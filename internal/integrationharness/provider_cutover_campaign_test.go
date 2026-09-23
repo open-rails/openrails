@@ -92,7 +92,10 @@ func TestNMIProviderCutoverHostCampaign(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	g := newCutoverGateway(t)
-	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
+	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
+		c.ProviderWriteMode = config.ProviderWriteModeFull
+		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: g.Server.URL}
+	}))
 	var previous bool
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&previous))
 	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)

@@ -19,6 +19,8 @@ type Charger struct {
 	Client      *provider.Client
 	Destination string
 	SecurityKey provider.Secret
+	// Posture is the credential's verified NMI identity; nil refuses charges.
+	Posture *nmi.NMIClient
 }
 
 var _ charge.Charger = (*Charger)(nil)
@@ -78,6 +80,9 @@ func (c *Charger) charge(ctx context.Context, req charge.Request) (charge.Result
 	}
 	if method.ID != req.Instrument.MethodRef {
 		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, provider.ErrBinding)
+	}
+	if err := c.Posture.RequireArmedFor(ctx, c.Destination, string(c.SecurityKey)); err != nil {
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, err)
 	}
 	response, err := c.Client.ProxyNMI(ctx, c.Destination, req.Instrument.MethodRef, form)
 	if err != nil {

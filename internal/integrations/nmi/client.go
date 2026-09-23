@@ -20,6 +20,8 @@ import (
 const (
 	DefaultDirectPostURL = "https://secure.networkmerchants.com/api/transact.php"
 	DefaultQueryAPIURL   = "https://secure.nmi.com/api/query.php"
+	// GatewayDirectPostURL is the regular gateway's secure.nmi.com alias.
+	GatewayDirectPostURL = "https://secure.nmi.com/api/transact.php"
 	SandboxDirectPostURL = "https://sandbox.nmi.com/api/transact.php"
 	SandboxQueryAPIURL   = "https://sandbox.nmi.com/api/query.php"
 )
@@ -36,13 +38,18 @@ type NMIClient struct {
 	DirectPostURL string
 	// QueryURL survives #663 for transaction SEARCH only (v5 has no
 	// payments list/search; v4's report endpoint is partner-key-only).
-	QueryURL  string
-	V5BaseURL string
-	TestMode  bool
+	QueryURL           string
+	V5BaseURL          string
+	TestMode           bool
+	endpointDeployment string
 	// ReadOnly blocks EVERY mutation — classic direct-post AND v5 non-GET —
 	// with ErrProviderReadOnly; reads stay available. Set when mode=readonly
 	// (#346) at client build.
 	ReadOnly bool
+	// LoopbackFixture marks an explicitly declared loopback fake gateway:
+	// mutations skip posture verification but only reach literal loopback IPs.
+	LoopbackFixture bool
+	proxyFixture    bool
 	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
 	// endpoint fails fast instead of blocking the request forever (#363/#367).
 	// The default http.DefaultClient used by http.PostForm has NO timeout.
@@ -201,7 +208,21 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 	directPostURL := DefaultDirectPostURL
 	queryURL := DefaultQueryAPIURL
 	v5BaseURL := DefaultV5BaseURL
-	if testMode {
+	deployment := cfg.EndpointDeployment
+	if deployment == "" {
+		if testMode {
+			deployment = config.NMIEndpointSandbox
+		} else {
+			deployment = config.NMIEndpointGateway
+		}
+	}
+	if deployment != config.NMIEndpointGateway && deployment != config.NMIEndpointSandbox {
+		return nil, errors.New("invalid NMI endpoint deployment")
+	}
+	if !testMode && deployment == config.NMIEndpointSandbox {
+		return nil, errors.New("NMI sandbox endpoint requires test posture")
+	}
+	if deployment == config.NMIEndpointSandbox {
 		directPostURL = SandboxDirectPostURL
 		queryURL = SandboxQueryAPIURL
 		v5BaseURL = SandboxV5BaseURL
@@ -216,17 +237,19 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 	}).Info("NMI endpoint selection")
 
 	return &NMIClient{
-		providerName:  provider,
-		SecurityKey:   securityKey,
-		WebhookSecret: webhookSecret,
-		DirectPostURL: directPostURL,
-		QueryURL:      queryURL,
-		V5BaseURL:     v5BaseURL,
-		TestMode:      testMode,
+		providerName:       provider,
+		SecurityKey:        securityKey,
+		WebhookSecret:      webhookSecret,
+		DirectPostURL:      directPostURL,
+		QueryURL:           queryURL,
+		V5BaseURL:          v5BaseURL,
+		TestMode:           testMode,
+		endpointDeployment: deployment,
 		httpClient: &http.Client{
 			// Backstop only; the real bound is the per-request context
 			// deadline (nmiMutationTimeout / nmiReadTimeout).
-			Timeout: nmiMutationTimeout,
+			Timeout:       nmiMutationTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 			Transport: &http.Transport{
 				Proxy:                 http.ProxyFromEnvironment,
 				MaxIdleConns:          20,
@@ -407,6 +430,9 @@ func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (_ s
 	defer cancel()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	if err := c.requireArmed(ctx, c.DirectPostURL); err != nil {
+		return "", err
+	}
 	resp, err := c.client().Do(req)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{

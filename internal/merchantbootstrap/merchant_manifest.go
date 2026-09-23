@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -654,11 +653,6 @@ type MerchantManifestReconcileOptions struct {
 	// discovery. Production uses the default resolver over provider read-only
 	// identity APIs.
 	IdentityResolver ManifestProviderIdentityResolver
-	// NMIProbeV5BaseURL is a test-only seam: overrides the base URL the #348
-	// test_mode arm-time probe (ProbeNMIAccountBeforeArm) hits, so tests can
-	// point it at a fake gateway instead of the real NMI API. Empty in
-	// production — the probe uses nmi.NewClient's documented default.
-	NMIProbeV5BaseURL string
 }
 
 type ManifestProviderIdentityResolver interface {
@@ -1494,15 +1488,6 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 			return fmt.Errorf("store secret %s: %w", name, err)
 		}
 	}
-	// #348, reinstated at arm time (#788 deleted the boot-time client map this
-	// used to probe, with no replacement — refusing an armed live NMI account
-	// under test_mode). Runs before anything below persists the account row.
-	if rail == string(models.RailNMI) && cfg != nil && cfg.IsTestMode() {
-		if err := ProbeNMIAccountBeforeArm(ctx, secretStore, merchantID, rail, environment, accountID, opts.NMIProbeV5BaseURL); err != nil {
-			return err
-		}
-	}
-
 	found := false
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		_, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{
@@ -1603,37 +1588,6 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		return nil
 	}); err != nil {
 		return err
-	}
-	return nil
-}
-
-// ProbeNMIAccountBeforeArm requires fresh sandbox qualification for the effective
-// credential before a manifest may arm an NMI account.
-func ProbeNMIAccountBeforeArm(ctx context.Context, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string) error {
-	name, err := merchants.PSPSecretName(rail, environment, accountID, "security_key")
-	if err != nil {
-		return err
-	}
-	sec, err := secretStore.Get(ctx, merchantID, name)
-	if errors.Is(err, merchants.ErrSecretNotFound) {
-		return nil // unconfigured; nothing to verify
-	}
-	if err != nil {
-		return fmt.Errorf("PSP %s:%s:%s: read security_key for test_mode probe: %w", rail, environment, accountID, err)
-	}
-	securityKey := strings.TrimSpace(sec.Value)
-	if securityKey == "" {
-		return nil
-	}
-	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
-	if err != nil {
-		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
-	}
-	if probeV5BaseURL != "" {
-		client.V5BaseURL = probeV5BaseURL
-	}
-	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
-		return fmt.Errorf("PSP %s:%s:%s: %w", rail, environment, accountID, err)
 	}
 	return nil
 }

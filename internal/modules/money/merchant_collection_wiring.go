@@ -271,6 +271,13 @@ func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Con
 		return nil, fmt.Errorf("build store-armed BT client: %w", err)
 	}
 	gw := nmiproxy.GatewayConfig{SecurityKey: gatewayKey, DirectPostURL: b.Endpoints.NMIDirectPostURL}
+	destination := gw.DirectPostURL
+	if destination == "" {
+		destination = nmi.DefaultDirectPostURL
+	}
+	if gw.Posture, err = nmi.ProxyPostureClient(gatewayKey, destination, b.testMode(), gw.DirectPostURL != ""); err != nil {
+		return nil, err
+	}
 	return NewCustodianProxyCollectionAdapter(nmiproxy.New(bt, gw)), nil
 }
 

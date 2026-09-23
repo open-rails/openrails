@@ -114,5 +114,9 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 			destination = nmi.SandboxDirectPostURL
 		}
 	}
-	return &hyperSwitchCollectionAdapter{binding: binding, charger: &hscharge.Charger{Client: client, Destination: destination, SecurityKey: hyperswitch.Secret(gatewayKey)}}, nil
+	posture, err := nmi.ProxyPostureClient(gatewayKey, destination, b.testMode(), strings.TrimSpace(b.Endpoints.NMIDirectPostURL) != "")
+	if err != nil {
+		return nil, err
+	}
+	return &hyperSwitchCollectionAdapter{binding: binding, charger: &hscharge.Charger{Client: client, Destination: destination, SecurityKey: hyperswitch.Secret(gatewayKey), Posture: posture}}, nil
 }

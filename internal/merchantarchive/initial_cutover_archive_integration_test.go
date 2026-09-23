@@ -108,6 +108,7 @@ func qualifiedInitialArchiveCutover(t *testing.T, ctx context.Context, d *db.DB,
 	require.NoError(t, err)
 	targetClient, err := nmi.NewAccountClient(mid.UUID(), target, "archive-target", &config.NMIProviderSettings{SecurityKey: "archive-target-key", WebhookSecret: "fixture-webhook"}, true)
 	require.NoError(t, err)
+	targetClient.LoopbackFixture = true
 	targetClient.DirectPostURL, targetClient.QueryURL, targetClient.V5BaseURL = gateway.URL, gateway.URL, gateway.URL
 	for _, entry := range []struct {
 		psp    uuid.UUID

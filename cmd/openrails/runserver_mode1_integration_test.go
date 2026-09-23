@@ -176,6 +176,11 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	require.NoError(t, readyResp.Body.Close())
 	require.Equal(t, http.StatusServiceUnavailable, readyResp.StatusCode)
 	require.Contains(t, string(readyBody), `"river_consumer":{"available":false`)
+	require.Contains(t, string(readyBody), `"psp_posture":{"available":true`)
+	readyResp, err = http.Get(base + "/readyz?verbose=1")
+	require.NoError(t, err)
+	require.NoError(t, readyResp.Body.Close())
+	require.EqualValues(t, 1, probeHits.Load(), "sandbox posture is verified once at startup, never per readiness probe")
 
 	// The manifest converged as DB projections: merchant row + armed NMI psps
 	// row — and the #348 probe went through the injected fake gateway.
@@ -336,4 +341,43 @@ func shutdownRunServer(t *testing.T, done <-chan error) {
 	case <-time.After(45 * time.Second):
 		t.Fatal("run-server did not shut down after SIGTERM")
 	}
+}
+
+// TestRunServerMode1BootDisarmsLiveNMIPSP: a sandbox deployment whose NMI
+// credential declines the non-issued test card (a live account) still boots,
+// but the PSP is disarmed and readiness reports psp_posture.
+func TestRunServerMode1BootDisarmsLiveNMIPSP(t *testing.T) {
+	var hits atomic.Int64
+	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		require.Equal(t, "/payments/auth", r.URL.Path, "a declined probe is never voided")
+		_, _ = w.Write([]byte(`{"object":"transaction","id":"probe-txn","response":"2","response_text":"DECLINE","response_code":"200"}`))
+	}))
+	defer probe.Close()
+	bootNMIProbeV5BaseURL = probe.URL
+	defer func() { bootNMIProbeV5BaseURL = "" }()
+
+	dir := t.TempDir()
+	manifestPath := writeMode1Manifest(t, dir)
+	port := freeTCPPort(t)
+	cfgPath := writeMode1Config(t, dir, dbtest.SharedPostgresDSN(t), port, "manifest", testSigningKeyPEM(t))
+	root := newRootCmd()
+	root.SetArgs([]string{"run-server", "--config", cfgPath, "--merchant-manifest", manifestPath, "--no-workers"})
+	done := make(chan error, 1)
+	go func() { done <- root.Execute() }()
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitForServerLive(t, base+"/health/live", done)
+
+	for i := 0; i < 2; i++ {
+		resp, err := http.Get(base + "/readyz?verbose=1")
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+		require.Contains(t, string(body), `"psp_posture":{"available":false`)
+		require.Contains(t, string(body), "PSP disarmed")
+	}
+	require.EqualValues(t, 1, hits.Load(), "a live verdict holds until the credential is reloaded")
+	shutdownRunServer(t, done)
 }

@@ -96,20 +96,38 @@ see `docs/dev/local-webhooks.md`.
 
 ### Sandbox testing
 
-Ask your ISO for a **sandbox/test gateway account** — most provision one on
-request. Declare it as its own PSP entry and run the deployment with
-`test_mode: sandbox` (env `TEST_MODE=sandbox`), which is what puts every PSP in
-the test environment.
+Run the deployment with `test_mode: sandbox` (env `TEST_MODE=sandbox`). Each
+NMI PSP then declares which NMI deployment its credentials belong to, in
+`settings.endpoint_deployment` (explicit; OpenRails never tries both):
 
-An NMI sandbox is otherwise undetectable: same URLs, and the security key
-carries no test marker (unlike Stripe's `sk_test_` prefix). So under
-`test_mode: sandbox` OpenRails **probes each NMI account** before arming it:
-one authorization on the canonical test card — a non-issued PAN no real
-processor can approve. A simulator approves it (probe auth is then voided); a
-decline proves live credentials and OpenRails **refuses to arm the account**
-rather than move real money in a test deployment. Verdicts are cached for 12
-hours, so back-to-back boots don't re-probe. The probe is harmless on a live
-account (one declined auth, no money movement).
+- `gateway` — a regular gateway account switched to test mode
+  (`secure.nmi.com` / `secure.networkmerchants.com`). Verified with the
+  read-only Query API `report_type=test_mode_status`; only a single
+  well-formed `test_mode_enabled=true` arms it. Never a financial request.
+- `sandbox` (default when omitted) — NMI's dedicated sandbox service
+  (`sandbox.nmi.com`). NMI documents no read-only test-mode signal there, so it
+  is verified with one authorization on the non-issued test card: a simulator
+  approves it (then voided), a live account declines it.
+
+```yaml
+      mobius:
+        nmi:
+          account_id: "1234567"           # dashboard Gateway ID
+          settings:
+            endpoint_deployment: gateway  # or sandbox
+            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+            tokenization_key: public-collectjs-key
+          secrets:
+            security_key: ...
+            webhook_signing_secret: ...
+```
+
+Verification runs once per loaded credential set (startup, credential
+create/rotate), bound to merchant + PSP + endpoint + credential fingerprint;
+see `docs/design/provider-sandbox-posture.md`. A false, unknown or unavailable
+verdict disarms the PSP: every NMI mutation is refused with
+`providerposture.ErrDisarmed`, reads still work, and `Ready()` reports
+`psp_posture` until a retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
 only into Collect.js fields — the E2E harness (`task e2e-nmi-live`) drives the

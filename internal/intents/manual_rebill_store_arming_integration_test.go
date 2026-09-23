@@ -29,7 +29,7 @@ import (
 
 func storeRebillConfig() *config.Config {
 	// TestMode=sandbox → provider environment "test", matching the seeding below.
-	return &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
+	return &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: "http://127.0.0.1:1"}}
 }
 
 func rebillMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {

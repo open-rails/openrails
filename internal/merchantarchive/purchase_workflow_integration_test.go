@@ -227,6 +227,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	t.Cleanup(gateway.Close)
 	client, err := nmi.NewAccountClient(id.UUID(), psp, "writer-account", &config.NMIProviderSettings{SecurityKey: "archive-fixture-key", WebhookSecret: "archive-fixture-webhook"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL, client.QueryURL, client.V5BaseURL = gateway.URL, gateway.URL, gateway.URL
 	provider := purchaseArchiveProvider{scope: merchants.PSPScope{ID: psp, Rail: "nmi", Key: "writer-account", Environment: "test", AccountID: account}}
 	checkoutService := newPurchaseArchiveCheckout(source, services, clock, provider, client)

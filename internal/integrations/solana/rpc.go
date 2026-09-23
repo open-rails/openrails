@@ -10,6 +10,8 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/internal/providerposture"
 )
 
 // RPCClient handles interactions with the Solana blockchain.
@@ -33,6 +35,8 @@ type RPCClientConfig struct {
 	Network string
 	// ReadOnly blocks transaction submission at the wire (mode=readonly, #346).
 	ReadOnly bool
+	// LoopbackFixture marks an explicitly declared loopback fake RPC.
+	LoopbackFixture bool
 }
 
 // NewRPCClientWithConfig creates a new Solana RPC client with fallback support.
@@ -43,11 +47,12 @@ func NewRPCClientWithConfig(cfg RPCClientConfig) *RPCClient {
 	}
 
 	fallback := NewRPCFallbackClient(RPCFallbackConfig{
-		ReadOnly:       cfg.ReadOnly,
-		CustomEndpoint: cfg.Endpoint,
-		RPCProvider:    cfg.RPCProvider,
-		RPCAPIKey:      cfg.RPCAPIKey,
-		Network:        network,
+		ReadOnly:        cfg.ReadOnly,
+		LoopbackFixture: cfg.LoopbackFixture,
+		CustomEndpoint:  cfg.Endpoint,
+		RPCProvider:     cfg.RPCProvider,
+		RPCAPIKey:       cfg.RPCAPIKey,
+		Network:         network,
 	})
 
 	return &RPCClient{
@@ -371,4 +376,14 @@ func (c *RPCClient) GetTokenBalances(ctx context.Context, owner solanago.PublicK
 // primary endpoint (#SEC-17) — the credential itself is never in GetEndpoint().
 func (c *RPCClient) PrimaryCredentialFingerprint() string {
 	return c.fallback.PrimaryCredentialFingerprint()
+}
+
+// CheckPosture is the chain's genesis-hash posture signal.
+func (c *RPCClient) CheckPosture(ctx context.Context) (providerposture.Verdict, error) {
+	return c.fallback.CheckPosture(ctx)
+}
+
+// VerifyPosture verifies the RPC chain now (startup, credential load).
+func (c *RPCClient) VerifyPosture(ctx context.Context) providerposture.Status {
+	return c.fallback.VerifyPosture(ctx)
 }

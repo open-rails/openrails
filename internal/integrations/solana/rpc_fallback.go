@@ -40,7 +40,8 @@ type RPCFallbackClient struct {
 	// readOnly blocks SendTransaction/SendTransactionSkipPreflight (the only
 	// chain mutations) with ErrProviderReadOnly when mode=readonly (#346).
 	// Reads (account data, balances, signatures) always pass.
-	readOnly bool
+	readOnly        bool
+	loopbackFixture bool
 }
 
 // RPCFallbackConfig holds configuration for building the fallback chain.
@@ -58,6 +59,8 @@ type RPCFallbackConfig struct {
 	Network string
 	// ReadOnly blocks transaction submission at the wire (mode=readonly).
 	ReadOnly bool
+	// LoopbackFixture marks an explicitly declared loopback fake RPC.
+	LoopbackFixture bool
 }
 
 // DefaultMainnetEndpoints returns the default RPC endpoints for mainnet.
@@ -161,11 +164,12 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 	}
 
 	return &RPCFallbackClient{
-		readOnly:  cfg.ReadOnly,
-		endpoints: endpoints,
-		clients:   clients,
-		network:   network,
-		failures:  make(map[int]time.Time),
+		readOnly:        cfg.ReadOnly,
+		loopbackFixture: cfg.LoopbackFixture,
+		endpoints:       endpoints,
+		clients:         clients,
+		network:         network,
+		failures:        make(map[int]time.Time),
 	}
 }
 
@@ -328,6 +332,9 @@ func (c *RPCFallbackClient) GetBalance(ctx context.Context, address solanago.Pub
 func (c *RPCFallbackClient) SendTransactionSkipPreflight(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
 	if c.readOnly {
 		return solanago.Signature{}, ErrProviderReadOnly
+	}
+	if err := c.requireArmed(ctx); err != nil {
+		return solanago.Signature{}, err
 	}
 	var sig solanago.Signature
 	err := c.withFallback(ctx, "SendTransactionSkipPreflight", func(client *rpc.Client) error {
@@ -573,6 +580,9 @@ var ErrProviderReadOnly = errors.New("solana: transaction submission is blocked 
 func (c *RPCFallbackClient) SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error) {
 	if c.readOnly {
 		return solanago.Signature{}, ErrProviderReadOnly
+	}
+	if err := c.requireArmed(ctx); err != nil {
+		return solanago.Signature{}, err
 	}
 	var sig solanago.Signature
 	err := c.withFallback(ctx, "SendTransaction", func(client *rpc.Client) error {

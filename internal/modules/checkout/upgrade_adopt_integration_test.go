@@ -169,6 +169,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.V5BaseURL = srv.URL
 	client.QueryURL = srv.URL
 	client.DirectPostURL = srv.URL

@@ -196,6 +196,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	t.Cleanup(srv.Close)
 	client, err := nmi.NewAccountClient(merchantID, pspID, "nmi", &config.NMIProviderSettings{SecurityKey: "certainty_key", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL, client.QueryURL, client.V5BaseURL = srv.URL, srv.URL, srv.URL
 
 	f.priceSvc = catalog.NewPriceService(dbi)

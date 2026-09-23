@@ -77,6 +77,7 @@ func newFakeNMI(t *testing.T, psid string, present bool) (*fakeNMI, *nmi.NMIClie
 		WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 	client.V5BaseURL = srv.URL

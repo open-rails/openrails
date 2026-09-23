@@ -94,6 +94,7 @@ func newFakeNMICardUpdateGateway(t *testing.T, vaultID, billingID string, oldCar
 
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test_security_key"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.V5BaseURL = server.URL
 	client.QueryURL = server.URL
 	client.DirectPostURL = server.URL

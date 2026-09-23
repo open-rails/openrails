@@ -463,6 +463,7 @@ func (s *RailPaymentMethodService) buildNMIClient(provider string, cfg *config.N
 		return nil, err
 	}
 	if s != nil && s.NMIEndpointOverride != "" {
+		client.LoopbackFixture = true
 		client.DirectPostURL = s.NMIEndpointOverride
 		client.QueryURL = s.NMIEndpointOverride
 		client.V5BaseURL = s.NMIEndpointOverride

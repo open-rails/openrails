@@ -723,6 +723,7 @@ type PSPConfig struct {
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
 // names match the store/manifest canonical secret keys (#711).
 type NMIRailConfig struct {
+	EndpointDeployment   string
 	SecurityKey          string
 	WebhookSigningSecret string
 }
@@ -925,6 +926,7 @@ func (p *PSPConfig) ToNMIProviderSettings() *NMIProviderSettings {
 	if p.NMI != nil {
 		s.SecurityKey = p.NMI.SecurityKey
 		s.WebhookSecret = p.NMI.WebhookSigningSecret
+		s.EndpointDeployment = p.NMI.EndpointDeployment
 	}
 	return s
 }
@@ -962,8 +964,9 @@ func (p *PSPConfig) ToCCBillConfig() *CCBillConfig {
 // NMIProviderSettings is what the NMI client actually reads (#710): the
 // credential pair. Sandbox posture is nmi.NewClient's testMode argument.
 type NMIProviderSettings struct {
-	SecurityKey   string
-	WebhookSecret string
+	EndpointDeployment string
+	SecurityKey        string
+	WebhookSecret      string
 }
 
 // CCBillConfig is the derived CCBill CLIENT config (programmatic-only): the

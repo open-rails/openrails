@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // nmiAdapter implements providerAdapter for the NMI rail's recurring plans. The
@@ -179,7 +180,19 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 		return nil, "", false
 	}
 	testMode := a.svc.rt.Config != nil && a.svc.rt.Config.IsTestMode()
-	client, cerr := nmi.NewClient(proc.EffectiveAccountID(), proc.ToNMIProviderSettings(), testMode)
+	mid, merr := merchant.Require(ctx)
+	if merr != nil && proc.ID != uuid.Nil {
+		return nil, "", false
+	}
+	var cerr error
+	if proc.ID == uuid.Nil {
+		// Static rail sets used by catalog unit fixtures have no persisted PSP ID.
+		// Runtime rail resolution always returns a persisted ID; this branch is
+		// intentionally confined to the non-durable fixture seam.
+		client, cerr = nmi.NewClient(proc.EffectiveAccountID(), proc.ToNMIProviderSettings(), testMode)
+	} else {
+		client, cerr = nmi.NewAccountClient(mid.UUID(), proc.ID, proc.EffectiveAccountID(), proc.ToNMIProviderSettings(), testMode)
+	}
 	if cerr != nil {
 		return nil, "", false
 	}
@@ -189,6 +202,7 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 		endpoint = a.svc.rt.Config.SandboxNMIGatewayURL()
 	}
 	if endpoint != "" {
+		client.LoopbackFixture = true
 		client.DirectPostURL = endpoint
 		client.QueryURL = endpoint
 		client.V5BaseURL = endpoint

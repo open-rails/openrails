@@ -130,6 +130,7 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	require.True(t, ok)
 	wrong, err := nmi.NewAccountClient(operation.MerchantID, uuid.New(), "wrong-account", &config.NMIProviderSettings{SecurityKey: "synthetic-key"}, true)
 	require.NoError(t, err)
+	wrong.LoopbackFixture = true
 	wrong.QueryURL = armed.QueryURL
 	wrong.V5BaseURL = armed.V5BaseURL
 	resolver := receiptFixtureNMI{client: wrong, request: money.ChargeRequest{MerchantID: operation.MerchantID, Instrument: e.frozenInstrument(t)}}

@@ -99,6 +99,25 @@ func ServiceLookupCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
+func ServiceGetCheckoutSessionByKey(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
+	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))
+	if !ok {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	out, err := svc.GetCheckoutSessionByKey(r.Request.Context(), payer.String(), r.Header("Idempotency-Key"), r.Query("entitlement"))
+	if err != nil {
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+		return
+	}
+	r.SuccessJSON(out)
+}
+
 func ServiceGetCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))

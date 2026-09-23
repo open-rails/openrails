@@ -50,15 +50,19 @@ const APIVersion = "2026-06-24.dahlia"
 type guardTransport struct {
 	base     http.RoundTripper
 	readOnly bool
+	// sandbox (test_mode=sandbox) requires every mutation's key to hold a
+	// verified test-mode posture; fixture marks an injected fake transport.
+	sandbox, fixture bool
 }
 
 func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.readOnly {
-		switch req.Method {
-		case http.MethodGet, http.MethodHead:
-			// reads stay available in readonly mode
-		default:
-			return nil, ErrProviderReadOnly
+	mutating := req.Method != http.MethodGet && req.Method != http.MethodHead
+	if t.readOnly && mutating {
+		return nil, ErrProviderReadOnly
+	}
+	if t.sandbox && !t.fixture && mutating {
+		if err := requirePosture(req, t.transport()); err != nil {
+			return nil, err
 		}
 	}
 	// Pin the API version (#587). Clone so we don't mutate the caller's request
@@ -67,11 +71,14 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req = req.Clone(req.Context())
 		req.Header.Set(VersionHeader, APIVersion)
 	}
-	base := t.base
-	if base == nil {
-		base = http.DefaultTransport
+	return t.transport().RoundTrip(req)
+}
+
+func (t *guardTransport) transport() http.RoundTripper {
+	if t.base == nil {
+		return http.DefaultTransport
 	}
-	return base.RoundTrip(req)
+	return t.base
 }
 
 // Client returns the *http.Client all Stripe API calls must go through. Writes
@@ -86,7 +93,7 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 //
 // timeout <= 0 selects DefaultTimeout.
 func Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return newClient(cfg == nil || cfg.IsProviderReadOnly(), timeout)
+	return (*Factory)(nil).Client(cfg, timeout)
 }
 
 // ReadOnlyClient returns a Stripe client that blocks writes UNCONDITIONALLY,
@@ -96,7 +103,7 @@ func Client(cfg *config.Config, timeout time.Duration) *http.Client {
 // through here keeps every Stripe byte on the choke-point transport and turns
 // any future write sneaking onto a read path into a loud local failure.
 func ReadOnlyClient(timeout time.Duration) *http.Client {
-	return newClient(true, timeout)
+	return (*Factory)(nil).ReadOnlyClient(timeout)
 }
 
 // IdempotencyKeyHeader is Stripe's request-dedup header: retrying a mutating
@@ -123,11 +130,11 @@ type Factory struct{ base http.RoundTripper }
 func NewFactory(base http.RoundTripper) *Factory { return &Factory{base: base} }
 
 func (f *Factory) Client(cfg *config.Config, timeout time.Duration) *http.Client {
-	return f.newClient(cfg == nil || cfg.IsProviderReadOnly(), timeout)
+	return f.newClient(cfg == nil || cfg.IsProviderReadOnly(), cfg != nil && cfg.IsTestMode(), timeout)
 }
 
 func (f *Factory) ReadOnlyClient(timeout time.Duration) *http.Client {
-	return f.newClient(true, timeout)
+	return f.newClient(true, false, timeout)
 }
 
 // HostRewriteTransport sends every request to target regardless of the
@@ -150,11 +157,7 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
-func newClient(readOnly bool, timeout time.Duration) *http.Client {
-	return (*Factory)(nil).newClient(readOnly, timeout)
-}
-
-func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
+func (f *Factory) newClient(readOnly, sandbox bool, timeout time.Duration) *http.Client {
 	var base http.RoundTripper
 	if f != nil {
 		base = f.base
@@ -164,6 +167,6 @@ func (f *Factory) newClient(readOnly bool, timeout time.Duration) *http.Client {
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &guardTransport{readOnly: readOnly, base: base},
+		Transport: &guardTransport{readOnly: readOnly, sandbox: sandbox, fixture: base != nil, base: base},
 	}
 }

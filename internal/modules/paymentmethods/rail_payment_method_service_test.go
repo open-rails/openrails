@@ -184,6 +184,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 			if err != nil {
 				return nil, err
 			}
+			client.LoopbackFixture = true
 			client.DirectPostURL = server.URL
 			client.V5BaseURL = server.URL
 			return client, nil

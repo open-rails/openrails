@@ -691,7 +691,6 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, id
 }
 
 var reconcileManifestPSP = merchantbootstrap.ReconcileManifestPSP
-var probeNMIAccountBeforeArm = merchantbootstrap.ProbeNMIAccountBeforeArm
 var manifestProviderSignerEvidence = merchantbootstrap.ManifestProviderSignerEvidence
 var solanaLocalKeypairPublicKey = merchantbootstrap.SolanaLocalKeypairPublicKey
 var solanaTransitPublicKey = merchantbootstrap.SolanaTransitPublicKey

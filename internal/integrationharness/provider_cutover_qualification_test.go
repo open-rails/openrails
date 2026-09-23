@@ -67,7 +67,10 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 	ctx := t.Context()
 	h := New(t, ctx)
 	g := newCutoverGateway(t)
-	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
+	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
+		c.ProviderWriteMode = config.ProviderWriteModeFull
+		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: g.Server.URL}
+	}))
 	var prior bool
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&prior))
 	t.Cleanup(func() {
@@ -742,6 +745,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				for id, key := range map[uuid.UUID]string{p.Source: p.SourceKey, p.Target: p.TargetKey} {
 					client, err := nmi.NewAccountClient(owner.MerchantID.UUID(), id, key, &config.NMIProviderSettings{SecurityKey: key}, true)
 					require.NoError(t, err)
+					client.LoopbackFixture = true
 					client.V5BaseURL = g.Server.URL
 					clients[id] = client
 				}

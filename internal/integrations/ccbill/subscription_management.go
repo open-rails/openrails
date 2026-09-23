@@ -199,6 +199,9 @@ func (c *DataLinkClient) CancelSubscription(ctx context.Context, subscriptionID 
 	if c.ReadOnly {
 		return CancelResult{}, ErrProviderReadOnly
 	}
+	if err := c.requireArmed(); err != nil {
+		return CancelResult{}, err
+	}
 	body, err := c.postSubscriptionManagement(ctx, actionCancelSubscription, subscriptionID)
 	if err != nil {
 		return CancelResult{}, err

@@ -22,6 +22,7 @@ func newTestNMIClient(t *testing.T, url string) *nmi.NMIClient {
 		WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	if url != "" {
 		client.DirectPostURL = url
 		client.QueryURL = url

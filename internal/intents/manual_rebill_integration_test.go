@@ -121,6 +121,7 @@ func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGate
 		WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 	client.V5BaseURL = srv.URL

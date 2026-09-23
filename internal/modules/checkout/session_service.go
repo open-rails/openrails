@@ -787,7 +787,7 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 	}
 
-	if response, found, err := s.initialMembershipSessionResponse(ctx, existing); found || err != nil {
+	if response, found, err := s.acceptedOperationSessionResponse(ctx, existing); found || err != nil {
 		return response, err
 	}
 	switch existing.Status {
@@ -827,7 +827,7 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 		return nil, ErrCheckoutSessionForbidden
 	}
 
-	if response, found, err := s.initialMembershipSessionResponse(ctx, session); found || err != nil {
+	if response, found, err := s.acceptedOperationSessionResponse(ctx, session); found || err != nil {
 		return response, err
 	}
 	if session.Mode == models.CheckoutSessionModePaymentMethod {
@@ -1045,7 +1045,7 @@ func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, ses
 	if err != nil && !errors.Is(err, ErrCheckoutProcessing) {
 		return nil, err
 	}
-	response, found, readErr := s.initialMembershipSessionResponse(ctx, session)
+	response, found, readErr := s.acceptedOperationSessionResponse(ctx, session)
 	if readErr != nil {
 		return nil, readErr
 	}
@@ -1081,6 +1081,9 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 				transactionID = strings.TrimSpace(*session.TransactionID)
 			}
 			_ = s.finalizeSolanaTransferReference(ctx, session, transactionID)
+			if response, found, err := s.acceptedOperationSessionResponse(ctx, session); found || err != nil {
+				return response, err
+			}
 			return s.sessionToResponse(session), nil
 		}
 		if session.Status != models.CheckoutSessionStatusExpired {

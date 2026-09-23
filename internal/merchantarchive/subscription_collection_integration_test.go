@@ -98,6 +98,7 @@ func TestEngineRecurringArchiveHistory(t *testing.T) {
 				defer server.Close()
 				client, err := nmi.NewAccountClient(mid.UUID(), psp, "engine", &config.NMIProviderSettings{SecurityKey: "synthetic", WebhookSecret: "synthetic"}, true)
 				require.NoError(t, err)
+				client.LoopbackFixture = true
 				client.QueryURL, client.V5BaseURL = server.URL, server.URL
 				receipt, found, err := intents.ReadNMICollectionReceipt(ctx, op, recurringArchiveReader{client}, transaction)
 				require.NoError(t, err)

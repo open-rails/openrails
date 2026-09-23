@@ -356,7 +356,11 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	if !ok {
 		return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
 	}
-	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
+	deployment, err := config.NMIEndpointDeployment(target.Scope.Settings)
+	if err != nil {
+		return nil, err
+	}
+	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value, EndpointDeployment: deployment}}
 	owner, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -366,6 +370,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		return nil, err
 	}
 	if s.NMIEndpointOverride != "" {
+		client.LoopbackFixture = true
 		client.DirectPostURL = s.NMIEndpointOverride
 		client.QueryURL = s.NMIEndpointOverride
 		client.V5BaseURL = s.NMIEndpointOverride

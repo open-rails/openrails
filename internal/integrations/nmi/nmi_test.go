@@ -163,7 +163,7 @@ func probeServer(t *testing.T, authCode string, seen *[]url.Values) *httptest.Se
 
 func probeClient(t *testing.T, serverURL string) *NMIClient {
 	t.Helper()
-	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-security-key"}, true)
 	require.NoError(t, err)
 	client.DirectPostURL = serverURL
 	client.V5BaseURL = serverURL

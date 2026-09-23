@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Options configures the embedded runtime.
@@ -192,6 +193,13 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		_ = r.Close(ctx)
 		return nil, err
 	}
+	var declared []merchant.ID
+	if opts.Merchant != nil {
+		if m, err := application.Runtime.Merchants.GetBySlug(ctx, opts.Merchant.Slug); err == nil {
+			declared = append(declared, m.ID)
+		}
+	}
+	application.Runtime.VerifyProviderPosture(ctx, declared...)
 	if opts.HTTP != nil {
 		if err := r.configureHTTP(*opts.HTTP); err != nil {
 			_ = r.Close(ctx)

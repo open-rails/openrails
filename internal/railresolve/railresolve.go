@@ -240,7 +240,12 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		if err != nil {
 			return nil, err
 		}
+		deployment, err := config.NMIEndpointDeployment(scope.Settings)
+		if err != nil {
+			return nil, err
+		}
 		out.NMI = &config.NMIRailConfig{
+			EndpointDeployment:   deployment,
 			SecurityKey:          securityKey,
 			WebhookSigningSecret: signing,
 		}

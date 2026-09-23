@@ -186,6 +186,27 @@ func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIden
 	}, nil
 }
 
+func (s *Service) GetCheckoutSessionByKey(ctx context.Context, customerID, key, entitlement string) (*CheckoutSession, error) {
+	sessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var response *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error {
+		var readErr error
+		response, readErr = sessions.GetSessionByKey(scoped, key, entitlement, &checkout.UserIdentity{ID: customerID})
+		return readErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return checkoutSessionFromResponse(response), nil
+}
+
 // GetCheckoutSession retrieves a checkout session by ID.
 func (s *Service) GetCheckoutSession(ctx context.Context, userID string, sessionID uuid.UUID) (*CheckoutSession, error) {
 	checkoutSessions, err := s.requireCheckoutSessionService()

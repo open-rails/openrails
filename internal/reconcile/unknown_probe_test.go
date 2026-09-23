@@ -73,6 +73,7 @@ func newNMIProbeFixture(t *testing.T) *nmiProbeFixture {
 
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
 	client.V5BaseURL = srv.URL

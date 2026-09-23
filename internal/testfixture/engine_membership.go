@@ -130,6 +130,7 @@ func EngineMembership(t testing.TB, ctx context.Context, d *db.DB, terms subscri
 	client, err := nmi.NewAccountClient(mid.UUID(), terms.PSPID, "initial-fixture", &config.NMIProviderSettings{SecurityKey: "fixture-initial-key", WebhookSecret: "fixture-initial-webhook"}, true)
 	require.NoError(t, err)
 	client.DirectPostURL, client.QueryURL, client.V5BaseURL = server.URL+"/transact", server.URL+"/query", server.URL
+	client.LoopbackFixture = true
 	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
 	var secrets merchants.MerchantSecretReader
 	if method.CustodianID != nil {

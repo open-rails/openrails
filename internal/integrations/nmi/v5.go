@@ -130,6 +130,11 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 		return err
 	}
 
+	if mutating {
+		if err := c.requireArmed(ctx, req.URL.String()); err != nil {
+			return err
+		}
+	}
 	resp, err := c.client().Do(req)
 	if err != nil {
 		return classify(fmt.Errorf("send v5 request: %w", err))

@@ -915,7 +915,11 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 	if securityKey == "" {
 		return nil // unconfigured; nothing to verify
 	}
-	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	deployment, pspID, err := s.storedNMIDeployment(ctx, id, rail, environment, accountID)
+	if err != nil {
+		return err
+	}
+	client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, true)
 	if err != nil {
 		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
 	}
@@ -926,6 +930,30 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
 	}
 	return nil
+}
+
+// storedNMIDeployment reads the declared endpoint deployment and PSP id; an
+// undeclared PSP uses the default deployment and its derived natural-key id.
+func (s *Service) storedNMIDeployment(ctx context.Context, id merchant.ID, rail, environment, accountID string) (string, uuid.UUID, error) {
+	pspID, _, _, _ := PSPNaturalKey(rail, environment, accountID)
+	if s.pool == nil {
+		return "", pspID, nil
+	}
+	var stored struct {
+		Settings map[string]any `json:"settings"`
+	}
+	row, err := gen.New(s.pool).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: accountID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", uuid.Nil, err
+	}
+	if err == nil {
+		pspID = row.ID
+		if err := json.Unmarshal(row.Evidence, &stored); err != nil {
+			return "", uuid.Nil, err
+		}
+	}
+	deployment, err := config.NMIEndpointDeployment(stored.Settings)
+	return deployment, pspID, err
 }
 
 // Read only the registry-bounded slots for this account. Published references

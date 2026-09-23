@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -61,144 +62,24 @@ func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
 	return manifest
 }
 
-// TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode reinstates #348 at
-// the manifest arm boundary (#788 deleted the boot-time probe with no
-// replacement): a test_mode deployment must refuse to arm an NMI account
-// whose credentials belong to a LIVE gateway. The account row must never be
-// persisted — the refusal happens before anything is written.
-func TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode(t *testing.T) {
+// TestReconcileMerchantManifestDefersSandboxPostureToRuntime: applying a
+// manifest is not a posture check. Sandbox NMI credentials persist without any
+// provider call; the runtime verifies them once when it loads them and
+// disarms (never refuses boot) on anything but a simulated verdict.
+func TestReconcileMerchantManifestDefersSandboxPostureToRuntime(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 
-	server := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
 	defer server.Close()
 
-	manifest := nmiManifestWithSecurityKey("live-security-key")
-	err := ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
-		Insert:            true,
-		NMIProbeV5BaseURL: server.URL,
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "PRODUCTION NMI credentials detected while test_mode is enabled")
-
-	var count int
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
-	`).Scan(&count))
-	require.Zero(t, count, "a refused arm must never persist the PSP row")
-}
-
-// TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode is the control:
-// a genuinely sandboxed NMI account (approves the probe) arms normally under
-// test_mode.
-func TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode(t *testing.T) {
-	ctx := context.Background()
-	pool := newMerchantManifestTestPool(t)
-	cp := newMerchantManifestControlPlane(t, pool)
-
-	server := nmiProbeArmTestServer(t, "1") // approved -> simulating
-	defer server.Close()
-
-	manifest := nmiManifestWithSecurityKey("sandbox-security-key")
-	err := ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
-		Insert:            true,
-		NMIProbeV5BaseURL: server.URL,
-	})
-	require.NoError(t, err)
-
-	var count int
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
-	`).Scan(&count))
-	require.Equal(t, 1, count, "a simulated (sandbox) account arms normally")
-}
-
-// Inconclusive qualification refuses manifest arming without a PSP row.
-func TestReconcileMerchantManifestNMIProbeIndeterminateRefuses(t *testing.T) {
-	ctx := context.Background()
-	pool := newMerchantManifestTestPool(t)
-	cp := newMerchantManifestControlPlane(t, pool)
-
-	server := nmiProbeArmTestServer(t, "3") // gateway-level error -> indeterminate
-	defer server.Close()
-
-	manifest := nmiManifestWithSecurityKey("unclear-security-key")
-	err := ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
-		Insert:            true,
-		NMIProbeV5BaseURL: server.URL,
-	})
-	require.ErrorContains(t, err, "qualification failed")
-
-	var count int
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
-	`).Scan(&count))
-	require.Zero(t, count)
-}
-
-// A second arm must qualify again even after a previous conclusive result.
-func TestReconcileMerchantManifestNMIProbeRequiresFreshProbe(t *testing.T) {
-	ctx := context.Background()
-	pool := newMerchantManifestTestPool(t)
-	cp := newMerchantManifestControlPlane(t, pool)
-
-	server := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
-	manifest := nmiManifestWithSecurityKey("live-security-key-qualification")
-
-	err := ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
-		Insert:            true,
-		NMIProbeV5BaseURL: server.URL,
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "PRODUCTION NMI credentials")
-
-	server.Close() // the fresh qualification attempt must fail closed
-
-	err = ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
-		Insert:            true,
-		NMIProbeV5BaseURL: server.URL,
-	})
-	require.Error(t, err, "an unreachable gateway cannot qualify an account")
-	require.Contains(t, err.Error(), "qualification failed")
-}
-
-// TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode proves
-// production deployments never probe-charge on arm: with test_mode=false,
-// even an account that would fail the probe (declined test card) arms
-// without any network call to the gateway at all.
-func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
-	ctx := context.Background()
-	pool := newMerchantManifestTestPool(t)
-	cp := newMerchantManifestControlPlane(t, pool)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("production (test_mode=false) must never probe an NMI account on arm, got %s %s", r.Method, r.URL.Path)
-	}))
-	defer server.Close()
-
-	manifest := hostThreeMerchantManifest()
-	mt := manifest.Merchants["host-three"]
-	mt.PSPs = map[string]PSPConfig{
-		"mobius": {
-			"nmi": {
-				AccountID: "100002",
-				Secrets:   map[string]string{"security_key": "live-security-key-prod"},
-			},
-		},
-	}
-	manifest.Merchants["host-three"] = mt
-
-	cfg := &config.Config{SecretBackend: config.SecretBackendSnapshot, TestMode: config.CredentialPostureLive}
-	err := ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{
-		Insert:            true,
-		NMIProbeV5BaseURL: server.URL,
-	})
-	require.NoError(t, err)
-
+	require.NoError(t, ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, nmiManifestWithSecurityKey("unverified-security-key"), MerchantManifestReconcileOptions{Insert: true}))
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Equal(t, 1, count)
+	require.Zero(t, hits.Load())
 }

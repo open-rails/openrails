@@ -140,6 +140,14 @@ func (s *CheckoutCustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Cha
 	if s.GatewayDirectPostURLOverride != "" {
 		gw.DirectPostURL = s.GatewayDirectPostURLOverride
 	}
+	destination := gw.DirectPostURL
+	if destination == "" {
+		destination = nmi.DefaultDirectPostURL
+	}
+	gw.Posture, err = nmi.ProxyPostureClient(gw.SecurityKey, destination, s.Config != nil && s.Config.IsTestMode(), s.GatewayDirectPostURLOverride != "")
+	if err != nil {
+		return nil, err
+	}
 	return nmiproxy.New(bt, gw), nil
 }
 

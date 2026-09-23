@@ -23,6 +23,8 @@ const (
 type GatewayConfig struct {
 	SecurityKey   string
 	DirectPostURL string // "" = nmi.DefaultDirectPostURL
+	// Posture is the credential's verified NMI identity; nil refuses charges.
+	Posture *nmi.NMIClient
 }
 
 func (g GatewayConfig) directPostURL() string {

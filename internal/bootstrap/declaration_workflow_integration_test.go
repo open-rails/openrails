@@ -60,7 +60,7 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 		}},
 	}
 	manifest := &BillingConfig{Version: 1, Merchants: map[string]MerchantConfig{"host-three": mt}}
-	apply := MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: gateway.URL}
+	apply := MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder()}
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, apply))
 	var id merchant.ID
 	var group string
@@ -189,7 +189,6 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	seed, err := ResolvePushMerchantConfigOptions(cfg, true, false, false, false)
 	require.NoError(t, err)
 	require.Equal(t, MerchantManifestReconcileOptions{Insert: true}, seed)
-	seed.NMIProbeV5BaseURL = gateway.URL
 	seed.SecretStore = snapshot.Seeder()
 	scope, armed, err := svc.ActivePSPScope(ctx, id, "stripe", "test")
 	require.NoError(t, err)
