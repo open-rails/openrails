@@ -24,9 +24,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Otherwise Security can save the shared key first and exclude race builds.
+      - name: Scope Go cache to this job
+        run: |
+          mkdir -p .reports
+          printf '%s\n' "$GITHUB_JOB" > .reports/go-cache-job
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            adapters/*/go.sum
+            .reports/go-cache-job
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
         with:
           package_json_file: web/admin/package.json
@@ -67,9 +76,18 @@ jobs:
       OPENRAILS_TEST_PACKAGES: "4"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Otherwise Security can save the shared key first and exclude race builds.
+      - name: Scope Go cache to this job
+        run: |
+          mkdir -p .reports
+          printf '%s\n' "$GITHUB_JOB" > .reports/go-cache-job
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            adapters/*/go.sum
+            .reports/go-cache-job
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
         with:
           package_json_file: tests/browser/package.json
@@ -105,9 +123,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # Otherwise Security can save the shared key first and exclude race builds.
+      - name: Scope Go cache to this job
+        run: |
+          mkdir -p .reports
+          printf '%s\n' "$GITHUB_JOB" > .reports/go-cache-job
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            adapters/*/go.sum
+            .reports/go-cache-job
       - name: Scan the complete tracked tree
         run: |
           bash scripts/scan-injected-code.sh --all
