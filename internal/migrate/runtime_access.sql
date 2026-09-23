@@ -117,6 +117,7 @@ GRANT EXECUTE ON FUNCTION openrails.ensure_default_catalog(uuid) TO :"runtime_us
 
 -- Durable catalog application identities are insert-only.
 GRANT SELECT, INSERT ON TABLE openrails.catalog_applications TO :"runtime_user";
+GRANT SELECT, INSERT ON TABLE openrails.product_archive_operations TO :"runtime_user";
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.credential_publications TO :"runtime_user";
 GRANT SELECT, INSERT ON TABLE openrails.merchant_configuration_applications TO :"runtime_user";

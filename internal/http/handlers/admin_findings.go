@@ -216,42 +216,55 @@ func AdminResolveFinding(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusConflict, "finding already resolved (status="+string(finding.Status)+", resolution="+finding.Resolution+")")
 		return
 	}
-	actor := resolveActorIdentity(r)
+	if outcome == "ignore" && notes == "" {
+		r.ErrorJSON(http.StatusBadRequest, "notes are required to ignore a finding (permanent silence for this subject)")
+		return
+	}
+	execution, status, message := resolveFindingOutcome(r, store, finding, outcome, notes, req.OverrideParams)
+	if status != http.StatusOK {
+		r.ErrorJSON(status, message)
+		return
+	}
+	updated, err := store.GetFinding(ctx, id)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "finding resolved but failed to reload")
+		return
+	}
+	r.JSON(http.StatusOK, resolveFindingResponse{Finding: newFindingView(updated), Execution: execution})
+}
 
+// resolveFinding resolves one open finding; see resolveFindingOutcome.
+func resolveFinding(r *httprequest.Request, store *reconcile.PGStore, finding reconcile.FindingRecord, outcome, notes string, overrideParams json.RawMessage) (int, string) {
+	_, status, message := resolveFindingOutcome(r, store, finding, outcome, notes, overrideParams)
+	return status, message
+}
+
+// resolveFindingOutcome ignores (notes required) or approves one open finding,
+// returning the completed execution effects or an HTTP status and message.
+func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, finding reconcile.FindingRecord, outcome, notes string, overrideParams json.RawMessage) (map[string]any, int, string) {
+	ctx := r.Request.Context()
+	id := finding.ID
+	actor := resolveActorIdentity(r)
 	if outcome == "ignore" {
-		if notes == "" {
-			r.ErrorJSON(http.StatusBadRequest, "notes are required to ignore a finding (permanent silence for this subject)")
-			return
-		}
 		okRow, err := store.IgnoreFindingWithActor(ctx, id, notes, actor)
 		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to ignore finding")
-			return
+			return nil, http.StatusInternalServerError, "failed to ignore finding"
 		}
 		if !okRow {
-			r.ErrorJSON(http.StatusConflict, "finding is no longer open")
-			return
+			return nil, http.StatusConflict, "finding is no longer open"
 		}
-		updated, err := store.GetFinding(ctx, id)
-		if err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "finding ignored but failed to reload")
-			return
-		}
-		r.JSON(http.StatusOK, resolveFindingResponse{Finding: newFindingView(updated)})
-		return
+		return nil, http.StatusOK, ""
 	}
 
 	// approve: mechanical execution requires a structured recommendation.
 	rec, hasRec := recommend.FromEvidence(finding.Evidence)
 	if !hasRec {
-		r.ErrorJSON(http.StatusUnprocessableEntity,
-			"finding carries no structured recommendation; approve is unavailable — resolve with outcome=ignore or fix out-of-band")
-		return
+		return nil, http.StatusUnprocessableEntity,
+			"finding carries no structured recommendation; approve is unavailable — resolve with outcome=ignore or fix out-of-band"
 	}
-	overrides, err := recommend.DecodeParams(req.OverrideParams)
+	overrides, err := recommend.DecodeParams(overrideParams)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid override_params: "+err.Error())
-		return
+		return nil, http.StatusBadRequest, "invalid override_params: " + err.Error()
 	}
 	params := recommend.MergeParams(rec.Params, overrides)
 	execution, execErr := executeFindingAction(r, finding, rec.Action, params, notes)
@@ -263,25 +276,16 @@ func AdminResolveFinding(r *httprequest.Request) {
 			note += " (completed: " + compactJSON(execution) + ")"
 		}
 		if nerr := store.AppendFindingNotes(ctx, id, note); nerr != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "execution failed and the failure note could not be recorded: "+execErr.Error())
-			return
+			return nil, http.StatusInternalServerError, "execution failed and the failure note could not be recorded: " + execErr.Error()
 		}
-		r.ErrorJSON(findingActionErrorStatus(execErr), "recommendation execution failed; finding remains open: "+execErr.Error())
-		return
+		return nil, findingActionErrorStatus(execErr), "recommendation execution failed; finding remains open: " + execErr.Error()
 	}
 	okRow, err := store.ResolveFindingFixed(ctx, id, notes, actor, execution)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "recommendation executed but finding could not be marked fixed")
-		return
+		return nil, http.StatusInternalServerError, "recommendation executed but finding could not be marked fixed"
 	}
 	if !okRow {
-		r.ErrorJSON(http.StatusConflict, "recommendation executed but the finding was no longer open")
-		return
+		return nil, http.StatusConflict, "recommendation executed but the finding was no longer open"
 	}
-	updated, err := store.GetFinding(ctx, id)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "finding resolved but failed to reload")
-		return
-	}
-	r.JSON(http.StatusOK, resolveFindingResponse{Finding: newFindingView(updated), Execution: execution})
+	return execution, http.StatusOK, ""
 }

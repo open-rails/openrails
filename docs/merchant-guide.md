@@ -242,6 +242,34 @@ provider before resolving the operation; do not use a new key to retry an
 uncertain refund. A captured success retries local finalization automatically
 without sending a second provider refund.
 
+Hosts refund through `Client.RefundPayment` (same route, embedded or remote):
+`Amount` or `Full`, a mandatory `IdempotencyKey`, `Reason` and `RevokeAccess`.
+A rail that cannot refund now returns `ErrRefundRailUnavailable` (nothing is
+reserved); CCBill and off-rail payments return `ErrRefundUnsupported`. Provider
+write gates (read-only mode, NMI test-mode qualification) park the operation:
+the refund is returned `pending` and settles when the gate allows it.
+
+### Archiving a product with purchase refunds
+
+`Client.ArchiveProduct` (`POST /v1/merchant/catalog/product-archives`, catalog
+update plus payment refund permission) archives a product — never deletes it —
+and applies the host's policy to its one-time purchases at or after
+`PurchasedSince` (or within `Window` of first acceptance):
+
+- `none`: archive only.
+- `refund`: refund each purchase in full and end the access it granted. Purchases
+  that cannot be refunded automatically (refused, declined, off-rail) become reviews.
+- `review`: record each purchase for merchant review; no money moves.
+
+The idempotency key fixes the product, action, resolved window and reason;
+replays report the current outcome of every purchase and never refund twice.
+A response with `complete: false` stopped at its per-request provider budget;
+replay it to continue. Subscription payments are excluded (subscriptions stay
+grandfathered). Reviews are listed with `Client.ListPurchaseReviews` and
+resolved with `Client.ResolvePurchaseReview`: `refund` returns the remaining
+amount and ends access, `dismiss` keeps both. They also appear in the findings
+queue as `life.product_archived_purchase`.
+
 Granting credits is money-in and carries its own permission,
 `merchant:credits:grant` — owner-level by default (`merchant:*`), NOT part of the
 fixed support role, unlike the entitlement/product-access grants (which ride

@@ -77,6 +77,7 @@ GET /v1/merchant/catalog/prices
 GET /v1/merchant/catalog/prices/by-key/{key}
 GET /v1/merchant/catalog/prices/by-key/{key}/history
 GET /v1/merchant/catalog/prices/{id}
+GET /v1/merchant/catalog/product-archives/{id}
 GET /v1/merchant/catalog/products
 GET /v1/merchant/catalog/products/by-key/{key}
 GET /v1/merchant/catalog/products/{id}
@@ -126,6 +127,7 @@ GET /v1/merchant/payments/{id}
 GET /v1/merchant/plan-migrations/{id}
 GET /v1/merchant/provider-operations/{operation_id}
 GET /v1/merchant/provider-operations/{operation_id}/qualification
+GET /v1/merchant/purchase-reviews
 GET /v1/merchant/repair-alerts
 GET /v1/merchant/reprices
 GET /v1/merchant/reprices/batches
@@ -202,6 +204,7 @@ POST /v1/merchant/catalog/prices
 POST /v1/merchant/catalog/prices/{id}/activate
 POST /v1/merchant/catalog/prices/{id}/deactivate
 POST /v1/merchant/catalog/prices/{id}/key
+POST /v1/merchant/catalog/product-archives
 POST /v1/merchant/catalog/products
 POST /v1/merchant/catalog/products/{id}/activate
 POST /v1/merchant/catalog/products/{id}/deactivate
@@ -237,6 +240,7 @@ POST /v1/merchant/plan-migrations/{id}/cancel
 POST /v1/merchant/provider-operations
 POST /v1/merchant/provider-operations/{operation_id}/observations
 POST /v1/merchant/provider-operations/{operation_id}/release
+POST /v1/merchant/purchase-reviews/{id}/resolve
 POST /v1/merchant/reprices/{id}/cancel
 POST /v1/merchant/solana-cancel-sessions
 POST /v1/merchant/solana-tier-change-sessions

@@ -47,6 +47,7 @@ var OwnedTables = []string{
 	"payments",
 	"price_key_movements",
 	"price_psp_bindings",
+	"product_archive_operations",
 	"prices",
 	"products",
 	"provider_billing_observations",

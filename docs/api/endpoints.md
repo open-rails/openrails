@@ -360,7 +360,9 @@ for those routes.
 |---|---|---|---|
 | GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
 | GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; `Client.GetPayment` |
-| POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail; `revoke_access` must be explicit to also revoke one-off access |
+| POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail. `Idempotency-Key` required; body `{amount}` or `{full:true}`, optional `reason`, `revoke_access` (explicit). 201 settled, 202 pending; `refund_rail_unavailable`/`refund_unsupported` refusals. `Client.RefundPayment` |
+| GET | `/v1/merchant/purchase-reviews` | `merchant:payments:read` | Purchases a product archive recorded for review (`status=open\|refunded\|dismissed`, `product_archive_id`); `Client.ListPurchaseReviews` |
+| POST | `/v1/merchant/purchase-reviews/{id}/resolve` | `merchant:payments:refund` | `{decision: refund\|dismiss, notes}`; refund returns the remaining amount and ends the purchase's access; `Client.ResolvePurchaseReview` |
 | GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
 | POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately |
@@ -477,6 +479,8 @@ when ordinary writes are disabled; there is no remote bypass.
 | POST | `/v1/merchant/catalog/drift/refresh` | Refresh drift detection |
 | GET | `/v1/merchant/catalog/revision` | Read the current merchant catalog revision |
 | POST | `/v1/merchant/catalog/applications` | Apply a JSON/YAML batch with durable application ID and expected revision |
+| POST | `/v1/merchant/catalog/product-archives` | Archive a product and refund or review its recent one-time purchases (also needs `merchant:payments:refund`; `Idempotency-Key` required); `Client.ArchiveProduct` |
+| GET | `/v1/merchant/catalog/product-archives/{id}` | Read an archive operation and each purchase's outcome (also needs `merchant:payments:read`); `Client.GetProductArchive` |
 | POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
 | POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only; does not mutate catalog definitions) |
 | GET | `/v1/merchant/catalog/meters` | List usage-meter definitions |
