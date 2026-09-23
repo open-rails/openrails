@@ -22,7 +22,7 @@ func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 	// 1000x undercharge — refuse it.
 	t.Run("caller shift disagrees with the mint", func(t *testing.T) {
 		sub := &fakeSubmitter{merchantPub: key.PublicKey()}
-		svc := NewPlanServiceWithReader(sub, readerWithMint(9), "devnet", testSolanaTokens())
+		svc := NewPlanServiceWithReader(sub, readerWithMint(9, sub), "devnet", testSolanaTokens())
 
 		_, err := svc.PublishPlan(ctx, PublishPlanInput{
 			MerchantID:      merchant.ID{},
@@ -54,7 +54,7 @@ func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 			{decimals: 8, amount: 1_000_000_000},
 		} {
 			sub := &fakeSubmitter{merchantPub: key.PublicKey()}
-			svc := NewPlanServiceWithReader(sub, readerWithMint(tc.decimals), "devnet", testSolanaTokens())
+			svc := NewPlanServiceWithReader(sub, readerWithMint(tc.decimals, sub), "devnet", testSolanaTokens())
 
 			h, err := svc.PublishPlan(ctx, PublishPlanInput{
 				MerchantID:      merchant.ID{},
@@ -76,7 +76,7 @@ func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 	// No decimals declared at all (zero value) is a refusal, not an implicit 6.
 	t.Run("missing caller decimals is refused", func(t *testing.T) {
 		sub := &fakeSubmitter{merchantPub: key.PublicKey()}
-		svc := NewPlanServiceWithReader(sub, readerWithMint(6), "devnet", testSolanaTokens())
+		svc := NewPlanServiceWithReader(sub, readerWithMint(6, sub), "devnet", testSolanaTokens())
 
 		if _, err := svc.PublishPlan(ctx, PublishPlanInput{
 			MerchantID:      merchant.ID{},
