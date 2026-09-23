@@ -149,11 +149,9 @@ done
 printf '//go:build !integration\n\npackage defaulttest\nimport "testing"\nfunc TestDefaultOnly(t *testing.T) {}\n' >"$fixture/defaulttest/default_test.go"
 printf '//go:build !integration\n\npackage defaultprod\nconst DefaultOnly = true\n' >"$fixture/defaultprod/default.go"
 
-# Native adapters are separate modules. Their integration files must not enter
-# the root-module package partition, even when no root integration files remain.
-mkdir -p "$fixture/adapters/nested"
-printf 'module example.test/partition/adapters/nested\n\ngo 1.26.0\n' >"$fixture/adapters/nested/go.mod"
-printf '//go:build integration\n\npackage nested\n' >"$fixture/adapters/nested/integration.go"
+# Native adapters share the root module and run once in its E2E partition.
+mkdir -p "$fixture/adapters/native"
+printf '//go:build integration\n\npackage native\n' >"$fixture/adapters/native/integration.go"
 
 run_selection() {
     : >"$log"
@@ -170,7 +168,7 @@ fi
 grep -Fq 'go list -race -tags=integration,browser' "$log"
 
 selected="$(run_selection --list-integration-packages)"
-expected="$(printf '%s\n' ./defaultprod ./defaulttest ./integrationonly ./mixed)"
+expected="$(printf '%s\n' ./adapters/native ./defaultprod ./defaulttest ./integrationonly ./mixed)"
 [[ "$selected" == "$expected" ]] || { echo "wrong E2E partition: $selected" >&2; exit 1; }
 [[ ! -s "$log" ]] || { echo "integration selection unexpectedly invoked Go or Docker" >&2; exit 1; }
 
@@ -186,7 +184,7 @@ fi
 grep -Fq 'empty Go package metadata' "$fixture/failure"
 unset FAKE_GO_LIST_EMPTY
 
-rm -rf "$fixture/mixed" "$fixture/defaulttest" "$fixture/defaultprod" "$fixture/integrationonly"
+rm -rf "$fixture/adapters" "$fixture/mixed" "$fixture/defaulttest" "$fixture/defaultprod" "$fixture/integrationonly"
 if run_selection --list-checks-packages >"$fixture/failure" 2>&1; then
     echo "test_integration_test: absent integration packages were accepted" >&2; exit 1
 fi

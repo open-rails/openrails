@@ -537,6 +537,21 @@ if err != nil { return err }
 if err := routes.Mount(app.Group("/billing")); err != nil { return err }
 ```
 
+All adapters ship in the root `github.com/open-rails/openrails` module and use
+its release version. Import paths stay the same. When upgrading from independently
+versioned Gin/Fiber modules, remove their old requirements before updating the
+root dependency; retaining those requirements creates ambiguous imports:
+
+```sh
+go mod edit -droprequire=github.com/open-rails/openrails/adapters/gin
+go mod edit -droprequire=github.com/open-rails/openrails/adapters/fiber
+# Select a published root release containing the adapters, then tidy.
+go get github.com/open-rails/openrails@<published-root-version>
+go mod tidy
+```
+
+Historical adapter tags remain available, but new releases use only the root tag.
+
 Each adapter registers ordinary method/path routes. Route inspection sees the
 actual endpoints, and unrelated host paths retain the host's normal 404/405
 behavior. The host owns prefix, middleware and server lifecycle. Original request

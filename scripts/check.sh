@@ -31,7 +31,6 @@ checks() {
     [[ -n "$package" ]] && unit_packages+=("$package")
   done <<< "$selected"
   go test -vet=all -race -count=1 "${unit_packages[@]}"
-  # Native adapters run once with their integration superset in End-to-end.
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2
@@ -67,7 +66,6 @@ e2e() {
   bash scripts/sql-lint.sh
   bash scripts/migration-lint.sh
   go run ./scripts/contracts -workflows
-  bash scripts/check-adapters.sh -tags=integration
 }
 
 case "${1:-all}" in
