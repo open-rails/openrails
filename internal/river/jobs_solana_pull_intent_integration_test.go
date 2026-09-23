@@ -21,9 +21,25 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 )
+
+// The pull recovery tests observe the lifecycle handoff; they do not simulate
+// subscription state transitions in a second in-memory implementation.
+type fakeLifecycle struct{ renewals int }
+
+func (l *fakeLifecycle) RenewMembership(context.Context, *subscriptions.RenewMembershipParams) error {
+	l.renewals++
+	return nil
+}
+func (*fakeLifecycle) FailMembership(context.Context, *subscriptions.FailMembershipParams) error {
+	return fmt.Errorf("unexpected failure during pull recovery")
+}
+func (*fakeLifecycle) CancelMembership(context.Context, *subscriptions.CancelMembershipParams) error {
+	return fmt.Errorf("unexpected cancellation during pull recovery")
+}
 
 // smPresubmitCranker simulates the production CrankService presubmit path:
 // sign (fixed signature) → presubmit write-ahead → submit (scripted outcome).

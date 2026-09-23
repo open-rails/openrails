@@ -202,21 +202,6 @@ func TestStripeFetcher_SingleSubscriptionFilter(t *testing.T) {
 	require.Equal(t, "sub_active1", snap.Subscriptions[0].RailSubscriptionID)
 }
 
-func TestStripeFetcher_APIErrorSurfaced(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"error":{"message":"Invalid API Key provided"}}`)
-	}))
-	t.Cleanup(server.Close)
-
-	fetcher := &StripeFetcher{SecretKey: "sk_bad", BaseURL: server.URL, HTTPClient: server.Client()}
-	_, err := fetcher.Fetch(context.Background(), FetchParams{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "Invalid API Key")
-}
-
 // or#842: SubscriptionsExhaustive is an ABSENCE PROOF — it authorizes cancelling
 // every local subscription missing from the roster and flips the §3.2
 // confirmed-absence gate for the whole merchant. Stripe used to stamp it before

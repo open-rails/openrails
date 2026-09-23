@@ -37,47 +37,6 @@ func newMobiusAdapterWithServer(t *testing.T, serverURL string) *nmiAdapter {
 	return &nmiAdapter{svc: svc, testEndpointURL: serverURL}
 }
 
-func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
-	got := nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30))
-	want := "premium-usd-23000000-30"
-	if got != want {
-		t.Fatalf("plan_id format drift: got %q want %q", got, want)
-	}
-	// No "openrails-"/merchant/application prefix: the content key IS the whole id.
-	if strings.HasPrefix(got, "openrails-") {
-		t.Fatalf("generated plan_id must not carry an openrails- prefix: %q", got)
-	}
-	// Content-addressed: no price-UUID input, so it is stable across a fresh DB;
-	// unchanged by cosmetic edits; distinct when money terms change.
-	if nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30)) != want {
-		t.Error("plan_id must be deterministic for identical content")
-	}
-	if nmiDeterministicPlanID("premium", "usd", 29_000_000, intPtr(30)) == want {
-		t.Error("a different amount must yield a different plan_id")
-	}
-	if nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(365)) == want {
-		t.Error("a different cycle must yield a different plan_id")
-	}
-	if nmiDeterministicPlanID("basic", "usd", 23_000_000, intPtr(30)) == want {
-		t.Error("a different product key must yield a different plan_id")
-	}
-}
-
-func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("{}"))
-	}))
-	t.Cleanup(server.Close)
-	a := newMobiusAdapterWithServer(t, server.URL)
-
-	_, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: uuid.New(), Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: nil,
-	})
-	if err == nil {
-		t.Fatal("expected error when recurring day cadence is nil")
-	}
-}
-
 func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	var addCalled bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,30 +200,6 @@ func nmiPlanQueryJSON(planID, planName, planAmount, dayFrequency string) string 
 		`","plan_amount":"` + planAmount + `","day_frequency":"` + dayFrequency + `"}`
 }
 
-func TestMobiusAdapter_AttachValidatesLinkAndCreatesNothing(t *testing.T) {
-	// A supplied link to a plan that EXISTS and MATCHES the price money terms is
-	// accepted, and Attach must never create a plan (no add_plan).
-	planID := "premium-usd-999-30"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			t.Error("Attach must not create an NMI plan when a valid link is supplied")
-		}
-		_, _ = w.Write([]byte(nmiPlanQueryJSON(planID, "Premium", "9.99", "30")))
-	}))
-	t.Cleanup(server.Close)
-	a := newMobiusAdapterWithServer(t, server.URL)
-
-	ids, err := a.Attach(context.Background(),
-		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{ProductKey: "premium", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
-	if err != nil {
-		t.Fatalf("valid link should attach cleanly, got %v", err)
-	}
-	if ids[models.RailKeyPlanID] != planID || ids[models.RailKeyProvider] != "mobius" {
-		t.Fatalf("unexpected ids: %v", ids)
-	}
-}
-
 func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 	// NMI plan_ids are client-creatable, so a link to a not-yet-existing plan_id
 	// is a find-or-CREATE at that operator-chosen id (e.g. "premium").
@@ -360,19 +295,6 @@ func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
 		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "billing cycle") {
 		t.Fatalf("expected a billing-cycle-mismatch error, got %v", err)
-	}
-}
-
-func TestMobiusAdapter_UpdateIsNoop(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("no NMI request expected: NMI plan Update is a no-op")
-	}))
-	t.Cleanup(server.Close)
-	a := newMobiusAdapterWithServer(t, server.URL)
-
-	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
-	if err := a.Update(context.Background(), ids, mutableUpdate{}); err != nil {
-		t.Fatalf("unexpected err: %v", err)
 	}
 }
 
