@@ -135,6 +135,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 			AllowCatalogUpdates: true,
 			ProviderWriteMode:   config.ProviderWriteModeFull,
 			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
+			ReturnOrigins:       []string{"https://example.test"},
 		},
 		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{
 			DisplayName: slug,

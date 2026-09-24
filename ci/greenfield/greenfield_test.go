@@ -86,6 +86,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 			AllowCatalogUpdates: true,
 			ProviderWriteMode:   providerWriteMode,
 			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
+			ReturnOrigins:       []string{"https://greenfield.test"},
 		},
 		Merchant: &embed.MerchantDeclaration{
 			Slug:   slug,

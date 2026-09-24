@@ -56,13 +56,17 @@ type PaymentProviderList struct {
 // Credentials are write-only. Retry with the same operation identity and payload;
 // the server owns credential storage paths, environment and publication authority.
 type UpsertPaymentProviderParams struct {
-	OperationID       uuid.UUID         `json:"operation_id"`
-	ExpectedRevision  *int64            `json:"expected_revision"`
-	Enabled           *bool             `json:"enabled"`
-	AccountID         string            `json:"account_id"`
-	PublicConfig      map[string]string `json:"public_config"`
-	Credentials       map[string]string `json:"credentials"`
-	LegacyEnvironment string            `json:"environment,omitempty"`
+	OperationID      uuid.UUID         `json:"operation_id"`
+	ExpectedRevision *int64            `json:"expected_revision"`
+	Enabled          *bool             `json:"enabled"`
+	AccountID        string            `json:"account_id"`
+	PublicConfig     map[string]string `json:"public_config"`
+	Credentials      map[string]string `json:"credentials"`
+	// RetireWebhookOverlap refuses the rotated-out webhook signing secret at
+	// once instead of at its overlap expiry (SEC-29). With a new
+	// webhook_signing_secret it rotates without any overlap.
+	RetireWebhookOverlap bool   `json:"retire_webhook_overlap,omitempty"`
+	LegacyEnvironment    string `json:"environment,omitempty"`
 }
 
 type ArchivePaymentProviderAccountParams struct {

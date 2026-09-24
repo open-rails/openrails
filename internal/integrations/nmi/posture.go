@@ -20,7 +20,7 @@ type probeContextKey struct{}
 // PostureKey binds a posture verdict to this client's exact merchant, PSP
 // account, endpoints and security key.
 func (c *NMIClient) PostureKey() providerposture.Key {
-	return providerposture.Key{
+	key := providerposture.Key{
 		Rail:       "nmi",
 		MerchantID: c.accountMerchantID,
 		PSPID:      c.accountPSPID,
@@ -28,16 +28,52 @@ func (c *NMIClient) PostureKey() providerposture.Key {
 		Endpoint:   strings.Join([]string{c.endpointDeployment, c.DirectPostURL, c.QueryURL, c.v5BaseURL()}, " "),
 		Credential: providerposture.Fingerprint(c.SecurityKey),
 	}
+	if !c.TestMode {
+		key.Expect = providerposture.Live
+	}
+	return key
 }
 
 // VerifyPosture runs the authoritative test-mode check now and records the
 // verdict for every client that loads the same credential. It is called when
-// credentials are loaded: startup, create and rotation.
+// credentials are loaded: startup, create and rotation. Under live posture
+// the account must be proven live (SEC-33).
 func (c *NMIClient) VerifyPosture(ctx context.Context) providerposture.Status {
-	if !c.TestMode || c.LoopbackFixture {
+	if !c.TestMode {
+		return providerposture.Process().Verify(ctx, c.PostureKey(), c.CheckLivePosture)
+	}
+	if c.LoopbackFixture {
 		return providerposture.Status{Key: c.PostureKey(), Verdict: providerposture.Simulated}
 	}
 	return providerposture.Process().Verify(ctx, c.PostureKey(), c.CheckPosture)
+}
+
+// PostureCheck is the check that arms this client under its posture.
+func (c *NMIClient) PostureCheck() providerposture.Check {
+	if !c.TestMode {
+		return c.CheckLivePosture
+	}
+	return c.CheckPosture
+}
+
+// CheckLivePosture proves a live deployment's NMI account is not in test mode
+// through the read-only test_mode_status query. A test-mode account approves
+// without moving money, so it must never grant access under live posture.
+func (c *NMIClient) CheckLivePosture(ctx context.Context) (providerposture.Verdict, error) {
+	if c.endpointDeployment == config.NMIEndpointSandbox {
+		return providerposture.Simulated, ErrSandboxEndpointUnderLive
+	}
+	result, err := c.readGatewayTestMode(context.WithValue(ctx, probeContextKey{}, c))
+	switch {
+	case err != nil:
+		return providerposture.Unknown, err
+	case result == ProbeLive:
+		return providerposture.Live, nil
+	case result == ProbeSimulated:
+		return providerposture.Simulated, ErrTestModeUnderLivePosture
+	default:
+		return providerposture.Unknown, errors.New("NMI test-mode verification was indeterminate")
+	}
 }
 
 // CheckPosture is the NMI authoritative signal: the regular gateway's
@@ -59,8 +95,16 @@ func (c *NMIClient) CheckPosture(ctx context.Context) (providerposture.Verdict, 
 // requireArmed gates every mutation. Under sandbox posture the credential
 // must hold a cached simulated verdict; an unseen credential is verified once.
 func (c *NMIClient) requireArmed(ctx context.Context, target string) error {
-	if !c.TestMode || ctx.Value(probeContextKey{}) == c {
+	if ctx.Value(probeContextKey{}) == c {
 		return nil
+	}
+	if !c.TestMode {
+		// Live credentials are verified when loaded (startup, create and
+		// rotation); a verified credential stays gated by its verdict.
+		if _, seen := providerposture.Process().Lookup(c.PostureKey()); !seen || c.LoopbackFixture {
+			return nil
+		}
+		return providerposture.Process().Require(ctx, c.PostureKey(), c.CheckLivePosture)
 	}
 	if c.LoopbackFixture {
 		if err := config.ValidateLoopbackGatewayURL(target); err != nil {

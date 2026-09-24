@@ -62,6 +62,9 @@ type nmiFake struct {
 	writes    []providerCall
 	gates     []*gate
 	odd       []string
+
+	// refusedSaves counts vault creations refused for a card declined "vault".
+	refusedSaves int
 }
 
 func newNMIFake() *nmiFake {
@@ -122,6 +125,18 @@ func (f *nmiFake) RoundTrip(r *http.Request) (*http.Response, error) {
 	if dropped {
 		f.serve(r, body)
 		return nil, errors.New("connection reset before the gateway's answer arrived")
+	}
+	if g != nil && g.served {
+		rec := f.serve(r, body)
+		g.once.Do(func() { close(g.arrived) })
+		select {
+		case <-g.release:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+		res := rec.Result()
+		res.Request = r
+		return res, nil
 	}
 	if g != nil {
 		g.once.Do(func() { close(g.arrived) })
@@ -227,6 +242,10 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 		c, ok := token()
 		if !ok {
 			return 400, obj{"type": "invalid", "message": "bad token"}
+		}
+		if c.Decline == "vault" {
+			f.refusedSaves++
+			return 400, obj{"type": "invalid", "message": "card refused"}
 		}
 		v := &nmiVault{ID: f.next("vault"), BillingID: f.next("bill"), Card: c}
 		f.vaults[v.ID] = v

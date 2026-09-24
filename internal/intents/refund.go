@@ -160,6 +160,24 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 				return err
 			}
 		}
+		// SEC-33: a provider notice recorded this refund first; keep that row and
+		// release the reservation instead of colliding on the transaction id.
+		original, err := svc.GetByID(ctx, p.OriginalPaymentID)
+		if err != nil {
+			return err
+		}
+		lookup := ctx
+		if original.PspID != nil {
+			lookup = db.WithPSPID(ctx, *original.PspID)
+		}
+		if existing, err := svc.GetByPSPTransactionID(lookup, original.Rail, providerRefundID); err == nil && existing.ID != reservation.ID {
+			if existing.RefundedPaymentID == nil || *existing.RefundedPaymentID != original.ID {
+				return fmt.Errorf("provider refund %s is recorded against another payment", providerRefundID)
+			}
+			return svc.MarkFailed(ctx, p.ReservationID)
+		} else if err != nil && !db.IsNotFound(err) {
+			return err
+		}
 		metadata := reservation.Metadata
 		if metadata == nil {
 			metadata = map[string]any{}

@@ -103,7 +103,7 @@ func (p *StripeWebhookPublication) publish(ctx context.Context, endpoint string,
 	if retire {
 		operation = uuid.NewSHA1(operation, []byte(fmt.Sprintf("retire/%d", evidence.Revision)))
 	}
-	row, err := p.service.publishProviderCredentials(ctx, p.merchant, "stripe", p.service.providerEnvironment, p.account, !p.row.Archived, UpsertPaymentProviderConfigRequest{OperationID: operation, ExpectedRevision: &evidence.Revision, AccountID: p.account}, names, keys, evidence.CredentialsValidated, p.row.LastVerifiedAt, credentialTransitionPublication{WebhookEndpointID: endpoint, RetireWebhookOverlap: retire})
+	row, err := p.service.publishProviderCredentials(ctx, p.merchant, "stripe", p.service.providerEnvironment, p.account, !p.row.Archived, UpsertPaymentProviderConfigRequest{OperationID: operation, ExpectedRevision: &evidence.Revision, AccountID: p.account}, names, keys, evidence.CredentialsValidated, p.row.LastVerifiedAt, credentialTransitionPublication{WebhookEndpointID: endpoint, RetireWebhookOverlap: retire, OverlapFor: MaxWebhookSecretOverlap})
 	if err == nil {
 		p.row = row
 	}

@@ -181,6 +181,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		NotificationService:          d.NotificationService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
+		Clock:                        d.Clock,
 	}
 	return service.HandleNMIWebhook(ctx)
 }

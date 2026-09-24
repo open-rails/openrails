@@ -76,7 +76,7 @@ func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID mercha
 		return false
 	}
 	if !found || custodian.MerchantID != merchantID {
-		r.ErrorJSON(http.StatusNotFound, "Unknown custodian account")
+		rejectWebhook(r)
 		return false
 	}
 	r.Request = r.Request.WithContext(db.WithCustodianID(r.Request.Context(), custodian.ID))

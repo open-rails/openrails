@@ -266,9 +266,9 @@ ORDER BY
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: MatchChargebackPayments :many
--- NMI chargeback reconciliation (webhooks/nmi.go): candidate subscription
--- payments matched by amount + card last4 within ±7d of the chargeback date,
--- closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
+-- NMI chargeback reconciliation (webhooks/nmi.go): candidate charges
+-- (subscription or one-time) matched by amount + card last4 within ±7d of the
+-- chargeback date, closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
 SELECT p.id AS payment_id,
        p.transaction_id AS payment_transaction_id,
        p.subscription_id AS subscription_id,
@@ -279,18 +279,23 @@ SELECT p.id AS payment_id,
        p.purchased_at AS purchased_at,
        COALESCE(pm.last_four, '')::text AS card_last4
 FROM openrails.payments p
-JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
+LEFT JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
+  AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
+  AND sub.deleted_at IS NULL AND sub.rail::text = p.rail::text
 LEFT JOIN openrails.payment_methods pm ON pm.id = sub.payment_method_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid
-  AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
-  AND p.subscription_id IS NOT NULL
+  AND (p.subscription_id IS NULL OR sub.id IS NOT NULL)
+  AND p.refunded_payment_id IS NULL
   AND p.deleted_at IS NULL
-  AND sub.deleted_at IS NULL
   AND p.rail = sqlc.arg(rail)
-  AND sub.rail::text = p.rail::text
   AND p.amount > 0
   AND p.amount = sqlc.arg(amount_cents)::bigint * 10000
-  AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+  AND (RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+    OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+    OR (p.subscription_id IS NULL AND EXISTS (
+      SELECT 1 FROM openrails.payment_methods cpm
+      WHERE cpm.merchant_id = p.merchant_id AND cpm.customer_id = p.customer_id AND cpm.psp_id = p.psp_id
+        AND RIGHT(regexp_replace(COALESCE(cpm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text)))
   AND p.purchased_at >= sqlc.arg(from_at)::timestamptz
   AND p.purchased_at <= sqlc.arg(to_at)::timestamptz
 ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - sqlc.arg(target_at)::timestamptz))) ASC,

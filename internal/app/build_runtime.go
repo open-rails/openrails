@@ -290,6 +290,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		)
 	}
 
+	// SEC-30: the durable card-testing ledger works on every replica, Redis or not.
+	cardFailureLedger := abuse.NewFailureLedger(database, clock, abuse.DefaultCardAbuseConfig())
+	serviceInstances.CheckoutSessionService.SetCardFailureLedger(cardFailureLedger)
+
 	// #725/#788: collection adapters arm PER MERCHANT from the armed rail
 	// state at charge time — no boot adapter map exists anymore.
 	moneyCharger := money.NewScopedCharger(database, nil)
@@ -339,6 +343,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
 		CardAbuseGuard:         cardAbuseGuard,
+		CardFailureLedger:      cardFailureLedger,
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
 		DashboardService:       serviceInstances.DashboardService,

@@ -174,6 +174,14 @@ type OpenrailsBillingPolicyBinding struct {
 	UpdatedAt  time.Time
 }
 
+// SEC-30 card-testing failure counts per merchant, subject and five-minute bucket.
+type OpenrailsCardAttemptFailure struct {
+	MerchantID uuid.UUID
+	Subject    string
+	BucketAt   time.Time
+	Failures   int64
+}
+
 // Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.
 type OpenrailsCatalog struct {
 	ID           uuid.UUID

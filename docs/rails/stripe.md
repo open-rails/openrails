@@ -78,8 +78,18 @@ endpoint. It does not need an outage. OpenRails follows Stripe's own dual-endpoi
 migration: the successor is **created first**, the predecessor is stamped
 `metadata[openrails_superseded_at]` and **left enabled**, and the outgoing secret is
 retained as `webhook_signing_secret_previous` so anything already queued on the old
-endpoint still verifies. Both endpoints deliver during the overlap; duplicate events
+endpoint still verifies — for at most 7 days (`webhook_overlap_expires_at`), after
+which the old secret is refused. Both endpoints deliver during the overlap; duplicate events
 are deduplicated by event id. Nothing is deleted by the bump.
+
+**Rotating a signing secret** (SEC-29, Stripe and NMI). Publishing a new
+`webhook_signing_secret` keeps the outgoing one verifying only for the
+`webhook_secret_overlap` window (default 24h, at most 168h), then refuses it.
+Rotate a leaked secret with `retire_webhook_overlap: true` on the provider
+upsert to refuse the old one at once; the same flag alone retires a running
+overlap. A host-declared `webhook_signing_secret_previous` must carry the
+setting `webhook_overlap_expires_at` (RFC 3339); without it the previous
+secret never verifies.
 
 Retiring the superseded endpoint is the only destructive step. It happens no sooner
 than 7 days after it was replaced, requires a live enabled endpoint at the current

@@ -20,7 +20,7 @@ import (
 )
 
 // ErrDisarmed refuses a provider mutation before any bytes are sent.
-var ErrDisarmed = errors.New("PSP disarmed: sandbox posture is not verified")
+var ErrDisarmed = errors.New("PSP disarmed: provider posture is not verified")
 
 // Verdict is what a provider's authoritative signal says about a credential.
 type Verdict uint8
@@ -60,6 +60,16 @@ type Key struct {
 	AccountID  string
 	Endpoint   string
 	Credential [sha256.Size]byte
+	// Expect is the verdict that arms this key: Simulated (zero value) under
+	// sandbox posture, Live under live posture (SEC-33).
+	Expect Verdict
+}
+
+func (k Key) expected() Verdict {
+	if k.Expect == Unknown {
+		return Simulated
+	}
+	return k.Expect
 }
 
 func (k Key) String() string {
@@ -93,7 +103,7 @@ type Status struct {
 }
 
 // Armed reports whether mutations are permitted.
-func (s Status) Armed() bool { return s.Verdict == Simulated }
+func (s Status) Armed() bool { return s.Verdict == s.Key.expected() }
 
 // Error explains why the key is disarmed, wrapping ErrDisarmed.
 func (s Status) Error() error {
@@ -193,7 +203,7 @@ func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check) Sta
 	} else {
 		verdict, err = check(ctx)
 	}
-	if verdict == Simulated && err != nil {
+	if verdict == k.expected() && err != nil {
 		verdict = Unknown
 	}
 	e.status = Status{Key: k, Verdict: verdict, Err: err, CheckedAt: r.now()}

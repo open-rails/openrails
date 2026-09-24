@@ -47,7 +47,9 @@ type gate struct {
 	arrived chan struct{}
 	release chan struct{}
 	commit  bool
-	once    sync.Once
+	// served parks the response after the provider has acted.
+	served bool
+	once   sync.Once
 }
 
 func newGate(match func(*http.Request) bool, commit bool) *gate {
@@ -116,6 +118,18 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		rec := httptest.NewRecorder()
 		rec.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = rec.WriteString(`{"error":{"type":"api_error","message":"unavailable"}}`)
+		res := rec.Result()
+		res.Request = r
+		return res, nil
+	}
+	if g != nil && g.served {
+		rec := f.serve(r, form)
+		g.once.Do(func() { close(g.arrived) })
+		select {
+		case <-g.release:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
 		res := rec.Result()
 		res.Request = r
 		return res, nil

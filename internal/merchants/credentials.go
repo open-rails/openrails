@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -91,7 +92,7 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if err != nil {
 		return creds, err
 	}
-	previousRef, err := scope.secretRef("webhook_signing_secret_previous")
+	previousRef, err := s.previousWebhookRef(scope)
 	if err != nil {
 		return creds, err
 	}
@@ -198,6 +199,8 @@ type pspSecretScope struct {
 	credentialRefs     map[string]SecretRef
 	retiredCredentials map[string]bool
 	custodianID        *uuid.UUID
+	// webhookOverlapUntil bounds webhook_signing_secret_previous (SEC-29).
+	webhookOverlapUntil time.Time
 }
 
 // applyEvidence unpacks the PSP row's evidence document: the manifest-supplied
@@ -208,6 +211,7 @@ func (s *pspSecretScope) applyEvidence(raw []byte) {
 	s.credentialVersions = CredentialVersions(raw)
 	s.credentialRefs = CredentialRefs(raw)
 	s.retiredCredentials = unmarshalProviderEvidence(raw).RetiredCredentials
+	s.webhookOverlapUntil = webhookOverlapExpiry(raw)
 }
 
 func (s pspSecretScope) secretName(key string) (string, error) {
@@ -656,22 +660,36 @@ func (s *Service) PSPScopeByAccountID(ctx context.Context, id merchant.ID, rail,
 	return scope.exported(), true, nil
 }
 
-// LoadNMIWebhookSigningSecretForAccount loads the webhook secret for a specific NMI
-// account (#641). ok=false when no such enabled account — the caller must reject.
-func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id merchant.ID, accountID string) (string, bool, error) {
+// NMIWebhookSecrets are the secrets an NMI webhook may be signed with: the
+// current one and, only during its bounded overlap (SEC-29), the previous one.
+type NMIWebhookSecrets struct {
+	Current, Previous string
+}
+
+// LoadNMIWebhookSigningSecretForAccount loads the webhook secrets for a specific
+// NMI account (#641). ok=false when no such enabled account — the caller must reject.
+func (s *Service) LoadNMIWebhookSigningSecretForAccount(ctx context.Context, id merchant.ID, accountID string) (NMIWebhookSecrets, bool, error) {
+	var out NMIWebhookSecrets
 	if s.secrets == nil || id.IsZero() {
-		return "", false, nil
+		return out, false, nil
 	}
 	scope, ok, err := s.pspSecretScopeByAccountID(ctx, id, string(models.RailNMI), accountID)
 	if err != nil || !ok {
-		return "", ok, err
+		return out, ok, err
 	}
 	ref, err := scope.secretRef("webhook_signing_secret")
 	if err != nil {
-		return "", false, err
+		return out, false, err
 	}
-	secret, err := s.secretValueRef(ctx, id, ref)
-	return secret, true, err
+	if out.Current, err = s.secretValueRef(ctx, id, ref); err != nil {
+		return out, true, err
+	}
+	previous, err := s.previousWebhookRef(scope)
+	if err != nil || previous.Name == "" {
+		return out, true, err
+	}
+	out.Previous, err = s.secretValueRef(ctx, id, previous)
+	return out, true, err
 }
 
 // LoadStripeCredentialsForAccount loads credentials for a specific Stripe account
@@ -697,7 +715,7 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 	if err != nil {
 		return creds, false, err
 	}
-	previousRef, err := scope.secretRef("webhook_signing_secret_previous")
+	previousRef, err := s.previousWebhookRef(scope)
 	if err != nil {
 		return creds, false, err
 	}

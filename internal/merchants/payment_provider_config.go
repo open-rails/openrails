@@ -38,7 +38,7 @@ var ErrPaymentProviderCredentialsRejected = apperr.New(http.StatusBadRequest, "p
 // providerCredentialError types a provider-side credential rejection; any
 // other probe outcome (transport, indeterminate) stays an internal failure.
 func providerCredentialError(err error) error {
-	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) || errors.Is(err, nmi.ErrTestModeUnderLivePosture) || errors.Is(err, nmi.ErrSandboxEndpointUnderLive) {
 		return fmt.Errorf("%w: %v", ErrPaymentProviderCredentialsRejected, err)
 	}
 	return err
@@ -177,9 +177,30 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 	return PaymentProviderConfig{}, ErrPaymentProviderNotFound
 }
 
+// ErrPSPClaimUnproven refuses a merchant's first claim of a provider account
+// whose credentials do not prove control of it (SEC-33). The deployment
+// operator declares such accounts instead.
+var ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, "psp_claim_requires_proof", "provider account claims require credentials that prove control of the account, or operator declaration")
+
+// claimNeedsProof lists rails whose inbound events route by account id.
+func claimNeedsProof(rail string) bool {
+	return rail == "stripe" || rail == "nmi" || rail == "ccbill"
+}
+
 // UpsertPaymentProviderConfig validates credentials first, then stores the
-// PSP and scoped secrets.
+// PSP and scoped secrets. A merchant's first claim of an account must prove
+// control through a successful credential probe.
 func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+	return s.upsertPaymentProviderConfig(ctx, id, rail, req, false)
+}
+
+// OperatorUpsertPaymentProviderConfig is the operator's approved claim: the
+// deployment operator vouches for account ownership.
+func (s *Service) OperatorUpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+	return s.upsertPaymentProviderConfig(ctx, id, rail, req, true)
+}
+
+func (s *Service) upsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest, operatorApproved bool) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil || s.secrets == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
 	}
@@ -222,6 +243,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if len(req.Credentials) > 0 && !CanStageCredentials(s.secrets) {
 		return PaymentProviderConfig{}, apperr.New(http.StatusMethodNotAllowed, "credential_source_read_only", "provider credential source has no writable durable custody")
 	}
+	claiming := false
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
@@ -234,6 +256,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		claiming = errors.Is(err, pgx.ErrNoRows)
 		if err == nil {
 			custody := unmarshalProviderEvidence(row.Evidence).CredentialCustody
 			if custody != "" && custody != SecretCustodyIdentity(s.secrets) {
@@ -288,13 +311,16 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		return PaymentProviderConfig{}, err
 	}
 	credentialsValidated = credentialsValidated || probed
+	if claiming && !probed && !operatorApproved && claimNeedsProof(rail) {
+		return PaymentProviderConfig{}, ErrPSPClaimUnproven
+	}
 	var lastVerifiedAt *time.Time
 	if credentialsValidated {
 		now := time.Now().UTC()
 		lastVerifiedAt = &now
 	}
 
-	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, enabled, req, secretNames, secretKeys, credentialsValidated, lastVerifiedAt)
+	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, enabled, req, secretNames, secretKeys, credentialsValidated, lastVerifiedAt, credentialTransitionPublication{RetireWebhookOverlap: req.RetireWebhookOverlap})
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -893,9 +919,10 @@ func unmarshalProviderEvidence(raw []byte) pspEvidence {
 // refuseLiveNMIUnderTestMode requires a fresh simulated result before arming
 // sandbox NMI credentials. Live or indeterminate responses refuse the arm.
 func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID, rail, environment, accountID string, credentials map[string]string) error {
-	if rail != string(models.RailNMI) || s.providerEnvironment != "test" {
+	if rail != string(models.RailNMI) {
 		return nil
 	}
+	sandbox := s.providerEnvironment == "test"
 	name, err := PSPSecretName(rail, environment, accountID, "security_key")
 	if err != nil {
 		return err
@@ -919,14 +946,19 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 	if err != nil {
 		return err
 	}
-	client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, true)
+	client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, sandbox)
 	if err != nil {
-		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
+		return fmt.Errorf("construct NMI posture qualification client: %w", err)
 	}
 	if s.nmiProbeV5BaseURL != "" {
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}
-	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
+	check := nmi.CheckTestModeArm
+	if !sandbox {
+		// SEC-33: a live deployment refuses an NMI account left in test mode.
+		check = nmi.CheckLiveArm
+	}
+	if err := check(ctx, client); err != nil {
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
 	}
 	return nil

@@ -94,7 +94,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 	if err != nil {
 		return nil, err
 	}
-	key := tierChangeIdempotencyKey(req.IdempotencyKey)
+	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
 	requested := strings.TrimSpace(req.PriceID)
 	fingerprint := sha256.Sum256([]byte(strings.Join([]string{terms.CustomerID.String(), existingSub.ID.String(), newPrice.ID.String(), key}, "\x00")))
 	database := s.SubscriptionService.Database()

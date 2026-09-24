@@ -12,6 +12,13 @@ import (
 // sandbox deployment.
 var ErrLiveCredentialsUnderTestMode = errors.New("PRODUCTION NMI credentials detected while test_mode is enabled; refusing to arm: use sandbox account credentials or select live mode")
 
+// ErrTestModeUnderLivePosture refuses to arm an NMI account left in test mode
+// in a live deployment: its approvals move no money (SEC-33).
+var ErrTestModeUnderLivePosture = errors.New("NMI account is in TEST MODE while the deployment is live; refusing to arm: disable test mode in the NMI gateway")
+
+// ErrSandboxEndpointUnderLive refuses NMI's sandbox deployment under live posture.
+var ErrSandboxEndpointUnderLive = errors.New("NMI sandbox endpoint selected while the deployment is live; refusing to arm")
+
 // CheckTestModeArm verifies the credential now (recording the verdict for
 // every client that loads it) and refuses anything but a simulated account.
 func CheckTestModeArm(ctx context.Context, client *NMIClient) error {
@@ -24,4 +31,17 @@ func CheckTestModeArm(ctx context.Context, client *NMIClient) error {
 	default:
 		return fmt.Errorf("NMI sandbox qualification failed; refusing to arm: %w", status.Err)
 	}
+}
+
+// CheckLiveArm verifies a live deployment's credential now and refuses an
+// account that is not proven live (SEC-33).
+func CheckLiveArm(ctx context.Context, client *NMIClient) error {
+	status := providerposture.Process().Verify(ctx, client.PostureKey(), client.CheckLivePosture)
+	if status.Armed() {
+		return nil
+	}
+	if status.Verdict == providerposture.Simulated {
+		return status.Err
+	}
+	return fmt.Errorf("NMI live qualification failed; refusing to arm: %w", status.Err)
 }

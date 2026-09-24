@@ -170,8 +170,10 @@ var descriptors = []Descriptor{
 		// credential. It belongs to the custodian account, not to whichever
 		// gateway its proxy detokenizes into, and lives under
 		// custodians/<kind>/<environment>/<account_id>/api_key.
-		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}},
-		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment"},
+		// webhook_signing_secret_previous: the rotated-out secret, verified
+		// only until webhook_overlap_expires_at (SEC-29).
+		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
+		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "webhook_overlap_expires_at"},
 	},
 	{
 		models.RailCCBill,
@@ -204,9 +206,9 @@ var descriptors = []Descriptor{
 		"",               // CancelPortalURL
 		// webhook_signing_secret_previous (#856): the outgoing secret, retained
 		// for the rollover overlap so events still queued on the superseded
-		// endpoint keep verifying. Dropped when the last predecessor retires.
+		// endpoint keep verifying, never past webhook_overlap_expires_at (SEC-29).
 		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"publishable_key"},
+		[]string{"publishable_key", "webhook_overlap_expires_at"},
 	},
 	{
 		models.RailSolana,

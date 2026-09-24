@@ -984,7 +984,18 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		return fmt.Errorf("parse stripe dispute: %w", err)
 	}
 	if stripeDisputeWon(eventType, dispute.Status) {
+		if err := s.markStripeDisputeWon(ctx, dispute.ID); err != nil {
+			return err
+		}
 		return s.handleStripeDisputeWon(ctx, dispute)
+	}
+	// SEC-33: Stripe delivers out of order. A dispute already won never
+	// reverses, whatever notice about it arrives later.
+	if won, err := s.stripeDisputeAlreadyWon(ctx, dispute.ID); err != nil {
+		return err
+	} else if won {
+		log.WithContext(ctx).WithField("dispute_id", dispute.ID).Info("Stripe dispute already won; ignoring late dispute notice")
+		return nil
 	}
 	if !stripeDisputeShouldReverse(eventType, dispute.Status) {
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -1030,7 +1041,13 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 	}
 	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
 		rail := models.RailStripe
-		reason := fmt.Sprintf("STRIPE DISPUTE: %s status=%s", strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
+		reason := fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
+		// A membership already cancelled is not this dispute's cancellation to undo.
+		if s.SubscriptionService != nil {
+			if sub, err := s.SubscriptionService.GetByID(ctx, *original.SubscriptionID); err == nil && sub.Status == models.StatusCancelled {
+				reason = fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
+			}
+		}
 		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: original.SubscriptionID,
 			Rail:           &rail,
@@ -1136,7 +1153,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	}
 
 	if original.SubscriptionID != nil {
-		if err := s.reactivateStripeSubscriptionAfterWonDispute(ctx, *original.SubscriptionID, original); err != nil {
+		if err := s.reactivateStripeSubscriptionAfterWonDispute(ctx, *original.SubscriptionID, original, disputeID); err != nil {
 			return err
 		}
 	} else if s.DB != nil {
@@ -1148,7 +1165,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	return nil
 }
 
-func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx context.Context, subscriptionID uuid.UUID, original *models.Payment) error {
+func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx context.Context, subscriptionID uuid.UUID, original *models.Payment, disputeID string) error {
 	if s.SubscriptionService == nil || s.SubscriptionLifecycleService == nil || original == nil {
 		return nil
 	}
@@ -1163,6 +1180,14 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 		return nil
 	}
 	if sub.Status != models.StatusCancelled {
+		return nil
+	}
+	// SEC-33: only the cancellation this dispute caused is undone; a user,
+	// merchant or other chargeback cancellation stays terminal.
+	if sub.CancelType == nil || *sub.CancelType != models.CancelTypeChargeback || sub.CancelFeedback == nil ||
+		!strings.HasPrefix(*sub.CancelFeedback, "STRIPE DISPUTE "+disputeID+":") {
+		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "dispute_id": disputeID}).
+			Info("Stripe dispute won; subscription was not cancelled by this dispute and stays cancelled")
 		return nil
 	}
 	now := s.now().UTC()
@@ -1195,6 +1220,41 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 		return fmt.Errorf("reactivate stripe subscription after won dispute: %w", err)
 	}
 	return nil
+}
+
+const stripeDisputeWonOp = "stripe.dispute_won"
+
+// markStripeDisputeWon durably records a won dispute so a late created notice
+// cannot reverse it.
+func (s *StripeWebhookService) markStripeDisputeWon(ctx context.Context, disputeID string) error {
+	disputeID = strings.TrimSpace(disputeID)
+	if s.DB == nil || disputeID == "" {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := s.DB.Gen(ctx).MarkWebhookEventCompleted(ctx, gen.MarkWebhookEventCompletedParams{MerchantID: mid.UUID(), Op: stripeDisputeWonOp, EventID: disputeID}); err != nil {
+		return fmt.Errorf("record won stripe dispute: %w", err)
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) stripeDisputeAlreadyWon(ctx context.Context, disputeID string) (bool, error) {
+	disputeID = strings.TrimSpace(disputeID)
+	if s.DB == nil || disputeID == "" {
+		return false, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	won, err := s.DB.Gen(ctx).WebhookEventCompleted(ctx, gen.WebhookEventCompletedParams{MerchantID: mid.UUID(), Op: stripeDisputeWonOp, EventID: disputeID})
+	if err != nil {
+		return false, fmt.Errorf("lookup won stripe dispute: %w", err)
+	}
+	return won, nil
 }
 
 func stripeRefundSucceeded(status string) bool {

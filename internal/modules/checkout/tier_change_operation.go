@@ -31,11 +31,24 @@ import (
 // subscription unique index shared by every durable tier change type.
 const tierChangeSubjectConstraint = "uq_rail_intents_tier_change_subscription"
 
-// One client key names one tier change within a merchant, independent of rail.
+// One client key names one tier change of one customer, independent of rail.
 // The ledger's (merchant_id, idempotency_key) unique constraint arbitrates
 // concurrent requests before either provider-specific handler can execute.
-func tierChangeIdempotencyKey(key string) string {
-	return "tier_change:" + strings.TrimSpace(key)
+// The customer scope keeps another customer from pre-claiming a predictable
+// key (SEC-33).
+func tierChangeIdempotencyKey(customerID, key string) string {
+	customerID = strings.TrimSpace(customerID)
+	if id, err := uuid.Parse(customerID); err == nil {
+		customerID = id.String()
+	}
+	return "tier_change:" + customerID + ":" + strings.TrimSpace(key)
+}
+
+func tierChangeCustomer(user *UserIdentity) string {
+	if user == nil {
+		return ""
+	}
+	return user.ID
 }
 
 // tierChangeSubject is what a replay must name again: the customer, the
@@ -108,10 +121,11 @@ func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeR
 		return nil, false, nil
 	}
 	store := intents.NewStore(s.SubscriptionService.Database())
-	in, err := store.GetByIdempotencyKey(ctx, tierChangeIdempotencyKey(req.IdempotencyKey))
+	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
+	in, err := store.GetByIdempotencyKey(ctx, key)
 	if db.IsNotFound(err) {
 		// An engine upgrade is an initial_membership operation under the same key.
-		in, err = store.GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(tierChangeIdempotencyKey(req.IdempotencyKey)))
+		in, err = store.GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
 	}
 	if db.IsNotFound(err) {
 		return nil, false, nil

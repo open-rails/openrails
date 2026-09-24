@@ -18,7 +18,7 @@ func TestPaymentProviderDefinitions(t *testing.T) {
 		// held by a third-party custodian. The rail is gone (0031) and the
 		// custodian's own key is NOT an NMI credential: it belongs to the
 		// custodian account (0053), not to whichever gateway it proxies into.
-		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret"}},
+		{Rail: "nmi", DisplayName: "Credit Card", CredentialKeys: []string{"security_key", "webhook_signing_secret", "webhook_signing_secret_previous"}},
 		{Rail: "ccbill", DisplayName: "Credit Card", CredentialKeys: []string{"salt", "datalink_username", "datalink_password"}},
 		{Rail: "stripe", DisplayName: "Stripe", CredentialKeys: []string{"secret_key", "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous"}},
 		{Rail: "solana", DisplayName: "Solana", CredentialKeys: []string{}},

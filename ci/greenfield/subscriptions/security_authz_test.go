@@ -196,7 +196,7 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 		Merchant:               &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps}},
 		Config: &config.Config{
 			TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, AllowCatalogUpdates: true,
-			DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}, TrustedProxies: []string{"127.0.0.1/32"},
+			DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://greenfield.test"},
 		},
 		PGXPool: w.pool, River: embed.RiverFromHost(), StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock,
 	})

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -100,6 +102,9 @@ type Service struct {
 	groupSlugResolver   GroupSlugResolver
 	groupIDResolver     GroupIDResolver
 	groupSearchResolver GroupSearchResolver
+	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
+	clock                clockwork.Clock
+	webhookSecretOverlap time.Duration
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge

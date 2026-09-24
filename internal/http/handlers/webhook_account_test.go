@@ -48,8 +48,8 @@ func TestResolvedWebhookAccountFailsClosed(t *testing.T) {
 		status int
 	}{
 		{name: "resolver failure", found: true, id: uuid.New(), err: errors.New("database unavailable"), status: 500},
-		{name: "missing account", status: 404},
-		{name: "empty resolved identity", found: true, status: 404},
+		{name: "missing account", status: 401},
+		{name: "empty resolved identity", found: true, status: 401},
 		{name: "resolved account", found: true, id: uuid.New(), status: 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

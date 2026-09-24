@@ -75,7 +75,7 @@ func UpsertPaymentProviderConfig(ctx context.Context, a *app.App, id merchant.ID
 	if err != nil {
 		return PaymentProviderConfig{}, fmt.Errorf("control plane configure payment provider: %w", err)
 	}
-	provider, err := providerService.UpsertPaymentProviderConfig(ctx, id, rail, req)
+	provider, err := providerService.OperatorUpsertPaymentProviderConfig(ctx, id, rail, req)
 	if err != nil {
 		return PaymentProviderConfig{}, fmt.Errorf("control plane configure payment provider: %w", err)
 	}

@@ -125,6 +125,10 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 	return refund, err
 }
 
+// ErrRefundReservationPending defers a provider refund fact while an OpenRails
+// refund of the same payment is unresolved.
+var ErrRefundReservationPending = errors.New("an OpenRails refund of this payment is still in flight; retry")
+
 func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
 	if reversalKind != ReversalRefund && reversalKind != ReversalChargeback && reversalKind != ReversalDisputeReversal {
 		return nil, fmt.Errorf("invalid reversal kind %q", reversalKind)
@@ -145,6 +149,20 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	}
 	if !db.IsNotFound(err) {
 		return nil, err
+	}
+	// SEC-33: while an OpenRails refund of this payment is in flight, a provider
+	// refund fact may be that same refund; recording it now would count it
+	// twice. The caller retries once the reservation resolves.
+	if reversalKind == ReversalRefund {
+		refunds, err := s.repo.ListRefunds(ctx, orig.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range refunds {
+			if r.Amount < 0 && strings.EqualFold(strings.TrimSpace(r.Status), PaymentStatusPendingValue) {
+				return nil, ErrRefundReservationPending
+			}
+		}
 	}
 	if err := s.ValidateRefund(ctx, orig, amount); err != nil {
 		return nil, err
