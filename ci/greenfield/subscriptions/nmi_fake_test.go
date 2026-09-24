@@ -33,8 +33,8 @@ type nmiSale struct {
 // nmiSchedule is a provider-owned recurring plan subscription.
 type nmiSchedule struct {
 	ID, Vault, Plan, Amount string
-	NextBilling            time.Time
-	Deleted                bool
+	NextBilling             time.Time
+	Deleted                 bool
 }
 
 // nmiFake is a stateful NMI gateway: Customer Vault (v5), Direct Post sales,
