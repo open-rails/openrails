@@ -202,6 +202,22 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			}
 			// Solved: fall through to normal counting (with the buckets just reset).
 		}
+	} else if !deps.Captcha.IsEnabled() && deps.ChallengeStore != nil && (bucket == "checkout" || bucket == "payment-methods") {
+		// Without a captcha to solve, a card-abuse block is a refusal. Ignoring
+		// it would leave card testing unthrottled beyond the plain rate limit.
+		blocked, err := deps.ChallengeStore.IsChallenged(r.Context(), captcha.CardAttackModeSubject)
+		for _, subject := range subjects {
+			if blocked || err != nil {
+				break
+			}
+			blocked, err = deps.ChallengeStore.IsChallenged(r.Context(), subject.Key)
+		}
+		if err != nil {
+			log.WithError(err).WithField("bucket", bucket).Warn("card-abuse block lookup failed")
+		}
+		if blocked {
+			return RateLimitDecision{Outcome: RateLimitTooMany, Bucket: bucket, SubjectKeys: keys, Headers: map[string]string{"Retry-After": "900"}}
+		}
 	}
 
 	results := make([]subjectRateLimitResult, 0, len(subjects))
@@ -706,7 +722,7 @@ func ClassifyBucket(path, method string) string {
 		return "captcha"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
-	case strings.HasPrefix(path, "/v1/me/payment-methods"):
+	case strings.HasPrefix(path, "/v1/me/payment-methods") || isCustomerSubpath(path, "/payment-methods"):
 		return "payment-methods"
 	case strings.HasPrefix(path, "/v1/me/subscriptions") && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete):
 		return "subscriptions"
@@ -758,4 +774,18 @@ func effectiveLimit(limit *config.RateLimit) int {
 		return 60 // Default to 60 requests per minute
 	}
 	return limit.RequestsPerMinute
+}
+
+// isCustomerSubpath reports /v1/customers/:customer_id<suffix>[/...].
+func isCustomerSubpath(path, suffix string) bool {
+	rest, ok := strings.CutPrefix(path, "/v1/customers/")
+	if !ok {
+		return false
+	}
+	idEnd := strings.IndexByte(rest, '/')
+	if idEnd <= 0 {
+		return false
+	}
+	tail := rest[idEnd:]
+	return tail == suffix || strings.HasPrefix(tail, suffix+"/")
 }

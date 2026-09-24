@@ -102,3 +102,14 @@ func (e *TierChangeInFlightError) Error() string {
 	return "tier change " + e.OperationID.String() + " is unresolved; retry with its Idempotency-Key"
 }
 func (e *TierChangeInFlightError) Unwrap() error { return ErrTierChangePending }
+
+// sameTierGroup reports whether a tier change stays inside one declared tier
+// group. A product without a group has no tiers: moving into or out of one would
+// bypass the catalog's tier structure and its one-membership-per-group guard.
+func sameTierGroup(current, next *models.Product) bool {
+	if current == nil || next == nil || current.TierGroup == nil || next.TierGroup == nil {
+		return false
+	}
+	group := strings.TrimSpace(*current.TierGroup)
+	return group != "" && group == strings.TrimSpace(*next.TierGroup)
+}

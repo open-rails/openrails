@@ -31,6 +31,10 @@ func ChangeTier(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
 		return
 	}
+	// An upgrade charges the saved card now.
+	if !customerInitiatedChargeAllowed(r) {
+		return
+	}
 
 	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {

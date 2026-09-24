@@ -196,8 +196,8 @@ SELECT EXISTS (
     WHERE ent.merchant_id = $4::uuid AND ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
-      AND ent.revoked_at IS NULL
-      AND ent.deleted_at IS NULL
+      -- A purchase projects once: a revoked or retracted window is final.
+      AND (ent.source_type = 'one_off' OR (ent.revoked_at IS NULL AND ent.deleted_at IS NULL))
 )
 `
 
@@ -1183,12 +1183,28 @@ func (q *Queries) ShiftEntitlementTimelineWindows(ctx context.Context, arg Shift
 }
 
 const softDeleteEntitlementByID = `-- name: SoftDeleteEntitlementByID :exec
+WITH retracted AS (
 UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.merchant_id = $3::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
+    RETURNING ent.grant_id
+)
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, $2::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
+FROM openrails.grants g
+WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING
 `
 
 type SoftDeleteEntitlementByIDParams struct {
@@ -1233,6 +1249,7 @@ func (q *Queries) SoftDeleteFutureEntitlementsBySubscription(ctx context.Context
 }
 
 const softDeleteFutureOneOffEntitlements = `-- name: SoftDeleteFutureOneOffEntitlements :exec
+WITH retracted AS (
 UPDATE openrails.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
@@ -1241,6 +1258,21 @@ WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'one_off'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.start_at >= $4::timestamptz
+    RETURNING ent.grant_id
+)
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, $2::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
+FROM openrails.grants g
+WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING
 `
 
 type SoftDeleteFutureOneOffEntitlementsParams struct {
@@ -1261,6 +1293,7 @@ func (q *Queries) SoftDeleteFutureOneOffEntitlements(ctx context.Context, arg So
 }
 
 const softDeleteFutureTimelineWindows = `-- name: SoftDeleteFutureTimelineWindows :exec
+WITH retracted AS (
 UPDATE openrails.entitlements ent SET
     deleted_at = $3::timestamptz,
     updated_at = $3::timestamptz
@@ -1271,6 +1304,21 @@ WHERE ent.merchant_id = $4::uuid AND ent.customer_id = $1
   AND ent.start_at > $3::timestamptz
   AND ($5::text IS NULL OR ent.source_type = $5::text)
   AND ($6::uuid IS NULL OR ent.source_id = $6::uuid)
+    RETURNING ent.grant_id
+)
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, $3::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
+FROM openrails.grants g
+WHERE g.merchant_id = $4::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING
 `
 
 type SoftDeleteFutureTimelineWindowsParams struct {

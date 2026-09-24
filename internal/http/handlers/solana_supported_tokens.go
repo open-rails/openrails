@@ -128,7 +128,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 	}
 	solanaConf, err := effectiveSolanaRailConfig(r)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.InternalError("Solana configuration unavailable", err)
 		return
 	}
 	if solanaConf == nil {
@@ -255,7 +255,7 @@ func GetSolanaConfig(r *httprequest.Request) {
 	}
 	solanaConf, err := effectiveSolanaRailConfig(r)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		r.InternalError("Solana configuration unavailable", err)
 		return
 	}
 	if solanaConf == nil {

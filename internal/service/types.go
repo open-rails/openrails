@@ -75,22 +75,3 @@ type CreditBalance struct {
 // NOTE: HoldCreditsRequest, CreditHold, CaptureHoldRequest, CreditTransaction,
 // WithdrawCreditsRequest, and EntitlementRecord are defined in service.go
 // as they are part of the existing API.
-
-// -------------------------------- Webhooks --------------------------------
-
-// HandleWebhookRequest contains the raw webhook data.
-type HandleWebhookRequest struct {
-	Provider  string            // "nmi", "ccbill", "stripe", "solana"
-	Body      []byte            // Raw request body
-	Headers   map[string]string // Relevant headers (signatures, etc.)
-	ClientIP  string
-	EventType string // Parsed event type if available
-}
-
-// WebhookResult contains the result of webhook processing.
-type WebhookResult struct {
-	Accepted  bool
-	EventID   string
-	EventType string
-	Error     string // Non-empty if processing failed
-}

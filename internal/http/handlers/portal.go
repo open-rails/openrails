@@ -33,7 +33,7 @@ func CreatePortalSession(r *httprequest.Request) {
 	service := &subscriptions.StripePortalService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
 	urlStr, err := service.CreatePortalSession(r.Request.Context(), customerID, returnURL)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		writeRefusal(r, err, "billing portal unavailable")
 		return
 	}
 	r.SuccessJSON(portalResponse{URL: urlStr})
