@@ -1811,7 +1811,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			sub.ClearRetrySchedule()
 			// A provider-billed period-end tier change: the provider already
 			// bills the scheduled price, so its renewal opens the new tier.
-			scheduled := sub.CollectionPolicy != models.CollectionPolicyEngine && sub.ScheduledPriceID != nil && newPeriodEnd != nil && sub.CurrentPeriodStartsAt != nil && sub.CurrentPeriodEndsAt.Equal(*newPeriodEnd)
+			scheduled := sub.CollectionPolicy != models.CollectionPolicyEngine && rails.IsNMI(sub.Rail) && sub.ScheduledPriceID != nil && newPeriodEnd != nil && sub.CurrentPeriodStartsAt != nil && sub.CurrentPeriodEndsAt.Equal(*newPeriodEnd)
 			if scheduled {
 				price, err := catalog.NewPriceService(dbb).GetByID(ctx, *sub.ScheduledPriceID)
 				if err != nil {

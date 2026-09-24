@@ -58,8 +58,9 @@ cards, so the change would do nothing at NMI. Vault the new card separately.
 
 NMI-billed (legacy) subscriptions: a cancel while the merchant's destructive
 switch is off is `409 provider_cancel_held` (nothing changed; NMI keeps billing
-until an operator arms the switch); a tier change is `409
-tier_change_requires_engine_billing`. Engine takeovers answer
+until an operator arms the switch); a tier change to a price of another billing
+cycle is `409 tier_change_cadence_unsupported` (NMI's billing date is kept).
+Engine takeovers answer
 `engine_takeover_ineligible`, `engine_takeover_no_recurring_agreement`,
 `engine_takeover_boundary_too_close`, `engine_takeover_in_flight`,
 `engine_takeover_committed`, `engine_takeover_conflict` (409) and

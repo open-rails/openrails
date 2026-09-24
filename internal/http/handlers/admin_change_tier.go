@@ -11,6 +11,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,7 +120,7 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 	// An engine subscription's service answers its own schedule: the same
 	// downgrade replays, another is a typed refusal, an upgrade replaces it.
 	if subscription.ScheduledPriceID != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
-		r.ErrorJSON(http.StatusConflict, "subscription already has a tier change scheduled")
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodeTierChangeAlreadyScheduled, "subscription already has a tier change scheduled"))
 		return false
 	}
 	if subscription.Rail == models.RailCCBill {

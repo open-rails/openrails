@@ -1812,54 +1812,6 @@ func (s *CheckoutService) processTierChangeCCBill(
 	return resp, nil
 }
 
-// mapCheckoutToTierChangeResponse converts a CheckoutResponse to TierChangeResponse
-func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse, newPrice *models.Price, action string) *TierChangeResponse {
-	tierResp := &TierChangeResponse{
-		Object:  "tier_change",
-		Mode:    "tier_change",
-		Action:  action,
-		PriceID: (openrails.PriceID(newPrice.ID)).String(),
-		Payment: CheckoutSessionPaymentResponse{
-			TransactionID: resp.TransactionID,
-		},
-		Message:      resp.Message,
-		DelayedStart: resp.DelayedStart,
-		Effective:    effectiveOf(action),
-	}
-
-	// Map status
-	switch resp.Status {
-	case "success":
-		tierResp.Status = "succeeded"
-	case "blocked":
-		tierResp.Status = "blocked"
-	case "redirect_required":
-		tierResp.Status = "requires_action"
-	default:
-		tierResp.Status = resp.Status
-	}
-
-	// Map subscription ID
-	if resp.SubscriptionID != nil {
-		subID := openrails.SubscriptionID(*resp.SubscriptionID)
-		tierResp.SubscriptionID = &subID
-	}
-
-	// Map redirect
-	if resp.RedirectURL != "" {
-		tierResp.URL = resp.RedirectURL
-		tierResp.Payment.RedirectURL = resp.RedirectURL
-		tierResp.NextAction = &CheckoutSessionNextAction{
-			Type: "redirect_to_url",
-			RedirectToURL: &CheckoutSessionRedirectToURL{
-				URL: resp.RedirectURL,
-			},
-		}
-	}
-
-	return tierResp
-}
-
 // requireNMIPlanForTarget returns the NMI plan the resolved payment provider
 // charges for this price. It never scans or falls back across a rail: with
 // several accounts on one rail, each provider's plan is its own.
