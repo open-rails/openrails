@@ -27,6 +27,7 @@ type nmiSale struct {
 	Card                                                       card
 	RefundedCents                                              int64
 	RefundIDs                                                  []string
+	ScheduleID                                                 string
 	At                                                         time.Time
 }
 
@@ -140,7 +141,7 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 		_, _ = rec.WriteString(f.sale(form))
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction":
 		rec.Header().Set("Content-Type", "text/xml")
-		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id")))
+		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id"), form.Get("subscription_id")))
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "test_mode_status":
 		rec.Header().Set("Content-Type", "text/xml")
 		_, _ = rec.WriteString("<nm_response><test_mode_status>enabled</test_mode_status></nm_response>")
@@ -242,6 +243,9 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 			actions = append(actions, obj{"id": s.TransactionID + "-r", "type": "refund", "amount": fmt.Sprintf("%.2f", float64(s.RefundedCents)/100), "success": true})
 		}
 		return 200, obj{"object": "transaction", "id": s.TransactionID, "response": "1", "response_code": "100", "amount": s.Amount, "currency": s.Currency, "customer_vault_id": s.Vault, "actions": actions}
+	case seg[0] == "plans" && len(seg) == 2 && strings.HasPrefix(seg[1], "legacy_plan_"):
+		// A legacy book's monthly 9.99 plan, created at NMI long ago.
+		return 200, obj{"object": "plan", "id": seg[1], "plan_name": "Legacy", "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}
 	case seg[0] == "subscriptions" && len(seg) == 1:
 		var data []obj
 		for _, s := range f.schedules {
@@ -307,11 +311,11 @@ func (f *nmiFake) sale(form url.Values) string {
 	return fmt.Sprintf("response=1&responsetext=SUCCESS&authcode=123456&transactionid=%s&orderid=%s&response_code=100", s.TransactionID, s.OrderID)
 }
 
-func (f *nmiFake) search(orderID, transactionID string) string {
+func (f *nmiFake) search(orderID, transactionID, scheduleID string) string {
 	var b strings.Builder
 	b.WriteString("<nm_response>")
 	for _, s := range f.sales {
-		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) {
+		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) {
 			continue
 		}
 		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>1</success><response_code>100</response_code><date>%s</date></action></transaction>",
@@ -374,4 +378,68 @@ func (f *nmiFake) unexpected() []string {
 	out := append([]string(nil), f.odd...)
 	sort.Strings(out)
 	return out
+}
+
+// legacyVault is a vault created by a legacy system.
+func (f *nmiFake) legacyVault(c card) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v := &nmiVault{ID: f.next("legacyvault"), BillingID: f.next("bill"), Card: c}
+	f.vaults[v.ID] = v
+	return v.ID
+}
+
+func (f *nmiFake) billingOf(vault string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.vaults[vault].BillingID
+}
+
+// legacySchedule is a provider-owned plan subscription, billed by NMI.
+func (f *nmiFake) legacySchedule(vault, plan, amount string, next time.Time) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := &nmiSchedule{ID: f.next("rsub"), Vault: vault, Plan: plan, Amount: amount, NextBilling: next}
+	f.schedules[s.ID] = s
+	return s.ID
+}
+
+// legacySale records a charge NMI made for a schedule, as its recurring
+// engine does: the schedule's order, the vault's card.
+func (f *nmiFake) legacySale(vault, amount string, at time.Time) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := &nmiSale{TransactionID: f.next("tx"), OrderID: "legacy-order", Vault: vault, BillingID: f.vaults[vault].BillingID, Amount: amount, Currency: "USD", Card: f.vaults[vault].Card, At: at}
+	f.sales = append(f.sales, s)
+	return s.TransactionID
+}
+
+// providerRenew is NMI's recurring engine charging a schedule; a failed
+// charge leaves the schedule's next billing date in place.
+func (f *nmiFake) providerRenew(id string, paid bool) (sale *nmiSale, declined bool) {
+	f.mu.Lock()
+	s := f.schedules[id]
+	f.mu.Unlock()
+	if !paid {
+		return nil, true
+	}
+	tx := f.legacySale(s.Vault, s.Amount, s.NextBilling)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s.NextBilling = s.NextBilling.Add(monthHours * time.Hour)
+	sale = f.saleByID(tx)
+	sale.ScheduleID = id
+	return sale, false
+}
+
+func (f *nmiFake) providerCancel(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.schedules[id].Deleted = true
+}
+
+func (f *nmiFake) scheduleLive(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.schedules[id].Deleted
 }

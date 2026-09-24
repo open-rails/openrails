@@ -250,11 +250,7 @@ func (w *world) runRenewals() {
 	w.t.Helper()
 	res, err := w.jobs.Insert(w.t.Context(), dunningPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
 	require.NoError(w.t, err)
-	require.Eventually(w.t, func() bool {
-		job, err := w.jobs.JobGet(w.t.Context(), res.Job.ID)
-		return err == nil && job.State == rivertype.JobStateCompleted
-	}, 20*time.Second, 20*time.Millisecond, "renewal pass")
-	w.settle()
+	w.waitJob(res.Job.ID)
 	if os.Getenv("GF_DEBUG") != "" {
 		page, _ := w.jobs.JobList(w.t.Context(), river.NewJobListParams().First(100))
 		for _, j := range page.Jobs {
@@ -297,6 +293,34 @@ func (w *world) settle() {
 		}
 		return true
 	}, 30*time.Second, 25*time.Millisecond, "operations settle")
+}
+
+// waitJob waits for one inserted engine job, then for the work it caused.
+func (w *world) waitJob(id int64) {
+	w.t.Helper()
+	require.Eventually(w.t, func() bool {
+		job, err := w.jobs.JobGet(w.t.Context(), id)
+		return err == nil && job.State == rivertype.JobStateCompleted
+	}, 20*time.Second, 20*time.Millisecond, "engine job")
+	w.settle()
+}
+
+// settleQuiet promotes due scheduled work once without asserting, for use off
+// the test goroutine while a request is held.
+func (w *world) settleQuiet() {
+	jobs := w.jobs
+	if jobs == nil {
+		return
+	}
+	page, err := jobs.JobList(context.Background(), river.NewJobListParams().Kinds(workKinds...).States(rivertype.JobStateScheduled).First(100))
+	if err != nil {
+		return
+	}
+	for _, job := range page.Jobs {
+		if !job.ScheduledAt.After(time.Now()) {
+			_, _ = jobs.JobRetry(context.Background(), job.ID)
+		}
+	}
 }
 
 // wake makes every snoozed operation runnable now, as an operator retry
@@ -353,6 +377,22 @@ type dunningPass struct{}
 func (dunningPass) Kind() string { return "openrails.dunning" }
 
 func (w *world) advance(d time.Duration) { w.clock.Advance(d) }
+
+// staff calls a merchant route with the staff credential and returns the
+// status and raw body.
+func (w *world) staff(method, path string) (int, string) {
+	w.t.Helper()
+	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, nil)
+	require.NoError(w.t, err)
+	req.Header.Set("Authorization", "Bearer "+w.auth.token(w.t, "staff"))
+	req.Header.Set("X-OpenRails-Merchant-Slug", w.slug)
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(w.t, err)
+	defer res.Body.Close()
+	raw, err := io.ReadAll(res.Body)
+	require.NoError(w.t, err)
+	return res.StatusCode, string(raw)
+}
 
 // customer is one native customer acting through the mounted /v1/me routes.
 type customer struct {

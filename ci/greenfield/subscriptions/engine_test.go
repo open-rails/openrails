@@ -5,12 +5,16 @@ package subscriptions_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/embed"
+	"github.com/riverqueue/river"
 )
 
 var rails = []string{"stripe", "nmi"}
@@ -241,7 +245,10 @@ func (e *engineCase) lastChargedCard() string {
 	return e.w.nmi.lastSale().Card.Last4
 }
 
-const day = 24 * time.Hour
+const (
+	day                = 24 * time.Hour
+	subscriptionsGrace = 24*time.Hour + time.Minute
+)
 
 // Scenarios 3 and 4: a new card given during dunning is retried at once and
 // recovers the same period; a card changed mid-cycle is the one the next
@@ -586,4 +593,107 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		require.Len(t, w.nmi.ledger(""), 1)
 		require.True(t, c.entitled("content:members"))
 	})
+}
+
+// Scenario 6: a process dies mid-renewal and a new one takes over the same
+// database. Before submission the renewal simply runs after restart; after a
+// submission whose response was lost, recovery reads the provider and never
+// sends a second charge. A request that never reached the provider stays
+// unresolved for an operator rather than being re-sent blind (documented:
+// absence of evidence never authorizes a second financial submission).
+func TestEngineCrashDurability(t *testing.T) {
+	submit := map[string]func(*http.Request) bool{
+		"stripe": func(r *http.Request) bool { return r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" },
+		"nmi":    func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") },
+	}
+	beforeSubmit := map[string]func(*http.Request) bool{
+		// Stripe's first provider call is the submission itself; the crash
+		// lands after admission, before the claim reaches the provider.
+		"stripe": func(r *http.Request) bool { return r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" },
+		"nmi":    func(r *http.Request) bool { return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v5/customers/") },
+	}
+	cases := []struct {
+		name    string
+		match   map[string]func(*http.Request) bool
+		commit  bool
+		charges int
+		renewed bool
+	}{
+		{"before_submit", beforeSubmit, false, 2, true},
+		{"after_submit_response_lost", submit, true, 2, true},
+		{"lost_before_provider", submit, false, 1, false},
+	}
+	for _, rail := range rails {
+		for _, tc := range cases {
+			if rail == "stripe" && tc.name == "before_submit" {
+				continue // identical wire point to lost_before_provider on Stripe
+			}
+			t.Run(rail+"/"+tc.name, func(t *testing.T) {
+				w := newWorld(t)
+				e := enroll(t, w, rail, embedded)
+				end := e.periodEnd()
+				e.toPeriodEnd()
+				var g *gate
+				if rail == "stripe" {
+					g = w.stripe.hold(newGate(tc.match[rail], tc.commit))
+				} else {
+					g = w.nmi.hold(newGate(tc.match[rail], tc.commit))
+				}
+				_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+				require.NoError(t, err)
+				go func() {
+					for range 200 {
+						w.settleQuiet()
+						time.Sleep(20 * time.Millisecond)
+					}
+				}()
+				select {
+				case <-g.arrived:
+				case <-time.After(20 * time.Second):
+					t.Fatal("the renewal never reached the provider")
+				}
+				w.stop() // the process dies with the request in flight
+				w.stripe.unhold()
+				w.nmi.unhold()
+				w.start()
+				w.advance(30 * time.Minute) // past any executor lease
+				w.wake()
+				w.runRenewals()
+				w.advance(30 * time.Minute)
+				w.wake()
+				require.Len(t, e.providerLedger(), tc.charges, "never a second charge")
+				require.Len(t, completed(w.payments(embedded, e.c.id)), tc.charges, "local payments match the provider")
+				sub := w.subscription(embedded, e.sub)
+				require.Equal(t, tc.renewed, sub.CurrentPeriodEndsAt.After(end))
+				require.True(t, e.c.entitled(e.ent), "access holds while the renewal is renewed or still being decided")
+				if !tc.renewed {
+					w.advance(subscriptionsGrace)
+					w.runRenewals()
+					require.Len(t, e.providerLedger(), tc.charges, "an unresolved submission is never re-sent")
+					require.False(t, e.c.entitled(e.ent), "access is bounded by the renewal grace while unresolved")
+				}
+			})
+		}
+	}
+}
+
+// One membership the due pass cannot process never fails the pass: every
+// other due renewal still runs, the pass completes, and the refusal is a
+// standing operator finding. (The broken row is the soak's shape: a paid
+// period end moved without a matching accepted agreement.)
+func TestEngineDuePassIsolatesRefusals(t *testing.T) {
+	w := newWorld(t)
+	healthy := enroll(t, w, "stripe", embedded)
+	broken := enroll(t, w, "nmi", embedded)
+	_, err := w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.subscriptions SET current_period_ends_at = current_period_ends_at - interval '1 day' WHERE id = $1`, strings.TrimPrefix(broken.sub.String(), "sub_"))
+	require.NoError(t, err)
+	end := healthy.periodEnd()
+	healthy.toPeriodEnd()
+	w.runRenewals() // waits for the pass to COMPLETE, not retry
+	require.True(t, w.subscription(embedded, healthy.sub).CurrentPeriodEndsAt.After(end), "the healthy member renews")
+	require.Len(t, broken.providerLedger(), 1, "the refused member is not charged")
+	status, body := w.staff(http.MethodGet, "/v1/merchant/findings")
+	require.Equal(t, http.StatusOK, status)
+	require.Contains(t, body, "life.due_pass.refused")
+	require.Contains(t, body, strings.TrimPrefix(broken.sub.String(), "sub_"))
 }

@@ -206,6 +206,10 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 			return 200, s
 		}
 		return 404, stripeErr("resource_missing")
+	case r.Method == http.MethodGet && seg[0] == "prices" && len(seg) == 2 && strings.HasPrefix(seg[1], "price_legacy_"):
+		// A legacy book's monthly 9.99 price, created at Stripe long ago.
+		return 200, obj{"object": "price", "id": seg[1], "product": "prod_legacy", "unit_amount": 999, "currency": "usd", "active": true, "livemode": false,
+			"type": "recurring", "recurring": obj{"interval": "month", "interval_count": 1}, "metadata": map[string]string{}}
 	case r.Method == http.MethodGet && seg[0] == "payment_methods" && len(seg) == 2:
 		if m, ok := f.methods[seg[1]]; ok {
 			return 200, m
@@ -436,4 +440,85 @@ func (f *stripeFake) unexpected() []string {
 	out := append([]string(nil), f.odd...)
 	sort.Strings(out)
 	return out
+}
+
+// legacySubscription seeds a provider-owned Stripe subscription in the
+// pinned API version's shape: the period on the item, the invoice's charge
+// under invoice.payments. It returns the subscription id.
+func (f *stripeFake) legacySubscription(customerRef, methodRef, price string, amount int64, start, end time.Time) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.customers[customerRef]; !ok {
+		f.customers[customerRef] = obj{"object": "customer", "id": customerRef, "metadata": map[string]string{}, "livemode": false, "invoice_settings": obj{"default_payment_method": methodRef}}
+	}
+	f.methods[methodRef] = obj{"object": "payment_method", "id": methodRef, "type": "card", "customer": customerRef, "livemode": false, "card": obj{"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2035}}
+	id := f.id("sub")
+	f.subs[id] = obj{"object": "subscription", "id": id, "customer": customerRef, "status": "active", "cancel_at_period_end": false, "canceled_at": nil, "livemode": false,
+		"default_payment_method": methodRef, "metadata": map[string]string{}, "currency": "usd",
+		"items": obj{"object": "list", "data": []obj{{"id": f.id("si"), "price": obj{"id": price, "unit_amount": amount, "currency": "usd"}, "current_period_start": start.Unix(), "current_period_end": end.Unix()}}}}
+	f.invoiceLocked(id, amount, true)
+	return id
+}
+
+// invoiceLocked cuts the subscription's latest invoice; paid moves money.
+func (f *stripeFake) invoiceLocked(subID string, amount int64, paid bool) obj {
+	s := f.subs[subID]
+	inv := obj{"object": "invoice", "id": f.id("in"), "customer": s["customer"], "currency": "usd", "amount_due": amount, "created": time.Now().Unix(), "billing_reason": "subscription_cycle",
+		"parent": obj{"type": "subscription_details", "subscription_details": obj{"subscription": subID}}}
+	if paid {
+		pi := obj{"object": "payment_intent", "id": f.id("pi"), "amount": amount, "amount_received": amount, "currency": "usd", "customer": s["customer"], "payment_method": s["default_payment_method"], "status": "succeeded", "livemode": false, "metadata": map[string]string{}}
+		ch := obj{"object": "charge", "id": f.id("ch"), "amount": amount, "amount_captured": amount, "currency": "usd", "customer": s["customer"], "payment_method": s["default_payment_method"], "payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "livemode": false}
+		pi["latest_charge"] = ch["id"]
+		f.intents[pi["id"].(string)], f.charges[ch["id"].(string)] = pi, ch
+		f.order = append(f.order, pi["id"].(string))
+		inv["status"], inv["amount_paid"] = "paid", amount
+		inv["payments"] = obj{"object": "list", "data": []obj{{"object": "invoice_payment", "status": "paid", "payment": obj{"type": "payment_intent", "payment_intent": pi["id"], "charge": ch["id"]}}}}
+	} else {
+		inv["status"], inv["amount_paid"] = "open", int64(0)
+		inv["payments"] = obj{"object": "list", "data": []obj{}}
+	}
+	s["latest_invoice"] = inv
+	return inv
+}
+
+// providerRenew is Stripe billing its own subscription for the next period.
+func (f *stripeFake) providerRenew(subID string, paid bool) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.subs[subID]
+	item := s["items"].(obj)["data"].([]obj)[0]
+	start, end := item["current_period_end"].(int64), item["current_period_end"].(int64)+monthHours*3600
+	item["current_period_start"], item["current_period_end"] = start, end
+	amount := item["price"].(obj)["unit_amount"].(int64)
+	if paid {
+		s["status"] = "active"
+	} else {
+		s["status"] = "past_due"
+	}
+	return f.invoiceLocked(subID, amount, paid)
+}
+
+// providerCancel is the subscription ended at Stripe (dashboard or dunning).
+func (f *stripeFake) providerCancel(subID string) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.subs[subID]
+	s["status"], s["canceled_at"] = "canceled", time.Now().Unix()
+	return s
+}
+
+func (f *stripeFake) subscriptionObject(subID string) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	raw, _ := json.Marshal(f.subs[subID])
+	out := obj{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+func (f *stripeFake) latestCharge(subID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inv := f.subs[subID]["latest_invoice"].(obj)
+	return inv["payments"].(obj)["data"].([]obj)[0]["payment"].(obj)["charge"].(string)
 }

@@ -61,8 +61,11 @@ type QueryFilter struct {
 	// OrderID filters by the transaction's order_id — the correlation handle
 	// OpenRails stamps on rebills/sales, used by the intent verifier to answer
 	// "did this charge land?" via reads.
-	OrderID     string
-	PageNumber  int
+	OrderID string
+	// SubscriptionID filters to the sales NMI's recurring engine made for one
+	// schedule, whatever order reference the schedule carries.
+	SubscriptionID string
+	PageNumber     int
 	ResultLimit int
 }
 
@@ -524,6 +527,9 @@ func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) 
 	}
 	if filter.ActionType != "" {
 		values.Set("action_type", filter.ActionType)
+	}
+	if filter.SubscriptionID != "" {
+		values.Set("subscription_id", filter.SubscriptionID)
 	}
 	if filter.OrderID != "" {
 		values.Set("order_id", filter.OrderID)

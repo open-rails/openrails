@@ -79,6 +79,15 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 		if err != nil {
 			return nil, err
 		}
+		if !probe.SuccessFound {
+			bySchedule, err := p.Client.ProbeSalesBySubscriptionID(ctx, subj.RailSubscriptionID, since)
+			if err != nil {
+				return nil, err
+			}
+			if bySchedule.SuccessFound || (!probe.DeclineFound && bySchedule.DeclineFound) {
+				probe = bySchedule
+			}
+		}
 		snap.Transactions = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
 	}
 

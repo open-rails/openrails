@@ -185,7 +185,15 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 	if merr != nil || proc.ID == uuid.Nil {
 		return nil, "", false
 	}
-	factory := &railresolve.NMIFactory{Config: a.svc.rt.Config, Endpoints: railresolve.LoopbackNMIEndpoints(a.testEndpointURL)}
+	// The runtime's one NMI factory carries its transport; a private factory
+	// would reach the real gateway around it.
+	factory := railresolve.NMIFactory{Config: a.svc.rt.Config}
+	if a.svc.rt.NMIClients != nil {
+		factory = *a.svc.rt.NMIClients
+	}
+	if a.testEndpointURL != "" {
+		factory.Endpoints = railresolve.LoopbackNMIEndpoints(a.testEndpointURL)
+	}
 	client, err = factory.ClientFor(mid, merchants.PSPScope{ID: proc.ID, Rail: string(models.RailNMI), AccountID: proc.EffectiveAccountID(), Key: proc.Key}, proc.ToNMIProviderSettings())
 	if err != nil {
 		return nil, "", false
