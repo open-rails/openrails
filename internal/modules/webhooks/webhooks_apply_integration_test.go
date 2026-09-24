@@ -113,8 +113,14 @@ func (f *stripeApplyFixture) subscriptionTruth(status string, periodStart, perio
 		"customer":             f.railCustomerID,
 	}
 	if inv != nil {
+		invStatus, attempts := "paid", 1
+		if !inv.Paid {
+			invStatus = "open" // a failed collection: attempted, still open
+		}
 		m["latest_invoice"] = map[string]any{
 			"id":             inv.ID,
+			"status":         invStatus,
+			"attempt_count":  attempts,
 			"paid":           inv.Paid,
 			"amount_paid":    inv.AmountPaid,
 			"amount_due":     inv.AmountDue,
