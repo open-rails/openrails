@@ -77,6 +77,27 @@ func IsWebhookErrorNonRetryable(err error) bool {
 	return errors.As(err, &nonRetryable)
 }
 
+// WebhookRefusal is a deliberate, permanent refusal of a well-formed event.
+// Ingress acknowledges it (redelivery cannot change the answer) and reports
+// Code, so the refusal is never mistaken for acceptance.
+type WebhookRefusal struct {
+	Code string
+	Err  error
+}
+
+func (e *WebhookRefusal) Error() string { return e.Code + ": " + e.Err.Error() }
+
+func (e *WebhookRefusal) Unwrap() error { return e.Err }
+
+// WebhookRefusalCode returns the refusal code carried by err, or "".
+func WebhookRefusalCode(err error) string {
+	var refusal *WebhookRefusal
+	if errors.As(err, &refusal) {
+		return refusal.Code
+	}
+	return ""
+}
+
 // NewDeduplicationService creates a webhook deduplication service.
 //
 // or#893: database is REQUIRED. Since #678 the dedup TRUTH is the Postgres

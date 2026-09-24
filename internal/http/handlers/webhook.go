@@ -638,6 +638,10 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 	}
 	msg := ccbillWebhookMessage(clientIP, prepared, accountID)
 	if err := r.State.WebhookDispatcher.Process(ctx, msg); err != nil {
+		if code := webhooks.WebhookRefusalCode(err); code != "" {
+			r.SuccessJSON(map[string]string{"status": "refused", "code": code})
+			return false
+		}
 		if webhooks.IsWebhookErrorNonRetryable(err) {
 			return true
 		}

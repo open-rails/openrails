@@ -39,6 +39,7 @@ const (
 	mountPrefix = "/billing"
 	stripeAcct  = "acct_greenfield"
 	nmiAcct     = "greenfield-nmi"
+	ccbillAcct  = "945280-0000"
 	whsecStripe = "whsec_greenfield"
 	whsecNMI    = "nmi_webhook_greenfield"
 	monthHours  = 720
@@ -176,6 +177,8 @@ func (w *world) start() {
 		ProviderWriteMode:   config.ProviderWriteModeFull,
 		AllowCatalogUpdates: true,
 		DB:                  &config.DBConfig{URL: w.dsn, Schema: w.schema},
+		// The test server's loopback peer is the site's reverse proxy.
+		TrustedProxies: []string{"127.0.0.1/32"},
 	}
 	if w.cfg != nil {
 		w.cfg(cfg)
@@ -186,6 +189,7 @@ func (w *world) start() {
 		Merchant: &embed.MerchantDeclaration{Slug: w.slug, Config: embed.MerchantConfig{DisplayName: w.slug, PSPs: map[string]embed.PSPConfig{
 			"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": whsecStripe}}},
 			"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}},
+			"ccbill": {"ccbill": {AccountID: ccbillAcct}},
 		}}},
 		Config:          cfg,
 		PGXPool:         w.pool,

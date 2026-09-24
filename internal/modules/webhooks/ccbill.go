@@ -494,38 +494,69 @@ func (s *CCBillWebhookService) validateWebhookAuth(ctx context.Context) error {
 	return nil
 }
 
-func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Info("Processing CCBill webhook notification")
+// CCBillNewSubscriptionRefused is the refusal code for a NewSaleSuccess that
+// would enroll a new CCBill agreement. OpenRails no longer issues CCBill
+// FlexForms (#1045); only imported CCBill memberships are serviced.
+const CCBillNewSubscriptionRefused = "ccbill_new_subscription_unsupported"
 
+// handleNewSaleSuccess never enrolls. A sale for a membership OpenRails holds
+// is a replay and changes nothing; any other sale is refused with an operator
+// repair alert, because CCBill has taken money OpenRails will not honour.
+func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 	var data CCBillNewSaleSuccessEvent
 	if err := json.Unmarshal(s.Data.EventBody, &data); err != nil {
 		return err
 	}
-
-	process := func(ctx context.Context) error {
-		return wrapCCBillWebhookErrorForRetry(s.handleNewSaleSuccessInternal(ctx, &data))
+	railSubID := strings.TrimSpace(data.SubscriptionID)
+	transactionID := strings.TrimSpace(data.TransactionID)
+	if railSubID != "" {
+		sub, err := s.SubscriptionService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), railSubID)
+		if err == nil {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":      sub.ID,
+				"rail_subscription_id": railSubID,
+				"transaction_id":       transactionID,
+			}).Info("CCBill NewSaleSuccess for a held membership; no-op")
+			return nil
+		}
+		if !db.IsNotFound(err) {
+			return fmt.Errorf("look up CCBill subscription for NewSaleSuccess: %w", err)
+		}
 	}
 
-	if s.DeduplicationService != nil && strings.TrimSpace(data.TransactionID) != "" {
-		return s.DeduplicationService.ProcessWebhook(
-			ctx,
-			data.TransactionID,
-			string(s.Data.EventType),
-			models.RailCCBill.EventSource(),
-			data,
-			process,
-		)
+	refusal := fmt.Errorf("CCBill NewSaleSuccess for unknown subscription %q refused: new CCBill subscriptions are not supported", railSubID)
+	key := transactionID
+	if key == "" {
+		key = railSubID
 	}
-
-	return process(ctx)
+	if key != "" {
+		if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+			Provider:       string(models.RailCCBill),
+			Operation:      "ccbill_new_sale_refused",
+			TransactionID:  transactionID,
+			IdempotencyKey: "ccbill_new_sale_refused:" + key,
+			Err:            refusal,
+			Metadata: map[string]any{
+				"rail_subscription_id": railSubID,
+				"billed_initial_price": strings.TrimSpace(data.BilledInitialPrice),
+				"billed_currency_code": data.BilledCurrencyCode.Trimmed(),
+				"username":             strings.TrimSpace(data.Username),
+				"event_type":           string(s.Data.EventType),
+			},
+		}); err != nil {
+			return fmt.Errorf("record refused CCBill new sale repair alert: %w", err)
+		}
+	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"rail_subscription_id": railSubID,
+		"transaction_id":       transactionID,
+	}).Error("Refused CCBill NewSaleSuccess: OpenRails does not enroll new CCBill subscriptions")
+	return MarkWebhookErrorNonRetryable(&WebhookRefusal{Code: CCBillNewSubscriptionRefused, Err: refusal})
 }
 
 // ccbillEventPurchasedAt parses a CCBill event `timestamp` ("YYYY-MM-DD HH:MM:SS",
 // no tz → UTC) into the provider's transaction time (#651); nil when absent or
-// unparseable so the payment row records now() rather than a guessed time. CCBill
-// webhooks can be delayed/retried, so this is more truthful than processing time.
+// unparseable so the payment row records now() rather than a guessed time.
 func ccbillEventPurchasedAt(ts string) *time.Time {
 	ts = strings.TrimSpace(ts)
 	if ts == "" {
@@ -537,129 +568,6 @@ func ccbillEventPurchasedAt(ts string) *time.Time {
 	}
 	p := parsed.UTC()
 	return &p
-}
-
-func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context, data *CCBillNewSaleSuccessEvent) error {
-	email := data.Email
-	formID := data.FlexID
-	transactionID := strings.TrimSpace(data.TransactionID)
-	if transactionID == "" {
-		return newBillingError(ErrorTypeValidation, "missing required field: transactionId", map[string]interface{}{"field": "transactionId"}, nil)
-	}
-	userID, err := s.resolveUserID(ctx, data.Username)
-	if err != nil {
-		return err
-	}
-	formName := data.FormName
-	ccBillSubID := data.SubscriptionID
-
-	// Get price information
-	priceLookupID := ccbillPriceLookupID(data.SubscriptionTypeID, data.FlexID)
-	price, err := s.PriceService.GetByCCBillPriceID(ctx, data.SubscriptionTypeID, data.FlexID)
-	if err != nil {
-		return fmt.Errorf("failed to find price for CCBill price ID %s: %w", priceLookupID, err)
-	}
-	if err := s.ensureCCBillPriceMatches(price, formID, formName, data.SubscriptionTypeID); err != nil {
-		return err
-	}
-
-	expectedAmountMicros := ccbillInitialChargeAmount(price)
-	billedAmountCents, err := parseCCBillAmountCents(data.BilledInitialPrice, "billedInitialPrice", "billedAmount", expectedAmountMicros == 0)
-	if err != nil {
-		return err
-	}
-	// Validate amount against expected cents from catalog price.
-	if err := validateCCBillBilledAmount(ctx, s, price.Currency, billedAmountCents, expectedAmountMicros, map[string]interface{}{
-		"price_id":                           price.ID.String(),
-		"ccbill_price_id":                    priceLookupID,
-		"recurring_billing_option_id":        data.SubscriptionTypeID,
-		"subscription_expected_first_amount": expectedAmountMicros,
-	}, log.Fields{
-		"transaction_id": transactionID,
-	}); err != nil {
-		return err
-	}
-
-	// Use SubscriptionLifecycleService to create membership
-	var emailPtr *string
-	if strings.TrimSpace(email) != "" {
-		emailCopy := strings.TrimSpace(email)
-		emailPtr = &emailCopy
-	}
-
-	currencyValue, err := requireCCBillCurrency(data.BilledCurrencyCode, "billedCurrencyCode")
-	if err != nil {
-		return err
-	}
-	if err := validateCCBillCurrencyMatches(currencyValue, price.Currency, map[string]interface{}{
-		"price_id":        price.ID.String(),
-		"ccbill_price_id": priceLookupID,
-		"transaction_id":  transactionID,
-	}); err != nil {
-		return err
-	}
-	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate)
-	if err != nil {
-		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", data.NextRenewalDate, err)
-	}
-
-	if s.DB != nil {
-		removed, err := subscriptions.RemoveCancelledSubscriptionsForActivation(ctx, s.DB, userID, price.ProductID, uuid.Nil)
-		if err != nil {
-			return fmt.Errorf("failed to cleanup cancelled subscriptions before activation: %w", err)
-		}
-		if removed > 0 {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"user_id":     userID,
-				"product_id":  price.ProductID,
-				"removed_cnt": removed,
-			}).Info("Removed cancelled subscriptions before activation (CCBill)")
-		}
-	}
-
-	// CreateMembership now creates the Payment record internally
-	subscription, err := s.SubscriptionLifecycleService.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
-		UserID:              userID,
-		PriceID:             price.ID,
-		Rail:                models.RailCCBill,
-		RailSubscriptionID:  &ccBillSubID,
-		UserEmail:           emailPtr,
-		CurrentPeriodEndsAt: paidTermEnd,
-		TransactionID:       transactionID,
-		Amount:              int64(moneyutil.CentsToMicros(billedAmountCents)),
-		AmountProvided:      true,
-		Currency:            currencyValue,
-		PurchasedAt:         ccbillEventPurchasedAt(data.Timestamp),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create membership: %w", err)
-	}
-
-	if s.CheckoutSessionService != nil {
-		session, err := s.findCCBillCheckoutSession(ctx, data.ReservationID, userID, price.ID)
-		if err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"user_id":        userID,
-				"price_id":       price.ID,
-				"reservation_id": data.ReservationID,
-			}).Warn("failed to locate checkout session for CCBill webhook")
-		} else if session != nil {
-			paymentID := uuid.Nil
-			if s.PaymentService != nil && strings.TrimSpace(transactionID) != "" {
-				if payment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailCCBill, transactionID); err == nil {
-					paymentID = payment.ID
-				}
-			}
-			if err := s.CheckoutSessionService.MarkSucceededWithSubscription(ctx, session.ID, paymentID, transactionID, subscription.ID); err != nil {
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"checkout_session_id": session.ID,
-					"transaction_id":      transactionID,
-				}).Warn("failed to update checkout session from CCBill webhook")
-			}
-		}
-	}
-
-	return nil
 }
 
 func (s *CCBillWebhookService) findCCBillCheckoutSession(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error) {
