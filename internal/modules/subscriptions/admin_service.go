@@ -362,10 +362,20 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
-		// Immediate cancel: access ends in the same transaction as the cancel.
+		// Immediate cancel: access ends in the same transaction as the cancel;
+		// otherwise standing access is bounded to the paid period.
+		entSvc := entitlements.NewEntitlementService(txdb, s.Clock())
 		if revokeAccess {
-			if err := entitlements.NewEntitlementService(txdb, s.Clock()).RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 				return fmt.Errorf("revoke access: %w", err)
+			}
+		} else {
+			accessEnd := now
+			if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
+				accessEnd = *subscription.CurrentPeriodEndsAt
+			}
+			if err := entSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
+				return fmt.Errorf("bound subscription access: %w", err)
 			}
 		}
 		if enqueueRemoteIntent != nil && !deleteHeld {

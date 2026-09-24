@@ -184,8 +184,10 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			b.book.PaymentMethods = append(b.book.PaymentMethods, openrails.DeclaredPaymentMethod{Customer: sharedID, Rail: "nmi", RailCustomerRef: shared.vault, RailMethodRef: second,
 				LastFour: mastercard.Last4, CardType: mastercard.Brand, ExpiryDate: "12/35"})
 			yearlyRow := b.add(&bookRow{source: "yearly", tier: yearly, c: shared.c, vault: shared.vault, paid: now.Add(200 * day)})
-			last := now.Add(-day)
-			pastDue := b.add(&bookRow{source: "past_due", tier: monthly, paid: now.Add(-3 * day), declared: true,
+			last := now.Add(-12 * time.Hour)
+			// Mid-dunning inside the grace window: NMI's failed renewal is
+			// mirrored and standing access holds while NMI retries.
+			pastDue := b.add(&bookRow{source: "past_due", tier: monthly, paid: now.Add(-day), declared: true,
 				dunning: &openrails.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
 			w.nmi.editSchedule(pastDue.schedule, func(s *nmiSchedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
 			cancelled := b.add(&bookRow{source: "cancelled", tier: monthly, paid: now.Add(20 * day), declared: true,
@@ -232,7 +234,7 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			}
 			wants := []want{
 				{active, "active", "", true}, {shared, "active", "", true}, {yearlyRow, "active", "", true}, {calendar, "active", "", true}, {gone, "active", "", true},
-				{pastDue, "past_due", "", false}, {cancelled, "cancelled", "user", true}, {expired, "cancelled", "expired", false}, {paused, "cancelled", "user", true},
+				{pastDue, "past_due", "", true}, {cancelled, "cancelled", "user", true}, {expired, "cancelled", "expired", false}, {paused, "cancelled", "user", true},
 			}
 			state := map[string]string{}
 			for _, x := range wants {

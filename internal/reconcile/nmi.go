@@ -461,13 +461,6 @@ func cardLast4(masked string) string {
 
 // nmiFlag reads a v5 boolean NMI serializes as "0"/"1", a number or a bool.
 func nmiFlag(v any) bool {
-	switch x := v.(type) {
-	case bool:
-		return x
-	case float64:
-		return x != 0
-	case string:
-		return strings.TrimSpace(x) == "1" || strings.EqualFold(strings.TrimSpace(x), "true")
-	}
-	return false
+	text := strings.TrimSpace(fmt.Sprint(v))
+	return text == "1" || strings.EqualFold(text, "true")
 }

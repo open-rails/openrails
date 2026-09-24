@@ -137,6 +137,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/manual_rebill.go:Execute":                       "manual_rebill intent handler",
 	"internal/intents/refund.go:Execute":                              "nmi_refund intent handler",
 	"internal/intents/nmi_provider_cutover.go:advance":                "durable cutover step executor",
+	"internal/intents/nmi_engine_takeover.go:advance":                 "durable engine-takeover step executor; the delete is fenced by delete_submitted and verified by tombstone readback",
 	"internal/intents/nmi_provider_cutover_abandon.go:advanceAbandon": "#657 same durable cutover intent; immutable direction, qualification lock and exact paused-target cancellation receipt; Verify never sends",
 	"internal/intents/nmi_delete.go:Execute":                          "nmi_delete_subscription intent handler",
 	"internal/intents/nmi_payment_source_update.go:Execute":           "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",

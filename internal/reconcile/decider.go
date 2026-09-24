@@ -503,7 +503,7 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	//    unpaid period eligible for the failure handling below.
 	if declineTxn == nil && remoteSub != nil && remoteSub.Status == SubscriptionStatusActive {
 		if next := remoteSub.NextBillingAt; next != nil && next.After(now) {
-			if renewTxn == nil && boundaryAdvanced(*next, localStart, localEnd) {
+			if renewTxn == nil && snap.Provider == ProviderNMI && boundaryAdvanced(*next, localStart, localEnd) {
 				// The provider moved past a boundary this snapshot cannot
 				// explain (NMI's bulk transaction report carries no schedule
 				// id). Adopting would skip a period without its charge; a

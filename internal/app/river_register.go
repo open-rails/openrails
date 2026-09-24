@@ -69,6 +69,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		DeferDelete:         r.DeferredDeletes,
 		NotificationService: r.NotificationService,
 		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
+		NMIClients:          r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}

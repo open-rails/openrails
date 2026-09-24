@@ -218,9 +218,9 @@ func TestLegacyNMICoexistsWithEngine(t *testing.T) {
 			w := newWorld(t)
 			w.armDestructive()
 			e := enroll(t, w, "nmi", tp)
+			engineVault := w.nmi.lastSale().Vault
 			l := importLegacyEvery(t, w, tp, 30, e.c)
 			w.converge()
-			engineVault := w.nmi.lastSale().Vault
 			require.NotEqual(t, l.railCust, engineVault)
 			for range 3 {
 				w.advanceTo(e.periodEnd().Add(time.Hour))

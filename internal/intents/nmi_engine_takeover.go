@@ -552,7 +552,7 @@ func (h *NMIEngineTakeover) advance(ctx context.Context, in gen.OpenrailsRailInt
 			detail["customer_vault_id"] = v
 		}
 		if amount, err := nmi.SubscriptionAmountMinor(schedule, p.Agreement.Currency); err != nil || int64(amount) != p.AmountMinor {
-			detail["amount"] = strings.TrimSpace(schedule.Amount)
+			detail["amount"] = formatScheduleAmount(schedule.Amount)
 		}
 		if next := strings.TrimSpace(schedule.NextBillingDate); len(next) < 10 || next[:10] != p.Anchor.Format("2006-01-02") {
 			detail["next_billing_date"] = next
@@ -654,3 +654,6 @@ func TakeoverAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	}
 	return a, nil
 }
+
+// formatScheduleAmount is NMI's decimal amount text as the schedule holds it.
+func formatScheduleAmount(raw string) string { return strings.TrimSpace(raw) }

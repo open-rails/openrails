@@ -4786,6 +4786,7 @@
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "progress": "github.com/open-rails/openrails/internal/shared/progress",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "reconcile": "github.com/open-rails/openrails/internal/reconcile",
       "river": "github.com/riverqueue/river",
       "rivertype": "github.com/riverqueue/river/rivertype",

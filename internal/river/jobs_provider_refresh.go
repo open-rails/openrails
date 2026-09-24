@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -258,6 +259,7 @@ type ProviderRefreshWorker struct {
 	// PullEndpoints overrides provider base URLs on store-armed clients
 	// (fake-provider test seam).
 	PullEndpoints reconcile.ProviderEndpoints
+	NMIClients    *railresolve.NMIFactory
 
 	Window          time.Duration
 	SafetyLag       time.Duration
@@ -300,6 +302,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		Merchants:     w.Merchants,
 		DB:            w.DB,
 		Endpoints:     w.PullEndpoints,
+		NMIClients:    w.NMIClients,
 	}
 
 	err := w.refreshMerchant(ctx, mid, builder, &stats, logger)
