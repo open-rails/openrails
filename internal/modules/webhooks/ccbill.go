@@ -538,8 +538,6 @@ func (s *CCBillWebhookService) handleNewSaleSuccess(ctx context.Context) error {
 			Err:            refusal,
 			Metadata: map[string]any{
 				"rail_subscription_id": railSubID,
-				"billed_initial_price": strings.TrimSpace(data.BilledInitialPrice),
-				"billed_currency_code": data.BilledCurrencyCode.Trimmed(),
 				"username":             strings.TrimSpace(data.Username),
 				"event_type":           string(s.Data.EventType),
 			},

@@ -74,6 +74,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	require.Equal(t, "active", subs.Data[0].Status)
 	require.Equal(t, "ccbill", subs.Data[0].Rail)
 	require.Equal(t, l.railSub, subs.Data[0].RailSubscriptionID)
+	w.converge()
 	require.True(t, l.c.entitled(l.ent))
 	return m
 }
@@ -148,6 +149,17 @@ func (m *ccbillMember) payment(txn string) *openrails.Payment {
 		}
 	}
 	return nil
+}
+
+// requireReversal finds the ledger reversal of the imported sale.
+func (m *ccbillMember) requireReversal(txn, kind string) {
+	m.w.t.Helper()
+	sale, reversal := m.payment(m.saleTxn), m.payment(txn)
+	require.NotNil(m.w.t, sale)
+	require.NotNil(m.w.t, reversal, "the %s is on the ledger: %+v", kind, m.w.payments(embedded, m.c.id))
+	require.EqualValues(m.w.t, -9_990_000, reversal.Amount)
+	require.NotNil(m.w.t, reversal.RefundedPaymentID)
+	require.Equal(m.w.t, sale.ID, *reversal.RefundedPaymentID, "the %s reverses the imported sale", kind)
 }
 
 func TestCCBillRetainedCohortWebhooks(t *testing.T) {
@@ -245,7 +257,9 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		w.advance(21 * day)
 		w.deliverCCBill("Expiration", map[string]string{"subscriptionId": m.railSub})
 		sub := w.subscription(embedded, m.sub)
-		require.Equal(t, "expired", sub.Status)
+		require.Equal(t, "cancelled", sub.Status, "expiry is terminal: never rebilled")
+		require.NotNil(t, sub.CancelType)
+		require.Equal(t, "expired", *sub.CancelType)
 		require.False(t, m.c.entitled(m.ent))
 	})
 
@@ -256,23 +270,21 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		w.deliverCCBill("Refund", m.reversal(refund, "9.99"))
 		require.False(t, m.c.entitled(m.ent), "a refunded member loses access")
 		require.NotEqual(t, "active", w.subscription(embedded, m.sub).Status)
-		sale := m.payment(m.saleTxn)
-		require.NotNil(t, sale)
-		require.EqualValues(t, 9_990_000, sale.AmountRefunded, "the refund is on the imported sale: %+v", sale)
+		m.requireReversal("refund:"+refund, "refund")
 
+		before := len(w.payments(embedded, m.c.id))
 		w.deliverCCBill("Refund", m.reversal(refund, "9.99"))
-		require.EqualValues(t, 9_990_000, m.payment(m.saleTxn).AmountRefunded, "a redelivered refund is recorded once")
+		require.Len(t, w.payments(embedded, m.c.id), before, "a redelivered refund is recorded once")
 	})
 
 	t.Run("chargeback reverses the sale and revokes access", func(t *testing.T) {
 		w := newWorld(t)
 		m := importCCBill(t, w)
-		w.deliverCCBill("Chargeback", m.reversal(ccbillNumericID(), "9.99"))
+		chargeback := ccbillNumericID()
+		w.deliverCCBill("Chargeback", m.reversal(chargeback, "9.99"))
 		require.False(t, m.c.entitled(m.ent))
 		require.NotEqual(t, "active", w.subscription(embedded, m.sub).Status)
-		sale := m.payment(m.saleTxn)
-		require.NotNil(t, sale)
-		require.EqualValues(t, 9_990_000, sale.AmountRefunded, "the chargeback is on the imported sale: %+v", sale)
+		m.requireReversal("chargeback:"+chargeback, "chargeback")
 	})
 
 	t.Run("posts from outside CCBill's ranges are refused", func(t *testing.T) {

@@ -5418,7 +5418,7 @@
     "internal/http/handlers/update_subscription_payment_method.go": "c277211f17f6d322d511d8238a9033a3b9c3a1d2809fc09ab0d51c0831889a80",
     "internal/http/handlers/user_payments.go": "5762b36aea6e9755d7fe9312be34c28cc8ae321636c48ee59f33cadd3b992154",
     "internal/http/handlers/user_subscriptions.go": "f4d7dd869eedcc3e40fc49841e42daf654f2a60fe51874cda2ea12caa8920850",
-    "internal/http/handlers/webhook.go": "ceb51280376bb62c791117e838b4ad6dec3f4220844a583f99ba08f96dc4c5bb",
+    "internal/http/handlers/webhook.go": "9ea95f9f54f9e0e8612eb314cf4b9f3da84d1f7d3e1508e6f40bf7477dada3fb",
     "internal/http/handlers/webhook_basistheory.go": "27daaa6b6486938af447b644163f499d59bc0e6d89da8ffc56c29df88abc5a21",
     "internal/http/handlers/webhook_stripe_thin.go": "096859bc50a8557bf78414a9c2e6251c852e1b52e1511303b04caae3de95e58f",
     "internal/http/inprocess/stream_transport.go": "2c1a977df25c9e055f74984425aab7cabd891bee6a417b4e43b373eada5d44f8",
