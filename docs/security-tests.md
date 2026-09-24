@@ -35,6 +35,11 @@ unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 | Squatting another merchant's provider account id to receive its events (SEC-33) | `TestSecurityProviderAccountClaimsNeedProof` | A merchant-API claim needs a successful credential probe; the operator declares otherwise |
 | NMI account left in test mode under live posture grants access without payment (SEC-33) | `internal/integrations/nmi` `TestLivePostureRefusesTestModeAccount` | Live posture arms NMI only on `test_mode_enabled=false` (read-only query); greenfield cannot run live posture because transport injection is refused under live by design |
 | Renewal grace kept after a period-end cancel (SEC-33) | `TestEngineCancelAndResume/cancel_at_period_end` | Cancel removes the future grace window |
+| Provider refund notice arriving before OpenRails' own refund finalizes records it twice or revokes against `revoke_access=false` (SEC-33) | `TestSecurityRefundNoticeDuringOwnRefundCountsOnce` | Provider refund facts wait for redelivery while a refund reservation is pending; finalize takes over an already-recorded refund |
+| NMI chargeback of a one-time purchase leaves access granted; unmatched chargebacks vanish (SEC-33) | `TestSecurityNMIChargebackRevokesOneTimePurchase` | Chargeback matching covers one-off charges and revokes entitlements and product access; unmatched entries raise a durable repair alert |
+| Late `charge.dispute.created` after a won dispute revokes; a won dispute revives an unrelated cancellation (SEC-33) | `TestSecurityStripeDisputeOrdering` | Won outcome stored durably; reactivation only for the chargeback cancellation this dispute caused |
+| Unsigned CCBill post buys years of access (RenewalSuccess/BillingDateChange date, UserReactivation without payment) (SEC-33) | `TestSecurityCCBillPeriodEndsAreBounded` | Period ends capped at one cycle + 72h past the paid anchor; reactivation never extends the paid end |
+| Solana transfer landing long after its quote settles at a stale price (SEC-33) | `internal/modules/solana` `TestSolanaSettlementTooLate` (no Solana greenfield harness) | 30-minute late window; later landings grant nothing and raise an operator repair alert |
 
 Known open items (not yet covered by a passing control) are listed in the
 tracker's SEC issues with their intended fix.
