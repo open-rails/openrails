@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -259,11 +260,15 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 	return outcome
 }
 
-// pushScheduleAmount sets the existing NMI schedule's amount to the accepted
-// recurring amount (Direct Post recurring=update_subscription; NMI has no
-// working v5 update route) and verifies it by readback. plan_payments is
-// preserved and no frequency or date is sent, so the next billing date is
-// unchanged. A schedule already at the amount is left untouched.
+// pushScheduleAmount moves the existing NMI schedule to the accepted recurring
+// amount (Direct Post recurring=update_subscription; NMI has no working v5
+// update route) and verifies it by readback; the next billing date must not
+// move. A custom schedule takes plan_amount (plan_payments preserved, no
+// frequency or date). NMI ignores plan_amount on a named-plan schedule, so a
+// named plan switches to the target price's linked plan instead. The mode is
+// decided from a fresh read of the schedule on every attempt, so an operation
+// admitted before a plan was linked converges once the link exists. A
+// schedule already at the target is left untouched.
 func (h *NMIUpgradeIntentHandler) pushScheduleAmount(ctx context.Context, client *nmi.NMIClient, p subscriptions.NMIUpgradePayload) error {
 	cents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.RecurringAmount)
 	if err != nil {
@@ -279,29 +284,48 @@ func (h *NMIUpgradeIntentHandler) pushScheduleAmount(ctx context.Context, client
 	if v := remote.CustomerVaultID; v != "" && v != p.Instrument.RailCustomerRef {
 		return fmt.Errorf("schedule %s bills another vault", p.OldProviderSubscriptionID)
 	}
-	if got, err := nmi.SubscriptionAmountMinor(remote, p.Currency); err == nil && got == cents {
-		return nil
-	}
-	payments := 0
-	if remote.Plan != nil && remote.Plan.PlanPayments != "" {
-		if payments, err = strconv.Atoi(remote.Plan.PlanPayments); err != nil || payments < 0 {
-			return fmt.Errorf("schedule %s has unparseable plan_payments", p.OldProviderSubscriptionID)
+	planID := ""
+	if remote.NamedPlan() {
+		if planID, err = h.targetPlan(ctx, client, p); err != nil {
+			return err
 		}
 	}
-	wire, err := nmi.WireAmount(cents, p.Currency)
-	if err != nil {
-		return err
+	atTarget := func(s nmi.V5Subscription) bool {
+		got, err := nmi.SubscriptionAmountMinor(s, p.Currency)
+		return err == nil && got == cents && (planID == "" || (s.Plan != nil && strings.TrimSpace(s.Plan.ID) == planID))
 	}
-	if _, err := client.UpdateRecurringSubscription(ctx, p.OldProviderSubscriptionID, wire, payments); err != nil {
-		return fmt.Errorf("update schedule: %w", err)
+	if atTarget(remote) {
+		return nil
+	}
+	if planID != "" {
+		if err := client.UpdateRecurringSubscriptionPlan(ctx, p.OldProviderSubscriptionID, planID); err != nil {
+			return fmt.Errorf("update schedule plan: %w", err)
+		}
+	} else {
+		payments := 0
+		if remote.Plan != nil && remote.Plan.PlanPayments != "" {
+			if payments, err = strconv.Atoi(remote.Plan.PlanPayments); err != nil || payments < 0 {
+				return fmt.Errorf("schedule %s has unparseable plan_payments", p.OldProviderSubscriptionID)
+			}
+		}
+		wire, err := nmi.WireAmount(cents, p.Currency)
+		if err != nil {
+			return err
+		}
+		if _, err := client.UpdateRecurringSubscription(ctx, p.OldProviderSubscriptionID, wire, payments); err != nil {
+			return fmt.Errorf("update schedule: %w", err)
+		}
 	}
 	after, found, err := client.GetSubscription(ctx, p.OldProviderSubscriptionID)
 	if err != nil || !found {
 		return fmt.Errorf("verify schedule: %v", err)
 	}
-	got, err := nmi.SubscriptionAmountMinor(after, p.Currency)
-	if err != nil || got != cents {
-		return fmt.Errorf("schedule %s reads %s after the update", p.OldProviderSubscriptionID, after.Amount)
+	if !atTarget(after) {
+		plan := ""
+		if after.Plan != nil {
+			plan = after.Plan.ID
+		}
+		return fmt.Errorf("schedule %s reads amount %s on plan %q after the update", p.OldProviderSubscriptionID, after.Amount, plan)
 	}
 	if after.NextBillingDate != remote.NextBillingDate {
 		return fmt.Errorf("schedule %s next billing date moved from %s to %s", p.OldProviderSubscriptionID, remote.NextBillingDate, after.NextBillingDate)
@@ -309,10 +333,33 @@ func (h *NMIUpgradeIntentHandler) pushScheduleAmount(ctx context.Context, client
 	return nil
 }
 
+// targetPlan is the named plan a named-plan schedule switches to: the plan
+// frozen at admission, else (an operation admitted before the price was
+// linked) the target price's current link, verified at NMI.
+func (h *NMIUpgradeIntentHandler) targetPlan(ctx context.Context, client *nmi.NMIClient, p subscriptions.NMIUpgradePayload) (string, error) {
+	price, err := h.Checkout.PriceService.GetByID(ctx, p.PriceID)
+	if err != nil {
+		return "", fmt.Errorf("load target price: %w", err)
+	}
+	link := map[string]string{"plan_id": p.TargetPlanID}
+	if p.TargetPlanID == "" {
+		rt, err := h.Checkout.resolveRailTargetForPSP(ctx, "nmi", p.Instrument.PSPID)
+		if err != nil {
+			return "", err
+		}
+		link = checkoutPSPLinkForTarget(price, rt)
+	}
+	planID, err := linkedTargetPlan(ctx, client, price, link)
+	if err != nil {
+		return "", fmt.Errorf("schedule %s is on a named NMI plan and the target price has no linked NMI plan of the same amount and cycle; link one in the catalog", p.OldProviderSubscriptionID)
+	}
+	return planID, nil
+}
+
 func (h *NMIUpgradeIntentHandler) raiseUpdateStuck(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, cause error) {
 	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": openrails.SubscriptionID(p.OldSubscriptionID).String(),
 		"rail_subscription_id": p.OldProviderSubscriptionID, "action": p.Action, "error": cause.Error()})
-	action := "A tier change could not move the NMI schedule to its new amount; NMI still bills the previous amount. Check the schedule at NMI; the operation keeps retrying."
+	action := "A tier change could not move the NMI schedule to its new amount; NMI still bills the previous amount. If the schedule is on a named NMI plan, link the target price to an NMI plan of the same amount and cycle; the operation keeps retrying and completes once NMI accepts the change."
 	wctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
 	_, _ = h.Checkout.SubscriptionService.Database().Gen(wctx).UpsertReconciliationFinding(wctx, gen.UpsertReconciliationFindingParams{MerchantID: in.MerchantID, FindingType: ProviderUpdateStuckFinding,

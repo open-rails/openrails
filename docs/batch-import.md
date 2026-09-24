@@ -241,8 +241,15 @@ them; NMI keeps billing until you hand a membership over.
    otherwise it runs every four hours, and NMI's own subscription webhooks
    converge the schedule they name at once. Tier changes (same tier group,
    same billing cycle) modify the member's existing NMI schedule in place
-   (Direct Post `update_subscription` sets its amount; its next billing date
-   E is kept; no second schedule is ever created). An upgrade charges now the
+   (Direct Post `update_subscription`; its next billing date E is kept; no
+   second schedule is ever created). A custom-amount schedule takes the new
+   `plan_amount`. NMI ignores `plan_amount` on a schedule attached to a named
+   plan, so such a schedule switches `plan_id` to the target price's linked NMI
+   plan, which must exist on the account with the target's exact amount and
+   cycle; otherwise the change is refused before any charge with
+   `409 tier_change_requires_linked_plan`. Link each tier price of a named-plan
+   book to its NMI plan (price `psp_links` `plan_id`) before offering tier
+   changes. An upgrade charges now the
    new price's share of the time left to E less the old price's unused credit,
    as a customer-initiated sale on the vault card, then updates the schedule,
    then switches access; if NMI refuses the update the operation retries and
@@ -251,6 +258,10 @@ them; NMI keeps billing until you hand a membership over.
    now (NMI applies it from the next charge) and the mirrored renewal at E
    opens the lower tier. Another billing cycle answers
    `409 tier_change_cadence_unsupported`; drift checks expect these amounts.
+   A stuck update (`life.tier_change.provider_update_stuck`, e.g. an upgrade
+   admitted by v0.178.0 on a named-plan schedule) re-reads the schedule on
+   every retry: link the target price to an NMI plan of its amount and cycle
+   and the operation switches the plan and completes without charging again.
 5. **(Optional) staged takeover to OpenRails billing.** `TakeOverBilling`
    (one membership) or `TakeOverBillingBatch` (a capped batch) deletes the NMI
    schedule at least 24 hours before the paid period ends, verifies NMI's

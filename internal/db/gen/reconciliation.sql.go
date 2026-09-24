@@ -1387,6 +1387,15 @@ WHERE e.merchant_id = $1::uuid
         AND live.start_at <= $4::timestamptz
         AND (live.end_at IS NULL OR live.end_at > $4::timestamptz)
   )
+  -- A tier change supersedes the replaced tier's window while the customer
+  -- holds the new tier's access: that is not access ending.
+  AND NOT (e.revoke_reason = 'superseded' AND EXISTS (
+      SELECT 1 FROM openrails.entitlements nw
+      WHERE nw.merchant_id = e.merchant_id
+        AND nw.customer_id = e.customer_id
+        AND nw.deleted_at IS NULL AND nw.revoked_at IS NULL
+        AND (nw.end_at IS NULL OR nw.end_at > $4::timestamptz)
+  ))
 ORDER BY e.customer_id,
          LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC
 `

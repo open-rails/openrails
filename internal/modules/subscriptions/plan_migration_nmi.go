@@ -104,6 +104,11 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if !found || remote.ID != railID {
 		return fmt.Errorf("nmi push: exact subscription %s not found at nmi", railID)
 	}
+	// NMI ignores plan_amount on a schedule attached to a named plan; moving
+	// one requires a plan swap, which a price migration does not name.
+	if remote.NamedPlan() {
+		return fmt.Errorf("nmi push: %s is on named plan %q; NMI changes its amount only by switching plans — migrate it by tier change to a linked plan", railID, remote.Plan.ID)
+	}
 	// update_subscription always writes the total installment count. Freeze an
 	// explicit provider value; missing facts cannot silently become bill forever.
 	if remote.Plan == nil || strings.TrimSpace(remote.Plan.PlanPayments) == "" {

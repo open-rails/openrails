@@ -192,7 +192,9 @@ target has no cycle answers `422 tier_change_cycle_unknown`, one without a valid
 current period `422 tier_change_period_unknown`, and one whose credit exceeds the
 target price `409 tier_change_credit_exceeds_price`. An NMI-billed (legacy)
 subscription changes tier in place: its NMI schedule keeps its next billing
-date E and only its amount changes; an upgrade charges the new price's share
+date E and only its amount changes (a named-plan schedule switches to the
+target price's linked NMI plan; without one the change answers
+`409 tier_change_requires_linked_plan` before any charge); an upgrade charges the new price's share
 of the time to E less the old price's unused credit (preview equals charge),
 a downgrade charges nothing and the renewal at E opens the new tier; a target
 of another billing cycle answers `409 tier_change_cadence_unsupported`;

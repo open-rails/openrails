@@ -781,7 +781,7 @@ func stripeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, 
 		}
 		if p.Action == "downgrade" {
 			resp.DelayedStart = &end
-			resp.Message = fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", p.ProductName, end.Format("January 2, 2006"))
+			resp.Message = fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", p.ProductName, end.UTC().Format("January 2, 2006"))
 		} else {
 			resp.Message = "Plan updated"
 		}

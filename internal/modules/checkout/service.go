@@ -1274,7 +1274,16 @@ func shortHash(s string) string {
 
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to rail-specific implementations.
+// TierChange runs a tier change; every instant in the answer is UTC.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+	resp, err := s.tierChange(ctx, req, user)
+	if resp != nil {
+		resp.DelayedStart, resp.NextChargeDate = utcPtr(resp.DelayedStart), utcPtr(resp.NextChargeDate)
+	}
+	return resp, err
+}
+
+func (s *CheckoutService) tierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
 	if response, found, err := s.ReplayTierChange(ctx, req, user); found || err != nil {
 		return response, err
 	}
@@ -1399,6 +1408,22 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 // Stripe finalizes the exact proration per-second on its side. NMI/Solana charge
 // the local math exactly, so it is not an estimate there.
 func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
+	resp, err := s.tierChangePreview(ctx, req, user)
+	if resp != nil {
+		resp.NextChargeDate = utcPtr(resp.NextChargeDate)
+	}
+	return resp, err
+}
+
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
+}
+
+func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
 	// #774: price_id accepts a price_key too.
 	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {
@@ -1466,7 +1491,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 		return s.previewEngineTierChange(ctx, resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
 	}
 	if rails.IsNMI(existingSub.Rail) {
-		return s.previewProviderNMITierChange(resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
+		return s.previewProviderNMITierChange(ctx, resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
 	}
 	if newProduct.TierRank < currentProduct.TierRank {
 		if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "downgrade"); err != nil {
@@ -1508,7 +1533,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.",
 		formatMinorAmount(firstCharge, newPrice.Currency),
 		formatMinorAmount(newPrice.Amount, newPrice.Currency),
-		nextDate.Format("January 2, 2006"))
+		nextDate.UTC().Format("January 2, 2006"))
 	return resp, nil
 }
 
@@ -1574,7 +1599,9 @@ func formatMinorAmount(micros int64, currency string) string {
 	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
 		symbol = strings.ToUpper(strings.TrimSpace(currency)) + " "
 	}
-	amount := moneyutil.FormatMicrosDecimal(moneyutil.Micros(micros))
+	// The currency's own scale, trimmed to its minor unit: "$3.98", not
+	// "$3.980000".
+	amount, _, _ := strings.Cut(moneyutil.FormatAmount(micros, currency), " ")
 	if strings.HasPrefix(amount, "-") {
 		return "-" + symbol + strings.TrimPrefix(amount, "-")
 	}

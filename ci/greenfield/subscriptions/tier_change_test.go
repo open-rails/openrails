@@ -111,6 +111,8 @@ func TestEngineTierUpgrade(t *testing.T) {
 			require.True(t, w.clock.Now().Add(time.Duration(row.newCycle)*h).Equal(*next.CurrentPeriodEndsAt), "%s: a fresh period of the new cadence", row.name)
 			require.True(t, c.entitled(to.ent))
 			require.False(t, c.entitled(from.ent))
+			w.converge()
+			require.Zero(t, w.accessEndedNotices(c.id), "%s: moving up is not access ending", row.name)
 
 			again, err := w.client[other(tp)].ChangeTier(t.Context(), sub, key, req)
 			require.NoError(t, err)

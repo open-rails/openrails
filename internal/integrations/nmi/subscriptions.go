@@ -229,6 +229,43 @@ func (c *NMIClient) UpdateRecurringSubscription(ctx context.Context, subscriptio
 	return response, nil
 }
 
+// UpdateRecurringSubscriptionPlan moves a schedule onto another named plan
+// (Direct Post recurring=update_subscription with plan_id). NMI ignores
+// plan_amount on a schedule attached to a named plan; switching plans is the
+// only in-place change it applies there, and it keeps the next billing date.
+func (c *NMIClient) UpdateRecurringSubscriptionPlan(ctx context.Context, subscriptionID, planID string) error {
+	if err := c.checkConfiguration(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(subscriptionID) == "" || strings.TrimSpace(planID) == "" {
+		return errors.New("missing required fields: subscriptionID, planID")
+	}
+	values := url.Values{
+		"recurring":       {"update_subscription"},
+		"security_key":    {c.SecurityKey},
+		"subscription_id": {subscriptionID},
+		"plan_id":         {planID},
+	}
+	response, err := c.sendDirectRequest(ctx, values)
+	if err != nil {
+		return err
+	}
+	output, err := parseDirectResponse(response)
+	if err != nil {
+		return err
+	}
+	if !isDirectResponseApproved(output) {
+		return fmt.Errorf("failed to update subscription plan: %s", responseText(output, response))
+	}
+	return nil
+}
+
+// NamedPlan reports whether the schedule is attached to a named NMI plan (a
+// custom-amount schedule carries a plan object with an empty plan_name).
+func (s V5Subscription) NamedPlan() bool {
+	return s.Plan != nil && strings.TrimSpace(s.Plan.PlanName) != "" && strings.TrimSpace(s.Plan.ID) != ""
+}
+
 // UpdateSubscriptionPaymentSource stays on classic Direct Post DELIBERATELY
 // (#663): the v5 subscription-update route does not exist on the live gateway
 // (see UpdateRecurringSubscription).
