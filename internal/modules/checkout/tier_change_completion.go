@@ -131,10 +131,6 @@ func validateNMITierCompletion(in gen.OpenrailsRailIntent, expected []byte, clas
 	if err != nil {
 		return err
 	}
-	enrollment, enrolled, err := intents.LoadNMIEnrollmentReceipt(in)
-	if err != nil {
-		return err
-	}
 	var actual, want nmiUpgradeProgress
 	if len(in.ResultEvidence) > 0 {
 		if err := json.Unmarshal(in.ResultEvidence, &actual); err != nil {
@@ -147,32 +143,20 @@ func validateNMITierCompletion(in gen.OpenrailsRailIntent, expected []byte, clas
 	if !reflect.DeepEqual(actual, want) {
 		return errors.New("tier receipt progress changed before completion")
 	}
-	if enrolled && (actual.Successor == nil || actual.Successor.Enrollment == nil || actual.Successor.Enrollment.SubscriptionID != enrollment.SubscriptionID() || actual.Successor.Refusal != "") {
-		return errors.New("retained enrollment contradicts completion progress")
-	}
 	if class == intents.OutcomeSucceeded {
-		if !enrolled {
-			return errors.New("upgrade has no qualified successor enrollment")
-		}
-		if actual.Successor == nil || actual.Successor.Enrollment == nil || actual.Successor.Enrollment.SubscriptionID == "" || actual.Successor.Refusal != "" {
-			return errors.New("upgrade has no accepted successor result")
+		if actual.Update == nil || !actual.Update.Done {
+			return errors.New("tier change has no confirmed schedule update")
 		}
 		if p.ProrationAmount > 0 && (!paid || actual.Proration == nil || actual.Proration.Refusal != "") {
 			return errors.New("upgrade has no qualified payment result")
 		}
 		return nil
 	}
-	if paid {
-		return errors.New("paid upgrade cannot become a refusal")
+	if paid || (actual.Update != nil && actual.Update.Done) {
+		return errors.New("a paid or applied tier change cannot become a refusal")
 	}
-	if actual.Proration != nil && !enrolled {
-		return errors.New("proration refusal has no qualified predecessor enrollment")
-	}
-	if (actual.Successor != nil && actual.Successor.Refusal != "") || (actual.Proration != nil && actual.Proration.Refusal != "") {
-		return nil
-	}
-	if actual.Successor != nil || actual.Proration != nil {
-		return errors.New("submitted upgrade has no definitive refusal")
+	if actual.Proration != nil && actual.Proration.Refusal == "" {
+		return errors.New("submitted proration has no definitive refusal")
 	}
 	return nil
 }

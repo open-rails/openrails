@@ -78,6 +78,8 @@ type nmiFake struct {
 
 	// refusedSaves counts vault creations refused for a card declined "vault".
 	refusedSaves int
+	// failUpdates makes the next n update_subscription requests fail.
+	failUpdates int
 }
 
 func newNMIFake() *nmiFake {
@@ -735,10 +737,17 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // updateSubscription is Direct Post recurring=update_subscription: a new
 // vault (payment source) or a new schedule amount.
+//
+// NMI applies the change to future recurring charges only: the next billing
+// date never moves.
 func (f *nmiFake) updateSubscription(form url.Values) string {
 	s := f.schedules[form.Get("subscription_id")]
 	if s == nil || s.Deleted {
 		return "response=3&responsetext=Invalid+subscription&response_code=300"
+	}
+	if f.failUpdates > 0 {
+		f.failUpdates--
+		return "response=3&responsetext=Subscription+update+unavailable&response_code=300"
 	}
 	if vault := form.Get("customer_vault_id"); vault != "" {
 		if f.vaults[vault] == nil {
@@ -748,6 +757,12 @@ func (f *nmiFake) updateSubscription(form url.Values) string {
 	}
 	if amount := form.Get("plan_amount"); amount != "" {
 		s.Amount = amount
+	}
+	if days := form.Get("day_frequency"); days != "" {
+		s.Days, s.Months = days, ""
+	}
+	if months := form.Get("month_frequency"); months != "" {
+		s.Months, s.Days = months, ""
 	}
 	return fmt.Sprintf("response=1&responsetext=Subscription+updated&subscription_id=%s&response_code=100", s.ID)
 }
@@ -877,4 +892,18 @@ func (f *nmiFake) validationOf(vault string) *nmiValidation {
 		}
 	}
 	return nil
+}
+
+// failScheduleUpdates makes the next n update_subscription requests fail.
+func (f *nmiFake) failScheduleUpdates(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failUpdates = n
+}
+
+// scheduleUpdates is the journal of update_subscription requests for a schedule.
+func (f *nmiFake) scheduleUpdates(id string) []providerCall {
+	return f.callsTo(http.MethodPost, "transact.php", func(v url.Values) bool {
+		return v.Get("recurring") == "update_subscription" && v.Get("subscription_id") == id
+	})
 }

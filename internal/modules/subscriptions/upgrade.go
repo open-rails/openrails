@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -131,4 +132,68 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 		return err
 	}
 	return s.newLifecycleEntitlementService(txDB).RevokeSourcesForSubscriptionAsOf(ctx, old.CustomerID.String(), old.ID, at, models.EntitlementRevokeSuperseded, models.EntitlementSourceSubscription, models.EntitlementSourceGrace)
+}
+
+// InPlaceTierChange is an accepted tier change of a provider-billed
+// subscription whose provider schedule was already moved to the new amount.
+// The subscription row, its rail reference and its period end are kept.
+type InPlaceTierChange struct {
+	SubscriptionID     uuid.UUID
+	FromPriceID        uuid.UUID
+	PriceID            uuid.UUID
+	ProductID          uuid.UUID
+	RailSubscriptionID string
+	PeriodEnd          time.Time
+	At                 time.Time
+	Entitlements       map[string]*int
+	Payment            *models.Payment
+	Downgrade          bool
+}
+
+// ChangeTierInPlaceTx commits an in-place tier change in the caller's
+// transaction. An upgrade switches price, product and access at At and records
+// its proration payment; a downgrade schedules the price for the renewal at
+// PeriodEnd, when the mirrored renewal applies it.
+func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, txDB *db.DB, c InPlaceTierChange) error {
+	repo := NewSubscriptionRepo(txDB)
+	sub, err := repo.GetByIDForUpdate(ctx, c.SubscriptionID)
+	if err != nil {
+		return err
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine || sub.RailSubscriptionID != c.RailSubscriptionID || sub.PriceID != c.FromPriceID ||
+		sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(c.PeriodEnd) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) {
+		return fmt.Errorf("subscription changed since the tier change was accepted; the provider schedule already bills the new amount")
+	}
+	if c.Downgrade {
+		id := c.PriceID
+		sub.ScheduledPriceID = &id
+		return repo.UpdateAt(ctx, sub, c.At)
+	}
+	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = c.PriceID, c.ProductID, nil
+	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(c.Entitlements)
+	if err := repo.UpdateAt(ctx, sub, c.At); err != nil {
+		return err
+	}
+	if err := s.switchTierAccess(ctx, txDB, sub, c.At, c.PeriodEnd); err != nil {
+		return err
+	}
+	if c.Payment != nil {
+		return payments.NewPaymentService(txDB, s.Clock()).Create(ctx, c.Payment)
+	}
+	return nil
+}
+
+// switchTierAccess ends the subscription's access sources at `at` and opens
+// the current snapshot's features for [at, end).
+func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txDB *db.DB, sub *models.Subscription, at, end time.Time) error {
+	ent := s.newLifecycleEntitlementService(txDB)
+	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, at, models.EntitlementRevokeSuperseded, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+		return err
+	}
+	for name := range sub.EntitlementsSpecSnapshot {
+		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &at, EndAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -239,8 +239,18 @@ them; NMI keeps billing until you hand a membership over.
    disarmed). `Client.RefreshProviders` (`POST /v1/merchant/provider-refresh`)
    runs the merchant's provider refresh now, from embedded or remote hosts;
    otherwise it runs every four hours, and NMI's own subscription webhooks
-   converge the schedule they name at once. Tier changes on an NMI-owned membership are refused with
-   `tier_change_requires_engine_billing`: take the membership over first.
+   converge the schedule they name at once. Tier changes (same tier group,
+   same billing cycle) modify the member's existing NMI schedule in place
+   (Direct Post `update_subscription` sets its amount; its next billing date
+   E is kept; no second schedule is ever created). An upgrade charges now the
+   new price's share of the time left to E less the old price's unused credit,
+   as a customer-initiated sale on the vault card, then updates the schedule,
+   then switches access; if NMI refuses the update the operation retries and
+   raises `life.tier_change.provider_update_stuck` until it lands (never a
+   second charge). A downgrade charges nothing, updates the schedule amount
+   now (NMI applies it from the next charge) and the mirrored renewal at E
+   opens the lower tier. Another billing cycle answers
+   `409 tier_change_cadence_unsupported`; drift checks expect these amounts.
 5. **(Optional) staged takeover to OpenRails billing.** `TakeOverBilling`
    (one membership) or `TakeOverBillingBatch` (a capped batch) deletes the NMI
    schedule at least 24 hours before the paid period ends, verifies NMI's

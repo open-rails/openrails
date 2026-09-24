@@ -134,19 +134,20 @@ var nameAmbiguousWrites = map[string]string{
 // permitted to reach a provider write directly. Anything else fails.
 var allowedWriteCallers = map[string]string{
 	// --- the sanctioned executors: intent handlers -----------------------
-	"internal/modules/checkout/nmi_sale_intent.go:Execute":            "nmi_sale intent handler",
-	"internal/modules/checkout/initial_membership_intent.go:Execute":  "initial_membership intent handler",
-	"internal/modules/checkout/nmi_upgrade_intent.go:advance":         "durable per-step upgrade handler",
-	"internal/intents/manual_rebill.go:Execute":                       "manual_rebill intent handler",
-	"internal/intents/refund.go:Execute":                              "nmi_refund intent handler",
-	"internal/intents/nmi_provider_cutover.go:advance":                "durable cutover step executor",
-	"internal/intents/nmi_engine_takeover.go:advance":                 "durable engine-takeover step executor; the delete is fenced by delete_submitted and verified by tombstone readback",
-	"internal/intents/nmi_provider_cutover_abandon.go:advanceAbandon": "#657 same durable cutover intent; immutable direction, qualification lock and exact paused-target cancellation receipt; Verify never sends",
-	"internal/intents/nmi_delete.go:Execute":                          "nmi_delete_subscription intent handler",
-	"internal/intents/nmi_payment_source_update.go:Execute":           "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
-	"internal/intents/nmi_payment_method_delete.go:Execute":           "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
-	"internal/intents/nmi_payment_method_update.go:advance":           "nmi_payment_method_update intent handler — the only stored-card replacement writer",
-	"internal/intents/manual_rebill_preparation.go:prepareProvider":   "manual_rebill intent pre-charge step; immutable provider preconditions and set/readback retry are proven by TestManualRebillPreparesAcceptedPriceOnceBeforeCharging",
+	"internal/modules/checkout/nmi_sale_intent.go:Execute":               "nmi_sale intent handler",
+	"internal/modules/checkout/initial_membership_intent.go:Execute":     "initial_membership intent handler",
+	"internal/modules/checkout/nmi_upgrade_intent.go:advance":            "durable per-step tier change handler",
+	"internal/modules/checkout/nmi_upgrade_intent.go:pushScheduleAmount": "tier change step: sets the existing schedule amount (set-to-value, readback verified); never deletes",
+	"internal/intents/manual_rebill.go:Execute":                          "manual_rebill intent handler",
+	"internal/intents/refund.go:Execute":                                 "nmi_refund intent handler",
+	"internal/intents/nmi_provider_cutover.go:advance":                   "durable cutover step executor",
+	"internal/intents/nmi_engine_takeover.go:advance":                    "durable engine-takeover step executor; the delete is fenced by delete_submitted and verified by tombstone readback",
+	"internal/intents/nmi_provider_cutover_abandon.go:advanceAbandon":    "#657 same durable cutover intent; immutable direction, qualification lock and exact paused-target cancellation receipt; Verify never sends",
+	"internal/intents/nmi_delete.go:Execute":                             "nmi_delete_subscription intent handler",
+	"internal/intents/nmi_payment_source_update.go:Execute":              "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
+	"internal/intents/nmi_payment_method_delete.go:Execute":              "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
+	"internal/intents/nmi_payment_method_update.go:advance":              "nmi_payment_method_update intent handler — the only stored-card replacement writer",
+	"internal/intents/manual_rebill_preparation.go:prepareProvider":      "manual_rebill intent pre-charge step; immutable provider preconditions and set/readback retry are proven by TestManualRebillPreparesAcceptedPriceOnceBeforeCharging",
 
 	// --- reactive user/admin cancels ------------------------------------
 	"internal/modules/subscriptions/admin_service.go:cancelWithNMI": "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",

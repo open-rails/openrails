@@ -190,9 +190,13 @@ share of its actual current period, at sub-second precision, credited against th
 new price; cadences may differ — see `docs/merchant-guide.md`); an upgrade whose
 target has no cycle answers `422 tier_change_cycle_unknown`, one without a valid
 current period `422 tier_change_period_unknown`, and one whose credit exceeds the
-target price `409 tier_change_credit_exceeds_price`; an NMI-billed (legacy)
-subscription answers `409 tier_change_requires_engine_billing` (take it over to
-OpenRails billing first); downgrades succeed with
+target price `409 tier_change_credit_exceeds_price`. An NMI-billed (legacy)
+subscription changes tier in place: its NMI schedule keeps its next billing
+date E and only its amount changes; an upgrade charges the new price's share
+of the time to E less the old price's unused credit (preview equals charge),
+a downgrade charges nothing and the renewal at E opens the new tier; a target
+of another billing cycle answers `409 tier_change_cadence_unsupported`;
+downgrades succeed with
 a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
 redirect `url`, downgrades are `blocked`; Solana tier changes go through the
 on-chain prepare/confirm routes above. **A tier change requires an

@@ -60,8 +60,7 @@ func decodeEnrollmentTerms(in gen.OpenrailsRailIntent) (enrollmentTerms, error) 
 
 		return enrollmentTerms{Instrument: p.Instrument, PlanID: p.NativeSchedule.PlanID, Currency: p.Terms.Currency, StartDate: p.NativeSchedule.StartDate, RecurringAmount: p.Terms.RecurringAmount, PeriodStart: p.Terms.PeriodStart, PeriodEnd: p.Terms.PeriodStart.Add(time.Duration(p.NativeSchedule.DayFrequency) * 24 * time.Hour), PlanPayments: &p.NativeSchedule.PlanPayments}, nil
 	}
-	p, err := subscriptions.DecodeNMIUpgradePayload(in)
-	return enrollmentTerms{Instrument: p.Instrument, OldProviderSubscriptionID: p.OldProviderSubscriptionID, PlanID: p.PlanID, Currency: p.Currency, StartDate: p.StartDate, RecurringAmount: p.RecurringAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd}, err
+	return enrollmentTerms{}, errors.New("operation kind has no enrollment contract")
 }
 
 func (r NMIEnrollmentReceipt) SubscriptionID() string { return r.data.Facts.Subscription.ID }

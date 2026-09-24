@@ -26,7 +26,7 @@ func TestLegacyNMIDrift(t *testing.T) {
 	writes := len(w.nmiWrites())
 
 	w.nmi.editSchedule(amount.railSub, func(s *nmiSchedule) { s.Amount = "14.99" })
-	w.nmi.editSchedule(plan.railSub, func(s *nmiSchedule) { s.Plan = other })
+	w.nmi.editSchedule(plan.railSub, func(s *nmiSchedule) { s.Plan, s.Amount = other, "14.99" })
 	w.nmi.editSchedule(paused.railSub, func(s *nmiSchedule) { s.Paused = true })
 	w.nmi.removeVault(vaultGone.railCust)
 	w.nmi.providerCancel(deleted.railSub)

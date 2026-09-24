@@ -58,6 +58,10 @@ type LocalSubscription struct {
 	LastRetryAt           *time.Time
 	RetryAttempts         int
 	NextRetryAt           *time.Time
+	// ScheduledPriceID is a price change the provider already bills from the
+	// next renewal; TierChangePending an unresolved in-place tier change.
+	ScheduledPriceID  *uuid.UUID
+	TierChangePending bool
 	// EntitlementNames are the keys of entitlements_spec_snapshot — the
 	// entitlements this subscription is supposed to grant.
 	EntitlementNames []string
@@ -182,6 +186,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			DeletionScheduledAt:   row.DeletionScheduledAt,
 			LastRetryAt:           row.LastRetryAt,
 			NextRetryAt:           row.NextRetryAt,
+			ScheduledPriceID:      row.ScheduledPriceID,
+			TierChangePending:     row.TierChangePending,
 		}
 		if row.UserEmail != nil {
 			s.UserEmail = *row.UserEmail

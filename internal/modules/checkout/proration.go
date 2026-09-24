@@ -91,6 +91,44 @@ func QuoteModelBUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuote, err
 // prorateCredit is ceil(amount × remaining / period) in rail minor units,
 // widened back to internal units and capped at amount.
 func prorateCredit(amount PriceAmount, remaining, period time.Duration) (int64, error) {
+	return prorate(amount, remaining, period, true)
+}
+
+// QuoteKeepBoundaryUpgrade prices an upgrade that keeps the current period's
+// end (a provider-billed schedule whose next billing date does not move):
+// the new price's share of the remaining time, rounded down, less the old
+// price's unused credit, rounded up, never below zero. Both prices must share
+// the period's cadence. The new price is billed in full from PeriodEnd.
+func QuoteKeepBoundaryUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuote, error) {
+	if err := RequireSameCurrency(u.Old, u.New); err != nil {
+		return ModelBUpgradeQuote{}, err
+	}
+	if u.PeriodStart == nil || u.PeriodEnd == nil || u.PeriodStart.IsZero() || !u.PeriodEnd.After(*u.PeriodStart) {
+		return ModelBUpgradeQuote{}, ErrTierChangePeriodUnknown
+	}
+	if u.Old.Micros < 0 || u.New.Micros < 0 {
+		return ModelBUpgradeQuote{}, errors.New("prices must be nonnegative")
+	}
+	from := now
+	if from.Before(*u.PeriodStart) {
+		from = *u.PeriodStart
+	}
+	remaining := max(u.PeriodEnd.Sub(from), 0)
+	period := u.PeriodEnd.Sub(*u.PeriodStart)
+	credit, err := prorate(u.Old, remaining, period, true)
+	if err != nil {
+		return ModelBUpgradeQuote{}, err
+	}
+	share, err := prorate(u.New, remaining, period, false)
+	if err != nil {
+		return ModelBUpgradeQuote{}, err
+	}
+	return ModelBUpgradeQuote{Credit: credit, ChargeNow: max(share-credit, 0), PeriodStart: now, PeriodEnd: *u.PeriodEnd}, nil
+}
+
+// prorate is amount × remaining / period in rail minor units, rounded up
+// (ceil) or down, widened back to internal units and capped at amount.
+func prorate(amount PriceAmount, remaining, period time.Duration, ceil bool) (int64, error) {
 	cur, ok := moneyutil.LookupCurrency(amount.Currency)
 	if !ok {
 		return 0, fmt.Errorf("money: unknown currency %q", amount.Currency)
@@ -104,7 +142,7 @@ func prorateCredit(amount PriceAmount, remaining, period time.Duration) (int64, 
 		num.Mul(num, scale)
 	}
 	minor, rem := new(big.Int).QuoRem(num, den, new(big.Int))
-	if rem.Sign() > 0 {
+	if ceil && rem.Sign() > 0 {
 		minor.Add(minor, big.NewInt(1))
 	}
 	if !minor.IsInt64() {
