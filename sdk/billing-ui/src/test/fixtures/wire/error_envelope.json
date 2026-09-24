@@ -1,0 +1,14 @@
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "idempotency_key_reused",
+    "message": "retry changed the committed amount",
+    "request_id": "req_fixture",
+    "param": "amount",
+    "metadata": {
+      "attempt": 2,
+      "committed_amount": "9223372036854775807",
+      "detail": null
+    }
+  }
+}

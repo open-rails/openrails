@@ -1,0 +1,188 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@source "./";
+
+/* @openrails/billing-ui — scoped token set (shadcn base-vega, zinc).
+   The build scopes every rule under `.orck` (tooling/checkout-css), so
+   utilities resolve against these tokens, not the host page's.
+   `data-orck-theme` picks the palette; `auto` follows the OS; `inherit`
+   defines no palette, so the host's shadcn tokens and `.dark` class apply.
+   Integrator overrides land as inline custom properties (appearance.ts) and
+   win. */
+
+@custom-variant dark {
+  &:where([data-orck-theme="dark"], [data-orck-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where([data-orck-theme="auto"], [data-orck-theme="auto"] *) {
+      @slot;
+    }
+  }
+  &:where(
+    .dark [data-orck-theme="inherit"],
+    .dark [data-orck-theme="inherit"] *,
+    .dark[data-orck-theme="inherit"],
+    .dark[data-orck-theme="inherit"] *
+  ) {
+    @slot;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+.orck:not([data-orck-theme="inherit"]) {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --orck-faint: oklch(0.705 0.015 286.067);
+  --orck-hairline: oklch(0.141 0.005 285.823 / 6%);
+  --radius: 0.625rem;
+  --orck-font:
+    "Instrument Sans Variable", "Instrument Sans", -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  font-family: var(--orck-font);
+}
+
+.orck {
+  --orck-success: oklch(0.6 0.13 163);
+  --orck-warning: oklch(0.6 0.15 55);
+
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  container-type: inline-size;
+  container-name: orck;
+}
+
+/* Host palette: derive the checkout-only tokens from the host's. */
+.orck[data-orck-theme="inherit"] {
+  --orck-faint: var(--muted-foreground);
+  --orck-hairline: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --orck-success: var(--success, oklch(0.6 0.13 163));
+  --orck-warning: var(--warning, oklch(0.6 0.15 55));
+  font-family: inherit;
+}
+
+.orck[data-orck-theme="inherit"]:where(.dark *, .dark) {
+  --orck-success: var(--success, oklch(0.77 0.15 163));
+  --orck-warning: var(--warning, oklch(0.8 0.15 75));
+}
+
+.orck[data-orck-theme="dark"] {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --orck-faint: oklch(0.552 0.016 285.938);
+  --orck-hairline: oklch(1 0 0 / 6%);
+  --orck-success: oklch(0.77 0.15 163);
+  --orck-warning: oklch(0.8 0.15 75);
+}
+
+@media (prefers-color-scheme: dark) {
+  .orck[data-orck-theme="auto"] {
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.92 0.004 286.32);
+    --primary-foreground: oklch(0.21 0.006 285.885);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
+    --orck-faint: oklch(0.552 0.016 285.938);
+    --orck-hairline: oklch(1 0 0 / 6%);
+    --orck-success: oklch(0.77 0.15 163);
+    --orck-warning: oklch(0.8 0.15 75);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /* No preflight (host page stays untouched), so reset the UA button face. */
+  button {
+    background-color: transparent;
+    color: inherit;
+    font: inherit;
+  }
+}
+
+/* Collect.js mounts an iframe into the field container; make it fill. */
+.orck-collect-field iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* The hosted field shows focus on its container, like our own inputs. */
+.orck-collect-field:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 35%, transparent);
+}
