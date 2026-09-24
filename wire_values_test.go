@@ -53,13 +53,15 @@ func TestHostedCheckoutPlanStampsRegistryScale(t *testing.T) {
 		_, err := NewHostedCheckoutPlan(bad.product, bad.price)
 		require.ErrorIs(t, err, ErrInvalid)
 	}
-	for rail, want := range map[string]string{"nmi": "collect_js", " NMI ": "collect_js", "stripe": "redirect", "ccbill": "redirect", "solana": "solana_pay"} {
-		got, ok := HostedCheckoutDriver(rail)
-		require.True(t, ok, rail)
-		require.Equal(t, want, got, rail)
-	}
-	_, ok := HostedCheckoutDriver("basis_theory")
-	require.False(t, ok, "a rail the browser cannot execute is never offered")
+	// OpenRails advertises the browser driver per option (#1078); an option
+	// no browser can drive carries none.
+	option := CheckoutRailOption{Selector: "solana", PSPID: "psp", Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
+	raw, err = json.Marshal(option)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"selector":"solana","psp_id":"psp","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
+	raw, err = json.Marshal(CheckoutRailOption{Selector: "stripe", PSPID: "psp", Rail: "stripe", Mode: "subscription"})
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "driver")
 }
 
 func TestInvoiceMoneyWireIsLossless(t *testing.T) {
