@@ -3,7 +3,7 @@
 ## 0.9.0
 
 One embedded card panel for one-time purchases and subscriptions, on every
-card PSP (openrails#1064).
+card PSP (openrails#1064). Requires OpenRails v0.164.0.
 
 - Stripe Elements checkout rail (`driver: "stripe_elements"`, from a PSP with
   `flow: "elements"`): saved Stripe cards or a new card in the page, 3-D
