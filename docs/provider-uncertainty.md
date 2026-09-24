@@ -140,8 +140,22 @@ separate release evidence.
 Provider reference: NMI's [transaction processing](https://docs.nmi.com/reference/transactions-processing)
 describes merchant order correlation and processor-dependent duplicate checking;
 its [Query API](https://docs.nmi.com/reference/query) does not establish a
-terminal-negative guarantee for a missing search result. The engine therefore
-uses absence as inconclusive evidence rather than assuming a provider guarantee.
+terminal-negative guarantee for a missing search result. Absence is therefore
+inconclusive, with one bounded exception below.
+
+**Lost engine renewal submissions.** A submitted engine renewal
+(`subscription_collection`) whose provider read finds nothing under its
+reference — NMI's Query API by order id (no transaction of any outcome), or
+Stripe's customer PaymentIntent list (no intent carrying the operation) — is
+treated as never executed once `LostSubmissionSettle` (5 minutes) has passed
+since the latest submission. The same operation is then re-sent under the same
+reference (Stripe: the same idempotency key), at most twice, each behind its
+own write-once fence. One matching approved charge is adopted; one recorded
+decline is adopted as the decline. A read that fails, an order holding anything
+else, or a spent cap never re-sends: the operation stays unknown and raises a
+standing `life.submission.unresolved` finding, closed when it completes.
+Custodian-held (HyperSwitch) instruments are excluded. Initial payments, sales,
+invoices and manual rebills keep the rule above.
 
 A Stripe tier change is a `stripe_tier_change` operation on the same ledger,
 keyed by the request's `Idempotency-Key`. The payload freezes the

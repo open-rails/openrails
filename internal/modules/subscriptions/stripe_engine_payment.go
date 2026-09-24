@@ -125,9 +125,9 @@ func (p StripeEnginePaymentParams) metadata() map[string]string {
 	return values
 }
 
-// CreateEnginePayment is called only by the unique durable submission-fence
-// winner. After ANY possible dispatch, recovery must use ReadEnginePayment;
-// Stripe's expiring idempotency cache is never permission to resend a create.
+// CreateEnginePayment is called only by the winner of a durable submission or
+// resend fence. A resend follows a settled, empty ReadEnginePayment and reuses
+// the operation's idempotency key, so Stripe replays any original it holds.
 func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEnginePaymentParams) (StripeEnginePaymentResult, error) {
 	scoped, err := s.engineScoped(p)
 	if err != nil {
@@ -244,8 +244,8 @@ func ValidateStripeEnginePaymentNotification(raw []byte, params StripeEnginePaym
 }
 
 // ReadEnginePayment never writes. A missing candidate triggers a fully paginated
-// customer list, not Stripe's eventually consistent Search API. Absence remains
-// unknown; even an empty list cannot authorize a second financial submission.
+// customer list, not Stripe's eventually consistent Search API. Absence is
+// Stripe's answer only after the caller's settle delay.
 func (s *StripeService) ReadEnginePayment(ctx context.Context, p StripeEnginePaymentParams, reference string) (StripeEnginePaymentResult, bool, error) {
 	scoped, err := s.engineScoped(p)
 	if err != nil {

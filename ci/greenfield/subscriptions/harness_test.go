@@ -336,13 +336,25 @@ func (w *world) settle() {
 		}
 		return true
 	}, 30*time.Second, 25*time.Millisecond, "operations settle") {
-		page, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(workKinds...).First(100))
-		if err == nil {
-			for _, job := range page.Jobs {
-				w.t.Logf("unsettled job %d %s %s attempts=%d scheduled=%s errors=%v", job.ID, job.Kind, job.State, job.Attempt, job.ScheduledAt, job.Errors)
-			}
-		}
+		w.dumpJobs()
 		w.t.FailNow()
+	}
+}
+
+func (w *world) dumpJobs() {
+	page, _ := w.jobs.JobList(context.Background(), river.NewJobListParams().First(100))
+	for _, j := range page.Jobs {
+		w.t.Logf("job %d %s %s sched=%s attempted=%v attempt=%d args=%s errs=%v", j.ID, j.Kind, j.State, j.ScheduledAt.Format(time.RFC3339), j.AttemptedAt, j.Attempt, j.EncodedArgs, j.Errors)
+	}
+	rows, err := w.pool.Query(context.Background(), `SELECT intent_type, status, coalesce(last_failure_reason,''), coalesce(result_evidence::text,''), claimed_until FROM `+pgx.Identifier{w.schema}.Sanitize()+`.rail_intents`)
+	if err == nil {
+		for rows.Next() {
+			var typ, status, reason, evidence string
+			var claimed *time.Time
+			_ = rows.Scan(&typ, &status, &reason, &evidence, &claimed)
+			w.t.Logf("intent %s %s claimed=%v reason=%q evidence=%s", typ, status, claimed, reason, evidence)
+		}
+		rows.Close()
 	}
 }
 
@@ -424,6 +436,20 @@ func (w *world) until(cond func() bool, msg string) {
 }
 
 type dunningPass struct{}
+
+type rescuePass struct{}
+
+func (rescuePass) Kind() string { return "openrails.job_rescue" }
+
+// rescue runs the minute's orphaned-job rescue pass now. (A process that
+// restarts within the minute its predecessor ran the pass waits for the next
+// minute's pass.)
+func (w *world) rescue() {
+	w.t.Helper()
+	res, err := w.jobs.Insert(w.t.Context(), rescuePass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	require.NoError(w.t, err)
+	w.waitJob(res.Job.ID)
+}
 
 func (dunningPass) Kind() string { return "openrails.dunning" }
 
@@ -599,4 +625,46 @@ func completed(payments []openrails.Payment) []openrails.Payment {
 		}
 	}
 	return out
+}
+
+// loseSubmissions makes the rail's next n charge requests fail in transit
+// without reaching the provider.
+func (w *world) loseSubmissions(rail string, n int) {
+	if rail == "stripe" {
+		w.stripe.loseSubmissions(n)
+	} else {
+		w.nmi.loseSubmissions(n)
+	}
+}
+
+// lostSubmissions is how many charge requests were lost in transit.
+func (w *world) lostSubmissions(rail string) int {
+	if rail == "stripe" {
+		w.stripe.mu.Lock()
+		defer w.stripe.mu.Unlock()
+		return w.stripe.lost
+	}
+	w.nmi.mu.Lock()
+	defer w.nmi.mu.Unlock()
+	return w.nmi.lost
+}
+
+// readUnavailable makes the rail's authoritative payment read fail.
+func (w *world) readUnavailable(rail string, down bool) {
+	if rail == "stripe" {
+		w.stripe.listUnavailable(down)
+	} else {
+		w.nmi.queryUnavailable(down)
+	}
+}
+
+// openFindings lists the subject keys of standing findings of one type.
+func (w *world) openFindings(findingType string) []string {
+	w.t.Helper()
+	rows, err := w.pool.Query(w.t.Context(), `SELECT subject_key FROM `+pgx.Identifier{w.schema}.Sanitize()+`.reconciliation_findings
+		WHERE finding_type = $1 AND status IN ('reconcile_required', 'requires_review')`, findingType)
+	require.NoError(w.t, err)
+	keys, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	require.NoError(w.t, err)
+	return keys
 }
