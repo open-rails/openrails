@@ -43,3 +43,7 @@ export function useBillingContext(): BillingContextValue {
 export const useBillingClient = (): BillingClient => useBillingContext().client
 
 export const useBillingRefresh = (): (() => void) => useBillingContext().refresh
+
+/** The billing context when a BillingProvider is present, else null. */
+export const useOptionalBillingContext = (): BillingContextValue | null =>
+  useContext(BillingContext)

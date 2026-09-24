@@ -104,13 +104,12 @@ export const en = {
     save: "Save card",
     added: "Card saved.",
     provider: "Payment provider",
-    consent:
-      "I allow this card to be saved for future payments that I separately agree to.",
-    enterCard: "Enter card details securely",
+    saveNotice:
+      "Cards you enter are saved to your account for future payments.",
     unavailable: "Secure card entry is unavailable for this provider.",
     verificationPending:
       "Card verification is pending. Check your saved cards before trying again.",
-    cardLabel: "{brand} ending {last4}",
+    cardLabel: "{brand} •••• {last4}",
     fallbackBrand: "Card",
     expires: "Expires {date}",
     usedBy: "Used by {names}",

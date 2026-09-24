@@ -111,6 +111,7 @@ export function PostalField({
   onChange,
   disabled,
   required,
+  error,
 }: {
   id: string
   value: string
@@ -118,23 +119,31 @@ export function PostalField({
   onChange: (value: string) => void
   disabled?: boolean
   required: boolean
+  error?: string
 }) {
   const field = postalField(country, required)
   return (
-    <BillingTextField
-      id={id}
-      name="zip"
-      label={field.label}
-      value={value}
-      onChange={onChange}
-      autoComplete="billing postal-code"
-      placeholder={field.placeholder}
-      disabled={disabled}
-      maxLength={32}
-      required={required}
-      inputMode={field.inputMode}
-      pattern={field.pattern}
-    />
+    <div className="grid gap-1.5">
+      <BillingTextField
+        id={id}
+        name="zip"
+        label={field.label}
+        value={value}
+        onChange={onChange}
+        autoComplete="billing postal-code"
+        placeholder={field.placeholder}
+        disabled={disabled}
+        maxLength={32}
+        required={required}
+        inputMode={field.inputMode}
+        pattern={field.pattern}
+      />
+      {error ? (
+        <p className="text-[12.5px] text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -143,11 +152,13 @@ export function CardBillingFields({
   value,
   onChange,
   disabled,
+  postalError,
 }: {
   idPrefix: string
   value: NMIBilling
   onChange: (next: NMIBilling) => void
   disabled?: boolean
+  postalError?: string
 }) {
   const set = (key: keyof NMIBilling) => (next: string) =>
     onChange({ ...value, [key]: next })
@@ -180,6 +191,7 @@ export function CardBillingFields({
           onChange={set("zip")}
           disabled={disabled}
           required={postalRequired}
+          error={postalError}
         />
       </div>
     </div>

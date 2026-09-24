@@ -33,7 +33,7 @@ test("customer manages a subscription from the account page", async ({
   await expect(sub).toContainText(/Renews \w{3} \d{1,2}, \d{4}/)
 
   const card = page.getByTestId("payment-method-row")
-  await expect(card).toContainText("Visa ending 4242")
+  await expect(card).toContainText("Visa •••• 4242")
 
   const payment = page.getByTestId("payment-row")
   await expect(payment.getByTestId("payment-item")).toHaveText("Membership")
@@ -82,7 +82,7 @@ test("customer manages a subscription from the account page", async ({
   await expect(change).toBeHidden()
 
   // The card pays for the live subscription, so OpenRails refuses removal.
-  await card.getByRole("button", { name: "Remove Visa ending 4242" }).click()
+  await card.getByRole("button", { name: "Remove Visa •••• 4242" }).click()
   const remove = page.getByRole("alertdialog")
   await remove.getByRole("button", { name: "Remove card" }).click()
   await expect(remove.getByRole("alert")).toContainText(

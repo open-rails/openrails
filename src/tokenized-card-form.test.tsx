@@ -33,6 +33,9 @@ describe("TokenizedCardForm", () => {
       name_on_card: "Pat Reader",
       country: "US",
       zip: "94107",
+      last_four: "4242",
+      card_type: "visa",
+      expiry_date: "12/27",
     })
     expect(
       container.querySelector('input[autocomplete="cc-number"]')
@@ -115,3 +118,41 @@ it.each(["key", "url", "consent"])(
     expect(save).not.toHaveBeenCalled()
   }
 )
+
+it("shows Collect.js field errors inline and waits for three valid fields", async () => {
+  let config: Record<string, (...args: unknown[]) => void> = {}
+  window.CollectJS = {
+    configure: vi.fn((value: Record<string, unknown>) => {
+      config = value as typeof config
+    }),
+    startPaymentRequest: vi.fn(),
+  }
+  const script = document.createElement("script")
+  script.id = "openrails-collectjs"
+  script.src = "https://gateway.example/Collect.js"
+  document.head.appendChild(script)
+  render(
+    <TokenizedCardForm
+      tokenizationKey="live_key"
+      tokenizationURL="https://gateway.example/Collect.js"
+      onTokenized={vi.fn()}
+    />
+  )
+  await waitFor(() => expect(config.validationCallback).toBeDefined())
+  act(() => config.fieldsAvailableCallback())
+  const save = screen.getByRole("button", { name: "Save card" })
+  expect(save).toBeDisabled()
+  act(() =>
+    config.validationCallback("ccnumber", false, "Card number is invalid")
+  )
+  expect(
+    await screen.findByText("Enter a valid card number.")
+  ).toBeInTheDocument()
+  act(() => {
+    config.validationCallback("ccnumber", true, "Success")
+    config.validationCallback("ccexp", true, "Success")
+    config.validationCallback("cvv", true, "Success")
+  })
+  expect(screen.queryByText("Enter a valid card number.")).toBeNull()
+  expect(save).toBeEnabled()
+})

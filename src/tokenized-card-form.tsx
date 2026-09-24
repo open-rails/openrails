@@ -7,8 +7,12 @@ import {
 import { CardBillingFields } from "./components/billing-fields"
 import { CardFields } from "./components/card-fields"
 import { PayButton, TrustLine } from "./components/pay-button"
-import { emptyNMIBilling, nmiBillingSchema } from "./lib/billing"
-import { useCollectJS } from "./lib/collect"
+import {
+  emptyNMIBilling,
+  initialCountry,
+  nmiBillingSchema,
+} from "./lib/billing"
+import { collectCardDisplay, useCollectJS } from "./lib/collect"
 import { cn } from "cn"
 
 // Only tokenized billing details cross the iframe boundary. PAN/CVC are never
@@ -18,6 +22,10 @@ export interface TokenizedCardData {
   name_on_card: string
   country: string
   zip?: string
+  /** Display metadata from the gateway: last four, brand, MM/YY. */
+  last_four?: string
+  card_type?: string
+  expiry_date?: string
 }
 export interface TokenizedCardFormProps {
   tokenizationKey: string
@@ -25,6 +33,8 @@ export interface TokenizedCardFormProps {
   onTokenized: (card: TokenizedCardData) => Promise<void>
   submitLabel?: string
   disabled?: boolean
+  /** Billing country to preselect; default: the browser locale's region. */
+  defaultCountry?: string
   appearance?: CheckoutAppearance
   className?: string
 }
@@ -37,6 +47,7 @@ export function TokenizedCardForm({
   onTokenized,
   submitLabel = "Save card",
   disabled = false,
+  defaultCountry,
   appearance,
   className,
 }: TokenizedCardFormProps) {
@@ -49,7 +60,10 @@ export function TokenizedCardForm({
     }),
     [uid]
   )
-  const [billing, setBilling] = React.useState(emptyNMIBilling)
+  const [billing, setBilling] = React.useState(() => ({
+    ...emptyNMIBilling,
+    country: initialCountry(defaultCountry),
+  }))
   const [busy, setBusy] = React.useState(false)
   const [submitted, setSubmitted] = React.useState(false)
   const [error, setError] = React.useState<string>()
@@ -100,7 +114,11 @@ export function TokenizedCardForm({
         return
       sent = true
       setSubmitted(true)
-      await onTokenized({ payment_token: token.token, ...parsed.data })
+      await onTokenized({
+        payment_token: token.token,
+        ...parsed.data,
+        ...collectCardDisplay(token.card),
+      })
     } catch (cause) {
       if (mounted.current)
         setError(
@@ -136,6 +154,7 @@ export function TokenizedCardForm({
           ids={ids}
           preview={collect.preview}
           error={collect.loadError}
+          fieldErrors={collect.fieldErrors}
         />
         {error ? (
           <p role="alert" className="text-sm text-destructive">
@@ -149,6 +168,7 @@ export function TokenizedCardForm({
             disabled ||
             submitted ||
             !collect.ready ||
+            !collect.valid ||
             Boolean(collect.loadError)
           }
         />

@@ -106,14 +106,13 @@ export const es: BillingUiMessageBundle = {
     save: "Guardar tarjeta",
     added: "Tarjeta guardada.",
     provider: "Proveedor de pago",
-    consent:
-      "Permito guardar esta tarjeta para pagos futuros que acepte por separado.",
-    enterCard: "Introducir los datos de la tarjeta de forma segura",
+    saveNotice:
+      "Las tarjetas que introduzcas se guardan en tu cuenta para pagos futuros.",
     unavailable:
       "La introducción segura de tarjetas no está disponible para este proveedor.",
     verificationPending:
       "La verificación de la tarjeta está pendiente. Revisa tus tarjetas guardadas antes de volver a intentarlo.",
-    cardLabel: "{brand} terminada en {last4}",
+    cardLabel: "{brand} •••• {last4}",
     fallbackBrand: "Tarjeta",
     expires: "Caduca {date}",
     usedBy: "Usada por {names}",

@@ -28,9 +28,9 @@ import { useMessages } from "#orck/i18n/context"
 import type { Translator } from "#orck/i18n/messages"
 import { usePaymentMethods } from "#orck/react/hooks"
 import { useScopeProps } from "#orck/scope-context"
-import { canSavePaymentMethod, type PspConfig } from "#orck/psp"
+import { canSavePaymentMethod, checkoutPsps, type PspConfig } from "#orck/psp"
 import { SavePaymentMethod } from "#orck/save-payment-method"
-import { brandName, expiry, RESET } from "./format"
+import { cardText, RESET } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
 import { useNotice } from "./notice"
 import { BillingStatusBadge } from "./status-badge"
@@ -45,15 +45,14 @@ export interface PaymentMethodsPanelProps {
   cardSetupReturnURL?: (setupId: string) => string
   /** Enables "Make default" for this currency's invoice collection. */
   defaultCurrency?: string
+  /** Billing country to preselect when adding a card. */
+  defaultCountry?: string
   appearance?: CheckoutAppearance
   className?: string
 }
 
-function methodLabel(method: PaymentMethod, { t }: Translator): string {
-  const brand = brandName(method.card?.brand, t("paymentMethods.fallbackBrand"))
-  return method.card?.last4
-    ? t("paymentMethods.cardLabel", { brand, last4: method.card.last4 })
-    : brand
+function methodLabel(method: PaymentMethod, m: Translator): string {
+  return cardText(method.card, m)
 }
 
 function removeMessage(error: BillingError, m: Translator): string {
@@ -66,6 +65,7 @@ export function PaymentMethodsPanel({
   psps,
   cardSetupReturnURL,
   defaultCurrency,
+  defaultCountry,
   appearance,
   className,
 }: PaymentMethodsPanelProps) {
@@ -80,7 +80,7 @@ export function PaymentMethodsPanel({
     message: string
   } | null>(null)
   const [adding, setAdding] = React.useState(false)
-  const savable = (psps ?? []).filter(canSavePaymentMethod)
+  const savable = checkoutPsps(psps ?? []).filter(canSavePaymentMethod)
   const [pspId, setPspId] = React.useState<string>()
   const psp = savable.find((item) => item.psp_id === pspId) ?? savable[0]
   const [notice, announce] = useNotice()
@@ -124,7 +124,6 @@ export function PaymentMethodsPanel({
       <ul className="-my-1 divide-y divide-border">
         {methods.map((method) => {
           const label = methodLabel(method, m)
-          const expires = expiry(method.card)
           const users = (method.subscriptions ?? [])
             .map((s) => s.display_name)
             .filter(Boolean)
@@ -132,7 +131,6 @@ export function PaymentMethodsPanel({
           const defaults = method.collection_default_currencies ?? []
           const pending = state.pending[method.id]
           const meta = [
-            expires && t("paymentMethods.expires", { date: expires }),
             users.length > 0 &&
               t("paymentMethods.usedBy", { names: users.join(", ") }),
           ].filter(Boolean)
@@ -322,6 +320,7 @@ export function PaymentMethodsPanel({
               key={psp.psp_id}
               psp={psp}
               returnURL={cardSetupReturnURL}
+              defaultCountry={defaultCountry}
               appearance={appearance}
               onSaved={() => {
                 setAdding(false)

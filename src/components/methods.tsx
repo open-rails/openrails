@@ -5,7 +5,7 @@
 import { cn } from "cn"
 import { Label } from "#orck/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
-import { RAIL_META, solanaHint, solanaToken } from "#orck/lib/rail-meta"
+import { railMeta, solanaHint, solanaToken } from "#orck/lib/rail-meta"
 import type { PaymentRailOption } from "#orck/types"
 
 export function MethodList({
@@ -23,6 +23,13 @@ export function MethodList({
   idPrefix: string
   renderBody: (option: PaymentRailOption, active: boolean) => React.ReactNode
 }) {
+  // One rail needs no chooser: render its body alone.
+  if (rails.length === 1)
+    return (
+      <div className="[&>div]:pt-0 [&>div]:pb-0 [&>div]:pl-0">
+        {renderBody(rails[0], true)}
+      </div>
+    )
   return (
     <RadioGroup
       aria-label="Payment method"
@@ -34,7 +41,7 @@ export function MethodList({
       disabled={disabled}
     >
       {rails.map((option) => {
-        const meta = RAIL_META[option.rail]
+        const meta = railMeta(option)
         const token = option.rail === "solana" ? solanaToken(option) : undefined
         const hint = token ? solanaHint(token) : meta.hint
         const active = option.id === selected

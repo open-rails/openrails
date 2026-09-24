@@ -180,3 +180,9 @@
   height: 100%;
   display: block;
 }
+
+/* The hosted field shows focus on its container, like our own inputs. */
+.orck-collect-field:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 35%, transparent);
+}

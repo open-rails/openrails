@@ -32,7 +32,9 @@ export {
   canAuthenticatePayment,
   canSavePaymentMethod,
   cardSetupDriver,
+  checkoutPsps,
   checkoutRails,
+  isCardRail,
   pspConfigSchema,
   savedMethodsFor,
   type CardSetupDriver,
@@ -75,6 +77,7 @@ export {
   type CheckoutSource,
 } from "./source"
 export { createFixtureSource, fixtureSession } from "./fixtures"
+export { browserCountry, initialCountry } from "./lib/billing"
 export {
   addAmounts,
   amountToDecimal,
@@ -94,6 +97,7 @@ export type {
   CheckoutPlan,
   CheckoutSession,
   CheckoutSessionStatus,
+  PaymentFailure,
   PaymentRailOption,
   PayRequest,
   PayResult,
@@ -105,6 +109,7 @@ export {
   checkoutPlanSchema,
   checkoutSessionSchema,
   checkoutSessionStatusSchema,
+  paymentFailureSchema,
   payRequestSchema,
   payResultSchema,
   paymentRailOptionSchema,

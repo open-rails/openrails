@@ -164,3 +164,22 @@ export const emptyNMIBilling: NMIBilling = {
   country: "",
   zip: "",
 }
+
+/** The buyer's likely billing country from the browser locale, or "". */
+export function browserCountry(): string {
+  try {
+    if (typeof navigator === "undefined" || !navigator.language) return ""
+    const region = new Intl.Locale(navigator.language).maximize().region
+    return region && /^[A-Z]{2}$/.test(region) ? region : ""
+  } catch {
+    return ""
+  }
+}
+
+/** The host's country when it is a known code, else the browser's region. */
+export function initialCountry(hostCountry?: string): string {
+  const code = hostCountry?.trim().toUpperCase() ?? ""
+  if (COUNTRY_OPTIONS.some((option) => option.code === code)) return code
+  const region = browserCountry()
+  return COUNTRY_OPTIONS.some((option) => option.code === region) ? region : ""
+}

@@ -169,6 +169,14 @@ export const paymentSchema = z.object({
   /** What was bought; OpenRails newer than v0.160.0. */
   product: subscriptionProductSchema.nullish(),
   card: cardSummarySchema.nullish(),
+  /** Normalized decline of a failed payment. */
+  failure: z
+    .object({
+      reason: z.string(),
+      message: z.string(),
+      field: z.string().nullish(),
+    })
+    .nullish(),
 })
 export type Payment = z.infer<typeof paymentSchema>
 
@@ -248,4 +256,8 @@ export interface NewCard {
   country?: string
   zip?: string
   email?: string
+  /** Collect.js display metadata: last four digits, brand, MM/YY. */
+  last_four?: string
+  card_type?: string
+  expiry_date?: string
 }

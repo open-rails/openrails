@@ -107,14 +107,13 @@ export const de: BillingUiMessageBundle = {
     save: "Karte speichern",
     added: "Karte gespeichert.",
     provider: "Zahlungsanbieter",
-    consent:
-      "Ich erlaube, diese Karte für künftige Zahlungen zu speichern, denen ich gesondert zustimme.",
-    enterCard: "Kartendaten sicher eingeben",
+    saveNotice:
+      "Eingegebene Karten werden für künftige Zahlungen in Ihrem Konto gespeichert.",
     unavailable:
       "Sichere Karteneingabe ist für diesen Anbieter nicht verfügbar.",
     verificationPending:
       "Die Kartenprüfung läuft noch. Prüfe deine gespeicherten Karten, bevor du es erneut versuchst.",
-    cardLabel: "{brand} mit Endung {last4}",
+    cardLabel: "{brand} •••• {last4}",
     fallbackBrand: "Karte",
     expires: "Gültig bis {date}",
     usedBy: "Verwendet von {names}",

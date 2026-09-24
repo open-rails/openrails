@@ -3,7 +3,16 @@
 // (fixture tokenization keys) renders inert placeholders with the same
 // geometry so every state is designable without a gateway.
 import { Label } from "#orck/components/ui/label"
+import type { CollectFieldErrors } from "#orck/lib/collect"
 import { cn } from "cn"
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  return message ? (
+    <p id={id} className="text-[12.5px] text-destructive" role="alert">
+      {message}
+    </p>
+  ) : null
+}
 
 const FIELD =
   "orck-collect-field h-[38px] overflow-hidden rounded-[9px] border border-[color:var(--border)] bg-card px-[3px]"
@@ -20,11 +29,14 @@ export function CardFields({
   ids,
   preview,
   error,
+  fieldErrors = {},
   hidden,
 }: {
   ids: CardFieldIds
   preview: boolean
   error?: string
+  /** Inline per-field errors (gateway validation or a decline). */
+  fieldErrors?: CollectFieldErrors
   // Kept mounted while hidden: the Collect.js iframes cannot be recreated
   // cheaply, so switching to a stored card must not unmount them.
   hidden?: boolean
@@ -46,8 +58,12 @@ export function CardFields({
             1234 1234 1234 1234
           </div>
         ) : (
-          <div id={ids.number} className={FIELD} />
+          <div
+            id={ids.number}
+            className={cn(FIELD, fieldErrors.number && "border-destructive")}
+          />
         )}
+        <FieldError id={`${ids.number}-error`} message={fieldErrors.number} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="grid gap-1.5">
@@ -62,8 +78,12 @@ export function CardFields({
               MM / YY
             </div>
           ) : (
-            <div id={ids.expiry} className={FIELD} />
+            <div
+              id={ids.expiry}
+              className={cn(FIELD, fieldErrors.expiry && "border-destructive")}
+            />
           )}
+          <FieldError id={`${ids.expiry}-error`} message={fieldErrors.expiry} />
         </div>
         <div className="grid gap-1.5">
           <Label
@@ -77,8 +97,12 @@ export function CardFields({
               CVC
             </div>
           ) : (
-            <div id={ids.cvv} className={FIELD} />
+            <div
+              id={ids.cvv}
+              className={cn(FIELD, fieldErrors.cvv && "border-destructive")}
+            />
           )}
+          <FieldError id={`${ids.cvv}-error`} message={fieldErrors.cvv} />
         </div>
       </div>
       {error ? (

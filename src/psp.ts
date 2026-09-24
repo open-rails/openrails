@@ -14,9 +14,14 @@ export const pspConfigSchema = z.object({
   /** Who holds the card: "psp" or a third-party custodian. */
   custodian: z.string(),
   display_name: z.string(),
-  /** `tokenize | redirect | wallet` */
+  /** `tokenize | elements | redirect | wallet` */
   flow: z.string(),
   config: z.record(z.string(), z.string()).nullish(),
+  /**
+   * New purchases and new cards use this PSP (the operator's checkout PSP).
+   * Other PSPs stay listed so existing cards and subscriptions keep working.
+   */
+  checkout: z.boolean().nullish(),
 })
 export type PspConfig = z.infer<typeof pspConfigSchema>
 
@@ -29,10 +34,17 @@ export interface CheckoutRailOffer {
 
 const usable = (value?: string) => !!value && !value.startsWith("preview_")
 
+const stripeKey = (psp: PspConfig) =>
+  psp.rail === "stripe" && !!psp.config?.publishable_key?.startsWith("pk_")
+
 function checkoutDriver(psp: PspConfig): PaymentRailOption["driver"] | null {
   switch (psp.flow) {
     case "redirect":
       return "redirect"
+    case "elements":
+      return psp.custodian === "psp" && stripeKey(psp)
+        ? "stripe_elements"
+        : null
     case "wallet":
       return "solana_pay"
     case "tokenize":
@@ -61,20 +73,40 @@ export function checkoutRails(
         rail: psp.rail,
         mode: offer.mode === "subscription" ? "subscription" : "one_off",
         driver,
+        psp_key: psp.key,
         ...(psp.config ? { public_config: psp.config } : {}),
       },
     ]
   })
 }
 
-/** Saved cards the checkout can charge in place, for the given rails. */
+const cardDrivers = new Set<PaymentRailOption["driver"]>([
+  "collect_js",
+  "stripe_elements",
+])
+
+/** Whether a rail takes a card in the page (saved or new). */
+export const isCardRail = (rail: PaymentRailOption): boolean =>
+  cardDrivers.has(rail.driver)
+
+/** PSPs that take new purchases and new cards. */
+export const checkoutPsps = (psps: readonly PspConfig[]): PspConfig[] =>
+  psps.filter((psp) => psp.checkout !== false)
+
+/**
+ * Saved cards the checkout can charge in place, for the given rails, most
+ * recent first.
+ */
 export function savedMethodsFor(
   methods: readonly PaymentMethod[],
   rails: readonly PaymentRailOption[]
 ): SavedPaymentMethod[] {
-  return methods.flatMap((method) => {
+  const recent = [...methods].sort((a, b) =>
+    (b.created_at ?? "").localeCompare(a.created_at ?? "")
+  )
+  return recent.flatMap((method) => {
     const rail = rails.find(
-      (item) => item.id === method.psp_id && item.driver === "collect_js"
+      (item) => item.id === method.psp_id && isCardRail(item)
     )
     if (!rail || method.health?.active === false) return []
     return [
@@ -97,8 +129,7 @@ export type CardSetupDriver = "collect_js" | "stripe_elements"
 export function cardSetupDriver(psp: PspConfig): CardSetupDriver | null {
   if (psp.custodian !== "psp") return null
   if (checkoutDriver(psp) === "collect_js") return "collect_js"
-  if (psp.rail === "stripe" && psp.config?.publishable_key?.startsWith("pk_"))
-    return "stripe_elements"
+  if (stripeKey(psp)) return "stripe_elements"
   return null
 }
 
@@ -108,3 +139,16 @@ export const canSavePaymentMethod = (psp: PspConfig): boolean =>
 /** Whether a pending payment on this PSP can be authenticated in the page. */
 export const canAuthenticatePayment = (psp: PspConfig): boolean =>
   cardSetupDriver(psp) === "stripe_elements"
+
+/** The PSP config behind a checkout rail, for card setup and authentication. */
+export function railPsp(rail: PaymentRailOption): PspConfig {
+  return {
+    psp_id: rail.id,
+    key: rail.psp_key ?? rail.rail,
+    rail: rail.rail,
+    custodian: "psp",
+    display_name: "",
+    flow: rail.driver === "stripe_elements" ? "elements" : "tokenize",
+    config: rail.public_config ?? null,
+  }
+}

@@ -76,6 +76,18 @@ export function brandName(brand: string | null | undefined, fallback: string) {
   return value[0].toUpperCase() + value.slice(1).toLowerCase()
 }
 
+/** "Visa •••• 4242 · 12/30"; the brand alone when no digits are known. */
+export function cardText(
+  card: CardSummary | null | undefined,
+  m: Translator
+): string {
+  const brand = brandName(card?.brand, m.t("paymentMethods.fallbackBrand"))
+  if (!card?.last4) return brand
+  const label = m.t("paymentMethods.cardLabel", { brand, last4: card.last4 })
+  const expires = expiry(card)
+  return expires ? `${label} · ${expires}` : label
+}
+
 export function expiry(card: CardSummary | null | undefined): string | null {
   if (!card?.exp_month || !card.exp_year) return null
   return `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`

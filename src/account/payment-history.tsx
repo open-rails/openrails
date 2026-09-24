@@ -9,7 +9,7 @@ import type { MessageKey, Translator } from "#orck/i18n/messages"
 import { usePayments, type PaymentsOptions } from "#orck/react/hooks"
 import { useBillingClient } from "#orck/react/context"
 import { useUiSettings } from "#orck/scope-context"
-import { brandName, formatDate, formatMoney, paymentItem } from "./format"
+import { cardText, formatDate, formatMoney, paymentItem } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
 import { BillingStatusBadge } from "./status-badge"
 
@@ -19,8 +19,7 @@ export interface PaymentHistoryProps extends PaymentsOptions {
 }
 
 function methodText(p: Payment, m: Translator): string {
-  if (p.card?.last4)
-    return `${brandName(p.card.brand, m.t("paymentMethods.fallbackBrand"))} •••• ${p.card.last4}`
+  if (p.card?.last4) return cardText(p.card, m)
   const rail = p.rail ?? ""
   return rail in m.messages.history.rail
     ? m.t(`history.rail.${rail}` as MessageKey)
@@ -107,6 +106,14 @@ export function PaymentHistory({
                     <div data-testid="payment-item" className="font-medium">
                       {item.name}
                     </div>
+                    {p.status === "failed" && p.failure?.message ? (
+                      <div
+                        data-testid="payment-failure"
+                        className="text-xs text-destructive"
+                      >
+                        {p.failure.message}
+                      </div>
+                    ) : null}
                     {item.detail ? (
                       <div
                         data-testid="payment-period"

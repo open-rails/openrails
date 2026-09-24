@@ -71,13 +71,27 @@ through unchanged; the PSP's `flow` and public `config` pick the browser flow
 provider:
 
 - `checkoutRails(offers, psps)` and `savedMethodsFor(methods, rails)` build a
-  `CheckoutSource`'s `rails` and `saved_methods`.
+  `CheckoutSource`'s `rails` and `saved_methods` (most recent card first).
+  Card rails (`collect_js`, `stripe_elements`) render one panel: saved cards,
+  an inline new card and one Pay/Subscribe button, which is the payer's
+  confirmation of the displayed terms. No provider chooser with one rail.
+- Inside a `BillingProvider`, a new card is always saved to the account first
+  and the source is paid with `payment_method_id`; `requires_action` results
+  carrying `operation_id` run 3-D Secure in the page. A `failed` result stays
+  on the panel with `failure.message` next to its `field`, so the buyer can
+  pick another card; the host gives each new attempt a new idempotency key.
+- Only PSPs with `checkout !== false` (`checkoutPsps`) take new cards; others
+  stay listed so existing cards and subscriptions keep working.
 - `<SavePaymentMethod psp={psp} onSaved={(id) => ...} />` saves a card in the
-  page with consent (needs `BillingProvider`); `canSavePaymentMethod(psp)`
-  filters PSPs that support it. After an off-page verification the provider
-  returns to `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
+  page (needs `BillingProvider`); `canSavePaymentMethod(psp)` filters PSPs
+  that support it. After an off-page verification the provider returns to
+  `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
 - `authenticatePayment(client, operationId, psp)` completes a pending
   payment's 3-D Secure challenge when `canAuthenticatePayment(psp)`.
+- `defaultCountry` (Checkout, SavePaymentMethod, AccountBilling) preselects
+  the billing country, else the browser locale's region.
+- `CheckoutModal gate={<SignIn />}` renders host content (e.g. sign-in) in
+  the modal instead of the checkout until cleared.
 
 - Panels: `SubscriptionsPanel` (cancel, resume, change card),
   `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,

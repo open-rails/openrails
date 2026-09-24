@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.9.0
+
+One embedded card panel for one-time purchases and subscriptions, on every
+card PSP (openrails#1064).
+
+- Stripe Elements checkout rail (`driver: "stripe_elements"`, from a PSP with
+  `flow: "elements"`): saved Stripe cards or a new card in the page, 3-D
+  Secure via `authenticatePayment`; no redirect to hosted Checkout.
+- One screen: saved cards (brand •••• last4 · MM/YY, most recent first),
+  inline "Use a new card", one "Pay $X" / "Subscribe for $X every <period>"
+  button with the agreement line. No provider chooser for a single rail.
+- New cards are always saved to the account (no consent checkbox) before
+  paying by id; Collect.js display metadata (`last_four`, `card_type`,
+  `expiry_date`) is sent with every token.
+- Declines stay on the panel: `PayResult.failure` / `CheckoutSession.failure`
+  (`{ reason, message, field }`) render next to the card field; retry with
+  another card. `requires_action` + `operation_id` authenticates in the page.
+- Collect.js `validationCallback`: inline number/expiry/CVC errors; the
+  button waits for three valid fields. Stripe Elements and Collect.js fields
+  are themed from the page tokens.
+- `defaultCountry` on Checkout / SavePaymentMethod / AccountBilling /
+  TokenizedCardForm; fallback: the browser locale's region
+  (`initialCountry`, `browserCountry`).
+- `PspConfig.checkout`; `checkoutPsps(psps)` — only checkout PSPs take new
+  cards. `isCardRail`, `useOptionalBillingContext`.
+- `CheckoutModal`: always closable; `gate` renders host content (sign-in)
+  in place of the checkout.
+- Account: card labels read "Visa •••• 4242 · 12/30"; failed payments show
+  `payment.failure.message`.
+- Breaking: `paymentMethods.consent`/`enterCard` messages are replaced by
+  `paymentMethods.saveNotice`; `cardLabel` is "{brand} •••• {last4}".
+
 ## 0.8.0
 
 Provider-neutral hosts: a host passes OpenRails's browser PSP configs through

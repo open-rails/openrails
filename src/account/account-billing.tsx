@@ -17,6 +17,8 @@ export interface AccountBillingProps {
   psps?: PaymentMethodsPanelProps["psps"]
   cardSetupReturnURL?: PaymentMethodsPanelProps["cardSetupReturnURL"]
   defaultCurrency?: string
+  /** Billing country to preselect when adding a card. */
+  defaultCountry?: string
   sendSolanaTransaction?: SendSolanaTransaction
   plansHref?: string
   renderSubscriptionFooter?: SubscriptionsPanelProps["renderSubscriptionFooter"]
@@ -30,6 +32,7 @@ export function AccountBilling({
   psps,
   cardSetupReturnURL,
   defaultCurrency,
+  defaultCountry,
   sendSolanaTransaction,
   plansHref,
   renderSubscriptionFooter,
@@ -53,6 +56,7 @@ export function AccountBilling({
         psps={psps}
         cardSetupReturnURL={cardSetupReturnURL}
         defaultCurrency={defaultCurrency}
+        defaultCountry={defaultCountry}
         appearance={appearance}
       />
       <PaymentHistory pageSize={historyPageSize} appearance={appearance} />

@@ -4,6 +4,12 @@
 // appearance (theming), and lifecycle callbacks. The container query is the
 // mode switch: wide containers get the split layout, narrow ones the compact
 // stack.
+//
+// Cards are one panel: the saved cards for the checkout PSP, an inline new
+// card, and one button that is the payer's explicit confirmation of the
+// displayed terms. With a BillingProvider, a new card is saved to the
+// customer's account first and the payment charges it by id; a decline keeps
+// the buyer on the panel to pick another card and retry.
 import * as React from "react"
 
 import {
@@ -11,6 +17,9 @@ import {
   appearanceTheme,
   type CheckoutAppearance,
 } from "#orck/appearance"
+import { authenticatePayment } from "#orck/authenticate"
+import { isBillingError } from "#orck/client/errors"
+import type { PaymentMethod } from "#orck/client/types"
 import { CardBillingFields } from "#orck/components/billing-fields"
 import { CardFields } from "#orck/components/card-fields"
 import { CCBillFields } from "#orck/components/ccbill-fields"
@@ -29,21 +38,37 @@ import {
   SucceededView,
   TerminalView,
 } from "#orck/components/states"
+import {
+  StripeCardEntry,
+  type StripeCardHandle,
+} from "#orck/components/stripe-card"
 import { CompactSummary, OrderSummary } from "#orck/components/summary"
-import { useCollectJS } from "#orck/lib/collect"
+import { useMessages } from "#orck/i18n/context"
+import {
+  collectCardDisplay,
+  useCollectJS,
+  type CollectFieldErrors,
+} from "#orck/lib/collect"
 import {
   emptyNMIBilling,
+  initialCountry,
   nmiBillingSchema,
   type NMIBilling,
 } from "#orck/lib/billing"
 import { amountToDecimal, formatAmount } from "#orck/lib/money"
+import { everyLabel } from "#orck/lib/period"
+import { isCardRail, railPsp } from "#orck/psp"
+import { useOptionalBillingContext } from "#orck/react/context"
 import { cn } from "cn"
 import type { CheckoutSource } from "#orck/source"
 import type {
   CheckoutPhase,
   CheckoutSession,
+  PaymentFailure,
+  PaymentRailOption,
   PayRequest,
   PayResult,
+  SavedPaymentMethod,
 } from "#orck/types"
 
 // Layout preference. Responsiveness always wins: the split layout only ever
@@ -58,6 +83,10 @@ export interface CheckoutProps {
   source: CheckoutSource
   appearance?: CheckoutAppearance
   layout?: CheckoutLayout
+  /** Billing country to preselect; default: the browser locale's region. */
+  defaultCountry?: string
+  /** Return target after an off-page card verification (Stripe setup). */
+  cardSetupReturnURL?: (setupId: string) => string
   // Embedded hosts get the result via callback; page hosts also redirect.
   onComplete?: (result: PayResult) => void
   onPhaseChange?: (phase: CheckoutPhase) => void
@@ -68,6 +97,7 @@ export interface CheckoutProps {
 }
 
 const POLL_INTERVAL_MS = 3_000
+const DECLINED = "Your card was declined. Try another card."
 
 function navigateTop(redirectURL: string): void {
   const parsed = new URL(redirectURL)
@@ -99,25 +129,67 @@ function solanaAmountLabel(
   return `${amountToDecimal(unit_amount, unit_decimals) ?? unit_amount} ${tokenSymbol}`.trim()
 }
 
+function savedFrom(
+  method: PaymentMethod,
+  rail: PaymentRailOption
+): SavedPaymentMethod {
+  return {
+    id: method.id,
+    option_id: rail.id,
+    rail: rail.rail,
+    brand: method.card?.brand ?? undefined,
+    last_four: method.card?.last4 ?? undefined,
+    exp_month: method.card?.exp_month ?? undefined,
+    exp_year: method.card?.exp_year ?? undefined,
+  }
+}
+
+// Provider SDK errors carry customer-facing text ("Your card was declined.").
+function describe(cause: unknown, fallback: string): string {
+  if (isBillingError(cause)) return cause.message || fallback
+  return cause instanceof Error && cause.message ? cause.message : fallback
+}
+
+const awaitingPayment = (session: CheckoutSession | null) =>
+  session?.status === "processing" ||
+  (session?.status === "requires_action" && !!session.operation)
+
 export function Checkout({
   source,
   appearance,
   layout = "auto",
+  defaultCountry,
+  cardSetupReturnURL,
   onComplete,
   onPhaseChange,
   completionMode = "embedded",
   className,
 }: CheckoutProps) {
+  const m = useMessages()
+  const billingContext = useOptionalBillingContext()
+  const client = billingContext?.client
   const uid = React.useId().replace(/[^a-zA-Z0-9-]/g, "")
   const [phase, setPhase] = React.useState<CheckoutPhase>("loading")
   const [session, setSession] = React.useState<CheckoutSession | null>(null)
   const [selected, setSelected] = React.useState<string>("")
   const [payError, setPayError] = React.useState<string>()
+  const [failure, setFailure] = React.useState<PaymentFailure>()
   const [billing, setBilling] =
     React.useState<CCBillBilling>(emptyCCBillBilling)
-  const [cardBilling, setCardBilling] =
-    React.useState<NMIBilling>(emptyNMIBilling)
+  const [cardBilling, setCardBilling] = React.useState<NMIBilling>(() => ({
+    ...emptyNMIBilling,
+    country: initialCountry(defaultCountry),
+  }))
   const [solanaURL, setSolanaURL] = React.useState<string>()
+  // Cards saved during this checkout, most recent first.
+  const [addedCards, setAddedCards] = React.useState<SavedPaymentMethod[]>([])
+  const [stripeComplete, setStripeComplete] = React.useState(false)
+  const [stripeKey, setStripeKey] = React.useState(0)
+  const [authenticating, setAuthenticating] = React.useState(false)
+  const stripeCard = React.useRef<StripeCardHandle>(null)
+  // Set once this component submitted a payment: a later definite decline
+  // returns to the panel instead of a terminal page.
+  const attempted = React.useRef(false)
   const mounted = React.useRef(true)
   const sourceRef = React.useRef(source)
   React.useEffect(() => {
@@ -150,10 +222,21 @@ export function Checkout({
     }
   }, [])
 
+  // Card rails that save a card in the page need the customer's billing
+  // client; without one (a hosted page) only token rails are offered.
+  const usable = React.useCallback(
+    (rails: PaymentRailOption[]) =>
+      supportedOptions(rails).filter(
+        (option) => option.driver !== "stripe_elements" || !!client
+      ),
+    [client]
+  )
+
   // Load the session once per source; map its status straight to a phase.
   React.useEffect(() => {
     let cancelled = false
     solanaStartedFor.current = undefined
+    attempted.current = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: a new source restarts the flow from loading
     changePhase("loading")
     setSolanaURL(undefined)
@@ -163,7 +246,7 @@ export function Checkout({
         if (cancelled || !mounted.current) return
         setSession(loaded)
         setSolanaURL(loaded.transaction_url)
-        const options = supportedOptions(loaded.rails)
+        const options = usable(loaded.rails)
         if (loaded.status === "succeeded") {
           changePhase("succeeded")
           onCompleteRef.current?.({
@@ -185,7 +268,9 @@ export function Checkout({
           changePhase("blocked")
           return
         }
-        if (loaded.status === "processing") {
+        if (awaitingPayment(loaded)) {
+          const card = options.find(isCardRail)
+          if (card) setSelected(card.id)
           changePhase("processing")
           return
         }
@@ -206,7 +291,7 @@ export function Checkout({
     return () => {
       cancelled = true
     }
-  }, [source, changePhase])
+  }, [source, changePhase, usable])
 
   // Expiry is enforced client-side too, so the page never invites a payment
   // the backend will refuse.
@@ -228,24 +313,33 @@ export function Checkout({
   }, [session, changePhase])
 
   const options = React.useMemo(
-    () => (session ? supportedOptions(session.rails) : []),
-    [session]
+    () => (session ? usable(session.rails) : []),
+    [session, usable]
   )
   const active = options.find((option) => option.id === selected)
   const nmiOption = options.find((option) => option.driver === "collect_js")
-  const savedMethods = React.useMemo(
-    () =>
-      (session?.saved_methods ?? []).filter(
-        (method) => method.option_id === nmiOption?.id
-      ),
-    [nmiOption?.id, session]
-  )
-  // Until the customer chooses, the first stored card stands selected: paying
-  // again with what is on file is the common case, and it keeps entry fields
-  // out of the way. Derived rather than stored so the default still applies
-  // when the session arrives after first render.
+  const savedMethods = React.useMemo(() => {
+    if (!active || !isCardRail(active)) return []
+    const seen = new Set<string>()
+    return [...addedCards, ...(session?.saved_methods ?? [])].filter(
+      (method) => {
+        if (method.option_id !== active.id || seen.has(method.id)) return false
+        seen.add(method.id)
+        return true
+      }
+    )
+  }, [active, addedCards, session])
+  // Until the customer chooses, the most recent stored card stands selected:
+  // paying again with what is on file is the common case, and it keeps entry
+  // fields out of the way. Derived rather than stored so the default still
+  // applies when the session arrives after first render.
   const [savedChoice, setSavedChoice] = React.useState<string>()
-  const savedMethodID = savedChoice ?? savedMethods[0]?.id ?? NEW_CARD_VALUE
+  const savedMethodID =
+    savedChoice &&
+    (savedChoice === NEW_CARD_VALUE ||
+      savedMethods.some((method) => method.id === savedChoice))
+      ? savedChoice
+      : (savedMethods[0]?.id ?? NEW_CARD_VALUE)
   const usingSavedMethod =
     savedMethodID !== NEW_CARD_VALUE &&
     savedMethods.some((method) => method.id === savedMethodID)
@@ -261,7 +355,7 @@ export function Checkout({
     enabled:
       Boolean(nmiOption) &&
       (phase === "ready" ||
-        (phase === "processing" && session?.status !== "processing")),
+        (phase === "processing" && !awaitingPayment(session))),
     active: selected === nmiOption?.id,
     tokenizationKey: nmiOption?.public_config?.tokenization_key ?? "",
     scriptURL: nmiOption?.public_config?.tokenization_url ?? "",
@@ -272,9 +366,110 @@ export function Checkout({
     },
   })
 
+  const clearFailure = () => {
+    setPayError(undefined)
+    setFailure(undefined)
+  }
+
+  const showFailure = React.useCallback(
+    (result: { failure?: PaymentFailure | null; failure_message?: string }) => {
+      const next = result.failure ?? undefined
+      setFailure(next)
+      setPayError(next?.message || result.failure_message || DECLINED)
+    },
+    []
+  )
+
+  // Saves a newly entered card to the customer's account and selects it, so
+  // a retry after a decline never enters or saves the card again.
+  const saveNewCard = React.useCallback(
+    async (rail: PaymentRailOption): Promise<PayRequest | null> => {
+      if (rail.driver === "stripe_elements") {
+        if (!client || !stripeCard.current) return null
+        const id = await stripeCard.current.save()
+        let saved: SavedPaymentMethod = {
+          id,
+          option_id: rail.id,
+          rail: rail.rail,
+        }
+        try {
+          const page = await client.listPaymentMethods({ limit: 100 })
+          const method = page.data.find((item) => item.id === id)
+          if (method) saved = savedFrom(method, rail)
+        } catch {
+          // The card is saved; its label arrives with the next session read.
+        }
+        billingContext?.notify({
+          type: "payment_method.added",
+          paymentMethodId: id,
+        })
+        setAddedCards((current) => [saved, ...current])
+        setSavedChoice(id)
+        setStripeKey((key) => key + 1)
+        return { option_id: rail.id, payment_method_id: id }
+      }
+      const parsed = nmiBillingSchema.safeParse(cardBilling)
+      if (!parsed.success) {
+        setPayError(
+          parsed.error.issues[0]?.message ?? "Check the billing details"
+        )
+        return null
+      }
+      const tokenized = await collect.tokenize()
+      const display = collectCardDisplay(tokenized.card)
+      if (!client) {
+        return {
+          option_id: rail.id,
+          payment_token: tokenized.token,
+          ...parsed.data,
+          ...display,
+        }
+      }
+      const method = await client.addPaymentMethod({
+        provider: rail.psp_key ?? rail.rail,
+        payment_token: tokenized.token,
+        ...parsed.data,
+        ...display,
+      })
+      billingContext?.notify({
+        type: "payment_method.added",
+        paymentMethodId: method.id,
+      })
+      const saved = savedFrom(method, rail)
+      setAddedCards((current) => [
+        {
+          ...saved,
+          brand: saved.brand ?? display.card_type,
+          last_four: saved.last_four ?? display.last_four,
+        },
+        ...current,
+      ])
+      setSavedChoice(method.id)
+      return { option_id: rail.id, payment_method_id: method.id }
+    },
+    [billingContext, cardBilling, client, collect]
+  )
+
+  const authenticate = React.useCallback(
+    async (operationID: string) => {
+      if (!client || !active) return
+      setAuthenticating(true)
+      setPayError(undefined)
+      try {
+        await authenticatePayment(client, operationID, railPsp(active))
+      } catch (cause) {
+        if (mounted.current)
+          setPayError(describe(cause, "Card authentication was not completed."))
+      } finally {
+        if (mounted.current) setAuthenticating(false)
+      }
+    },
+    [active, client]
+  )
+
   const pay = React.useCallback(async () => {
     if (!session || !active || phase !== "ready") return
-    setPayError(undefined)
+    clearFailure()
     changePhase("processing")
     let submitted = false
     try {
@@ -290,24 +485,24 @@ export function Checkout({
         }
         request = { option_id: active.id, ...parsed.data }
       }
-      if (active.driver === "collect_js" && usingSavedMethod) {
+      if (isCardRail(active) && usingSavedMethod) {
         request = { option_id: active.id, payment_method_id: savedMethodID }
-      } else if (active.driver === "collect_js") {
-        const parsed = nmiBillingSchema.safeParse(cardBilling)
-        if (!parsed.success) {
-          setPayError(
-            parsed.error.issues[0]?.message ?? "Check the billing details"
-          )
+      } else if (isCardRail(active)) {
+        let saved: PayRequest | null
+        try {
+          saved = await saveNewCard(active)
+        } catch (cause) {
+          if (!mounted.current || sourceRef.current !== source) return
+          setPayError(describe(cause, "Card entry could not be completed."))
           changePhase("ready")
           return
         }
-        const tokenized = await collect.tokenize()
         if (!mounted.current || sourceRef.current !== source) return
-        request = {
-          option_id: active.id,
-          payment_token: tokenized.token,
-          ...parsed.data,
+        if (!saved) {
+          changePhase("ready")
+          return
         }
+        request = saved
       }
       if (active.driver === "solana_pay") {
         // supportedOptions only offers Solana options with a bound token, so
@@ -318,6 +513,7 @@ export function Checkout({
         }
       }
       submitted = true
+      attempted.current = true
       const result = await source.pay(request)
       if (!mounted.current || sourceRef.current !== source) return
       if (active.driver === "redirect" && result.redirect_url) {
@@ -349,10 +545,7 @@ export function Checkout({
         return
       }
       if (result.status === "failed") {
-        setPayError(
-          result.failure_message ??
-            "Payment failed. Check the details and try again."
-        )
+        showFailure(result)
         changePhase("ready")
         return
       }
@@ -376,6 +569,17 @@ export function Checkout({
         changePhase("expired")
         return
       }
+      if (result.status === "requires_action" && result.operation_id) {
+        const operation = { id: result.operation_id, status: "pending" }
+        setSession((current) =>
+          current
+            ? { ...current, status: "requires_action", operation }
+            : current
+        )
+        changePhase("processing")
+        await authenticate(result.operation_id)
+        return
+      }
       setSession((current) =>
         current ? { ...current, status: "processing" } : current
       )
@@ -384,30 +588,27 @@ export function Checkout({
       if (!mounted.current || sourceRef.current !== source) return
       if (submitted) {
         setPayError(
-          "The payment result is not confirmed. Keep this attempt while we check its status."
+          "The payment result is not confirmed yet. Keep this window open while we check its status."
         )
         setSession((current) =>
           current ? { ...current, status: "processing" } : current
         )
         changePhase("processing")
       } else {
-        setPayError(
-          err instanceof Error
-            ? err.message
-            : "Card entry could not be completed."
-        )
+        setPayError(describe(err, "Card entry could not be completed."))
         changePhase("ready")
       }
     }
   }, [
     active,
+    authenticate,
     billing,
-    cardBilling,
     changePhase,
-    collect,
     phase,
+    saveNewCard,
     savedMethodID,
     session,
+    showFailure,
     source,
     usingSavedMethod,
   ])
@@ -431,7 +632,7 @@ export function Checkout({
   React.useEffect(() => {
     if (
       !session ||
-      (!(phase === "processing" && session.status === "processing") &&
+      (!(phase === "processing" && awaitingPayment(session)) &&
         !(active?.driver === "solana_pay" && phase === "ready" && solanaURL))
     )
       return
@@ -456,6 +657,14 @@ export function Checkout({
             })
             return
           case "failed":
+            if (attempted.current) {
+              // A definite decline of this panel's attempt: back to the
+              // cards, with the reason, for another card and a new attempt.
+              setSession({ ...loaded, status: "created", operation: null })
+              showFailure(loaded)
+              changePhase("ready")
+              return
+            }
             setSession(loaded)
             changePhase("failed")
             return
@@ -468,9 +677,17 @@ export function Checkout({
             setSession(loaded)
             changePhase("expired")
             return
+          case "requires_action":
+            if (loaded.operation) {
+              setSession(loaded)
+              schedule()
+              return
+            }
+            schedule()
+            return
           default:
             // Ready-looking reads can race an accepted write. Keep the local
-            // pending presentation and poll; never re-enable tokenization.
+            // pending presentation and poll; never re-enable card entry.
             schedule()
         }
       } catch {
@@ -483,18 +700,130 @@ export function Checkout({
       cancelled = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [active?.driver, changePhase, phase, session, solanaURL, source])
+  }, [
+    active?.driver,
+    changePhase,
+    phase,
+    session,
+    showFailure,
+    solanaURL,
+    source,
+  ])
 
   const merchantName = session?.merchant.display_name ?? ""
   const solanaTokenSymbol =
     active?.rail === "solana" ? (solanaToken(active)?.symbol ?? "") : ""
   const processing = phase === "processing"
+  const amount = session
+    ? formatAmount(
+        session.plan.unit_amount,
+        session.plan.currency,
+        session.plan.unit_decimals
+      )
+    : ""
+  const renews = session?.plan.automatically_renews
+    ? everyLabel(session.plan.period_hours, m)
+    : null
   const payLabel =
     active && session
       ? active.driver === "redirect"
         ? `Continue to ${active.rail === "stripe" ? "Stripe" : "CCBill"}`
-        : `Pay ${formatAmount(session.plan.unit_amount, session.plan.currency, session.plan.unit_decimals)}`
+        : renews
+          ? `Subscribe for ${amount} ${renews}`
+          : `Pay ${amount}`
       : ""
+
+  // A decline about a specific field is shown next to it while the new card
+  // entry is open; otherwise under the card choice.
+  const newCardOpen = !!active && isCardRail(active) && !usingSavedMethod
+  const collectErrors: CollectFieldErrors = { ...collect.fieldErrors }
+  let postalError: string | undefined
+  let inlineFailure = false
+  if (failure?.field && newCardOpen && active?.driver === "collect_js") {
+    inlineFailure = true
+    if (failure.field === "number") collectErrors.number = failure.message
+    else if (failure.field === "expiry") collectErrors.expiry = failure.message
+    else if (failure.field === "cvc") collectErrors.cvv = failure.message
+    else if (failure.field === "postal_code") postalError = failure.message
+    else inlineFailure = false
+  }
+
+  // Card errors sit with the cards; other rails keep the form-level line.
+  const cardError =
+    payError && active && isCardRail(active) && !inlineFailure
+      ? payError
+      : undefined
+  const cardBody = (option: PaymentRailOption, isActive: boolean) => {
+    const stripe = option.driver === "stripe_elements"
+    const entryOpen = isActive && !usingSavedMethod
+    return (
+      <MethodBody hidden={!isActive}>
+        {savedMethods.length > 0 ? (
+          <SavedMethods
+            methods={savedMethods}
+            value={savedMethodID}
+            onChange={(next) => {
+              setSavedChoice(next)
+              clearFailure()
+            }}
+            disabled={processing}
+            idPrefix={`orck-${uid}-saved`}
+          />
+        ) : null}
+        {stripe ? (
+          entryOpen && client ? (
+            <StripeCardEntry
+              key={stripeKey}
+              ref={stripeCard}
+              psp={railPsp(option)}
+              client={client}
+              returnURL={cardSetupReturnURL}
+              defaultCountry={cardBilling.country || undefined}
+              onCompleteChange={setStripeComplete}
+              unavailableMessage={m.t("paymentMethods.unavailable")}
+              verificationPendingMessage={m.t(
+                "paymentMethods.verificationPending"
+              )}
+            />
+          ) : null
+        ) : (
+          // Card fields stay mounted once created so the Collect.js iframes
+          // survive rail and card switches; hidden handles visibility.
+          <div
+            className={cn("grid gap-3", usingSavedMethod && "hidden")}
+            aria-hidden={usingSavedMethod || undefined}
+          >
+            <CardBillingFields
+              idPrefix={`orck-${uid}-card`}
+              value={cardBilling}
+              onChange={(next) => {
+                setCardBilling(next)
+                clearFailure()
+              }}
+              disabled={processing || !isActive || usingSavedMethod}
+              postalError={isActive ? postalError : undefined}
+            />
+            <CardFields
+              ids={cardIds}
+              preview={collect.preview}
+              error={isActive ? collect.loadError : undefined}
+              fieldErrors={isActive ? collectErrors : undefined}
+            />
+          </div>
+        )}
+        {isActive && cardError ? (
+          <p className="text-[13px] text-destructive" role="alert">
+            {cardError}
+          </p>
+        ) : null}
+        {newCardOpen && isActive && client ? (
+          <p className="text-xs text-muted-foreground">
+            {m.t("paymentMethods.saveNotice")}
+          </p>
+        ) : null}
+      </MethodBody>
+    )
+  }
 
   const paymentColumn = session ? (
     <form
@@ -526,50 +855,12 @@ export function Checkout({
             solanaStartedFor.current = undefined
           }
           setSelected(optionID)
-          setPayError(undefined)
+          clearFailure()
         }}
         disabled={processing}
         idPrefix={`orck-${uid}`}
         renderBody={(option, isActive) => {
-          if (option.driver === "collect_js") {
-            // Card fields stay mounted once created so the Collect.js
-            // iframes survive rail switches; hidden handles visibility.
-            return (
-              <MethodBody hidden={!isActive}>
-                {savedMethods.length > 0 ? (
-                  <SavedMethods
-                    methods={savedMethods}
-                    value={savedMethodID}
-                    onChange={(next) => {
-                      setSavedChoice(next)
-                      setPayError(undefined)
-                    }}
-                    disabled={processing}
-                    idPrefix={`orck-${uid}-saved`}
-                  />
-                ) : null}
-                <div
-                  className={cn("grid gap-3", usingSavedMethod && "hidden")}
-                  aria-hidden={usingSavedMethod || undefined}
-                >
-                  <CardBillingFields
-                    idPrefix={`orck-${uid}-card`}
-                    value={cardBilling}
-                    onChange={(next) => {
-                      setCardBilling(next)
-                      setPayError(undefined)
-                    }}
-                    disabled={processing || !isActive || usingSavedMethod}
-                  />
-                  <CardFields
-                    ids={cardIds}
-                    preview={collect.preview}
-                    error={isActive ? collect.loadError : undefined}
-                  />
-                </div>
-              </MethodBody>
-            )
-          }
+          if (isCardRail(option)) return cardBody(option, isActive)
           if (!isActive) return null
           if (option.driver === "solana_pay") {
             return (
@@ -620,7 +911,7 @@ export function Checkout({
           )
         }}
       />
-      {payError && active && active.rail !== "ccbill" ? (
+      {payError && active && active.rail !== "ccbill" && !isCardRail(active) ? (
         <p className="text-[13px] text-destructive" role="alert">
           {payError}
         </p>
@@ -630,15 +921,25 @@ export function Checkout({
           label={active.driver === "solana_pay" ? "Try again" : payLabel}
           processing={processing}
           disabled={
-            active.driver === "collect_js" &&
+            isCardRail(active) &&
             !usingSavedMethod &&
-            (!collect.ready || Boolean(collect.loadError))
+            (active.driver === "collect_js"
+              ? !collect.ready || !collect.valid || Boolean(collect.loadError)
+              : !stripeComplete)
           }
         />
+      ) : null}
+      {renews && active && isCardRail(active) ? (
+        <p className="-mt-1 text-center text-xs text-muted-foreground">
+          {`You agree to pay ${amount} ${renews} until you cancel. First charge today; cancel anytime.`}
+        </p>
       ) : null}
       <TrustLine />
     </form>
   ) : null
+
+  const pendingOperation =
+    session?.status === "requires_action" ? session.operation : null
 
   return (
     <div
@@ -686,13 +987,28 @@ export function Checkout({
           merchantName={merchantName}
           headline="Checkout isn’t available right now"
         />
-      ) : phase === "processing" && session?.status === "processing" ? (
+      ) : phase === "processing" && awaitingPayment(session) ? (
         <div role="status" className="grid gap-3 py-6 text-center">
-          <div className="font-semibold">Confirming your payment</div>
+          <div className="font-semibold">
+            {pendingOperation
+              ? "Confirm with your bank"
+              : "Confirming payment…"}
+          </div>
           <p className="text-muted-foreground">
-            The original payment is still being verified. Do not start another
-            checkout.
+            {pendingOperation
+              ? "Your bank needs to confirm this payment."
+              : "We’re checking the payment status. Don’t start another payment."}
           </p>
+          {pendingOperation && client && active && isCardRail(active) ? (
+            <button
+              type="button"
+              className="mx-auto h-9 rounded-[9px] bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              disabled={authenticating}
+              onClick={() => void authenticate(pendingOperation.id)}
+            >
+              {authenticating ? "Waiting for your bank…" : "Confirm payment"}
+            </button>
+          ) : null}
           {payError ? (
             <p className="text-xs text-muted-foreground">{payError}</p>
           ) : null}

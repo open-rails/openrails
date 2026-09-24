@@ -40,7 +40,7 @@ function brandName(brand?: string): string {
 function expiryLabel(method: SavedPaymentMethod): string | undefined {
   if (!method.exp_month || !method.exp_year) return undefined
   const month = String(method.exp_month).padStart(2, "0")
-  return `Expires ${month}/${String(method.exp_year).slice(-2)}`
+  return `${month}/${String(method.exp_year).slice(-2)}`
 }
 
 export function SavedMethods({
@@ -92,14 +92,18 @@ export function SavedMethods({
             >
               <span className="sr-only">
                 {brandName(method.brand)} card ending {method.last_four}
+                {expires ? `, expires ${expires}` : ""}
               </span>
-              <span aria-hidden>•••• {method.last_four}</span>
+              <span aria-hidden>
+                {brandName(method.brand)} •••• {method.last_four ?? "····"}
+                {expires ? (
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    · {expires}
+                  </span>
+                ) : null}
+              </span>
             </span>
-            {expires ? (
-              <span className="shrink-0 text-xs font-normal text-[color:var(--orck-faint)] tabular-nums">
-                {expires}
-              </span>
-            ) : null}
           </Label>
         )
       })}

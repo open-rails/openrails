@@ -78,8 +78,8 @@ describe("AccountBilling", () => {
     expect(sub).toHaveTextContent("Visa •••• 4242")
 
     const card = await screen.findByTestId("payment-method-row")
-    expect(card).toHaveTextContent("Visa ending 4242")
-    expect(card).toHaveTextContent("Expires 12/30 · Used by Pro")
+    expect(card).toHaveTextContent("Visa •••• 4242 · 12/30")
+    expect(card).toHaveTextContent("Used by Pro")
     expect(card).toHaveTextContent("Default for USD")
 
     const rows = await screen.findAllByTestId("payment-row")
@@ -216,7 +216,7 @@ describe("SubscriptionsPanel", () => {
     expect(dialog).not.toHaveTextContent("0005")
     const use = within(dialog).getByRole("button", { name: "Use this card" })
     expect(use).toBeDisabled()
-    fireEvent.click(within(dialog).getByText("Mastercard ending 5454"))
+    fireEvent.click(within(dialog).getByText(/^Mastercard •••• 5454/))
     fireEvent.click(use)
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
@@ -352,7 +352,7 @@ describe("PaymentMethodsPanel", () => {
       "resource_conflict"
     )
     fireEvent.click(
-      within(rows[0]).getByRole("button", { name: "Remove Visa ending 4242" })
+      within(rows[0]).getByRole("button", { name: /^Remove Visa •••• 4242/ })
     )
     let dialog = await screen.findByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove card" }))
@@ -373,7 +373,7 @@ describe("PaymentMethodsPanel", () => {
     fireEvent.click(
       within(screen.getAllByTestId("payment-method-row")[0]).getByRole(
         "button",
-        { name: "Remove Visa ending 4242" }
+        { name: /^Remove Visa •••• 4242/ }
       )
     )
     dialog = await screen.findByRole("alertdialog")

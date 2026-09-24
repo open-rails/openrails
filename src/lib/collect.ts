@@ -54,7 +54,7 @@ function safeCollectScriptURL(raw: string): string | undefined {
 // the theme tokens in their authored oklch space (canvas fillStyle keeps it
 // too), so oklch is converted numerically; everything else round-trips
 // through a canvas fillStyle. Unparseable input returns "".
-function toPlainColor(value: string | undefined): string {
+export function toPlainColor(value: string | undefined): string {
   if (!value) return ""
   const oklch = oklchToRGB(value)
   if (oklch) return oklch
@@ -111,6 +111,25 @@ export function isPreviewTokenizationKey(key: string): boolean {
   return key.startsWith("preview_")
 }
 
+/** Inline field errors, keyed by our field names. */
+export interface CollectFieldErrors {
+  number?: string
+  expiry?: string
+  cvv?: string
+}
+
+const FIELD_NAMES: Record<string, keyof CollectFieldErrors> = {
+  ccnumber: "number",
+  ccexp: "expiry",
+  cvv: "cvv",
+}
+
+const FIELD_MESSAGES: Record<keyof CollectFieldErrors, string> = {
+  number: "Enter a valid card number",
+  expiry: "Enter a valid expiry date",
+  cvv: "Enter a valid security code",
+}
+
 export interface CollectFieldSelectors {
   number: string
   expiry: string
@@ -127,12 +146,21 @@ export function useCollectJS(config: {
   ready: boolean
   preview: boolean
   loadError?: string
+  /** Every field reported valid by the gateway. */
+  valid: boolean
+  fieldErrors: CollectFieldErrors
   tokenize: () => Promise<CollectResponse>
 } {
   const preview =
     config.enabled && isPreviewTokenizationKey(config.tokenizationKey)
   const [ready, setReady] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string>()
+  // Validity per field as Collect.js reports it on edit and blur.
+  const [validity, setValidity] = React.useState<
+    Partial<
+      Record<keyof CollectFieldErrors, { valid: boolean; message?: string }>
+    >
+  >({})
   const pending = React.useRef<
     | {
         resolve: (r: CollectResponse) => void
@@ -189,6 +217,7 @@ export function useCollectJS(config: {
         // confirms that every new field is available.
         setReady(false)
         setLoadError(undefined)
+        setValidity({})
       })
       // The hosted iframes cannot inherit the page theme; hand them the
       // container's resolved colors so dark mode reaches inside the fields.
@@ -218,11 +247,22 @@ export function useCollectJS(config: {
             height: "38px",
             "line-height": "38px",
             padding: "0 8px",
+            "font-size": "14px",
+            "font-family": probeStyle?.fontFamily || "inherit",
             "background-color": fieldBackground,
             color: fieldColor,
           },
           placeholderCss: {
             color: placeholderColor,
+          },
+          invalidCss: {
+            color:
+              toPlainColor(
+                probeStyle?.getPropertyValue("--destructive").trim()
+              ) || "#dc2626",
+          },
+          focusCss: {
+            outline: "none",
           },
           // Collect.js owns the cross-origin inputs and therefore controls
           // their autocomplete behavior. Titles and placeholders are the
@@ -245,6 +285,27 @@ export function useCollectJS(config: {
             },
           },
           fieldsAvailableCallback: () => settle(() => setReady(true)),
+          validationCallback: (
+            field: string,
+            status: boolean,
+            message: string
+          ) => {
+            const name = FIELD_NAMES[field]
+            if (!name) return
+            settle(() =>
+              setValidity((current) => ({
+                ...current,
+                [name]: {
+                  valid: status,
+                  message: status
+                    ? undefined
+                    : message && message !== "Field is empty"
+                      ? `${FIELD_MESSAGES[name]}.`
+                      : FIELD_MESSAGES[name],
+                },
+              }))
+            )
+          },
           timeoutDuration: TIMEOUT_MS,
           timeoutCallback: () => {
             const request = pending.current
@@ -365,5 +426,39 @@ export function useCollectJS(config: {
     [preview, ready]
   )
 
-  return { ready: ready || preview, preview, loadError, tokenize }
+  const fieldErrors: CollectFieldErrors = {}
+  for (const name of ["number", "expiry", "cvv"] as const) {
+    const state = validity[name]
+    if (state && !state.valid) fieldErrors[name] = state.message
+  }
+  const valid =
+    preview ||
+    (["number", "expiry", "cvv"] as const).every(
+      (name) => validity[name]?.valid === true
+    )
+  return {
+    ready: ready || preview,
+    preview,
+    loadError,
+    valid,
+    fieldErrors,
+    tokenize,
+  }
+}
+
+/** Display metadata of a tokenized card: never the PAN. */
+export function collectCardDisplay(card?: CollectCard): {
+  last_four?: string
+  card_type?: string
+  expiry_date?: string
+} {
+  const digits = (card?.number ?? "").replace(/\D/g, "")
+  const exp = (card?.exp ?? "").replace(/\D/g, "")
+  return {
+    ...(digits.length >= 4 ? { last_four: digits.slice(-4) } : {}),
+    ...(card?.type ? { card_type: card.type } : {}),
+    ...(exp.length === 4
+      ? { expiry_date: `${exp.slice(0, 2)}/${exp.slice(2)}` }
+      : {}),
+  }
 }

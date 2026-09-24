@@ -7,6 +7,13 @@ export interface RailMeta {
   hint?: string
 }
 
+// A card taken in the page reads "Card" whichever PSP charges it.
+export function railMeta(option: PaymentRailOption): RailMeta {
+  if (option.driver === "collect_js" || option.driver === "stripe_elements")
+    return { label: "Card" }
+  return RAIL_META[option.rail]
+}
+
 export const RAIL_META: Record<string, RailMeta> = {
   nmi: { label: "Card" },
   stripe: { label: "Stripe", hint: "Opens Stripe" },
@@ -63,6 +70,7 @@ export function supportedOptions(
   return options.filter((option) => {
     if (RAIL_META[option.rail] === undefined) return false
     if (option.driver === "collect_js") return option.rail === "nmi"
+    if (option.driver === "stripe_elements") return option.rail === "stripe"
     if (option.driver === "redirect")
       return option.rail === "stripe" || option.rail === "ccbill"
     return (

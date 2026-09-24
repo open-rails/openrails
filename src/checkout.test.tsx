@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Checkout } from "./checkout"
+import { createBillingClient } from "./client/client"
+import { BillingProvider } from "./react/provider"
 import { CheckoutModal } from "./modal"
 import { createFixtureSource, fixtureSession } from "./fixtures"
 import type { CheckoutSource } from "./source"
@@ -62,7 +64,9 @@ describe("Checkout", () => {
       // which is visible.
       expect(screen.getAllByText("Acme Demo").length).toBeGreaterThan(0)
     })
-    expect(screen.getByText("Pay $99.00")).toBeInTheDocument()
+    expect(
+      screen.getByText("Subscribe for $99.00 every 30 days")
+    ).toBeInTheDocument()
     expect(screen.getByLabelText("Payment method")).toBeInTheDocument()
     expect(screen.getAllByText("Card").length).toBeGreaterThan(0)
     expect(screen.getByText("Stripe")).toBeInTheDocument()
@@ -159,6 +163,9 @@ describe("Checkout", () => {
     expect(country).toHaveAttribute("name", "country")
     expect(country).toHaveAttribute("autocomplete", "billing country")
 
+    // The browser locale's region is the default; the buyer can change it.
+    expect(country).toHaveValue("US")
+    fireEvent.change(country, { target: { value: "" } })
     const initialPostal = screen.getByLabelText("Postal code")
     expect(initialPostal).toHaveAttribute("name", "zip")
     expect(initialPostal).toHaveAttribute("autocomplete", "billing postal-code")
@@ -392,7 +399,7 @@ describe("Checkout", () => {
 
     const saved = await screen.findByRole("radio", { name: /Visa/ })
     fireEvent.click(saved)
-    fireEvent.click(screen.getByRole("button", { name: /^Pay / }))
+    fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe) / }))
 
     await waitFor(() => {
       expect(pay).toHaveBeenCalledWith({
@@ -435,7 +442,9 @@ describe("Checkout", () => {
 
     // The stored card is selected by default, so the button is live even
     // though the new-card fields are hidden.
-    const button = await screen.findByRole("button", { name: /^Pay / })
+    const button = await screen.findByRole("button", {
+      name: /^(Pay|Subscribe) /,
+    })
     expect(button).not.toBeDisabled()
     fireEvent.click(button)
 
@@ -486,7 +495,7 @@ describe("Checkout", () => {
     fireEvent.change(screen.getByLabelText("Postal code"), {
       target: { value: "100-0001" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /^Pay / }))
+    fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe) / }))
 
     await waitFor(() => {
       expect(pay).toHaveBeenCalledWith({
@@ -495,6 +504,9 @@ describe("Checkout", () => {
         name_on_card: "李 小龍",
         country: "JP",
         zip: "100-0001",
+        last_four: "4242",
+        card_type: "visa",
+        expiry_date: "12/27",
       })
     })
   })
@@ -535,9 +547,9 @@ describe("Checkout", () => {
 
     render(<Checkout source={source} />)
 
-    expect(
-      await screen.findByRole("radio", { name: /CCBill/ })
-    ).toBeInTheDocument()
+    // One remaining rail: no chooser, just its body.
+    expect(await screen.findByText(/CCBill’s secure page/)).toBeInTheDocument()
+    expect(screen.queryByText("Crypto")).not.toBeInTheDocument()
     expect(
       screen.queryByRole("radio", { name: /Crypto/ })
     ).not.toBeInTheDocument()
@@ -666,7 +678,9 @@ describe("CheckoutModal", () => {
       />
     )
     await waitFor(() => {
-      expect(screen.getByText("Pay $99.00")).toBeInTheDocument()
+      expect(
+        screen.getByText("Subscribe for $99.00 every 30 days")
+      ).toBeInTheDocument()
     })
     const dialog = screen.getByRole("dialog")
     const overlay = document.querySelector('[data-slot="dialog-overlay"]')
@@ -708,7 +722,7 @@ describe("CheckoutModal", () => {
       />
     )
 
-    await screen.findByText("Pay $99.00")
+    await screen.findByText("Subscribe for $99.00 every 30 days")
     const dialog = screen.getByRole("dialog")
     expect(dialog).toHaveAttribute("data-orck-theme", "dark")
     expect(dialog.style.getPropertyValue("--primary")).toBe(
@@ -837,7 +851,7 @@ describe("CheckoutModal", () => {
     view.rerender(
       <CheckoutModal open onOpenChange={() => {}} source={source} />
     )
-    await screen.findByText("Card")
+    await screen.findByText("Card number")
 
     window.CollectJS = {
       configure,
@@ -882,14 +896,18 @@ describe("accepted processing", () => {
       )
     const onComplete = vi.fn()
     render(<Checkout source={{ getSession, pay }} onComplete={onComplete} />)
-    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
     vi.useFakeTimers()
     await act(async () => {
       fireEvent.click(button)
     })
-    expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+    expect(screen.getByText("Confirming payment…")).toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Pay $99.00" })
+      screen.queryByRole("button", {
+        name: "Subscribe for $99.00 every 30 days",
+      })
     ).not.toBeInTheDocument()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(6000)
@@ -911,7 +929,9 @@ describe("accepted processing", () => {
         fixtureSession({ expires_at: new Date(Date.now() + 100).toISOString() })
       )
     render(<Checkout source={{ getSession, pay }} />)
-    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
     vi.useFakeTimers()
     await act(async () => {
       fireEvent.click(button)
@@ -919,7 +939,7 @@ describe("accepted processing", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3500)
     })
-    expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+    expect(screen.getByText("Confirming payment…")).toBeInTheDocument()
     expect(
       screen.queryByText("This checkout link has expired")
     ).not.toBeInTheDocument()
@@ -937,7 +957,9 @@ describe("accepted processing", () => {
         fixtureSession({ status: "succeeded", payment_id: "settled" })
       )
     render(<Checkout source={{ getSession, pay }} />)
-    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
     vi.useFakeTimers()
     await act(async () => {
       fireEvent.click(button)
@@ -946,9 +968,11 @@ describe("accepted processing", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000)
       })
-      expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+      expect(screen.getByText("Confirming payment…")).toBeInTheDocument()
       expect(
-        screen.queryByRole("button", { name: "Pay $99.00" })
+        screen.queryByRole("button", {
+          name: "Subscribe for $99.00 every 30 days",
+        })
       ).not.toBeInTheDocument()
     }
     await act(async () => {
@@ -968,7 +992,7 @@ describe("accepted processing", () => {
       pay: vi.fn(),
     }
     render(<Checkout source={source} />)
-    await screen.findByText("Confirming your payment")
+    await screen.findByText("Confirming payment…")
     expect(
       await screen.findByText("Payment failed", {}, { timeout: 5000 })
     ).toBeInTheDocument()
@@ -989,7 +1013,11 @@ it("does not apply a previous source's payment result after a source switch", as
   const { rerender } = render(
     <Checkout source={oldSource} onComplete={complete} />
   )
-  fireEvent.click(await screen.findByRole("button", { name: "Pay $99.00" }))
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+  )
   const next = createFixtureSource({
     session: { merchant: { display_name: "Second merchant" } },
   })
@@ -1000,5 +1028,159 @@ it("does not apply a previous source's payment result after a source switch", as
     await pending
   })
   expect(complete).not.toHaveBeenCalled()
-  expect(screen.getByRole("button", { name: "Pay $99.00" })).toBeEnabled()
+  expect(
+    screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+  ).toBeEnabled()
+})
+
+describe("one card panel", () => {
+  const nmiRail = checkoutOption("nmi", {
+    tokenization_key: "preview_tokenization_key",
+    tokenization_url: "preview://collect",
+  })
+
+  it("saves a new card to the account first and charges it by id", async () => {
+    const calls: { path: string; body: unknown }[] = []
+    const fetch = vi.fn(async (input: string, init: RequestInit) => {
+      calls.push({ path: input, body: JSON.parse(String(init.body)) })
+      return Response.json({
+        id: "pm_new",
+        psp_id: "option_nmi",
+        card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2027 },
+      })
+    })
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "succeeded",
+    })
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <Checkout
+          source={{
+            getSession: async () =>
+              fixtureSession({
+                rails: [{ ...nmiRail, psp_key: "nmi" }],
+                saved_methods: [],
+              }),
+            pay,
+          }}
+        />
+      </BillingProvider>
+    )
+    // One rail: no provider chooser.
+    await screen.findByLabelText("Name on card")
+    expect(
+      screen.queryByRole("radiogroup", { name: "Payment method" })
+    ).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    await waitFor(() =>
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_nmi",
+        payment_method_id: "pm_new",
+      })
+    )
+    expect(calls).toEqual([
+      {
+        path: "/billing/v1/me/payment-methods",
+        body: expect.objectContaining({
+          provider: "nmi",
+          payment_token: "preview_payment_token",
+          last_four: "4242",
+          card_type: "visa",
+          expiry_date: "12/27",
+        }),
+      },
+    ])
+  })
+
+  it("keeps the panel after a decline and retries with another card", async () => {
+    const pay = vi
+      .fn<CheckoutSource["pay"]>()
+      .mockResolvedValueOnce({
+        status: "failed",
+        failure: {
+          reason: "insufficient_funds",
+          message: "Your card has insufficient funds.",
+          field: "",
+        },
+      })
+      .mockResolvedValueOnce({ status: "succeeded" })
+    const onComplete = vi.fn()
+    render(
+      <Checkout
+        source={{
+          getSession: async () => {
+            const session = fixtureSession({ rails: [nmiRail] })
+            return {
+              ...session,
+              saved_methods: session.saved_methods?.map((method) => ({
+                ...method,
+                option_id: nmiRail.id,
+              })),
+            }
+          },
+          pay,
+        }}
+        onComplete={onComplete}
+      />
+    )
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+    fireEvent.click(button)
+    expect(
+      await screen.findByText("Your card has insufficient funds.")
+    ).toBeInTheDocument()
+    expect(pay).toHaveBeenLastCalledWith({
+      option_id: "option_nmi",
+      payment_method_id: "pm_preview_visa",
+    })
+    fireEvent.click(screen.getByRole("radio", { name: /5454/ }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(pay).toHaveBeenLastCalledWith({
+      option_id: "option_nmi",
+      payment_method_id: "pm_preview_mc",
+    })
+  })
+
+  it("shows a field-specific decline next to that field", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "failed",
+      failure: {
+        reason: "incorrect_cvc",
+        message: "The security code is incorrect.",
+        field: "cvc",
+      },
+    })
+    render(
+      <Checkout
+        source={{
+          getSession: async () =>
+            fixtureSession({ rails: [nmiRail], saved_methods: [] }),
+          pay,
+        }}
+      />
+    )
+    fireEvent.change(await screen.findByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    const message = await screen.findByText("The security code is incorrect.")
+    expect(message).toHaveAttribute("id", expect.stringMatching(/cvv-error$/))
+  })
 })

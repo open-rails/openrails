@@ -6,6 +6,7 @@ import { BillingUiProvider } from "./provider"
 import {
   canAuthenticatePayment,
   cardSetupDriver,
+  checkoutPsps,
   checkoutRails,
   savedMethodsFor,
   type PspConfig,
@@ -96,7 +97,44 @@ describe("PSP flows", () => {
     expect(canAuthenticatePayment(nmi)).toBe(false)
   })
 
-  it("saves with consent through the PSP's setup and reports the method", async () => {
+  it("offers Stripe Elements as an in-page card rail and hides non-checkout PSPs", () => {
+    const elements = { ...stripe, flow: "elements" }
+    const rails = checkoutRails(
+      [{ psp_id: "psp_stripe", rail: "stripe", mode: "one_off" }],
+      [elements]
+    )
+    expect(rails).toEqual([
+      expect.objectContaining({
+        id: "psp_stripe",
+        driver: "stripe_elements",
+        psp_key: "stripe",
+      }),
+    ])
+    expect(
+      savedMethodsFor(
+        [
+          {
+            id: "pm_old",
+            psp_id: "psp_stripe",
+            card: { brand: "visa", last4: "4242" },
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          {
+            id: "pm_new",
+            psp_id: "psp_stripe",
+            card: { brand: "visa", last4: "1881" },
+            created_at: "2026-02-01T00:00:00Z",
+          },
+        ],
+        rails
+      ).map((m) => m.id)
+    ).toEqual(["pm_new", "pm_old"])
+    expect(
+      checkoutPsps([nmi, { ...elements, checkout: false }]).map((p) => p.key)
+    ).toEqual(["nmi"])
+  })
+
+  it("always saves the card through the PSP's setup and reports the method", async () => {
     const calls: { path: string; key: string | null; body: unknown }[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {
       calls.push({
@@ -118,12 +156,13 @@ describe("PSP flows", () => {
         </BillingProvider>
       </BillingUiProvider>
     )
-    const start = screen.getByRole("button", {
-      name: "Enter card details securely",
-    })
-    expect(start).toBeDisabled()
-    fireEvent.click(screen.getByRole("checkbox"))
-    fireEvent.click(start)
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/saved to your account for future payments/)
+    ).toBeInTheDocument()
+    const save = await screen.findByRole("button", { name: "Save card" })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith("pm_9"))
     expect(calls).toEqual([
       {

@@ -66,13 +66,30 @@ export const checkoutSessionStatusSchema = z.enum([
 ])
 export type CheckoutSessionStatus = z.infer<typeof checkoutSessionStatusSchema>
 
+// A definite decline, normalized by OpenRails. `field` places the message
+// next to the card field it concerns ("" = the card as a whole).
+export const paymentFailureSchema = z.object({
+  reason: z.string(),
+  message: z.string(),
+  field: z.string().nullish(),
+})
+export type PaymentFailure = z.infer<typeof paymentFailureSchema>
+
+// The accepted payment operation; `requires_action` sessions authenticate it.
+export const checkoutOperationSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+})
+
 export const paymentRailOptionSchema = z.object({
   id: z.string().min(1),
   rail: z.string(),
   mode: z.enum(["one_off", "subscription"]),
-  driver: z.enum(["collect_js", "redirect", "solana_pay"]),
+  driver: z.enum(["collect_js", "stripe_elements", "redirect", "solana_pay"]),
+  /** The PSP's checkout key; saving a new card names it. */
+  psp_key: z.string().optional(),
   // Browser-safe rail config the host serves (nmi: Collect.js
-  // tokenization_key + tokenization_url).
+  // tokenization_key + tokenization_url; stripe: publishable_key).
   public_config: z.record(z.string(), z.string()).optional(),
 })
 export type PaymentRailOption = z.infer<typeof paymentRailOptionSchema>
@@ -122,6 +139,8 @@ export const checkoutSessionSchema = z.object({
   payment_id: z.string().optional(),
   subscription_id: z.string().optional(),
   failure_message: z.string().optional(),
+  failure: paymentFailureSchema.nullish(),
+  operation: checkoutOperationSchema.nullish(),
   // Present on hosted-page reads so the page host can redirect on success.
   success_url: returnURLSchema.optional(),
   expires_at: z.string().nullish(),
@@ -142,6 +161,10 @@ export const payRequestSchema = z.object({
   state: z.string().optional(),
   zip: z.string().optional(),
   country: z.string().optional(),
+  // Collect.js display metadata for a new card (never the PAN).
+  last_four: z.string().optional(),
+  card_type: z.string().optional(),
+  expiry_date: z.string().optional(),
   token_symbol: z.string().optional(),
 })
 export type PayRequest = z.infer<typeof payRequestSchema>
@@ -153,6 +176,9 @@ export const payResultSchema = z.object({
   payment_id: z.string().optional(),
   subscription_id: z.string().optional(),
   failure_message: z.string().optional(),
+  failure: paymentFailureSchema.nullish(),
+  /** The payment operation to authenticate when status is requires_action. */
+  operation_id: z.string().optional(),
 })
 export type PayResult = z.infer<typeof payResultSchema>
 

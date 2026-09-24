@@ -21,7 +21,7 @@ import { Spinner } from "#orck/components/ui/spinner"
 import { useMessages } from "#orck/i18n/context"
 import { usePaymentMethods } from "#orck/react/hooks"
 import { useScopeProps } from "#orck/scope-context"
-import { brandName, expiry, RESET } from "./format"
+import { cardText, RESET } from "./format"
 import { ErrorState, ListSkeleton } from "./section"
 
 /** Cards the subscription's PSP can charge; expired cards are left out. */
@@ -135,11 +135,6 @@ function ChangeCardForm({
       >
         {cards.map((card) => {
           const id = `${idPrefix}-${card.id}`
-          const brand = brandName(
-            card.card?.brand,
-            t("paymentMethods.fallbackBrand")
-          )
-          const expires = expiry(card.card)
           return (
             <Label
               key={card.id}
@@ -156,20 +151,11 @@ function ChangeCardForm({
                 fallback={(card.card?.brand ?? "card").slice(0, 4)}
               />
               <span className="min-w-0 flex-1 truncate text-sm font-medium tabular-nums">
-                {card.card?.last4
-                  ? t("paymentMethods.cardLabel", {
-                      brand,
-                      last4: card.card.last4,
-                    })
-                  : brand}
+                {cardText(card.card, m)}
               </span>
               {card.id === current ? (
                 <span className="shrink-0 text-xs text-muted-foreground">
                   {t("changeCard.current")}
-                </span>
-              ) : expires ? (
-                <span className="shrink-0 text-xs text-[color:var(--orck-faint)] tabular-nums">
-                  {t("paymentMethods.expires", { date: expires })}
                 </span>
               ) : null}
             </Label>
