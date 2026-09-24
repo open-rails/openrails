@@ -133,10 +133,11 @@ These proofs use local provider transports and owned test databases only.
 
 A resource key such as `post:<stable-id>` identifies access independently of the
 product key. Several products can grant that resource through `EntitlementsSpec`;
-one product can grant several resources. `ListOffersForEntitlement` performs an
-indexed exact reverse lookup of active products and prices. Kind is required
-(`permanent`, `finite`, or `recurring`), pages cap at 100, and preferred currency
-only changes ordering. Every row retains its native currency, amount, duration
+one product can grant several resources. `ListOffersForEntitlements` performs an
+exact reverse lookup of active products and prices for up to 100 keys in one
+request and one query. Kind is required (`permanent`, `finite`, or `recurring`),
+each key's page caps at 100 with its own cursor, and preferred currency only
+changes ordering. Every row retains its native currency, amount, duration
 and renewal flag. It never substitutes a monthly plan for permanent access.
 
 `HasEntitlement` and `CheckEntitlements` query only the requested keys in the

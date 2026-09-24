@@ -39,12 +39,16 @@ type grantProductAccessRequest struct {
 	EndsAt    *string             `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
 }
 
-// productAccessResponses enriches grants with product metadata. It loads each
-// distinct product once via the ProductService (best-effort: a missing product
-// just yields an unenriched row rather than failing the whole response).
+// productAccessResponses enriches grants with product metadata from one batched
+// product load (best-effort: a missing product yields an unenriched row).
 func productAccessResponses(r *httprequest.Request, grants []models.ProductAccessGrant) []ProductAccessGrantResponse {
+	products := map[uuid.UUID]*models.Product{}
+	if r.State != nil && r.State.ProductService != nil {
+		if loaded, err := r.State.ProductService.GetByIDs(r.Request.Context(), models.DistinctProductIDs(grants)); err == nil {
+			products = loaded
+		}
+	}
 	out := make([]ProductAccessGrantResponse, 0, len(grants))
-	cache := map[uuid.UUID]*models.Product{}
 	for i := range grants {
 		g := grants[i]
 		resp := ProductAccessGrantResponse{
@@ -68,18 +72,9 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 			reason := string(*g.RevokeReason)
 			resp.RevokeReason = &reason
 		}
-		if r.State != nil && r.State.ProductService != nil {
-			prod, ok := cache[g.ProductID]
-			if !ok {
-				if p, err := r.State.ProductService.GetByID(r.Request.Context(), g.ProductID); err == nil {
-					prod = p
-				}
-				cache[g.ProductID] = prod
-			}
-			if prod != nil {
-				resp.ProductKey = prod.Key
-				resp.ProductName = prod.DisplayName
-			}
+		if prod := products[g.ProductID]; prod != nil {
+			resp.ProductKey = prod.Key
+			resp.ProductName = prod.DisplayName
 		}
 		out = append(out, resp)
 	}

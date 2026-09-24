@@ -367,29 +367,26 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 		}
 	}
 
-	if s.EntitlementService != nil && product.EntitlementsSpec != nil {
-		for entitlementName := range product.EntitlementsSpec {
-			hasIndefinite, err := s.EntitlementService.HasActiveIndefinite(ctx, userID, entitlementName, now)
-			if err != nil {
-				return nil, fmt.Errorf("failed to check indefinite entitlement: %w", err)
-			}
-			if hasIndefinite {
-				coverage.HasCoverage = true
-				coverage.IsIndefinite = true
-				coverage.SourceType = "entitlement"
-				return coverage, nil
-			}
-
-			ent, err := s.EntitlementService.LatestFiniteWindow(ctx, userID, entitlementName, now)
-			if err != nil && !db.IsNotFound(err) {
-				return nil, fmt.Errorf("failed to check finite entitlement: %w", err)
-			}
-			if ent != nil {
-				coverage.HasCoverage = true
-				coverage.SourceType = "entitlement"
-				if ent.EndAt != nil && (coverage.EndDate == nil || ent.EndAt.After(*coverage.EndDate)) {
-					coverage.EndDate = ent.EndAt
-				}
+	if s.EntitlementService != nil && len(product.EntitlementsSpec) > 0 {
+		keys := make([]string, 0, len(product.EntitlementsSpec))
+		for key := range product.EntitlementsSpec {
+			keys = append(keys, key)
+		}
+		indefinite, latestEnd, err := s.EntitlementService.Coverage(ctx, userID, keys, now)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check entitlement coverage: %w", err)
+		}
+		if indefinite {
+			coverage.HasCoverage = true
+			coverage.IsIndefinite = true
+			coverage.SourceType = "entitlement"
+			return coverage, nil
+		}
+		if latestEnd != nil {
+			coverage.HasCoverage = true
+			coverage.SourceType = "entitlement"
+			if coverage.EndDate == nil || latestEnd.After(*coverage.EndDate) {
+				coverage.EndDate = latestEnd
 			}
 		}
 	}

@@ -94,21 +94,20 @@ func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, quer
 		return nil, 0, fmt.Errorf("failed to get subscriptions: %w", err)
 	}
 
+	ids := make([]uuid.UUID, 0, len(subscriptions))
+	for _, sub := range subscriptions {
+		ids = append(ids, sub.PriceID)
+	}
+	prices, err := s.PriceService.GetWithProductByIDs(ctx, ids)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to load subscription prices: %w", err)
+	}
 	responses := make([]*AdminSubscriptionResponse, len(subscriptions))
 	for i, sub := range subscriptions {
-		responses[i] = &AdminSubscriptionResponse{
-			Subscription: sub,
-		}
-
-		// No user enrichment (IdP-managed)
-
-		// Enrich with price and product data if available
-		if price, err := s.PriceService.GetByID(ctx, sub.PriceID); err == nil {
+		responses[i] = &AdminSubscriptionResponse{Subscription: sub}
+		if price := prices[sub.PriceID]; price != nil {
 			responses[i].Price = price
-
-			if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-				responses[i].Product = product
-			}
+			responses[i].Product = price.Product
 		}
 	}
 

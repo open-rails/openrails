@@ -75,8 +75,13 @@ func (s *Service) HasProductAccess(ctx context.Context, userID string, productID
 }
 
 func (s *Service) productAccessRecords(ctx context.Context, grants []models.ProductAccessGrant) []ProductAccessRecord {
+	products := map[uuid.UUID]*models.Product{}
+	if s != nil && s.rt != nil && s.rt.ProductService != nil {
+		if loaded, err := s.rt.ProductService.GetByIDs(ctx, models.DistinctProductIDs(grants)); err == nil {
+			products = loaded
+		}
+	}
 	out := make([]ProductAccessRecord, 0, len(grants))
-	cache := map[uuid.UUID]*models.Product{}
 	for i := range grants {
 		g := grants[i]
 		rec := ProductAccessRecord{
@@ -97,18 +102,9 @@ func (s *Service) productAccessRecords(ctx context.Context, grants []models.Prod
 			reason := string(*g.RevokeReason)
 			rec.RevokeReason = &reason
 		}
-		if s != nil && s.rt != nil && s.rt.ProductService != nil {
-			prod, ok := cache[g.ProductID]
-			if !ok {
-				if p, err := s.rt.ProductService.GetByID(ctx, g.ProductID); err == nil {
-					prod = p
-				}
-				cache[g.ProductID] = prod
-			}
-			if prod != nil {
-				rec.ProductKey = prod.Key
-				rec.ProductName = prod.DisplayName
-			}
+		if prod := products[g.ProductID]; prod != nil {
+			rec.ProductKey = prod.Key
+			rec.ProductName = prod.DisplayName
 		}
 		out = append(out, rec)
 	}

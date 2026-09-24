@@ -101,6 +101,8 @@ type world struct {
 	nmi    *nmiFake
 	auth   *verifier
 	cfg    func(*config.Config)
+	// queries records named sqlc statements while counting.
+	queries *queryLog
 
 	rt     *embed.Runtime
 	jobs   *river.Client[pgx.Tx]
@@ -122,10 +124,12 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 	poolConfig, err := pgxpool.ParseConfig(dsn(t))
 	require.NoError(t, err)
 	poolConfig.MaxConns = 12
+	queries := &queryLog{}
+	poolConfig.ConnConfig.Tracer = queries
 	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
 	require.NoError(t, err)
 	w := &world{
-		t: t, pool: pool, dsn: dsn(t),
+		t: t, pool: pool, dsn: dsn(t), queries: queries,
 		schema: "gf_subs_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16],
 		slug:   "subs-" + uuid.NewString()[:8],
 		// Engine time starts in the past so every accepted operation is

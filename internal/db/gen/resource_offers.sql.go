@@ -62,39 +62,48 @@ func (q *Queries) CheckResourceEntitlements(ctx context.Context, arg CheckResour
 	return items, nil
 }
 
-const listOffersForEntitlement = `-- name: ListOffersForEntitlement :many
-SELECT product.id AS product_id, product.key AS product_key,
- product.display_name AS product_name, product.entitlements_spec,
- price.id AS price_id, price.key AS price_key, price.amount AS unit_amount,
- price.currency, price.access_duration_hours, price.auto_renew
-FROM openrails.products product
-JOIN openrails.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
-WHERE product.merchant_id=$1::uuid
- AND ($2::uuid IS NULL OR product.catalog_id=$2::uuid)
- AND NOT product.archived AND NOT price.archived
- AND product.entitlements_spec ? $3::text
- AND (($4::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>$3::text,'0')='0')
-   OR ($4::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
-   OR ($4::text='recurring' AND price.auto_renew))
- AND ($5::uuid IS NULL OR
-   (price.currency<>$6::text, price.currency, price.id) >
-   ($7::text<>$6::text, $7::text, $5::uuid))
-ORDER BY price.currency<>$6::text, price.currency, price.id
-LIMIT $8::int
+const listOffersForEntitlements = `-- name: ListOffersForEntitlements :many
+SELECT wanted.entitlement::text AS entitlement, offer.product_id, offer.product_key,
+ offer.product_name, offer.entitlements_spec, offer.price_id, offer.price_key,
+ offer.unit_amount, offer.currency, offer.access_duration_hours, offer.auto_renew
+FROM unnest($1::text[], $2::text[], $3::uuid[])
+ AS wanted(entitlement, after_currency, after_id)
+CROSS JOIN LATERAL (
+ SELECT product.id AS product_id, product.key AS product_key,
+  product.display_name AS product_name, product.entitlements_spec,
+  price.id AS price_id, price.key AS price_key, price.amount AS unit_amount,
+  price.currency, price.access_duration_hours, price.auto_renew
+ FROM openrails.products product
+ JOIN openrails.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
+ WHERE product.merchant_id=$4::uuid
+  AND ($5::uuid IS NULL OR product.catalog_id=$5::uuid)
+  AND NOT product.archived AND NOT price.archived
+  AND product.entitlements_spec ? wanted.entitlement
+  AND (($6::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
+    OR ($6::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
+    OR ($6::text='recurring' AND price.auto_renew))
+  AND (wanted.after_id='00000000-0000-0000-0000-000000000000'::uuid OR
+    (price.currency<>$7::text, price.currency, price.id) >
+    (wanted.after_currency<>$7::text, wanted.after_currency, wanted.after_id))
+ ORDER BY price.currency<>$7::text, price.currency, price.id
+ LIMIT $8::int
+) offer
+ORDER BY wanted.entitlement, offer.currency<>$7::text, offer.currency, offer.price_id
 `
 
-type ListOffersForEntitlementParams struct {
+type ListOffersForEntitlementsParams struct {
+	Entitlements      []string
+	AfterCurrencies   []string
+	AfterIds          []uuid.UUID
 	MerchantID        uuid.UUID
 	CatalogID         *uuid.UUID
-	Entitlement       string
 	Kind              string
-	AfterID           *uuid.UUID
 	PreferredCurrency string
-	AfterCurrency     string
 	PageLimit         int32
 }
 
-type ListOffersForEntitlementRow struct {
+type ListOffersForEntitlementsRow struct {
+	Entitlement         string
 	ProductID           uuid.UUID
 	ProductKey          string
 	ProductName         string
@@ -108,25 +117,27 @@ type ListOffersForEntitlementRow struct {
 }
 
 // Discovery only: all pricing and benefits are revalidated at admission.
-func (q *Queries) ListOffersForEntitlement(ctx context.Context, arg ListOffersForEntitlementParams) ([]ListOffersForEntitlementRow, error) {
-	rows, err := q.db.Query(ctx, listOffersForEntitlement,
+// One page per requested key; uuid.Nil in after_ids starts a key's first page.
+func (q *Queries) ListOffersForEntitlements(ctx context.Context, arg ListOffersForEntitlementsParams) ([]ListOffersForEntitlementsRow, error) {
+	rows, err := q.db.Query(ctx, listOffersForEntitlements,
+		arg.Entitlements,
+		arg.AfterCurrencies,
+		arg.AfterIds,
 		arg.MerchantID,
 		arg.CatalogID,
-		arg.Entitlement,
 		arg.Kind,
-		arg.AfterID,
 		arg.PreferredCurrency,
-		arg.AfterCurrency,
 		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListOffersForEntitlementRow
+	var items []ListOffersForEntitlementsRow
 	for rows.Next() {
-		var i ListOffersForEntitlementRow
+		var i ListOffersForEntitlementsRow
 		if err := rows.Scan(
+			&i.Entitlement,
 			&i.ProductID,
 			&i.ProductKey,
 			&i.ProductName,

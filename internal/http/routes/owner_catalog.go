@@ -23,6 +23,7 @@ import (
 // Provider configuration, entitlement grants, meters and batch application retain
 // their merchant-administrator surfaces and are never mounted in this group.
 func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	readActions := rr
 	rr = withCatalogWritePolicy(rr, rt)
 	scope := []router.Middleware{}
 	if rt != nil && rt.DB != nil {
@@ -34,7 +35,7 @@ func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options)
 	rr.Handle(http.MethodGet, "", h(handlers.OwnCatalog), read...)
 	rr.Handle(http.MethodPut, "", h(handlers.OwnCatalog), write...)
 	rr.Handle(http.MethodGet, "/products", h(handlers.AdminListProducts), read...)
-	rr.Handle(http.MethodGet, "/offers", h(handlers.ListOffersForEntitlement), read...)
+	readActions.Handle(http.MethodPost, "/offers/lookup", h(handlers.ListOffersForEntitlements), read...)
 	rr.Handle(http.MethodPost, "/products", h(handlers.AdminCreateProduct), write...)
 	rr.Handle(http.MethodGet, "/products/by-key/:key", h(handlers.AdminGetProductByKey), read...)
 	rr.Handle(http.MethodPut, "/products/by-key/:key", h(handlers.AdminEnsureProduct), write...)

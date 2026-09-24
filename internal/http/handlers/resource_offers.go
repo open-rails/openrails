@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/open-rails/openrails"
@@ -33,21 +31,16 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 	r.SuccessJSON(result)
 }
 
-func ListOffersForEntitlement(r *httprequest.Request) {
-	params := openrails.OfferListParams{Kind: openrails.OfferKind(r.Query("kind")), PreferredCurrency: r.Query("preferred_currency"), Cursor: r.Query("cursor")}
-	if raw := r.Query("limit"); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid limit")
-			return
-		}
-		params.Limit = value
+func ListOffersForEntitlements(r *httprequest.Request) {
+	var body openrails.OfferLookupRequest
+	if !r.BindJSON(&body) {
+		return
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	result, err := svc.ListOffersForEntitlement(r.Request.Context(), r.Query("entitlement"), params)
+	result, err := svc.ListOffersForEntitlements(r.Request.Context(), body.Entitlements, openrails.OfferListParams{Kind: body.Kind, PreferredCurrency: body.PreferredCurrency, Limit: body.PageSize, Cursors: body.Cursors})
 	if err != nil {
 		writeCatalogError(r, err)
 		return
