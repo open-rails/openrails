@@ -1348,3 +1348,50 @@ func (q *Queries) UpdatePaymentMethod(ctx context.Context, arg UpdatePaymentMeth
 	}
 	return result.RowsAffected(), nil
 }
+
+const replacePaymentMethodCard = `-- name: ReplacePaymentMethodCard :execrows
+UPDATE openrails.payment_methods SET
+    rail_method_ref = $1::text,
+    last_four = $2,
+    card_type = $3,
+    expiry_date = $4,
+    metadata = $5,
+    stored_credential_recurring_ref = $6::text,
+    updated_at = $7::timestamptz
+WHERE merchant_id = $8::uuid AND id = $9::uuid
+  AND rail_method_ref = $10::text
+`
+
+type ReplacePaymentMethodCardParams struct {
+	NewRailMethodRef string
+	LastFour         *string
+	CardType         *string
+	ExpiryDate       *string
+	Metadata         []byte
+	RecurringRef     string
+	UpdatedAt        time.Time
+	MerchantID       uuid.UUID
+	ID               uuid.UUID
+	OldRailMethodRef string
+}
+
+// An in-place card replacement moves the method onto the verified billing
+// entry: card metadata and its recurring agreement change together.
+func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePaymentMethodCardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, replacePaymentMethodCard,
+		arg.NewRailMethodRef,
+		arg.LastFour,
+		arg.CardType,
+		arg.ExpiryDate,
+		arg.Metadata,
+		arg.RecurringRef,
+		arg.UpdatedAt,
+		arg.MerchantID,
+		arg.ID,
+		arg.OldRailMethodRef,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

@@ -45,6 +45,11 @@ type MerchantConfiguration struct {
 	// sends one receipt per renewal.
 	RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
 
+	// ProviderRefundAccess decides what a refund made at the provider (not
+	// through OpenRails) does to the refunded charge's access: revoke_on_full
+	// ("" default), revoke_on_any or keep.
+	ProviderRefundAccess string `json:"provider_refund_access,omitempty"`
+
 	// CheckoutRouting (or#288) is the merchant's deterministic processor
 	// preference policy: ordered rules, first match wins. Empty ⇒ the built-in
 	// default order.

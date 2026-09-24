@@ -543,6 +543,9 @@ type MerchantConfiguration struct {
 	// RenewalReceiptMinIntervalHours (#1069) spaces renewal receipts per
 	// subscription. A nil pointer preserves the stored value.
 	RenewalReceiptMinIntervalHours *int
+	// ProviderRefundAccess is the provider-dashboard refund access policy. A
+	// nil pointer preserves the stored value.
+	ProviderRefundAccess *string
 	// ArrearsGraceDays / ArrearsDelinquencyFloor (or#878) are the arrears
 	// delinquency policy: how long past due_at a payer keeps grace, and the
 	// smallest overdue balance that can escalate. A nil pointer preserves the
@@ -588,6 +591,7 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		AlertEmail:                         &alertEmail,
 		RepriceNoticeWindowDays:            cfg.RepriceNoticeWindowDays,
 		RenewalReceiptMinIntervalHours:     cfg.RenewalReceiptMinIntervalHours,
+		ProviderRefundAccess:               nonEmptyString(cfg.ProviderRefundAccess),
 		ArrearsGraceDays:                   cfg.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:            cfg.ArrearsDelinquencyFloor,
 		CheckoutRouting:                    routing,
@@ -678,6 +682,13 @@ func applyMerchantConfiguration(cfg models.MerchantConfiguration, in MerchantCon
 			return cfg, fmt.Errorf("renewal_receipt_min_interval_hours must be >= 0")
 		}
 		cfg.RenewalReceiptMinIntervalHours = in.RenewalReceiptMinIntervalHours
+	}
+	if in.ProviderRefundAccess != nil {
+		policy, err := merchantconfig.NormalizeProviderRefundAccess(strings.TrimSpace(*in.ProviderRefundAccess))
+		if err != nil {
+			return cfg, err
+		}
+		cfg.ProviderRefundAccess = policy
 	}
 	if in.ArrearsGraceDays != nil {
 		if *in.ArrearsGraceDays < 0 {
@@ -1255,4 +1266,11 @@ func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, 
 		return "", err
 	}
 	return money.NewMoneyService(s.rt.DB).GetTrustLevel(ctx, payer, cur)
+}
+
+func nonEmptyString(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }

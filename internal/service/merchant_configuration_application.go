@@ -231,6 +231,9 @@ func mergeMerchantSettings(current, patch openrails.MerchantSettings) openrails.
 	if patch.RenewalReceiptMinIntervalHours != nil {
 		current.RenewalReceiptMinIntervalHours = patch.RenewalReceiptMinIntervalHours
 	}
+	if patch.ProviderRefundAccess != nil {
+		current.ProviderRefundAccess = patch.ProviderRefundAccess
+	}
 	if patch.ArrearsGraceDays != nil {
 		current.ArrearsGraceDays = patch.ArrearsGraceDays
 	}

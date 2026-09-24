@@ -951,29 +951,8 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 	if err != nil {
 		return fmt.Errorf("calculate stripe refund total: %w", err)
 	}
-	if original.SubscriptionID != nil && refundedTotal >= original.Amount && s.SubscriptionLifecycleService != nil {
-		rail := models.RailStripe
-		reason := "Stripe refund processed"
-		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-			SubscriptionID: original.SubscriptionID,
-			Rail:           &rail,
-			CancelType:     models.CancelTypeMerchant,
-			CancelFeedback: &reason,
-			RevokeAccess:   true,
-		}); err != nil {
-			return fmt.Errorf("cancel subscription after stripe refund: %w", err)
-		}
-	} else if original.SubscriptionID == nil && refundedTotal >= original.Amount && s.DB != nil {
-		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
-		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund); err != nil {
-			return fmt.Errorf("revoke one-off entitlements after stripe refund: %w", err)
-		}
-		// Revoke the durable product access grant tied to this payment (issue #250),
-		// consistent with the entitlement reversal above.
-		paSvc := productaccess.NewService(s.DB, s.Clock)
-		if _, err := paSvc.RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeRefund); err != nil {
-			return fmt.Errorf("revoke product access after stripe refund: %w", err)
-		}
+	if _, err := (providerRefundAccess{DB: s.DB, Clock: s.Clock, Lifecycle: s.SubscriptionLifecycleService}).apply(ctx, models.RailStripe, original, refundedTotal, "Stripe refund processed"); err != nil {
+		return err
 	}
 	return nil
 }

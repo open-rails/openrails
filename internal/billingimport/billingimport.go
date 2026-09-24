@@ -13,9 +13,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -354,19 +355,30 @@ func deriveImportedAccess(ctx context.Context, database *db.DB, merchantID merch
 		ids = append(ids, id)
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
-	var clocks []clockwork.Clock
-	if clock != nil {
-		clocks = append(clocks, clock)
-	}
-	engine := converge.NewConvergeEngine(database, clocks...)
-	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		for i := range ids {
-			if _, err := engine.Converge(ctx, converge.Scope{Merchant: merchantID, Customer: &ids[i]}); err != nil {
-				return fmt.Errorf("customer %s: %w", ids[i], err)
+	now := timeutil.FirstClock(clock).Now().UTC()
+	// Deriving the imported memberships' grants is the import's own effect,
+	// written directly; a convergence pass would record each as a repaired
+	// finding.
+	scanSince := now.Add(-3 * 365 * 24 * time.Hour)
+	for i := range ids {
+		customer := ids[i]
+		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			ledger := grants.New(gen.New(tx), merchantID.UUID())
+			subs, err := ledger.UngrantedSubscriptions(ctx, &customer, scanSince)
+			if err != nil {
+				return err
 			}
+			for _, sub := range subs {
+				if err := ledger.DeriveSubscriptionGrant(ctx, sub); err != nil {
+					return fmt.Errorf("subscription %s: %w", sub.ID, err)
+				}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("customer %s: %w", customer, err)
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func nilIfEmpty(s string) *string {

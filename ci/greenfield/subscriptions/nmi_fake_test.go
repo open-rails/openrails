@@ -225,18 +225,54 @@ func nmiNotFound() (int, any) {
 }
 
 func (f *nmiFake) customer(v *nmiVault) obj {
-	details := obj{"card_number": map[string]string{"mastercard": "5", "amex": "3"}[v.Card.Brand] + "xxxxxxxxxxx" + v.Card.Last4, "card_exp": "1235", "card_type": v.Card.Brand}
-	if details["card_number"] == "xxxxxxxxxxx"+v.Card.Last4 {
-		details["card_number"] = "4xxxxxxxxxxx" + v.Card.Last4
+	details := func(c card) obj {
+		prefix := map[string]string{"mastercard": "5", "amex": "3"}[c.Brand]
+		if prefix == "" {
+			prefix = "4"
+		}
+		d := obj{"card_number": prefix + "xxxxxxxxxxx" + c.Last4, "card_exp": "1235", "card_type": c.Brand}
+		if v.NoBrand {
+			delete(d, "card_type")
+		}
+		return d
 	}
-	if v.NoBrand {
-		delete(details, "card_type")
-	}
-	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": details}}
+	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": details(v.Card)}}
 	for i, b := range v.Extra {
-		billing = append(billing, obj{"id": b.ID, "priority": i + 2, "payment_details": obj{"card_number": "4xxxxxxxxxxx" + b.Card.Last4, "card_exp": "1235", "card_type": b.Card.Brand}})
+		billing = append(billing, obj{"id": b.ID, "priority": i + 2, "payment_details": details(b.Card)})
 	}
 	return obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing}
+}
+
+// cardFor is the vault card a request's billing_id names ("" = the primary).
+func (v *nmiVault) cardFor(billingID string) (*card, bool) {
+	if billingID == "" || billingID == v.BillingID {
+		return &v.Card, true
+	}
+	for i := range v.Extra {
+		if v.Extra[i].ID == billingID {
+			return &v.Extra[i].Card, true
+		}
+	}
+	return nil, false
+}
+
+// removeBilling deletes one billing entry; NMI promotes the next entry when
+// the primary goes and refuses to empty a vault.
+func (v *nmiVault) removeBilling(billingID string) bool {
+	if billingID == v.BillingID {
+		if len(v.Extra) == 0 {
+			return false
+		}
+		v.BillingID, v.Card, v.Extra = v.Extra[0].ID, v.Extra[0].Card, v.Extra[1:]
+		return true
+	}
+	for i := range v.Extra {
+		if v.Extra[i].ID == billingID {
+			v.Extra = append(v.Extra[:i], v.Extra[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
@@ -284,6 +320,31 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 			data = append(data, f.customer(f.vaults[id]))
 		}
 		return 200, obj{"customers": data, "has_more": false}
+	case seg[0] == "customers" && len(seg) == 3 && seg[2] == "billing" && method == http.MethodPost:
+		v, ok := f.vaults[seg[1]]
+		if !ok {
+			return nmiNotFound()
+		}
+		var one struct {
+			PaymentDetails struct {
+				PaymentToken string `json:"payment_token"`
+			} `json:"payment_details"`
+		}
+		_ = json.Unmarshal(body, &one)
+		c, ok := f.tokens[one.PaymentDetails.PaymentToken]
+		if !ok {
+			return 400, obj{"type": "invalid", "message": "bad token"}
+		}
+		delete(f.tokens, one.PaymentDetails.PaymentToken) // single use
+		b := nmiBilling{ID: f.next("bill"), Card: c}
+		v.Extra = append(v.Extra, b)
+		return 200, obj{"object": "billing", "id": b.ID}
+	case seg[0] == "customers" && len(seg) == 4 && seg[2] == "billing" && method == http.MethodDelete:
+		v, ok := f.vaults[seg[1]]
+		if !ok || !v.removeBilling(seg[3]) {
+			return 400, obj{"type": "invalid", "message": "billing entry cannot be removed"}
+		}
+		return 200, f.customer(v)
 	case seg[0] == "customers" && len(seg) == 2:
 		v, ok := f.vaults[seg[1]]
 		if !ok {
@@ -424,7 +485,11 @@ func (f *nmiFake) sale(form url.Values) string {
 	if v == nil {
 		return "response=3&responsetext=Invalid+Customer+Vault+Id&response_code=300"
 	}
-	if code := v.Card.Decline; code != "" {
+	charged, ok := v.cardFor(form.Get("billing_id"))
+	if !ok {
+		return "response=3&responsetext=Invalid+Billing+Id&response_code=300"
+	}
+	if code := charged.Decline; code != "" {
 		d := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, Amount: form.Get("amount"), Currency: strings.ToUpper(form.Get("currency")), Declined: code, At: time.Now().UTC()}
 		f.declined = append(f.declined, d)
 		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&orderid=%s&response_code=%s", d.TransactionID, d.OrderID, code)
@@ -445,7 +510,7 @@ func (f *nmiFake) sale(form url.Values) string {
 	}
 	s := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
 		Currency: currency, InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
-		Initial: form.Get("initial_transaction_id"), Card: v.Card, At: time.Now().UTC()}
+		Initial: form.Get("initial_transaction_id"), Card: *charged, At: time.Now().UTC()}
 	if s.BillingID == "" {
 		s.BillingID = v.BillingID
 	}
@@ -479,6 +544,18 @@ func (f *nmiFake) search(orderID, transactionID, scheduleID, vault string) strin
 		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
 			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, success, code, s.At.Format("20060102150405"))
 	}
+	for _, v := range f.validations {
+		order := v.Form.Get("orderid")
+		if (orderID != "" && order != orderID) || (transactionID != "" && v.TransactionID != transactionID) || scheduleID != "" || (vault != "" && v.Vault != vault) {
+			continue
+		}
+		success, code := "1", "100"
+		if !v.Approved {
+			success, code = "0", v.Card.Decline
+		}
+		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>USD</currency><action><amount>0.00</amount><action_type>validate</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
+			v.TransactionID, order, v.Vault, success, code, time.Now().UTC().Format("20060102150405"))
+	}
 	b.WriteString("</nm_response>")
 	return b.String()
 }
@@ -491,6 +568,11 @@ func (f *nmiFake) setDecline(last4, code string) {
 	for _, v := range f.vaults {
 		if v.Card.Last4 == last4 {
 			v.Card.Decline = code
+		}
+		for i := range v.Extra {
+			if v.Extra[i].Card.Last4 == last4 {
+				v.Extra[i].Card.Decline = code
+			}
 		}
 	}
 }
@@ -765,17 +847,24 @@ func (f *nmiFake) validate(form url.Values) string {
 	if v == nil {
 		return "response=3&responsetext=Invalid+Customer+Vault+Id&response_code=300"
 	}
+	c, ok := v.cardFor(form.Get("billing_id"))
+	if !ok {
+		return "response=3&responsetext=Invalid+Billing+Id&response_code=300"
+	}
 	id := f.next("validate")
-	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, Form: form})
-	if code := v.Card.Decline; code != "" && code != "202" && code != "203" {
-		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&response_code=%s", id, code)
+	approved := c.Decline == "" || c.Decline == "202" || c.Decline == "203"
+	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, BillingID: form.Get("billing_id"), Card: *c, Approved: approved, Form: form})
+	if !approved {
+		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&response_code=%s", id, c.Decline)
 	}
 	return fmt.Sprintf("response=1&responsetext=VALIDATED&transactionid=%s&response_code=100", id)
 }
 
 type nmiValidation struct {
-	TransactionID, Vault string
-	Form                 url.Values
+	TransactionID, Vault, BillingID string
+	Card                            card
+	Approved                        bool
+	Form                            url.Values
 }
 
 // validationOf is the approved card verification of a vault, or nil.

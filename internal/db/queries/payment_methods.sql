@@ -316,3 +316,17 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(rail_method_ref);
+
+-- name: ReplacePaymentMethodCard :execrows
+-- An in-place card replacement moves the method onto the verified billing
+-- entry: card metadata and its recurring agreement change together.
+UPDATE openrails.payment_methods SET
+    rail_method_ref = sqlc.arg(new_rail_method_ref)::text,
+    last_four = sqlc.narg(last_four),
+    card_type = sqlc.narg(card_type),
+    expiry_date = sqlc.narg(expiry_date),
+    metadata = sqlc.narg(metadata),
+    stored_credential_recurring_ref = sqlc.arg(recurring_ref)::text,
+    updated_at = sqlc.arg(updated_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND rail_method_ref = sqlc.arg(old_rail_method_ref)::text;

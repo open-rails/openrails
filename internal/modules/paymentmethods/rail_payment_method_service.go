@@ -567,6 +567,9 @@ type PaymentMethodUpdateOutcome struct {
 	Retokenize bool
 	Terminal   bool
 	Reason     string
+	// DeclineCode is set when the issuer refused to verify the replacement
+	// card; the method keeps its previous card.
+	DeclineCode string
 }
 
 type PaymentMethodUpdateExecutor interface {
@@ -613,6 +616,8 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 		return out.Method, nil
 	case out.Retokenize:
 		return nil, ErrPaymentMethodRetokenize
+	case out.DeclineCode != "":
+		return nil, &PaymentMethodError{Err: errors.New(out.Reason), LocalizationID: out.DeclineCode, Message: "card verification failed: " + out.Reason}
 	case out.Terminal:
 		return nil, &PaymentMethodUpdateFailedError{Reason: out.Reason}
 	default:
