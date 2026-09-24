@@ -5303,7 +5303,7 @@
     "embed/transport.go": "9d8695d0fcacdb9a2f71c1f89acf4200b2581273e8238e03df27c8d45e4c6fc3",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
     "examples/embedded/main.go": "946fdbc0e1208593e1542c7a06ebf71cb7543d197268ef55e01ae204eb18f0b9",
-    "internal/app/runtime.go": "baccf4a21c1dbdf48d70186f40a14bdad50b628b994c3bba93830d8249b52833",
+    "internal/app/runtime.go": "b5ff29a457ff4c32d1ff5e76f7442d2ddbcd0985b007f848f4fab80820f079d3",
     "internal/auth/delegated.go": "d0cc54d53043dbf70fca244031bf96921a7e737175f513f0a50747b36525725f",
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",
     "internal/auth/provider.go": "bca5b1e71635a8ac9d0f7fdb3324de353a6eea81d35815384ba49e9e2aeca915",
