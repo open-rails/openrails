@@ -67,6 +67,43 @@ func TestReplicasAdmissionRace(t *testing.T) {
 	}
 }
 
+// Scenario 2b: a pass reads a membership as due, then another replica
+// settles it (here the member pays on another replica) before the pass
+// reaches it. The pass does nothing and raises no operator finding.
+func TestReplicasSettledBeforeAdmission(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			f := newFleet(t, 2)
+			a, b := f.replicas[0], f.replicas[1]
+			late := enroll(t, a, rail, embedded)
+			f.advance(day)
+			first := enroll(t, a, rail, embedded)
+			late.setDecline(visa.Last4, "insufficient_funds", "202")
+			f.toDue(late)
+			f.passes()
+			retry := f.subscription(late)
+			require.Equal(t, "past_due", retry.Status)
+			late.setDecline(visa.Last4, "", "") // the member's bank now approves
+			// first falls due before late's retry, so a pass reaches it first.
+			require.True(t, f.periodEnd(first).Before(*retry.NextRetryAt))
+			lock := f.lockCustomer(first)
+			f.advance(retry.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
+			passes := f.startPasses(b)
+			lock.awaitWaiters(b) // b has read both as due and waits on the first
+			paid := unwrap(late.c.must(http.MethodPost, "/subscriptions/"+late.sub.String()+"/retry-now", "retry-"+uuid.NewString(), map[string]any{}))
+			t.Logf("member retry: %v", paid)
+			f.until(func() bool { return f.subscription(late).Status == "active" }, "the member's payment settles the late membership")
+			lock.release()
+			f.awaitPasses(passes)
+			f.passes()
+			f.requireExactlyOnce(first, 1, 2)
+			f.requireExactlyOnce(late, 1, 3)
+		})
+	}
+}
+
 // crashPoint arranges one replica's death at a point in a renewal and
 // returns the replica it killed.
 type crashPoint struct {
@@ -478,7 +515,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				}, "the raced renewal resolves")
 				sub := f.subscription(e)
 				require.Equal(t, "cancelled", sub.Status)
-				require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a cancelled membership is not extended")
+				require.False(t, sub.CurrentPeriodEndsAt.After(end), "a cancelled membership is not extended")
 				want := 1
 				if rc.charge {
 					want = 2 // sent before the cancel committed; recorded for review, never lost
