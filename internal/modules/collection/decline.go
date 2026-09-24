@@ -351,7 +351,11 @@ func ClassifyDeclineDetail(rail, code string) Classification {
 	// Bucket 1 either way; the only question left is whether the rail's own
 	// normalized-reason table recognizes the code. If it does, bucket 1 is a
 	// decision. If it does not, nobody has ever mapped this code.
-	if payments.NormalizeFailureReason(c.Rail, lowered) != payments.FailureUnknown {
+	reason := lowered
+	if c.Rail == "nmi" {
+		reason = strings.TrimPrefix(strings.TrimPrefix(reason, "nmi_response_"), "nmi_")
+	}
+	if payments.NormalizeFailureReason(c.Rail, reason) != payments.FailureUnknown {
 		c.Coverage = CoverageKnownRetry
 	}
 	return c

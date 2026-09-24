@@ -181,7 +181,7 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	case OriginSystem:
 		return c.checkSystem(ctx, p, now)
 	default:
-		return nil
+		return fmt.Errorf("rate ceiling: destructive op has unknown origin %q", p.Origin) // fail closed
 	}
 	// A gated op with a broken/absent gate FAILS CLOSED: a compromised path must
 	// never sail through a gate that cannot evaluate.
