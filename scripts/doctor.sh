@@ -217,21 +217,6 @@ else
     fi
 fi
 
-docker_host="${DOCKER_HOST:-}"
-if [ -z "$docker_host" ] && [ "$docker_ok" = true ]; then
-    docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
-fi
-case "$docker_host" in
-    *colima*)
-        if [ -n "${DOCKER_HOST:-}" ] && [ "${TESTCONTAINERS_RYUK_DISABLED:-}" = "true" ]; then
-            pass "testcontainers" "Colima socket configured with Ryuk disabled"
-        else
-            fail "testcontainers" "Colima detected at $docker_host" "export DOCKER_HOST='$docker_host' and TESTCONTAINERS_RYUK_DISABLED=true"
-        fi
-        ;;
-    *) pass "testcontainers" "Docker is not using a Colima socket" ;;
-esac
-
 tracked_hooks=0
 for source_hook in "$root"/scripts/hooks/*; do
     [ -f "$source_hook" ] || continue

@@ -2,10 +2,11 @@
 
 The greenfield suite is the small contract gate for the OpenRails API. It is
 intentionally independent of `internal/dbtest`, `internal/integrationharness`,
-Redis, testcontainers, provider credentials, browser automation, and direct
-application-table SQL.
+Redis, testcontainers, provider credentials, browser automation. Ordinary lifecycle setup uses public APIs. Narrow
+subscription fixtures use direct SQL only for crash-state rewind and the
+operator destructive-action switches.
 
-The first slice has eight focused contracts:
+The initial slice has eight focused contracts:
 
 - fresh migration plus replay, product/price creation, and entitlement offer
   selection;
@@ -23,10 +24,16 @@ The first slice has eight focused contracts:
   half-away-from-zero rounding, overflow rejection, USD sub-cent refusal, and
   zero-decimal JPY scaling.
 
+The `ci/greenfield/subscriptions` package adds engine- and provider-owned
+Stripe/NMI lifecycle scenarios: confirmation, renewal, dunning, card replacement,
+cancel/resume, repricing, refunds, and crash recovery. The
+[coverage map](greenfield-coverage.md) records the exact cases and gaps.
+
 Each test creates one random OpenRails schema in the PostgreSQL service, applies
 the public `embed.ApplyMigrations` entry point, constructs an embedded runtime,
-and drops the schema during cleanup. The suite never reads migration files or
-writes billing rows itself. A missing DSN is an error, so an empty test job
+and drops the schema during cleanup. The suite never reads migration files. Ordinary billing fixtures use the
+public client and HTTP routes; the subscription crash/operator fixtures are
+the direct-SQL exceptions described above. A missing DSN is an error, so an empty test job
 cannot report green.
 
 Run it locally with:
@@ -36,7 +43,8 @@ OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_
   bash scripts/greenfield.sh
 ```
 
-The former broad integration workflow has been removed. The legacy `native_engine_signup`
-workflow remains the full engine-owned confirmation, renewal, dunning, and
-entitlement oracle. The old suite is not removed until focused scenarios have
-earned equivalent receipts.
+The former broad integration, browser, and devnet harnesses have been removed,
+including `native_engine_signup`. The contracts listed above are the current
+coverage boundary. The new subscription scenarios earn their own lifecycle coverage; deleted
+tests do not provide a current regression oracle. Real PSP and chain
+qualification requires separate, explicitly scoped operator evidence.
