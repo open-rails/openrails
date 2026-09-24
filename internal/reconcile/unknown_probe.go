@@ -222,7 +222,7 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	// backfilled failed attempt and the eventual success never collide. Only
 	// recorded when Stripe gives the invoice's own created time (#651: no
 	// fabricated instants).
-	if !rec.LatestInvoicePaid && rec.LatestInvoiceAmountDue > 0 &&
+	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 &&
 		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
 		snap.Transactions = append(snap.Transactions, RemoteTransaction{
 			TransactionID:  "failed:" + rec.LatestInvoiceTransactionID,

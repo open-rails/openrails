@@ -116,7 +116,20 @@ func TestProviderOwnedRenewals(t *testing.T) {
 		require.Equal(t, charges, l.engineCharges(), "no engine charge for a provider-owned subscription")
 		require.True(t, l.c.entitled(l.ent), "standing access while the provider bills")
 
-		first := l.providerRenewal(true)
+		var first obj
+		if rail == "stripe" {
+			// Stripe first rolls the period with a draft invoice; that is a
+			// renewal in progress, never a decline.
+			require.Equal(t, http.StatusOK, w.deliver(rail, stripeEvent("customer.subscription.updated", w.stripe.providerDraft(l.railSub))))
+			sub := w.subscription(tp, l.sub)
+			require.Equal(t, "active", sub.Status, "a draft invoice is not a failed renewal")
+			for _, p := range w.payments(tp, l.c.id) {
+				require.NotEqual(t, "failed", p.Status, "no failed payment for a draft invoice")
+			}
+			first = stripeEvent("invoice.paid", w.stripe.providerCollectDraft(l.railSub))
+		} else {
+			first = l.providerRenewal(true)
+		}
 		require.Equal(t, http.StatusOK, w.deliver(rail, first))
 		require.Equal(t, http.StatusOK, w.deliver(rail, first), "a duplicate delivery")
 		renewed := l.periodEnd()

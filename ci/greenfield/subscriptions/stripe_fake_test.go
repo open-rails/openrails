@@ -480,7 +480,7 @@ func (f *stripeFake) invoiceLocked(subID string, amount int64, paid bool) obj {
 		inv["status"], inv["amount_paid"] = "paid", amount
 		inv["payments"] = obj{"object": "list", "data": []obj{{"object": "invoice_payment", "status": "paid", "payment": obj{"type": "payment_intent", "payment_intent": pi["id"], "charge": ch["id"]}}}}
 	} else {
-		inv["status"], inv["amount_paid"] = "open", int64(0)
+		inv["status"], inv["amount_paid"], inv["attempt_count"] = "open", int64(0), int64(1)
 		inv["payments"] = obj{"object": "list", "data": []obj{}}
 	}
 	s["latest_invoice"] = inv
@@ -502,6 +502,33 @@ func (f *stripeFake) providerRenew(subID string, paid bool) obj {
 		s["status"] = "past_due"
 	}
 	return f.invoiceLocked(subID, amount, paid)
+}
+
+// providerDraft is Stripe rolling the subscription into its next period
+// with a draft invoice it has not finalized or tried to collect yet.
+func (f *stripeFake) providerDraft(subID string) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.subs[subID]
+	item := s["items"].(obj)["data"].([]obj)[0]
+	start := item["current_period_end"].(int64)
+	item["current_period_start"], item["current_period_end"] = start, start+monthHours*3600
+	s["latest_invoice"] = obj{"object": "invoice", "id": f.id("in"), "customer": s["customer"], "currency": "usd", "status": "draft", "amount_due": item["price"].(obj)["unit_amount"], "amount_paid": int64(0),
+		"attempt_count": int64(0), "created": time.Now().Unix(), "billing_reason": "subscription_cycle", "payments": obj{"object": "list", "data": []obj{}},
+		"parent": obj{"type": "subscription_details", "subscription_details": obj{"subscription": subID}}}
+	raw, _ := json.Marshal(s)
+	out := obj{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// providerCollectDraft finalizes and pays the draft invoice.
+func (f *stripeFake) providerCollectDraft(subID string) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.subs[subID]
+	amount := s["items"].(obj)["data"].([]obj)[0]["price"].(obj)["unit_amount"].(int64)
+	return f.invoiceLocked(subID, amount, true)
 }
 
 // providerCancel is the subscription ended at Stripe (dashboard or dunning).
