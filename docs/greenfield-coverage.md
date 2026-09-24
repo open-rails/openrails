@@ -23,7 +23,7 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Subscription changes | Cancellation/resumption, host account-deletion cancellation, repricing, replacing a card | Full tier-change/proration matrix, trials and bulk plan migration |
 | Refunds | Engine subscription renewal refunds, repeated refund requests and provider notifications | One-time partial refunds, concurrent over-refund refusal, archive-with-refund/review operations |
 | Payment uncertainty and restart | Engine request interruption/restart, late receipts, duplicate refusal and abandoned authentication | Every sale/refund/cutover uncertainty path; no test may infer no charge from a timeout |
-| Webhooks | Signed Stripe completion/replay/stale expiry, provider-owned subscription notices | Forged signatures, wrong account, thin-event URL validation, CCBill and Solana notifications |
+| Webhooks | Signed Stripe completion/replay/stale expiry, provider-owned subscription notices, CCBill posts through a trusted proxy with foreign source IPs refused | Forged signatures, wrong account, thin-event URL validation, Solana notifications |
 | River jobs | Real shared fleet, scheduled renewal, operation recovery, interrupted rescue-worker recovery and restart after completed rescue work | Host/managed ownership permutations, arbitrary schema migration concurrency, stalled queue health |
 | Embedded/HTTP client parity | Subscription scenarios run embedded and remote clients against mounted HTTP routes | Full catalog, treasury, configuration and archive parity; standalone executable boot |
 | PostgreSQL initialization | Fresh schema, public migration entry point, replay and runtime startup | Concurrent bootstrap, one-connection pool, privilege grants, drift refusal and restored databases |
@@ -35,7 +35,7 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Provider/custodian account migration | No focused scenario yet | Freeze source/target identity, paused destination, exact cancellation receipts, no double billing |
 | Merchant configuration and portability | Constructor provisioning exercised incidentally | Versioned configuration, slug forwarding, export/import, retirement, shared-schema purge isolation |
 | Authentication/authorization | Neutral host verification used in subscription routes; some permission boundaries exercised incidentally | Explicit negative user/machine/delegated tests, live permissions, issuer/audience and tenant authority |
-| Other rails | NMI/Mobius and Stripe modeled | CCBill lifecycle and constraints, Solana transfer/signature/recurring paths, external vault adapters |
+| Other rails | NMI/Mobius and Stripe modeled; imported CCBill memberships: renewal/replay, decline then recovery, cancellation (incl. failedRB), expiration, refund/chargeback reversals, refused new sale | CCBill Void/Upgrade/BillingDateChange/UserReactivation, Solana transfer/signature/recurring paths, external vault adapters |
 | Self-service, administration and reporting | Subscription and payment reads used as assertions | `/me` pagination, notifications, billing portal, analytics, metrics/copilot, readiness, rate limits, CLI and browser UX |
 
 The highest-value additions after both NMI ownership paths are treasury/ledger

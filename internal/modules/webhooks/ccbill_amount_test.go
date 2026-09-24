@@ -74,15 +74,11 @@ func TestParseCCBillAmountCentsAllowsZeroForTrial(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestCCBillSuccessRequiresTransactionID(t *testing.T) {
+func TestCCBillRenewalRequiresTransactionID(t *testing.T) {
 	t.Parallel()
 
 	svc := &CCBillWebhookService{}
-	err := svc.handleNewSaleSuccessInternal(context.Background(), &CCBillNewSaleSuccessEvent{})
-	require.Error(t, err)
-	require.True(t, shouldTreatCCBillErrorAsNonRetryable(err))
-
-	err = svc.handleRenewalSuccessInternal(context.Background(), &CCBillRenewalSuccessEvent{})
+	err := svc.handleRenewalSuccessInternal(context.Background(), &CCBillRenewalSuccessEvent{})
 	require.Error(t, err)
 	require.True(t, shouldTreatCCBillErrorAsNonRetryable(err))
 }
