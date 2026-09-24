@@ -501,7 +501,7 @@ func nmiUpgradeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeRespon
 	subID := openrails.SubscriptionID(p.OldSubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: "upgrade", PriceID: (openrails.PriceID(p.PriceID)).String(),
+		Object: "tier_change", Mode: "tier_change", Action: "upgrade", Effective: "now", PriceID: (openrails.PriceID(p.PriceID)).String(),
 		Payment: CheckoutSessionPaymentResponse{Rail: in.Rail}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(),

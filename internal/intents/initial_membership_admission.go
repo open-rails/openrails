@@ -64,11 +64,22 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
-		if err == nil {
+		// An upgrade replaces exactly one live membership of its tier group; the
+		// partial unique index admits no second one, so that row is the only
+		// conflict it may name.
+		if terms.Upgrade() {
+			if p.SubscriptionID == nil || *p.SubscriptionID != terms.Terms.Replaces.SubscriptionID {
+				return errors.New("engine upgrade must name the membership it replaces")
+			}
+			if _, err := subscriptions.LockReplacedMembership(ctx, d, terms.Terms, models.Rail(p.Provider), true); err != nil {
+				return err
+			}
+		}
+		conflict, err := d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
+		if err == nil && (!terms.Upgrade() || conflict.ID != terms.Terms.Replaces.SubscriptionID) {
 			return apperr.Conflictf("customer already has a subscription for this product or tier group")
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})

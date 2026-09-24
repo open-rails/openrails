@@ -41,7 +41,16 @@ type InitialMembershipPayload struct {
 	PSP                    string                     `json:"psp"`
 	Email                  string                     `json:"email,omitempty"`
 	E2ERunID               string                     `json:"e2e_run_id,omitempty"`
+	// RequestedPrice is the price reference a tier upgrade named (an id or
+	// price key); a replay may name either it or the canonical price id.
+	RequestedPrice string `json:"requested_price,omitempty"`
 }
+
+// TierChangeKeyPrefix scopes an upgrade's client key beside checkout keys.
+const TierChangeKeyPrefix = "tier_change:"
+
+// Upgrade reports whether this operation is an engine tier upgrade.
+func (p InitialMembershipPayload) Upgrade() bool { return p.Terms.Replaces != nil }
 
 func (p InitialMembershipPayload) DelayedStart() *time.Time {
 	if p.Terms.Pending {
@@ -65,6 +74,9 @@ func DecodeInitialMembershipPayload(in gen.OpenrailsRailIntent) (InitialMembersh
 	if p.CheckoutSessionID != nil && (*p.CheckoutSessionID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
 		return p, errors.New("initial membership has invalid quoted-session binding")
 	}
+	if p.Upgrade() != (p.RequestedPrice != "") || (p.Upgrade() && (p.CheckoutSessionID != nil || !strings.HasPrefix(p.CheckoutIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != p.Terms.Replaces.SubscriptionID)) {
+		return p, errors.New("engine upgrade has no exact tier-change binding")
+	}
 	if err := p.Terms.Validate(); err != nil {
 		return p, err
 	}
@@ -81,7 +93,7 @@ func DecodeInitialMembershipPayload(in gen.OpenrailsRailIntent) (InitialMembersh
 		return p, err
 	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
-		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
+		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !p.Upgrade()) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
 			return p, errors.New("engine initial membership requires its positive customer charge and permanent custody, without a native schedule")
 		}
 		return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch, false)

@@ -1477,7 +1477,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	}
 	// One unresolved tier change owns the subscription on every rail: a
 	// request under another key is pointed at it.
-	if err := s.refuseTierChangeInFlight(ctx, existingSub.ID); err != nil {
+	if err := s.refuseTierChangeInFlight(ctx, existingSub); err != nil {
 		return nil, err
 	}
 
@@ -1516,7 +1516,15 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		action = "downgrade"
 	}
 
-	// 6. Route to rail-specific handler based on config type detection
+	// 6. Engine-owned subscriptions have no provider schedule on any rail.
+	if existingSub.CollectionPolicy == models.CollectionPolicyEngine {
+		if action == "downgrade" {
+			return s.processEngineDowngrade(ctx, newPrice, newProduct, existingSub)
+		}
+		return s.processEngineUpgrade(ctx, req, user, newPrice, newProduct, existingSub, currentPrice)
+	}
+
+	// 7. Route to rail-specific handler based on config type detection
 	// This allows adding new NMI providers via config without code changes
 	rail := string(existingSub.Rail)
 
@@ -1616,6 +1624,9 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 		NextChargeAmount: newPrice.Amount,
 	}
 
+	if existingSub.CollectionPolicy == models.CollectionPolicyEngine {
+		return s.previewEngineTierChange(ctx, resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
+	}
 	if newProduct.TierRank < currentProduct.TierRank {
 		if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "downgrade"); err != nil {
 			return nil, err
@@ -2015,6 +2026,7 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 		},
 		Message:      resp.Message,
 		DelayedStart: resp.DelayedStart,
+		Effective:    effectiveOf(action),
 	}
 
 	// Map status

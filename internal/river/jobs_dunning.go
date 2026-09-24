@@ -319,6 +319,9 @@ func (w *DunningWorker) processSubscription(
 			return dunningOutcomeFailed, nil
 		}
 		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())
+		if errors.Is(err, subscriptions.ErrRenewalHeldByUpgrade) {
+			return dunningOutcomeFailed, nil
+		}
 		return dunningOutcomeMaterialized, err
 	}
 	ctx = db.WithPSPID(ctx, sub.PspID)

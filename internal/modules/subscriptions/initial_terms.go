@@ -31,6 +31,19 @@ type InitialMembershipTerms struct {
 	PeriodEnd        time.Time               `json:"period_end"`
 	Pending          bool                    `json:"pending"`
 	Entitlements     map[string]*int         `json:"entitlements"`
+	// Replaces is set on an engine tier upgrade: accepting this membership
+	// supersedes that one. Amount is then the prorated charge and
+	// RecurringAmount the new price every renewal bills.
+	Replaces *ReplacedMembership `json:"replaces,omitempty"`
+}
+
+// ReplacedMembership freezes the engine membership an upgrade supersedes as
+// the customer saw it: completion refuses if it moved since.
+type ReplacedMembership struct {
+	SubscriptionID uuid.UUID `json:"subscription_id"`
+	PriceID        uuid.UUID `json:"price_id"`
+	PeriodEnd      time.Time `json:"period_end"`
+	Credit         int64     `json:"credit,string"`
 }
 
 func (t InitialMembershipTerms) Validate() error {
@@ -47,6 +60,11 @@ func (t InitialMembershipTerms) Validate() error {
 	}
 	if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
 		return err
+	}
+	if r := t.Replaces; r != nil {
+		if t.CollectionPolicy != models.CollectionPolicyEngine || t.Pending || r.SubscriptionID == uuid.Nil || r.SubscriptionID == t.SubscriptionID || r.PriceID == uuid.Nil || r.PriceID == t.PriceID || !r.PeriodEnd.After(t.AcceptedAt) || !r.PeriodEnd.Equal(r.PeriodEnd.Truncate(time.Microsecond)) || t.Amount <= 0 || r.Credit < 0 || t.Amount+r.Credit != t.RecurringAmount {
+			return errors.New("engine upgrade terms contradict the membership they replace")
+		}
 	}
 	_, err := moneyutil.NativeToRailMinorExact(t.Currency, t.RecurringAmount)
 	return err

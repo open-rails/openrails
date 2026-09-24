@@ -34,6 +34,7 @@ const (
 	CancelTypeMerchant   CancelType = "merchant"   // We manually cancelled for them
 	CancelTypeExpired    CancelType = "expired"    // User failed to rebill
 	CancelTypeChargeback CancelType = "chargeback" // Cancelled due to chargeback
+	CancelTypeUpgrade    CancelType = "upgrade"    // Superseded by a tier upgrade
 )
 
 type Subscription struct {

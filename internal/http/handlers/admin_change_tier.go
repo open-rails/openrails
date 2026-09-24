@@ -116,7 +116,9 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 		r.ErrorJSON(http.StatusConflict, "only active or past-due subscriptions can change tier")
 		return false
 	}
-	if subscription.ScheduledPriceID != nil {
+	// An engine subscription's service answers its own schedule: the same
+	// downgrade replays, another is a typed refusal, an upgrade replaces it.
+	if subscription.ScheduledPriceID != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
 		r.ErrorJSON(http.StatusConflict, "subscription already has a tier change scheduled")
 		return false
 	}
