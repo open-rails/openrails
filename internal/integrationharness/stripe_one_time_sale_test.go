@@ -104,7 +104,8 @@ func stripeOneTimeSale(t *testing.T, first, reason, field string, attempts int) 
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/cancel"):
 			cancels++
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/payment_intents/"), "/cancel")
-			payments[id]["status"] = "canceled"
+			// Stripe clears the method and the last error when it cancels.
+			payments[id]["status"], payments[id]["payment_method"], payments[id]["last_payment_error"] = "canceled", nil, nil
 			write(payments[id])
 		case r.Method == "GET" && r.URL.Path == "/v1/payment_intents":
 			list := []any{}

@@ -83,7 +83,14 @@ func (h *NMISaleIntentHandler) recoverStripeSale(ctx context.Context, in gen.Ope
 		return intents.Ambiguous("submitted Stripe sale requires exact readback; no resend")
 	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
+		// Cancellation erases the decline reason at Stripe; retain it first.
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, current.ID, map[string]any{"decline_code": result.FailureCode}); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
 		if _, err := service.FinalizeEngineDecline(ctx, params, result.PaymentIntentID); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+		if current, err = intents.NewStore(h.database()).Get(ctx, current.ID); err != nil {
 			return intents.Ambiguous(err.Error())
 		}
 	}
@@ -119,7 +126,11 @@ func (h *NMISaleIntentHandler) verifyStripeSale(ctx context.Context, in gen.Open
 		if result.FailureCode != "canceled" {
 			return intents.Retryable("Stripe decline requires gated cancellation of the same payment")
 		}
-		evidence := map[string]any{"declined": true, "decline_code": result.DeclineCode}
+		code := result.DeclineCode
+		if retained := intents.EvidenceString(in, "decline_code"); retained != "" {
+			code = retained
+		}
+		evidence := map[string]any{"declined": true, "decline_code": code}
 		if err := store.RecordProgress(ctx, in.ID, evidence); err != nil {
 			return intents.Ambiguous("cannot retain sale refusal: " + err.Error())
 		}
