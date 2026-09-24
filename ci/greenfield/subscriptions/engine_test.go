@@ -215,7 +215,9 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 			end := e.periodEnd()
 			e.toPeriodEnd()
 			w.restart()
-			deadline := time.Now().Add(30 * time.Second)
+			// The due pass runs on start and every minute, once per minute: a
+			// restart inside the minute its predecessor ran waits for the next.
+			deadline := time.Now().Add(90 * time.Second)
 			for !w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) {
 				require.True(t, time.Now().Before(deadline), "the runtime renews without a manual pass")
 				w.settle()
@@ -706,11 +708,11 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 }
 
 // Scenario 6: a process dies mid-renewal and a new one takes over the same
-// database. Before submission the renewal simply runs after restart; after a
-// submission whose response was lost, recovery reads the provider and never
-// sends a second charge. A request that never reached the provider stays
-// unresolved for an operator rather than being re-sent blind (documented:
-// absence of evidence never authorizes a second financial submission).
+// database. Before submission the renewal simply runs after restart. After a
+// submission whose response was lost, recovery adopts the provider's charge.
+// A request that never reached the provider is re-sent under the same
+// reference once the provider's read settles on "no transaction" (the soak's
+// SIGKILL case). Every path ends with exactly one renewal charge.
 func TestEngineCrashDurability(t *testing.T) {
 	t.Parallel()
 	submit := map[string]func(*http.Request) bool{
@@ -726,16 +728,16 @@ func TestEngineCrashDurability(t *testing.T) {
 		},
 	}
 	cases := []struct {
-		name    string
-		match   map[string]func(*http.Request) bool
-		commit  bool
-		charges int
-		renewed bool
+		name   string
+		match  map[string]func(*http.Request) bool
+		commit bool
+		hard   bool
 	}{
-		{"before_submit", beforeSubmit, false, 2, true},
-		{"after_submit_response_lost", submit, true, 2, true},
-		{"lost_before_provider", submit, false, 1, false},
-		{"hard_kill_after_submit", submit, true, 2, true},
+		{"before_submit", beforeSubmit, false, false},
+		{"after_submit_response_lost", submit, true, false},
+		{"lost_before_provider", submit, false, false},
+		{"hard_kill_after_submit", submit, true, true},
+		{"hard_kill_lost_before_provider", submit, false, true},
 	}
 	for _, rail := range rails {
 		for _, tc := range cases {
@@ -767,7 +769,7 @@ func TestEngineCrashDurability(t *testing.T) {
 				case <-time.After(20 * time.Second):
 					t.Fatal("the renewal never reached the provider")
 				}
-				if tc.name == "hard_kill_after_submit" {
+				if tc.hard {
 					w.kill() // nothing the dying process was doing is recorded
 				} else {
 					w.stop() // the process dies with the request in flight
@@ -776,24 +778,94 @@ func TestEngineCrashDurability(t *testing.T) {
 				w.nmi.unhold()
 				w.start()
 				w.advance(30 * time.Minute) // past any executor lease
+				if tc.hard {
+					w.rescue() // the dead process's job, silent past the rescue window
+				}
 				w.wake()
 				w.runRenewals()
-				w.advance(30 * time.Minute)
+				w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the renewal resolves")
+				w.advance(time.Hour)
 				w.wake()
-				require.Len(t, e.providerLedger(), tc.charges, "never a second charge")
-				require.Len(t, completed(w.payments(embedded, e.c.id)), tc.charges, "local payments match the provider")
-				sub := w.subscription(embedded, e.sub)
-				require.Equal(t, tc.renewed, sub.CurrentPeriodEndsAt.After(end))
-				require.True(t, e.c.entitled(e.ent), "access holds while the renewal is renewed or still being decided")
-				if !tc.renewed {
-					w.advance(subscriptionsGrace)
-					w.runRenewals()
-					require.Len(t, e.providerLedger(), tc.charges, "an unresolved submission is never re-sent")
-					require.False(t, e.c.entitled(e.ent), "access is bounded by the renewal grace while unresolved")
-				}
+				require.Len(t, e.providerLedger(), 2, "exactly one renewal charge")
+				require.Len(t, completed(w.payments(embedded, e.c.id)), 2, "local payments match the provider")
+				require.True(t, e.c.entitled(e.ent))
 			})
 		}
 	}
+}
+
+// A submitted renewal the provider has no record of is decided by the
+// provider's authoritative read: nothing after the settle delay re-sends the
+// same operation (capped); a recorded decline or charge is adopted; an
+// unavailable read never re-sends and raises an operator finding.
+func TestEngineLostSubmission(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail+"/lost_in_transit", func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			e := enroll(t, w, rail, embedded)
+			end := e.periodEnd()
+			e.toPeriodEnd()
+			w.loseSubmissions(rail, 1)
+			w.runRenewals()
+			w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the lost renewal is re-sent")
+			require.Len(t, e.providerLedger(), 2, "exactly one renewal charge")
+			require.Len(t, completed(w.payments(embedded, e.c.id)), 2)
+			require.True(t, e.c.entitled(e.ent))
+			require.Empty(t, w.openFindings("life.submission.unresolved"))
+		})
+		t.Run(rail+"/read_unavailable", func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			e := enroll(t, w, rail, embedded)
+			end := e.periodEnd()
+			e.toPeriodEnd()
+			w.loseSubmissions(rail, 1)
+			w.readUnavailable(rail, true)
+			w.runRenewals()
+			w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unreadable submission is an operator finding")
+			for range 6 {
+				w.advance(time.Hour)
+				w.wake()
+			}
+			require.Equal(t, 1, e.providerAttempts(), "never re-sent while the provider cannot be read")
+			require.False(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
+			w.readUnavailable(rail, false)
+			w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the renewal resolves once the provider answers")
+			require.Len(t, e.providerLedger(), 2)
+			require.Empty(t, w.openFindings("life.submission.unresolved"), "the finding closes with the operation")
+		})
+		t.Run(rail+"/resend_cap", func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			e := enroll(t, w, rail, embedded)
+			end := e.periodEnd()
+			e.toPeriodEnd()
+			w.loseSubmissions(rail, 10)
+			w.runRenewals()
+			w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the spent cap is an operator finding")
+			for range 6 {
+				w.advance(time.Hour)
+				w.wake()
+			}
+			require.Len(t, e.providerLedger(), 1, "nothing reached the provider")
+			require.Equal(t, 3, w.lostSubmissions(rail), "the original and two resends, no more")
+			require.False(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
+		})
+	}
+	t.Run("nmi/declined_answer_lost", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		e := enroll(t, w, "nmi", embedded)
+		e.toPeriodEnd()
+		w.nmi.setDecline(visa.Last4, "202")
+		w.nmi.dropResponses(1)
+		w.runRenewals()
+		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the recorded decline is adopted")
+		require.Equal(t, 2, e.providerAttempts(), "the declined renewal is not re-sent")
+		require.Len(t, e.providerLedger(), 1)
+	})
 }
 
 // One membership the due pass cannot process never fails the pass: every

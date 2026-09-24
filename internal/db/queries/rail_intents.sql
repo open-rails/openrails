@@ -214,7 +214,8 @@ SET status = 'failed_retryable',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at'
+           AND NOT (intent_type = 'subscription_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'resend_armed'))
   AND NOT (intent_type = 'nmi_sale' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (intent_type = 'initial_membership' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted');
 
@@ -543,6 +544,19 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'rebill_preparation')
        OR result_evidence->'rebill_preparation' = sqlc.arg(preparation)::jsonb);
+
+-- name: ArmRailIntentResend :execrows
+-- A submitted engine collection whose provider read shows no transaction
+-- after the settle delay is armed for one gated resend of the same operation.
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('resend_armed', sqlc.arg(attempt)::int),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = 'subscription_collection'
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND COALESCE(result_evidence, '{}'::jsonb) ? 'submitted_at'
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['qualified_receipt', 'rebill_decline', 'stripe_recurring_decline', 'qualified_invoice_nonexecution'])
+  AND COALESCE((result_evidence->>'resend_armed')::int, 0) < sqlc.arg(attempt)::int;
 
 -- name: RetainRailIntentRebillDecline :execrows
 UPDATE openrails.rail_intents

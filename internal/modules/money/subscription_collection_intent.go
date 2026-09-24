@@ -65,21 +65,12 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 		if in.Rail == "stripe" {
 			return h.executeStripeEngineDecline(ctx, in)
 		}
-		return h.Verify(ctx, in)
+		return h.resendLostNMISubmission(ctx, in, p)
 	}
-	if h.Config == nil {
-		return intents.Parked("engine execution mode is not configured")
-	}
-	if h.Config.EngineAdmissionHold {
-		return intents.Parked("new engine payment submission is held")
-	}
-	if blocked, reason := intents.GateExecution(h.Config, intents.Origin(in.Origin)); blocked {
+	if reason := h.submissionHeld(in); reason != "" {
 		return intents.Parked(reason)
 	}
-	if h.Resolver == nil {
-		return intents.Parked("engine collection resolver is unavailable")
-	}
-	method, _, _, err := h.validateAndFence(ctx, in, p, false)
+	method, _, _, err := h.validateAndFence(ctx, in, p, nil)
 	if err != nil {
 		if errors.Is(err, errEngineObligationChanged) || errors.Is(err, charge.ErrInstrumentChanged) {
 			return h.completeNotExecuted(ctx, in, p, "instrument_changed", err.Error())
@@ -93,7 +84,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if err != nil {
 		return intents.Parked("arm accepted recurring charge: " + err.Error())
 	}
-	_, proof, first, err := h.validateAndFence(ctx, in, p, true)
+	_, proof, first, err := h.validateAndFence(ctx, in, p, h.firstSubmission(in))
 	if err != nil {
 		if errors.Is(err, errEngineObligationChanged) || errors.Is(err, charge.ErrInstrumentChanged) {
 			return h.completeNotExecuted(ctx, in, p, "instrument_changed", err.Error())
@@ -103,6 +94,28 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if !first {
 		return h.Verify(ctx, in)
 	}
+	return h.dispatchNMI(ctx, in, p, charger, proof)
+}
+
+func (h *SubscriptionCollectionHandler) submissionHeld(in gen.OpenrailsRailIntent) string {
+	if h.Config == nil {
+		return "engine execution mode is not configured"
+	}
+	if h.Config.EngineAdmissionHold {
+		return "new engine payment submission is held"
+	}
+	if blocked, reason := intents.GateExecution(h.Config, intents.Origin(in.Origin)); blocked {
+		return reason
+	}
+	if h.Resolver == nil {
+		return "engine collection resolver is unavailable"
+	}
+	return ""
+}
+
+// dispatchNMI sends the accepted charge under its order reference. Only the
+// writer of a fresh submission or resend fence calls it.
+func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof) intents.Outcome {
 	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
 	execute := charger.ChargeRecurringMIT
 	if p.Initiator == charge.InitiatorCustomer {
@@ -134,9 +147,25 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	return h.Verify(ctx, in)
 }
 
+// submissionFence takes a write-once submission fence inside the validation
+// transaction: the original submission or one armed resend.
+type submissionFence func(context.Context, *intents.Store) (intents.CollectionNonexecutionProof, bool, error)
+
+func (h *SubscriptionCollectionHandler) firstSubmission(in gen.OpenrailsRailIntent) submissionFence {
+	return func(ctx context.Context, s *intents.Store) (intents.CollectionNonexecutionProof, bool, error) {
+		return s.BeginCollectedPayment(ctx, in, h.now())
+	}
+}
+
+func (h *SubscriptionCollectionHandler) resendSubmission(in gen.OpenrailsRailIntent, attempt int) submissionFence {
+	return func(ctx context.Context, s *intents.Store) (intents.CollectionNonexecutionProof, bool, error) {
+		return s.BeginLostSubmissionResend(ctx, in, attempt, h.now())
+	}
+}
+
 // Local lock order matches admission/deletion: customer, subscription, method,
 // then operation. No provider request runs while these locks are held.
-func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, fence bool) (gen.OpenrailsPaymentMethod, intents.CollectionNonexecutionProof, bool, error) {
+func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, fence submissionFence) (gen.OpenrailsPaymentMethod, intents.CollectionNonexecutionProof, bool, error) {
 	var method gen.OpenrailsPaymentMethod
 	if h.now().Before(p.AcceptedAt) {
 		return method, intents.CollectionNonexecutionProof{}, false, errors.New("engine admission time has not arrived")
@@ -186,8 +215,8 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if binding != p.HyperSwitch {
 			return charge.ErrInstrumentChanged
 		}
-		if fence {
-			proof, first, err = intents.NewStore(d).BeginCollectedPayment(ctx, in, h.now())
+		if fence != nil {
+			proof, first, err = fence(ctx, intents.NewStore(d))
 			return err
 		}
 		return nil
@@ -222,12 +251,28 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Openr
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
 	if err != nil {
-		return intents.Ambiguous("engine receipt did not qualify: " + err.Error())
+		return h.unresolved(ctx, in, p, "engine receipt did not qualify: "+err.Error())
 	}
-	if !found {
-		return intents.Ambiguous("submitted engine charge has no exact receipt; no automatic resend")
+	if found {
+		return h.completePaid(ctx, in, p, receipt)
 	}
-	return h.completePaid(ctx, in, p, receipt)
+	if p.Instrument.CustodianHeld() {
+		return h.unresolved(ctx, in, p, "custodian-held engine charge has no exact receipt")
+	}
+	attempts, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver)
+	if err != nil {
+		return h.unresolved(ctx, in, p, "order read is inconclusive: "+err.Error())
+	}
+	if attempts.Declined {
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, attempts.DeclineCode, attempts.DeclineTransactionID); err != nil {
+			return h.unresolved(ctx, in, p, "retain the order's decline: "+err.Error())
+		}
+		return h.Verify(ctx, in)
+	}
+	if attempts.Transactions > 0 {
+		return h.unresolved(ctx, in, p, "the order holds transactions that are not one approved or declined sale")
+	}
+	return h.lostSubmission(ctx, in, p)
 }
 func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if receipt, found, err := intents.LoadCollectedReceipt(in); err != nil {
@@ -279,6 +324,9 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.O
 			if err := apply(ctx, d, sub); err != nil {
 				return err
 			}
+		}
+		if _, err := d.Gen(ctx).ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: in.MerchantID, FindingType: FindingSubmissionUnresolved, SubjectKey: in.ID.String()}); err != nil {
+			return err
 		}
 		return intents.NewStore(d).CompleteSubscriptionCollection(ctx, in, outcome, h.now())
 	})

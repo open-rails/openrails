@@ -35,6 +35,34 @@ func (q *Queries) AdvanceRailIntentVerification(ctx context.Context, arg Advance
 	return result.RowsAffected(), nil
 }
 
+const armRailIntentResend = `-- name: ArmRailIntentResend :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('resend_armed', $1::int),
+    updated_at = now()
+WHERE id = $2::uuid AND merchant_id = $3::uuid
+  AND intent_type = 'subscription_collection'
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND COALESCE(result_evidence, '{}'::jsonb) ? 'submitted_at'
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['qualified_receipt', 'rebill_decline', 'stripe_recurring_decline', 'qualified_invoice_nonexecution'])
+  AND COALESCE((result_evidence->>'resend_armed')::int, 0) < $1::int
+`
+
+type ArmRailIntentResendParams struct {
+	Attempt    int32
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// A submitted engine collection whose provider read shows no transaction
+// after the settle delay is armed for one gated resend of the same operation.
+func (q *Queries) ArmRailIntentResend(ctx context.Context, arg ArmRailIntentResendParams) (int64, error) {
+	result, err := q.db.Exec(ctx, armRailIntentResend, arg.Attempt, arg.ID, arg.MerchantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimDueRailIntents = `-- name: ClaimDueRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
@@ -2194,7 +2222,8 @@ SET status = 'failed_retryable',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at'
+           AND NOT (intent_type = 'subscription_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'resend_armed'))
   AND NOT (intent_type = 'nmi_sale' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND NOT (intent_type = 'initial_membership' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted')
 `

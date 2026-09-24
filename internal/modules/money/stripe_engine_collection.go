@@ -34,7 +34,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngine(ctx context.Context,
 	if err != nil {
 		return intents.Parked(err.Error())
 	}
-	_, proof, first, err := h.validateAndFence(ctx, in, p, true)
+	_, proof, first, err := h.validateAndFence(ctx, in, p, h.firstSubmission(in))
 	if err != nil {
 		if errors.Is(err, errEngineObligationChanged) || errors.Is(err, charge.ErrInstrumentChanged) {
 			return h.completeNotExecuted(ctx, in, p, "instrument_changed", err.Error())
@@ -44,6 +44,12 @@ func (h *SubscriptionCollectionHandler) executeStripeEngine(ctx context.Context,
 	if !first {
 		return h.executeStripeEngineDecline(ctx, in)
 	}
+	return h.dispatchStripe(ctx, in, p, service, params, proof)
+}
+
+// dispatchStripe creates the PaymentIntent under the operation's idempotency
+// key. Only the writer of a fresh submission or resend fence calls it.
+func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams, proof intents.CollectionNonexecutionProof) intents.Outcome {
 	result, err := service.CreateEnginePayment(ctx, params)
 	if errors.Is(err, charge.ErrNotDispatched) {
 		return h.completeNotExecuted(ctx, in, p, "not_dispatched", charge.ErrNotDispatched.Error(), proof)
@@ -71,10 +77,10 @@ func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, 
 	}
 	result, found, err := service.ReadEnginePayment(ctx, params, reference)
 	if err != nil {
-		return intents.Ambiguous("Stripe engine receipt did not qualify")
+		return h.unresolved(ctx, in, p, "Stripe engine receipt did not qualify: "+err.Error())
 	}
 	if !found {
-		return intents.Ambiguous("submitted Stripe payment has no exact readback; no automatic resend")
+		return h.lostSubmission(ctx, in, p)
 	}
 	if result.PaymentIntentID != "" && reference == "" {
 		if err := intents.NewStore(h.DB).RetainCollectionCandidate(ctx, in, intents.CollectionCandidate{TransactionID: result.PaymentIntentID}); err != nil {
@@ -134,8 +140,11 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 		reference = candidate.TransactionID
 	}
 	result, found, err := service.ReadEnginePayment(ctx, params, reference)
-	if err != nil || !found {
-		return intents.Ambiguous("submitted Stripe payment requires exact readback; no resend")
+	if err != nil {
+		return h.Verify(ctx, current)
+	}
+	if !found {
+		return h.resendLostStripeSubmission(ctx, current, service, params)
 	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
 		// Cancellation erases the decline at Stripe; retain it first.
@@ -158,4 +167,28 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 		}
 	}
 	return h.Verify(ctx, current)
+}
+
+// resendLostStripeSubmission sends an armed resend with the original
+// idempotency key: Stripe replays the first PaymentIntent if it ever existed.
+func (h *SubscriptionCollectionHandler) resendLostStripeSubmission(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams) intents.Outcome {
+	attempt := armedResend(in)
+	if attempt == 0 {
+		return h.Verify(ctx, in)
+	}
+	p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if h.Config.EngineAdmissionHold {
+		return intents.Parked("new engine payment submission is held")
+	}
+	_, proof, first, err := h.validateAndFence(ctx, in, p, h.resendSubmission(in, attempt))
+	if err != nil {
+		return h.closeChangedResend(ctx, in, p, attempt, err)
+	}
+	if !first {
+		return h.Verify(ctx, in)
+	}
+	return h.dispatchStripe(ctx, in, p, service, params, proof)
 }
