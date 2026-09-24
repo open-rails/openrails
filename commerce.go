@@ -88,6 +88,10 @@ type CheckoutCustomerIdentity struct {
 // action. Merchant credentials authorize the host; they do not prove customer
 // interaction. Do not use this command as an unattended way to establish a
 // customer-initiated stored-card agreement.
+//
+// A recurring card price is quoted unless Confirm is set: an NMI PaymentToken
+// is saved as the customer's method, and the customer accepts the quote at
+// /v1/me/checkout/{id}/confirm.
 type CreateCheckoutSessionRequest struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
 	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
@@ -103,6 +107,11 @@ type CreateCheckoutSessionRequest struct {
 	IdempotencyKey string                 `json:"-"`
 	SuccessURL     string                 `json:"success_url"` // Required for Stripe hosted checkout
 	CancelURL      string                 `json:"cancel_url"`  // Required for Stripe hosted checkout
+	// Confirm relays the present customer's pay action on the displayed price:
+	// a recurring price is enrolled and charged in this call instead of quoted.
+	// A definite decline creates no subscription and keeps no card saved from
+	// PaymentToken. Retries with the same IdempotencyKey never charge twice.
+	Confirm bool `json:"confirm,omitempty"`
 }
 
 // CreatePaymentMethodSessionRequest authorizes a nonmonetary card setup.

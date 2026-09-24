@@ -165,7 +165,7 @@ sale, per the rail registry:
 
 | Rail | One-time | New subscription |
 |---|---|---|
-| NMI, Stripe | yes | engine-collected on a saved card (no trial phase) |
+| NMI, Stripe | yes | engine-collected on a saved card (no trial phase); an NMI token is saved first |
 | Solana | yes (Solana Pay) | the price's published on-chain plan |
 | CCBill | no | no (imported subscriptions keep working) |
 

@@ -347,6 +347,9 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 		return nil, err
 	}
 	resp, err := s.createSession(ctx, req, user)
+	if err == nil && req != nil && req.Acceptance != nil && resp != nil && resp.MembershipQuote != nil {
+		resp, err = s.acceptQuoteOnCreate(ctx, resp, user, *req.Acceptance)
+	}
 	s.noteCardAttempt(ctx, user, resp, err)
 	return resp, err
 }
@@ -726,20 +729,37 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	// A saved custodian card creates a priced agreement for a later verified
 	// customer action. Persist the quote with the row before returning it.
 	engineEnrollment := mode == models.CheckoutSessionModeSubscription && rails.NewSubscriptionFor(models.Rail(rail)) == rails.NewSubscriptionEngine
-	if engineEnrollment && req.Payment.PaymentMethodID != "" {
-		methodID, err := openrails.ParsePaymentMethodID(req.Payment.PaymentMethodID)
+	// A new NMI card is vaulted first: engine memberships charge saved methods.
+	var vaulted *models.PaymentMethod
+	if engineEnrollment && req.Payment.PaymentMethodID == "" && strings.TrimSpace(req.Payment.PaymentToken) != "" && rails.IsNMI(models.Rail(rail)) {
+		vaulted, err = s.vaultEnrollmentCard(ctx, &req.Payment, session, decision.Target, user)
 		if err != nil {
-			return nil, ErrCheckoutSessionValidation
+			return nil, err
+		}
+		session.RailState[initialMembershipVaultedMethodKey] = vaulted.ID.String()
+	}
+	if engineEnrollment && (req.Payment.PaymentMethodID != "" || vaulted != nil) {
+		var methodID uuid.UUID
+		if vaulted != nil {
+			methodID = vaulted.ID
+		} else {
+			parsed, err := openrails.ParsePaymentMethodID(req.Payment.PaymentMethodID)
+			if err != nil {
+				return nil, ErrCheckoutSessionValidation
+			}
+			methodID = parsed.UUID()
 		}
 		mid, err := merchant.Require(ctx)
 		if err != nil {
+			s.discardEnrollmentCard(ctx, vaulted)
 			return nil, err
 		}
-		method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: methodID.UUID()})
+		method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: methodID})
+		if err == nil {
+			err = quoteInitialMembership(ctx, session, price, product, method, now)
+		}
 		if err != nil {
-			return nil, err
-		}
-		if err := quoteInitialMembership(ctx, session, price, product, method, now); err != nil {
+			s.discardEnrollmentCard(ctx, vaulted)
 			return nil, err
 		}
 		session.Status = models.CheckoutSessionStatusRequiresAction
@@ -749,7 +769,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	// plan enrolls through the subscriber's wallet below.
 	if engineEnrollment {
 		if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
-			return nil, fmt.Errorf("%w: engine enrollment requires a supported saved NMI or Stripe method", ErrCheckoutSessionValidation)
+			return nil, fmt.Errorf("%w: engine enrollment requires an NMI card token or a saved NMI or Stripe method", ErrCheckoutSessionValidation)
 		}
 	}
 
@@ -758,6 +778,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		create = s.admitPurchaseSession
 	}
 	if err := create(ctx, session); err != nil {
+		s.discardEnrollmentCard(ctx, vaulted)
 		if idempotencyKey != "" {
 			existing, getErr := s.repo.GetByID(ctx, session.ID)
 			if getErr == nil {

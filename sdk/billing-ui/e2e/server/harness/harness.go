@@ -18,6 +18,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/nmifake"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -35,6 +36,11 @@ const (
 	// ManagePrefix mounts the CustomerBillingManagement scope beside /v1/me.
 	ManagePrefix = "/v1/manage"
 	SolanaPSPKey = "solana"
+	// CardPSPKey is an armed NMI account on the loopback gateway (nmifake):
+	// hosted checkout sells card subscriptions and one-time sales through it.
+	CardPSPKey = "cards"
+	// CardTokenizationKey is public; the browser's Collect.js is the test's.
+	CardTokenizationKey = "e2e-tokenization"
 )
 
 type Runtime struct {
@@ -43,7 +49,9 @@ type Runtime struct {
 	Client  *openrails.Client
 	Catalog Catalog
 	// Solana is the loopback chain the armed Solana PSP reads.
-	Solana  *solanafake.Node
+	Solana *solanafake.Node
+	// NMI is the loopback gateway the armed card PSP charges.
+	NMI     *nmifake.Gateway
 	BaseURL string
 }
 
@@ -71,9 +79,11 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 // workers because customer cancel/resume are queued jobs.
 func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers bool) (_ *Runtime, err error) {
 	chain := solanafake.New()
+	gateway := nmifake.New()
 	defer func() {
 		if err != nil {
 			chain.Close()
+			gateway.Close()
 		}
 	}()
 	signer := solanago.NewWallet().PrivateKey
@@ -113,12 +123,17 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		}},
 		Merchant: &openrailsembed.MerchantDeclaration{
 			Slug: MerchantSlug,
-			Config: openrailsembed.MerchantConfig{DisplayName: "billing-ui e2e", PSPs: map[string]openrailsembed.PSPConfig{
+			Config: openrailsembed.MerchantConfig{DisplayName: "billing-ui e2e", CheckoutRouting: checkoutRouting, PSPs: map[string]openrailsembed.PSPConfig{
 				// An armed Solana PSP on devnet: checkout offers it (#1078).
 				SolanaPSPKey: {"solana": {
 					Signer:   &openrailsembed.PSPSignerConfig{Mode: "local_keypair"},
 					Secrets:  map[string]string{"private_key": signer.String()},
 					Settings: map[string]any{"rpc_provider": "public", "tokens": map[string]any{"SOL": map[string]any{}, "DUSD": map[string]any{}}},
+				}},
+				CardPSPKey: {"nmi": {
+					AccountID: "billing-ui-e2e-cards",
+					Secrets:   map[string]string{"security_key": "e2e-security-key", "webhook_signing_secret": "e2e-webhook-secret"},
+					Settings:  map[string]any{"tokenization_key": CardTokenizationKey},
 				}},
 			}},
 			PSPs: []openrailsembed.PSPDeclaration{{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}},
@@ -130,7 +145,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			DB:                   &openrailsconfig.DBConfig{URL: dsn, Schema: BillingSchema},
 			PublicBillingBaseURL: baseURL + "/billing",
 			ReturnOrigins:        []string{baseURL},
-			ProviderSandbox:      &openrailsconfig.ProviderSandboxConfig{SolanaRPCURL: chain.URL()},
+			ProviderSandbox:      &openrailsconfig.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
 		},
 		PGXPool:    pool,
 		RunWorkers: workers,
@@ -154,7 +169,14 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err := armDestructive(ctx, pool); err != nil {
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}
-	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog, Solana: chain, BaseURL: baseURL}, nil
+	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
+}
+
+// checkoutRouting sells the card product through the card PSP and everything
+// else through Solana; the declared-only NMI account never sells.
+var checkoutRouting = []openrailsembed.CheckoutRoutingRuleConfig{
+	{Match: openrailsembed.CheckoutRoutingMatchConfig{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
+	{Prefer: []string{SolanaPSPKey}},
 }
 
 // BillingRoutes returns the embedded billing routes, relative to /billing.
@@ -182,6 +204,7 @@ func (r *Runtime) Close() {
 	_ = r.Billing.Close(context.Background())
 	r.Auth.Close()
 	r.Solana.Close()
+	r.NMI.Close()
 }
 
 // armDestructive is the operator arming a reviewed deployment
