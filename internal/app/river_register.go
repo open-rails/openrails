@@ -7,6 +7,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
@@ -452,8 +453,15 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		riverjobs.DuePassInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.DunningArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.DuePassInterval},
+				Queue: riverjobs.QueueBilling,
+				// Coalesce outstanding scans, but let startup run again after
+				// a completed scan. A minute bucket including completed jobs
+				// would silently suppress RunOnStart after a quick restart.
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{
+					rivertype.JobStateAvailable, rivertype.JobStatePending,
+					rivertype.JobStateRunning, rivertype.JobStateRetryable,
+					rivertype.JobStateScheduled,
+				}},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
@@ -483,8 +491,14 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.JobRescueArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Minute},
+				Queue: riverjobs.QueueBilling,
+				// A completed rescue from the previous process must not
+				// suppress recovery of jobs left by a quick restart.
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{
+					rivertype.JobStateAvailable, rivertype.JobStatePending,
+					rivertype.JobStateRunning, rivertype.JobStateRetryable,
+					rivertype.JobStateScheduled,
+				}},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
