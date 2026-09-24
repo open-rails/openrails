@@ -109,4 +109,3 @@ internal/river/worker_health.go|now := time.Now().UTC()|infrastructure_time|Work
 internal/service/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/service/service_definition_catalog.go|now := time.Now().UTC()|db_audit_timestamp|Product creation audit timestamp|1
 internal/service/catalog_price_write.go|now := time.Now().UTC()|db_audit_timestamp|Price creation and key movement audit timestamp|1
-internal/service/service_webhooks.go|ReceivedAt: time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1

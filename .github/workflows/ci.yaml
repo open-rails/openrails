@@ -68,8 +68,8 @@ jobs:
     name: End-to-end
     runs-on: ubuntu-latest
     # The PR gate is intentionally small: the greenfield contracts are the
-    # database/provider test suite.
-    timeout-minutes: 10
+    # database/provider test suite, including the adversarial security cases.
+    timeout-minutes: 15
     env:
       OPENRAILS_GREENFIELD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
     steps:

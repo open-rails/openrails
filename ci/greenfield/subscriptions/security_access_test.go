@@ -90,12 +90,15 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 			method := c.saveCard(rail, visa)
 			start := w.clock.Now()
 			c.buy(rail, method, price, openrails.OfferFinite, "content:pass")
+			first := completed(w.payments(embedded, c.id))
+			require.Len(t, first, 1)
+			w.advance(time.Hour)
 			c.buy(rail, method, price, openrails.OfferFinite, "content:pass")
 			paid := completed(w.payments(embedded, c.id))
 			require.Len(t, paid, 2)
 			require.True(t, c.entitledAt("content:pass", start.Add(45*day)), "the second pass is stacked after the first")
 			second := paid[0]
-			if paid[1].CreatedAt.After(second.CreatedAt) {
+			if second.ID == first[0].ID {
 				second = paid[1]
 			}
 			_, err := w.client[embedded].RefundPayment(t.Context(), second.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + second.ID.String()})
@@ -255,7 +258,7 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 	require.NoError(t, err)
 	var finding string
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`INSERT INTO openrails.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, evidence)
-		SELECT id, 'security.override', $2, 'critical', 'requires_review', $3::jsonb FROM openrails.merchants WHERE slug = $1 RETURNING id::text`), w.slug, "override-"+uuid.NewString(), string(evidence)).Scan(&finding))
+		SELECT id, 'consistency.security.override', $2, 'critical', 'requires_review', $3::jsonb FROM openrails.merchants WHERE slug = $1 RETURNING id::text`), w.slug, "override-"+uuid.NewString(), string(evidence)).Scan(&finding))
 
 	for _, override := range []map[string]any{
 		{"refund_payment_id": payment.ID.String()},

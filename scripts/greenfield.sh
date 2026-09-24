@@ -14,7 +14,14 @@ go test "${flags[@]}" -run '^$' ./ci/greenfield/...
 	go test "${flags[@]}" -p 1 -parallel 3 -run '^TestReplicas' ./ci/greenfield/subscriptions 2>&1 | sed -u 's/^/[replicas] /'
 ) &
 replicas=$!
+# The adversarial security cases (#1077, docs/security-tests.md) likewise.
+(
+	set -o pipefail
+	go test "${flags[@]}" -p 1 -parallel 3 -run '^TestSecurity' ./ci/greenfield/... 2>&1 | sed -u 's/^/[security] /'
+) &
+security=$!
 status=0
-go test "${flags[@]}" -p 1 -parallel 4 -skip '^TestReplicas' ./ci/greenfield/... || status=$?
+go test "${flags[@]}" -p 1 -parallel 4 -skip '^(TestReplicas|TestSecurity)' ./ci/greenfield/... || status=$?
 wait "$replicas" || status=$?
+wait "$security" || status=$?
 exit "$status"

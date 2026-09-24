@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
@@ -59,21 +58,24 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				body         any
 			}{
 				{http.MethodGet, "/subscriptions/" + aliceSub.String(), nil},
-				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "x"}},
-				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"immediately": true}},
+				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed"}},
+				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed", "immediately": true}},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/resume", nil},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/retry-now", nil},
 				{http.MethodPut, "/subscriptions/" + aliceSub.String() + "/payment-method", map[string]any{"payment_method_id": malloryCard}},
 				{http.MethodPut, "/subscriptions/" + mallorySub.String() + "/payment-method", map[string]any{"payment_method_id": aliceCard}},
 				{http.MethodPut, "/collection-payment-method", map[string]any{"payment_method_id": aliceCard, "currency": "USD"}},
-				{http.MethodPut, "/payment-methods/" + aliceCard, map[string]any{"provider": rail, "name_on_card": "Mallory"}},
 				{http.MethodDelete, "/payment-methods/" + aliceCard, nil},
 				{http.MethodGet, "/checkout/" + pending.ID, nil},
 				{http.MethodPost, "/checkout/" + pending.ID + "/confirm", map[string]any{"payment": map[string]string{"rail": rail}}},
 				{http.MethodPost, "/checkout/" + pending.ID + "/confirm", map[string]any{"payment": map[string]string{"rail": rail, "payment_method_id": aliceCard}}},
 			} {
-				status, body := mallory.call(tc.method, tc.path, "", tc.body)
+				status, body := mallory.call(tc.method, tc.path, "idor-"+uuid.NewString(), tc.body)
 				refused(t, status, body, fmt.Sprintf("%s %s %v", tc.method, tc.path, tc.body))
+			}
+			if rail == "nmi" {
+				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
+				refused(t, status, body, "replace Alice's card")
 			}
 			w.settle()
 
@@ -193,7 +195,6 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, psps map[string
 	t.Cleanup(server.Close)
 	client, err := rt.Client()
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "peer readiness")
 	return &rival{slug: slug, rt: rt, server: server, client: client}
 }
 
