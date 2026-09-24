@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -805,4 +806,37 @@ func TestEngineDuePassIsolatesRefusals(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.Contains(t, body, "life.due_pass.refused")
 	require.Contains(t, body, strings.TrimPrefix(broken.sub.String(), "sub_"))
+}
+
+// The same bound holds for a one-time purchase on a saved card: a buyer who
+// abandons the issuer challenge is not left with a purchase that blocks them.
+func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	client := w.client[embedded]
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	require.NoError(t, err)
+	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	require.NoError(t, err)
+	c := w.newCustomer()
+	buy := func(method, key string) *openrails.CheckoutSession {
+		session, err := client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
+			OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
+			IdempotencyKey: key, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
+			SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		})
+		require.NoError(t, err)
+		return session
+	}
+	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
+	first := buy(challenged, "buy-3ds")
+	t.Logf("first: %s", first.Status)
+	w.advance(2 * time.Hour)
+	w.until(func() bool {
+		return unwrap(c.must(http.MethodGet, "/checkout/"+first.ID, "", nil))["status"] == "failed"
+	}, "the abandoned challenge fails the purchase")
+	again := buy(c.saveCard("stripe", visa), "buy-again")
+	w.settle()
+	require.True(t, c.entitled("content:post"), "status %s", again.Status)
+	require.Len(t, w.stripe.ledger(""), 1)
 }

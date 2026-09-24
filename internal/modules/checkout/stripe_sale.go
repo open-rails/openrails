@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -82,6 +83,17 @@ func (h *NMISaleIntentHandler) recoverStripeSale(ctx context.Context, in gen.Ope
 	if err != nil || !found {
 		return intents.Ambiguous("submitted Stripe sale requires exact readback; no resend")
 	}
+	if result.State == subscriptions.StripeEngineAuthenticationRequired && h.authenticationAbandoned(current) {
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, current.ID, map[string]any{"decline_code": "authentication_required"}); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+		if _, err := service.CancelAbandonedEnginePayment(ctx, params, result.PaymentIntentID); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+		if current, err = intents.NewStore(h.database()).Get(ctx, current.ID); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
 		// Cancellation erases the decline reason at Stripe; retain it first.
 		if err := intents.NewStore(h.database()).RecordProgress(ctx, current.ID, map[string]any{"decline_code": result.FailureCode}); err != nil {
@@ -121,6 +133,9 @@ func (h *NMISaleIntentHandler) verifyStripeSale(ctx context.Context, in gen.Open
 	}
 	switch result.State {
 	case subscriptions.StripeEngineAuthenticationRequired:
+		if h.authenticationAbandoned(in) {
+			return intents.Retryable("abandoned authentication requires gated cancellation of the same payment")
+		}
 		return intents.Ambiguous("Stripe sale requires customer authentication")
 	case subscriptions.StripeEngineDeclined:
 		if result.FailureCode != "canceled" {
@@ -164,4 +179,17 @@ func (h *NMISaleIntentHandler) resolveStripeSale(ctx context.Context, in gen.Ope
 		return intents.Outcome{}, err
 	}
 	return h.complete(ctx, in, &receipt, intents.Succeeded(nil)), nil
+}
+
+// authenticationAbandoned: a buyer who started an issuer challenge and never
+// finished it releases the purchase after the engine's authentication window.
+func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.OpenrailsRailIntent) bool {
+	if h.Sale == nil || h.Sale.PurchaseService == nil {
+		return false
+	}
+	p, err := payments.DecodeNMISalePayload(in)
+	if err != nil {
+		return false
+	}
+	return h.Sale.PurchaseService.now().After(p.AcceptedAt.Add(subscriptions.EngineAuthenticationWindow))
 }
