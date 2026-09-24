@@ -492,9 +492,11 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.JobRescueArgs{}, &river.InsertOpts{
 				Queue: riverjobs.QueueBilling,
-				// A completed rescue from the previous process must not
-				// suppress recovery of jobs left by a quick restart.
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{
+				// Completed rescues must not suppress quick restarts. Bound
+				// active uniqueness by period too: if this rescuer dies while
+				// running, a later pass must be able to rescue it. River's
+				// built-in rescuer ignores our negative-timeout workers.
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Minute, ByState: []rivertype.JobState{
 					rivertype.JobStateAvailable, rivertype.JobStatePending,
 					rivertype.JobStateRunning, rivertype.JobStateRetryable,
 					rivertype.JobStateScheduled,
