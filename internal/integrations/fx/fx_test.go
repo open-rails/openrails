@@ -1,0 +1,121 @@
+package fx
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
+
+// MONEY-3: exact rational conversion with one final ceiling, across ISO scales.
+func TestConvertAmount(t *testing.T) {
+	p := NewMockProvider(map[string]float64{"eur": 1.08, "jpy": 0.01})
+	for _, tc := range []struct {
+		from, to  string
+		amt, want int64
+	}{
+		{"EUR", "USD", 100, 108},           // float 100*1.08 = 108.00000000000001 would ceil to 109
+		{"USD", "EUR", 1_000_000, 925_926}, // 925925.92… rounds up, never under-counts
+		{"USD", "EUR", 1, 1},
+		{"USD", "JPY", 123_456, 123_456},
+		{"JPY", "USD", 123, 123},
+		{"JPY", "USD", 1, 1},
+		{"usd", "USD", 42, 42},
+		{"EUR", "USD", 0, 0},
+	} {
+		got, q, err := ConvertAmount(context.Background(), p, tc.from, tc.to, tc.amt)
+		if err != nil || got != tc.want || q == nil {
+			t.Errorf("%s->%s %d = %d, %v; want %d", tc.from, tc.to, tc.amt, got, err, tc.want)
+		}
+	}
+
+	for name, call := range map[string]func() error{
+		"negative":         func() error { _, _, err := ConvertAmount(context.Background(), p, "USD", "EUR", -1); return err },
+		"unknown currency": func() error { _, _, err := ConvertAmount(context.Background(), p, "USD", "XXQ", 1); return err },
+		"no provider":      func() error { _, _, err := ConvertAmount(context.Background(), nil, "USD", "EUR", 1); return err },
+		"provider error": func() error {
+			_, _, err := ConvertAmount(context.Background(), &MockProvider{Error: errors.New("down")}, "USD", "EUR", 1)
+			return err
+		},
+		"zero rate": func() error {
+			_, _, err := ConvertAmount(context.Background(), NewMockProvider(map[string]float64{"eur": 0}), "EUR", "USD", 1)
+			return err
+		},
+	} {
+		if call() == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	if got, _, err := ConvertAmount(context.Background(), nil, "USD", "USD", 7); err != nil || got != 7 {
+		t.Fatalf("same currency needs no provider: %d %v", got, err)
+	}
+}
+
+func TestCachedProvider(t *testing.T) {
+	mock := NewMockProvider(map[string]float64{"eur": 1.08})
+	cached := NewCachedProvider(mock, time.Minute)
+	ctx := context.Background()
+	for range 2 {
+		q, err := cached.QuoteToUSD(ctx, "eur")
+		if err != nil || q.Rate != 1.08 || q.FromCurrency != "EUR" || mock.CallCount != 1 {
+			t.Fatalf("quote %+v err %v calls %d", q, err, mock.CallCount)
+		}
+	}
+	cached.InvalidateAll()
+	if _, _ = cached.QuoteToUSD(ctx, "EUR"); mock.CallCount != 2 {
+		t.Fatalf("invalidate must refetch, calls %d", mock.CallCount)
+	}
+	if _, err := cached.QuoteToUSD(ctx, "gbp"); err == nil {
+		t.Fatal("provider error must not be cached as a quote")
+	}
+	expiring := NewCachedProvider(mock, 0)
+	_, _ = expiring.QuoteToUSD(ctx, "eur")
+	_, _ = expiring.QuoteToUSD(ctx, "eur")
+	if mock.CallCount != 5 {
+		t.Fatalf("zero ttl must never serve cache, calls %d", mock.CallCount)
+	}
+}
+
+// CUR-6 wire exception: the endpoint is lower case in path and keys; quotes stay upper.
+func TestExchangeAPIWire(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"date":"2026-09-01","eur":{"usd":1.08,"gbp":0.85}}`))
+	}))
+	defer srv.Close()
+	p := &ExchangeAPIProvider{client: srv.Client(), baseURL: srv.URL}
+	q, err := p.QuoteToUSD(context.Background(), "EUR")
+	if err != nil || path != "/eur.json" || q.Rate != 1.08 || q.FromCurrency != "EUR" || q.ToCurrency != "USD" ||
+		!q.AsOf.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("quote %+v path %q err %v", q, path, err)
+	}
+	if q, err := p.Quote(context.Background(), "usd", "USD"); err != nil || q.Rate != 1 {
+		t.Fatalf("same currency: %+v %v", q, err)
+	}
+}
+
+// RedisCachedProvider.Start suppresses shutdown noise via errors.Is(err, context.Canceled).
+func TestExchangeAPICanceledContextIsDetectable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewExchangeAPIProvider().Quote(ctx, "eur", "usd"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled through the wrap chain, got %v", err)
+	}
+}
+
+// The Redis cache fails closed without a client rather than inventing a rate.
+func TestRedisCachedProviderFailsClosedWithoutRedis(t *testing.T) {
+	p := NewRedisCachedProvider(nil, NewMockProvider(nil), 0)
+	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
+		t.Fatal("missing redis must refuse")
+	}
+	if q, err := p.Quote(context.Background(), "usd", "USD"); err != nil || q.Rate != 1 {
+		t.Fatalf("same currency: %+v %v", q, err)
+	}
+	if p.Refresh(context.Background(), []string{"EUR", "USD"}) == nil {
+		t.Fatal("refresh without redis must fail")
+	}
+}

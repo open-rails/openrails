@@ -865,7 +865,7 @@ func stripeEntitlementSet(spec map[string]*int) map[string]bool {
 // Stripe invoice amounts are CENTS on the wire; payment rows store micros.
 // Success rows record amount_paid (what actually settled); failed rows record
 // amount_due (what was attempted) — #671 1f. Wire-pinned in
-// stripe_wire_pinning_test.go.
+// stripe_test.go (TestStripeInvoiceWireShapes).
 func stripeInvoicePaidAmountMicros(inv stripeInvoice) int64 {
 	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountPaid)))
 }
