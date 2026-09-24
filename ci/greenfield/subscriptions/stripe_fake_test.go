@@ -4,12 +4,12 @@ package subscriptions_test
 
 import (
 	"encoding/json"
-	"os"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
