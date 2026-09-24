@@ -1,12 +1,13 @@
 # Focused OpenRails CI
 
-The focused suite contains 28 top-level tests in two packages. Ordinary
+The focused suite runs two packages. Ordinary
 unit/static/security checks run separately. The old broad integration runner,
 browser harness, scheduled backstop and devnet workflows have been removed.
 
 `ci/greenfield` tests migration replay, catalog/merchant isolation, product
 provisioning, hosted checkout idempotency, signed webhook replay, exact integer
-money and browser-safe JSON. `ci/greenfield/subscriptions` exercises:
+money, browser-safe JSON and recovery of the rescue worker itself after a crash.
+`ci/greenfield/subscriptions` exercises:
 
 - NMI and Stripe engine-owned confirmation and renewals;
 - provider-owned schedules and a distinct NMI/OpenRails-dunning hybrid;
@@ -25,7 +26,8 @@ OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_
   bash scripts/greenfield.sh
 ```
 
-The runner selects both packages with race detection and no test-result cache.
+The runner selects both packages with race detection and no test-result cache,
+running at most four lifecycle scenarios concurrently.
 Each test owns a random schema; migrations use the libraries' public entry
 points. Lifecycle setup and assertions use public clients/HTTP. The crash
 fixture rewinds durable job/intent state to model interrupted execution, and

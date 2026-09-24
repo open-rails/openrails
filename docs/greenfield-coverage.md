@@ -24,7 +24,7 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Refunds | Engine subscription renewal refunds, repeated refund requests and provider notifications | One-time partial refunds, concurrent over-refund refusal, archive-with-refund/review operations |
 | Payment uncertainty and restart | Engine request interruption/restart, late receipts, duplicate refusal and abandoned authentication | Every sale/refund/cutover uncertainty path; no test may infer no charge from a timeout |
 | Webhooks | Signed Stripe completion/replay/stale expiry, provider-owned subscription notices | Forged signatures, wrong account, thin-event URL validation, CCBill and Solana notifications |
-| River jobs | Real shared fleet, scheduled renewal and operation recovery in subscription scenarios | Host/managed ownership permutations, arbitrary schema migration concurrency, stalled queue health |
+| River jobs | Real shared fleet, scheduled renewal, operation recovery, interrupted rescue-worker recovery and restart after completed rescue work | Host/managed ownership permutations, arbitrary schema migration concurrency, stalled queue health |
 | Embedded/HTTP client parity | Subscription scenarios run embedded and remote clients against mounted HTTP routes | Full catalog, treasury, configuration and archive parity; standalone executable boot |
 | PostgreSQL initialization | Fresh schema, public migration entry point, replay and runtime startup | Concurrent bootstrap, one-connection pool, privilege grants, drift refusal and restored databases |
 | Saved payment methods and custody | NMI/Stripe setup and subscription card changes | Vault deletion with active agreements, Basis Theory/HyperSwitch custody, credential rotation |

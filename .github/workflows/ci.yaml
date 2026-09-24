@@ -79,6 +79,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
         ports: [5432:5432]
         options: >-
+          --tmpfs /var/lib/postgresql:rw,size=2g
           --health-cmd pg_isready --health-interval 2s --health-timeout 5s
           --health-retries 20
     env:
