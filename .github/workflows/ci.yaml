@@ -65,7 +65,7 @@ jobs:
           args: --timeout=15m
 
   e2e:
-    name: End-to-end (greenfield)
+    name: End-to-end
     runs-on: ubuntu-latest
     # The PR gate is intentionally small: the greenfield contracts are the
     # database/provider test suite.
