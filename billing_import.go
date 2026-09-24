@@ -67,14 +67,20 @@ type DeclaredPaymentMethod struct {
 	Customer CustomerID `json:"customer"`
 	Rail     string     `json:"rail"`
 	// PSP is the account holding the vault entry; falls back to DefaultPSP.
-	PSP                  PSPRef    `json:"psp,omitzero"`
-	RailCustomerRef      string    `json:"rail_customer_ref"`
-	RailMethodRef        string    `json:"rail_method_ref"`
-	InitialTransactionID string    `json:"initial_transaction_id,omitempty"`
-	LastFour             string    `json:"last_four,omitempty"`
-	CardType             string    `json:"card_type,omitempty"`
-	ExpiryDate           string    `json:"expiry_date,omitempty"`
-	CreatedAt            time.Time `json:"created_at,omitempty"`
+	PSP                  PSPRef `json:"psp,omitzero"`
+	RailCustomerRef      string `json:"rail_customer_ref"`
+	RailMethodRef        string `json:"rail_method_ref"`
+	InitialTransactionID string `json:"initial_transaction_id,omitempty"`
+	// RecurringTransactionID is the account-scoped NMI transaction reference
+	// for an existing, verified recurring stored-card agreement. Supply it
+	// only when the imported evidence establishes that agreement; a generic
+	// initial sale is not sufficient. Import never infers it or replaces an
+	// already captured recurring reference.
+	RecurringTransactionID string    `json:"recurring_transaction_id,omitempty"`
+	LastFour               string    `json:"last_four,omitempty"`
+	CardType               string    `json:"card_type,omitempty"`
+	ExpiryDate             string    `json:"expiry_date,omitempty"`
+	CreatedAt              time.Time `json:"created_at,omitempty"`
 }
 
 // PaymentMethodRef links a DeclaredSubscription to a DeclaredPaymentMethod.

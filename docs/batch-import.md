@@ -82,6 +82,16 @@ classification evaluates against it, never wall-clock.
 `subscriptions_exhaustive: true` is an absence proof valid only when one call
 covers the merchant's entire book — it MUST be false for batched imports.
 
+For NMI `provider_dunning`, declare the saved method's
+`recurring_transaction_id` when verified legacy evidence identifies the existing
+recurring stored-card agreement. It is separate from `initial_transaction_id`:
+an ordinary initial sale does not establish permission for recurring use.
+Import stores the recurring reference once; replaying it is allowed, while a
+different reference for the same merchant/account/vault method is a conflict.
+Omitting it never synthesizes an agreement, and recovery charging remains
+unavailable until a qualified reference exists. Importing this fact performs
+no provider request and does not transfer ownership of NMI's billing schedule.
+
 Each subscription fact takes one of two lanes:
 
 - **Explicit cancel evidence** (`user_cancelled` / `chargeback` /

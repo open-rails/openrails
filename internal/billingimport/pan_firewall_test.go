@@ -62,15 +62,16 @@ func TestDeclaredBookRefusesCardNumbers(t *testing.T) {
 	t.Parallel()
 	const visa = "4111111111111111"
 	for name, mutate := range map[string]func(*DeclaredBilling){
-		"payment_methods.rail_method_ref":        func(b *DeclaredBilling) { b.PaymentMethods[0].RailMethodRef = visa },
-		"payment_methods.rail_customer_ref":      func(b *DeclaredBilling) { b.PaymentMethods[0].RailCustomerRef = visa },
-		"payment_methods.initial_transaction_id": func(b *DeclaredBilling) { b.PaymentMethods[0].InitialTransactionID = visa },
-		"payment_methods.last_four":              func(b *DeclaredBilling) { b.PaymentMethods[0].LastFour = "4111 1111 1111 1111" },
-		"payment_methods.card_type":              func(b *DeclaredBilling) { b.PaymentMethods[0].CardType = "visa 4111-1111-1111-1111" },
-		"payment_methods.expiry_date":            func(b *DeclaredBilling) { b.PaymentMethods[0].ExpiryDate = visa },
-		"subscriptions.source_id":                func(b *DeclaredBilling) { b.Subscriptions[0].SourceID = visa },
-		"subscriptions.rail_subscription_id":     func(b *DeclaredBilling) { b.Subscriptions[0].RailSubscriptionID = visa },
-		"subscriptions.user_email":               func(b *DeclaredBilling) { b.Subscriptions[0].UserEmail = visa + "@example.test" },
+		"payment_methods.rail_method_ref":          func(b *DeclaredBilling) { b.PaymentMethods[0].RailMethodRef = visa },
+		"payment_methods.rail_customer_ref":        func(b *DeclaredBilling) { b.PaymentMethods[0].RailCustomerRef = visa },
+		"payment_methods.initial_transaction_id":   func(b *DeclaredBilling) { b.PaymentMethods[0].InitialTransactionID = visa },
+		"payment_methods.recurring_transaction_id": func(b *DeclaredBilling) { b.PaymentMethods[0].RecurringTransactionID = visa },
+		"payment_methods.last_four":                func(b *DeclaredBilling) { b.PaymentMethods[0].LastFour = "4111 1111 1111 1111" },
+		"payment_methods.card_type":                func(b *DeclaredBilling) { b.PaymentMethods[0].CardType = "visa 4111-1111-1111-1111" },
+		"payment_methods.expiry_date":              func(b *DeclaredBilling) { b.PaymentMethods[0].ExpiryDate = visa },
+		"subscriptions.source_id":                  func(b *DeclaredBilling) { b.Subscriptions[0].SourceID = visa },
+		"subscriptions.rail_subscription_id":       func(b *DeclaredBilling) { b.Subscriptions[0].RailSubscriptionID = visa },
+		"subscriptions.user_email":                 func(b *DeclaredBilling) { b.Subscriptions[0].UserEmail = visa + "@example.test" },
 		"subscriptions.evidence": func(b *DeclaredBilling) {
 			b.Subscriptions[0].Evidence = json.RawMessage(`{"card":"` + visa + `"}`)
 		},
