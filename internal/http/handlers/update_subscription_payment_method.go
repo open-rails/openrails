@@ -74,7 +74,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 
 	targetUserID := subscription.CustomerID.String()
 	if enforceOwnership && targetUserID != authenticatedUserID {
-		r.ErrorJSON(http.StatusForbidden, "You don't own this subscription")
+		r.ErrorJSON(http.StatusNotFound, "Subscription not found")
 		return
 	}
 
@@ -103,7 +103,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
-			r.ErrorJSON(http.StatusForbidden, "You don't own this payment method")
+			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
 		default:
 			log.WithError(err).WithFields(log.Fields{"payment_method_id": paymentMethodID, "user_id": targetUserID}).Error("Failed to validate payment method ownership")

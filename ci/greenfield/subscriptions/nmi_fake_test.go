@@ -62,6 +62,9 @@ type nmiFake struct {
 	writes    []providerCall
 	gates     []*gate
 	odd       []string
+
+	// refusedSaves counts vault creations refused for a card declined "vault".
+	refusedSaves int
 }
 
 func newNMIFake() *nmiFake {
@@ -227,6 +230,10 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 		c, ok := token()
 		if !ok {
 			return 400, obj{"type": "invalid", "message": "bad token"}
+		}
+		if c.Decline == "vault" {
+			f.refusedSaves++
+			return 400, obj{"type": "invalid", "message": "card refused"}
 		}
 		v := &nmiVault{ID: f.next("vault"), BillingID: f.next("bill"), Card: c}
 		f.vaults[v.ID] = v

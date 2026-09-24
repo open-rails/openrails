@@ -8,6 +8,7 @@ var OwnedTables = []string{
 	"admission_operations",
 	"billing_policies",
 	"billing_policy_bindings",
+	"card_attempt_failures",
 	"catalog_applications",
 	"catalog_meters",
 	"catalog_rate_cards",

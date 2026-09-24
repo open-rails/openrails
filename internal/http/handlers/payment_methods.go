@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -189,6 +190,9 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "payment_token is required")
 		return
 	}
+	if refuseBlockedCardAttempt(r, user.ID) {
+		return
+	}
 
 	// The NMI transport has a 25-second ceiling. Leave enough time for the
 	// local write while still completing before the browser's 30-second cap.
@@ -224,9 +228,10 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.APIError(providerErr)
 			return
 		}
+		// Every other refusal of the card counts toward card-testing blocks.
+		recordCardFailure(r, abuse.CustomerSubject(user.ID), abuse.AddressSubject(r.ClientIP()), abuse.MerchantSubject)
 		var pmErr *paymentmethods.PaymentMethodError
 		if errors.As(err, &pmErr) {
-			// A refused card counts toward card-testing escalation.
 			r.State.CardAbuseGuard.RecordChargeFailure(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
 			writePaymentMethodError(r, pmErr)
 			return
@@ -343,7 +348,8 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
-			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
+			// SEC-33: a foreign id is indistinguishable from a missing one.
+			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
 		default:
 			log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to validate payment method ownership")
@@ -556,7 +562,8 @@ func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
 			log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Warn("Unauthorized payment method deletion attempt")
-			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
+			// SEC-33: a foreign id is indistinguishable from a missing one.
+			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
 		default:
 			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Error("Failed to validate payment method ownership")

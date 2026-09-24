@@ -208,6 +208,7 @@ func (w *world) start() {
 		DB:                  &config.DBConfig{URL: dbURL, Schema: w.schema},
 		// The test server's loopback peer is the site's reverse proxy.
 		TrustedProxies: []string{"127.0.0.1/32"},
+		ReturnOrigins:  []string{"https://greenfield.test"},
 	}
 	if w.cfg != nil {
 		w.cfg(cfg)

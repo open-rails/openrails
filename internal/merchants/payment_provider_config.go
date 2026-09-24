@@ -177,9 +177,30 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 	return PaymentProviderConfig{}, ErrPaymentProviderNotFound
 }
 
+// ErrPSPClaimUnproven refuses a merchant's first claim of a provider account
+// whose credentials do not prove control of it (SEC-33). The deployment
+// operator declares such accounts instead.
+var ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, "psp_claim_requires_proof", "provider account claims require credentials that prove control of the account, or operator declaration")
+
+// claimNeedsProof lists rails whose inbound events route by account id.
+func claimNeedsProof(rail string) bool {
+	return rail == "stripe" || rail == "nmi" || rail == "ccbill"
+}
+
 // UpsertPaymentProviderConfig validates credentials first, then stores the
-// PSP and scoped secrets.
+// PSP and scoped secrets. A merchant's first claim of an account must prove
+// control through a successful credential probe.
 func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+	return s.upsertPaymentProviderConfig(ctx, id, rail, req, false)
+}
+
+// OperatorUpsertPaymentProviderConfig is the operator's approved claim: the
+// deployment operator vouches for account ownership.
+func (s *Service) OperatorUpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
+	return s.upsertPaymentProviderConfig(ctx, id, rail, req, true)
+}
+
+func (s *Service) upsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest, operatorApproved bool) (PaymentProviderConfig, error) {
 	if s == nil || s.pool == nil || s.secrets == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
 	}
@@ -222,6 +243,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if len(req.Credentials) > 0 && !CanStageCredentials(s.secrets) {
 		return PaymentProviderConfig{}, apperr.New(http.StatusMethodNotAllowed, "credential_source_read_only", "provider credential source has no writable durable custody")
 	}
+	claiming := false
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
@@ -234,6 +256,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		claiming = errors.Is(err, pgx.ErrNoRows)
 		if err == nil {
 			custody := unmarshalProviderEvidence(row.Evidence).CredentialCustody
 			if custody != "" && custody != SecretCustodyIdentity(s.secrets) {
@@ -288,6 +311,9 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		return PaymentProviderConfig{}, err
 	}
 	credentialsValidated = credentialsValidated || probed
+	if claiming && !probed && !operatorApproved && claimNeedsProof(rail) {
+		return PaymentProviderConfig{}, ErrPSPClaimUnproven
+	}
 	var lastVerifiedAt *time.Time
 	if credentialsValidated {
 		now := time.Now().UTC()

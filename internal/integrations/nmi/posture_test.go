@@ -199,3 +199,42 @@ func TestProxyPostureBindsCredentialAndDestination(t *testing.T) {
 	var none *NMIClient
 	require.ErrorIs(t, none.RequireArmedFor(context.Background(), DefaultDirectPostURL, "proxy-key"), providerposture.ErrDisarmed)
 }
+
+// SEC-33: under live posture an NMI account must prove it is live. An account
+// left in test mode approves without moving money, so every mutation is
+// refused before it is sent; the sandbox endpoint is refused outright.
+func TestLivePostureRefusesTestModeAccount(t *testing.T) {
+	live := func(g *fakeGateway, deployment string) *NMIClient {
+		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: deployment}, false)
+		require.NoError(t, err)
+		client.QueryURL = g.URL + "/query"
+		client.V5BaseURL = g.URL
+		client.DirectPostURL = g.URL + "/transact"
+		return client
+	}
+	for _, mode := range []string{"true", "unavailable", "maybe"} {
+		t.Run(mode, func(t *testing.T) {
+			g := newFakeGateway(t, mode)
+			client := live(g, config.NMIEndpointGateway)
+			require.False(t, client.VerifyPosture(context.Background()).Armed())
+			err := client.Void(context.Background(), "txn")
+			require.ErrorIs(t, err, providerposture.ErrDisarmed)
+			require.EqualValues(t, 0, g.mutations.Load(), "nothing reaches a test-mode account under live posture")
+			require.EqualValues(t, 0, g.probeAuths.Load())
+		})
+	}
+	t.Run("live", func(t *testing.T) {
+		g := newFakeGateway(t, "false")
+		client := live(g, "")
+		require.True(t, client.VerifyPosture(context.Background()).Armed())
+		require.NoError(t, client.Void(context.Background(), "txn"))
+		require.EqualValues(t, 1, g.queries.Load())
+		require.EqualValues(t, 0, g.probeAuths.Load(), "live verification never sends a financial probe")
+	})
+	t.Run("sandbox_endpoint", func(t *testing.T) {
+		g := newFakeGateway(t, "false")
+		client := live(g, config.NMIEndpointSandbox)
+		require.ErrorIs(t, client.Void(context.Background(), "txn"), providerposture.ErrDisarmed)
+		require.EqualValues(t, 0, g.queries.Load()+g.mutations.Load())
+	})
+}

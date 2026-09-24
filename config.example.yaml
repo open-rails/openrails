@@ -93,6 +93,14 @@ rate_limits:
   default:
     requests_per_minute: 300
 
+# Exact origins checkout success/cancel and billing-portal return URLs may
+# name. Empty allows only the origin of public_billing_base_url.
+# return_origins:
+#   - https://shop.example.com
+
+# How long a rotated-out webhook signing secret keeps verifying (max 168h).
+# webhook_secret_overlap: 24h
+
 # CIDRs whose X-Forwarded-For is trusted (#746). Empty (default) trusts
 # NOTHING — rate limiting, abuse tracking, webhook IPAddress recording, and the
 # CCBill IP allowlist all use the raw socket peer. Set this to your load

@@ -37,6 +37,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health TO :"runtime
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health_daily TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_state TO :"runtime_user";
 GRANT SELECT,INSERT,UPDATE ON TABLE openrails.admission_denials_hourly TO :"runtime_user";
+GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE openrails.card_attempt_failures TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.billing_policies TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_meters TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custodians TO :"runtime_user";

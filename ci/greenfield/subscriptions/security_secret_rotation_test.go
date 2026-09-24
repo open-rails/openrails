@@ -96,3 +96,37 @@ func TestSecurityRotatedWebhookSecretExpires(t *testing.T) {
 		})
 	}
 }
+
+// SEC-33: an unknown provider account and a bad signature for a real one get
+// the same answer, so webhook routes cannot enumerate the accounts served.
+func TestSecurityWebhookResponsesRevealNoAccounts(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	for _, rail := range rails {
+		own := w.webhookTarget(rail)
+		unknown := own
+		unknown.path = "/v1/webhooks/" + rail + "/not-a-configured-account"
+		body := []byte(`{"id":"evt_probe","type":"invoice.paid","event_id":"probe","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"not-a-configured-account"}}}`)
+		if rail == "nmi" {
+			body = []byte(`{"event_id":"probe","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"` + nmiAcct + `"}}}`)
+		}
+		knownStatus, knownBody := w.postWebhook(own, signature(own, "whsec_attacker", time.Now(), body), body)
+		if rail == "nmi" {
+			body = []byte(`{"event_id":"probe","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"not-a-configured-account"}}}`)
+		}
+		unknownStatus, unknownBody := w.postWebhook(unknown, signature(unknown, "whsec_attacker", time.Now(), body), body)
+		require.Equal(t, http.StatusUnauthorized, knownStatus, "%s: %s", rail, knownBody)
+		require.Equal(t, knownStatus, unknownStatus, "%s: %s", rail, unknownBody)
+		require.Equal(t, withoutRequestID(t, knownBody), withoutRequestID(t, unknownBody), rail)
+	}
+}
+
+func withoutRequestID(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	out := map[string]any{}
+	require.NoError(t, json.Unmarshal([]byte(raw), &out), raw)
+	if e, ok := out["error"].(map[string]any); ok {
+		delete(e, "request_id")
+	}
+	return out
+}

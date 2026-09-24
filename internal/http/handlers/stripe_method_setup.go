@@ -22,6 +22,9 @@ func CreateStripeMethodSetup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "permission to save the card for future agreed payments is required")
 		return
 	}
+	if user := r.GetUser(); user != nil && refuseBlockedCardAttempt(r, user.ID) {
+		return
+	}
 	resolver, ok := stripeSetupResolver(r)
 	if !ok {
 		return

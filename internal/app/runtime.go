@@ -236,6 +236,9 @@ type Runtime struct {
 	// and detects site-wide card-testing attacks (#371). Nil when Redis isn't
 	// configured (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
+	// CardFailureLedger is the PostgreSQL card-testing ledger (SEC-30),
+	// enforced on every replica.
+	CardFailureLedger *abuse.FailureLedger
 
 	riverCompositionMu     sync.Mutex
 	riverCompositionSealed bool

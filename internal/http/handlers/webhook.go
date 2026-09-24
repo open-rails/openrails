@@ -90,7 +90,7 @@ func Webhook(r *httprequest.Request) {
 		}
 		return
 	}
-	r.ErrorJSON(http.StatusNotFound, "No configured provider account resolves this webhook")
+	rejectWebhook(r)
 }
 
 // pinWebhookMerchantConn pins the resolved merchant's DB connection (the
@@ -112,7 +112,7 @@ func Webhook(r *httprequest.Request) {
 func pinWebhookMerchantConn(r *httprequest.Request, merchantID merchant.ID) (func(), bool) {
 	if r != nil && r.State != nil {
 		if bound := r.State.ConfiguredMerchant(); !bound.IsZero() && bound != merchantID {
-			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			rejectWebhook(r)
 			return func() {}, false
 		}
 	}
@@ -180,7 +180,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	var found bool
 	creds, found, err = r.State.Merchants.LoadStripeCredentialsForAccount(r.Request.Context(), merchantID, accountID)
 	if err == nil && !found {
-		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		rejectWebhook(r)
 		return
 	}
 	if err != nil {
@@ -210,7 +210,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		secrets = append(secrets, s)
 	}
 	if len(secrets) == 0 {
-		r.ErrorJSON(http.StatusUnauthorized, "Merchant webhook signing secret not configured")
+		rejectWebhook(r)
 		return
 	}
 	prepared, err := prepareStripeMultiSecret(body, secrets, r.Header("Stripe-Signature"), 5*time.Minute)
@@ -416,7 +416,7 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, t
 		return merchants.CustodianIdentity{}, noop, false
 	}
 	if !ok {
-		r.ErrorJSON(http.StatusNotFound, "Unknown custodian account")
+		rejectWebhook(r)
 		return merchants.CustodianIdentity{}, noop, false
 	}
 	// or#893/or#795: pin the custodian the event demonstrably came from, the way
@@ -443,7 +443,7 @@ func pinWebhookAccount(r *httprequest.Request, rail, environment, accountID stri
 		return merchants.PSPIdentity{}, noop, false
 	}
 	if !ok {
-		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		rejectWebhook(r)
 		return merchants.PSPIdentity{}, noop, false
 	}
 	ctx := merchant.WithID(r.Request.Context(), account.MerchantID)
@@ -474,7 +474,7 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	var found bool
 	keys, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
 	if err == nil && !found {
-		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		rejectWebhook(r)
 		return false
 	}
 	if err != nil {
@@ -564,7 +564,7 @@ func bindResolvedWebhookPSP(r *httprequest.Request, id uuid.UUID, found bool, er
 		return false
 	}
 	if !found || id == uuid.Nil {
-		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		rejectWebhook(r)
 		return false
 	}
 	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), id))
@@ -595,7 +595,7 @@ func processMerchantCCBillWebhook(r *httprequest.Request, clientIP, routeAccount
 		return false
 	}
 	if !found {
-		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		rejectWebhook(r)
 		return false
 	}
 	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pspID))
@@ -757,4 +757,11 @@ func readRequestBody(body io.ReadCloser) ([]byte, error) {
 	}
 	defer body.Close()
 	return io.ReadAll(body)
+}
+
+// rejectWebhook answers an unknown account, an unconfigured secret and a bad
+// signature identically (SEC-33), so a webhook route never reveals which
+// provider accounts a deployment serves.
+func rejectWebhook(r *httprequest.Request) {
+	r.ErrorJSON(http.StatusUnauthorized, "Invalid webhook signature")
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -97,6 +98,9 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
+	if refuseBlockedCardAttempt(r, user.ID) {
+		return
+	}
 	// A saved method or card token is charged at creation.
 	if (strings.TrimSpace(req.Payment.PaymentMethodID) != "" || strings.TrimSpace(req.Payment.PaymentToken) != "") && !customerInitiatedChargeAllowed(r) {
 		return
@@ -122,6 +126,9 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	}
 	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
+	if checkout.CardAttemptFailed(resp, err) {
+		recordCardFailure(r, abuse.AddressSubject(r.ClientIP()))
+	}
 	if err != nil {
 		log.WithError(err).WithField("request_id", r.RequestID()).Error("Failed to create checkout session")
 		// Card-abuse tracking (#371): a vault/card decline is a failed charge
@@ -228,9 +235,15 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		return
 	}
 	parsedID := typedParsedID.UUID()
+	if refuseBlockedCardAttempt(r, user.ID) {
+		return
+	}
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Capture: req.Payment.Capture, Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	principal := checkoutVerifiedPrincipal(r)
 	resp, err := r.State.CheckoutSessionService.ConfirmCustomerSession(r.Request.Context(), parsedID, svcReq, user, principal)
+	if checkout.CardAttemptFailed(resp, err) {
+		recordCardFailure(r, abuse.AddressSubject(r.ClientIP()))
+	}
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
 			Rail:              req.Payment.Rail,
@@ -256,6 +269,11 @@ type checkoutSessionErrorContext struct {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
+	var blocked *checkout.CardAttemptsBlockedError
+	if errors.As(err, &blocked) {
+		writeCardAttemptsBlocked(r, blocked.RetryAfter)
+		return
+	}
 	if errors.Is(err, openrails.ErrIdempotencyKeyReused) {
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "idempotency_key_reused", "idempotency key reused with different checkout session parameters"))
 		return

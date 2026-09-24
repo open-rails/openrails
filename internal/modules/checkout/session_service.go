@@ -29,6 +29,7 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -154,6 +155,8 @@ type CheckoutSessionService struct {
 	config      *config.Config
 	rails       railresolve.Source
 	clock       clockwork.Clock
+	// cardFailures is the durable card-testing ledger (SEC-30).
+	cardFailures *abuse.FailureLedger
 	// pendingLease overrides checkoutSessionPendingLease (tests); zero = default.
 	pendingLease time.Duration
 
@@ -332,11 +335,23 @@ func (s *CheckoutSessionService) requireProviderWrites() error {
 }
 
 func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	if err := s.guardCardAttempt(ctx, user); err != nil {
+		return nil, err
+	}
+	resp, err := s.createSession(ctx, req, user)
+	s.noteCardAttempt(ctx, user, resp, err)
+	return resp, err
+}
+
+func (s *CheckoutSessionService) createSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return nil, fmt.Errorf("%w: user is required", ErrCheckoutSessionValidation)
 	}
 	if req == nil {
 		return nil, fmt.Errorf("%w: request is required", ErrCheckoutSessionValidation)
+	}
+	if err := s.validateReturnURLs(req.SuccessURL, req.CancelURL); err != nil {
+		return nil, err
 	}
 	if req.Mode == string(models.CheckoutSessionModePaymentMethod) {
 		return s.createPaymentMethodSetup(ctx, req, user)
@@ -1017,6 +1032,15 @@ func (s *CheckoutSessionService) initialMembershipSessionResponse(ctx context.Co
 // ConfirmCustomerSession is the self-service boundary. The operation ledger,
 // rather than the session projection or quote expiry, owns accepted replay.
 func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity, principal billingauth.DelegatedPrincipal) (*CheckoutSessionResponse, error) {
+	if err := s.guardCardAttempt(ctx, user); err != nil {
+		return nil, err
+	}
+	resp, err := s.confirmCustomerSession(ctx, sessionID, req, user, principal)
+	s.noteCardAttempt(ctx, user, resp, err)
+	return resp, err
+}
+
+func (s *CheckoutSessionService) confirmCustomerSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity, principal billingauth.DelegatedPrincipal) (*CheckoutSessionResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		if db.IsNotFound(err) {

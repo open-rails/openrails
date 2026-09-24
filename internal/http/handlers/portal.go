@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"net/http"
-	"net/url"
+	"slices"
 	"strings"
 
+	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -24,7 +25,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "stripe customer not found")
 		return
 	}
-	returnURL := guessBaseURLPortal(r.Request)
+	returnURL := portalReturnOrigin(r)
 	if returnURL == "" {
 		r.ErrorJSON(http.StatusBadRequest, "return_url unavailable")
 		return
@@ -39,34 +40,19 @@ func CreatePortalSession(r *httprequest.Request) {
 	r.SuccessJSON(portalResponse{URL: urlStr})
 }
 
-func guessBaseURLPortal(req *http.Request) string {
-	if req == nil {
+// portalReturnOrigin returns the browser's origin only when it is an allowed
+// return origin (SEC-33), else the first allowed origin. Request headers never
+// choose an unlisted destination.
+func portalReturnOrigin(r *httprequest.Request) string {
+	if r == nil || r.State == nil || r.State.Config == nil {
 		return ""
 	}
-	if origin := strings.TrimSpace(req.Header.Get("Origin")); origin != "" {
-		if u, err := url.Parse(origin); err == nil && u.Scheme != "" && u.Host != "" {
-			return u.Scheme + "://" + u.Host
-		}
-	}
-	if ref := strings.TrimSpace(req.Header.Get("Referer")); ref != "" {
-		if u, err := url.Parse(ref); err == nil && u.Scheme != "" && u.Host != "" {
-			return u.Scheme + "://" + u.Host
-		}
-	}
-	scheme := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto"))
-	if scheme == "" {
-		if req.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
-	host := strings.TrimSpace(req.Header.Get("X-Forwarded-Host"))
-	if host == "" {
-		host = req.Host
-	}
-	if host == "" || scheme == "" {
+	allowed := r.State.Config.AllowedReturnOrigins()
+	if len(allowed) == 0 {
 		return ""
 	}
-	return scheme + "://" + host
+	if origin, ok := config.URLOrigin(r.Header("Origin")); ok && slices.Contains(allowed, origin) {
+		return origin
+	}
+	return allowed[0]
 }

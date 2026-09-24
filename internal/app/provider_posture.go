@@ -24,11 +24,15 @@ import (
 // reads and other PSPs keep working. Hosts that want a hard startup failure
 // check Ready after construction. Credentials loaded later are verified when
 // written or on their first mutation.
+//
+// Under live posture every NMI account must prove it is not in test mode
+// (SEC-33): an account left in test mode approves without moving money.
 func (r *Runtime) VerifyProviderPosture(ctx context.Context, declared ...merchant.ID) {
-	if r == nil || r.Config == nil || !r.Config.IsTestMode() || r.Config.IsProviderReadOnly() || r.DB == nil || r.Merchants == nil {
+	if r == nil || r.Config == nil || r.Config.IsProviderReadOnly() || r.DB == nil || r.Merchants == nil {
 		return
 	}
-	environment := config.ExpectedProviderEnvironment(true)
+	live := !r.Config.IsTestMode()
+	environment := config.ExpectedProviderEnvironment(!live)
 	seen := map[merchant.ID]bool{}
 	for _, mid := range append([]merchant.ID{r.ConfiguredMerchant()}, declared...) {
 		if mid.IsZero() || seen[mid] {
@@ -41,7 +45,7 @@ func (r *Runtime) VerifyProviderPosture(ctx context.Context, declared ...merchan
 				return err
 			}
 			for _, row := range rows {
-				if !row.Archived && row.Environment == environment {
+				if !row.Archived && row.Environment == environment && (!live || row.Rail == string(models.RailNMI)) {
 					r.verifyPSPPosture(mctx, mid, row.ID)
 				}
 			}
@@ -71,13 +75,13 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")
 			return
 		}
-		if client.LoopbackFixture {
+		if client.LoopbackFixture && client.TestMode {
 			return
 		}
 		if r.NMIPostureV5BaseURL != "" {
 			client.V5BaseURL = r.NMIPostureV5BaseURL
 		}
-		status, check = client.VerifyPosture(ctx), client.CheckPosture
+		status, check = client.VerifyPosture(ctx), client.PostureCheck()
 	case string(models.RailStripe):
 		secret, err := pspSecret(ctx, svc, mid, scope, "secret_key")
 		if err != nil {
@@ -103,10 +107,10 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 	}
 	r.providerPosture.Add(status.Key, check)
 	if status.Armed() {
-		log.WithContext(ctx).WithFields(fields).Info("provider posture: sandbox credentials verified; PSP armed")
+		log.WithContext(ctx).WithFields(fields).Info("provider posture: credentials verified; PSP armed")
 		return
 	}
-	log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: sandbox credentials not verified; PSP disarmed")
+	log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: credentials not verified; PSP disarmed")
 }
 
 // providerPostureReady fails while any loaded sandbox PSP is disarmed. Due
