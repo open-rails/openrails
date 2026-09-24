@@ -247,6 +247,47 @@ func (w *world) stop() {
 
 func (w *world) restart() { w.stop(); w.start() }
 
+// kill ends the process as SIGKILL does: nothing it was doing gets recorded.
+// The running jobs and in-flight operations are captured at the instant of
+// death, the process stops, and those rows are put back exactly as the dead
+// process left them (its beat long stopped) before a new process starts.
+func (w *world) kill() {
+	w.t.Helper()
+	ctx := w.t.Context()
+	schema := pgx.Identifier{w.schema}.Sanitize()
+	type intentRow struct {
+		id      string
+		status  string
+		claimed *time.Time
+	}
+	var jobIDs []int64
+	rows, err := w.pool.Query(ctx, `SELECT id FROM `+schema+`.river_job WHERE state = 'running' AND kind LIKE 'openrails.%'`)
+	require.NoError(w.t, err)
+	for rows.Next() {
+		var id int64
+		require.NoError(w.t, rows.Scan(&id))
+		jobIDs = append(jobIDs, id)
+	}
+	rows.Close()
+	var intents []intentRow
+	rows, err = w.pool.Query(ctx, `SELECT id::text, status, claimed_until FROM `+schema+`.rail_intents WHERE status = 'in_flight'`)
+	require.NoError(w.t, err)
+	for rows.Next() {
+		var r intentRow
+		require.NoError(w.t, rows.Scan(&r.id, &r.status, &r.claimed))
+		intents = append(intents, r)
+	}
+	rows.Close()
+	require.NotEmpty(w.t, jobIDs, "a job was running at the kill")
+	w.stop()
+	_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.river_job SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '10 minutes' WHERE id = ANY($1)`, jobIDs)
+	require.NoError(w.t, err)
+	for _, r := range intents {
+		_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.rail_intents SET status = $2, claimed_until = $3 WHERE id = $1::uuid`, r.id, r.status, r.claimed)
+		require.NoError(w.t, err)
+	}
+}
+
 // runRenewals runs the engine's scheduled due pass once, then waits for the
 // fleet to finish every operation it accepted.
 func (w *world) runRenewals() {

@@ -163,6 +163,9 @@ WRITES: while an OpenRails job runs it refreshes that job's
 `river_job.attempted_at` — the one column River's rescuer reads to decide a
 running job is stuck — because River has no heartbeat API (xs-007 row 31). One
 UPDATE by primary key; only the schema is interpolated, after the same check.
+`internal/river/job_rescue.go` is PERMANENT for the same reason: it returns
+running OpenRails jobs whose liveness beat stopped, which River's rescuer
+skips for timeout-free jobs.
 
 `LockUsageEventsForMeterCorrection` is also PERMANENT, but remains in sqlc: it
 holds a table-level transaction lock so an event insert cannot race a meter's

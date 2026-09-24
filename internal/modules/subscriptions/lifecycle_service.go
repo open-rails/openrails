@@ -2104,6 +2104,9 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 }
 
 // FailMembership marks a subscription as failed due to payment issues.
+// FindingTerminalHeld is a terminal decline whose cancellation was refused.
+const FindingTerminalHeld = "life.terminal_outcome.held"
+
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id is required")
@@ -2209,7 +2212,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 			awaitingStatus = models.StatusPastDue
 		}
+		heldTerminal := ""
 		parkUnknown := func(why string) {
+			heldTerminal = why
 			subscription.Status = awaitingStatus
 			subscription.GraceEndsAt = nil
 			subscription.NextRetryAt = nil
@@ -2393,6 +2398,16 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"subscription_id": subscription.ID,
 			}).Error("Failed to update subscription during failure flow")
 			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		// A terminal outcome the operator's switch (or a missing certainty
+		// leg) refused is a standing finding: the member is neither charged
+		// nor cancelled until someone decides.
+		if heldTerminal != "" {
+			evidence, _ := json.Marshal(map[string]any{"subscription_id": subscription.ID, "collection_policy": subscription.CollectionPolicy, "status": subscription.Status, "refusal": heldTerminal, "failure_code": normalize.FromPtr(params.FailureCode)})
+			action := fmt.Sprintf("subscription %s reached a terminal decline but cancellation was refused (%s); it waits %s with no further charges. Arm the destructive-action switch to let terminal outcomes apply, or resolve it by hand", subscription.ID, heldTerminal, subscription.Status)
+			if _, err := db.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: subscription.MerchantID, FindingType: FindingTerminalHeld, SubjectKey: subscription.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+				return fmt.Errorf("record held terminal outcome for %s: %w", subscription.ID, err)
+			}
 		}
 		// Engine access is paid time plus the renewal allowance; a decided
 		// decline ends the allowance now.

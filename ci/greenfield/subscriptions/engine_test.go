@@ -277,6 +277,11 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				require.Equal(t, tc.retries, offsets, "retry schedule")
 				sub := w.subscription(e.tp, e.sub)
 				require.Equal(t, tc.final, sub.Status)
+				if !tc.armed && tc.final == "past_due" {
+					status, body := w.staff(http.MethodGet, "/v1/merchant/findings")
+					require.Equal(t, http.StatusOK, status)
+					require.Contains(t, body, "life.terminal_outcome.held", "a held terminal outcome is visible to the operator")
+				}
 				attempts := 1 + len(tc.retries) + 1
 				require.Equal(t, attempts, e.providerAttempts(), "one provider attempt per scheduled try")
 				require.Len(t, e.providerLedger(), 1, "no charge besides the initial one")
@@ -730,6 +735,7 @@ func TestEngineCrashDurability(t *testing.T) {
 		{"before_submit", beforeSubmit, false, 2, true},
 		{"after_submit_response_lost", submit, true, 2, true},
 		{"lost_before_provider", submit, false, 1, false},
+		{"hard_kill_after_submit", submit, true, 2, true},
 	}
 	for _, rail := range rails {
 		for _, tc := range cases {
@@ -761,7 +767,11 @@ func TestEngineCrashDurability(t *testing.T) {
 				case <-time.After(20 * time.Second):
 					t.Fatal("the renewal never reached the provider")
 				}
-				w.stop() // the process dies with the request in flight
+				if tc.name == "hard_kill_after_submit" {
+					w.kill() // nothing the dying process was doing is recorded
+				} else {
+					w.stop() // the process dies with the request in flight
+				}
 				w.stripe.unhold()
 				w.nmi.unhold()
 				w.start()
