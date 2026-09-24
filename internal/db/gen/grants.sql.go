@@ -1303,7 +1303,11 @@ func (q *Queries) ListUngrantedGrantablePayments(ctx context.Context, arg ListUn
 
 const listUngrantedSubscriptions = `-- name: ListUngrantedSubscriptions :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at,
+       s.current_period_starts_at,
+       -- A provider-billed member in the provider's dunning keeps access
+       -- through its grace window, as a mirrored decline does.
+       GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END)::timestamptz AS current_period_ends_at,
+       s.started_at, s.ended_at,
        pd.entitlements_spec
 FROM openrails.subscriptions s
 JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
@@ -1312,7 +1316,7 @@ WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
   -- Engine card access is authored only by its atomic accepted-payment writer.
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
-  AND s.status IN ('active', 'cancelled', 'unknown')
+  AND (s.status IN ('active', 'cancelled', 'unknown') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)

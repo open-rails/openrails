@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -135,6 +136,12 @@ func (w *world) pull() {
 	w.t.Helper()
 	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, nil)
 	require.NoError(w.t, err)
+	if res.Job.State == rivertype.JobStateScheduled {
+		// The scheduler's staggered refresh for this merchant absorbed the
+		// insert (one in-flight refresh per merchant); run it now.
+		_, err = w.jobs.JobRetry(w.t.Context(), res.Job.ID)
+		require.NoError(w.t, err)
+	}
 	w.waitJob(res.Job.ID)
 }
 
