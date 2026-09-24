@@ -164,7 +164,14 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	seen := make(chan v5CreateSeen, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
-		require.Equal(t, "/customers", r.URL.Path)
+		if r.URL.Path != "/customers" {
+			// The recurring credential-on-file verification (Direct Post validate).
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, "validate", r.PostForm.Get("type"))
+			require.Equal(t, "vault_123", r.PostForm.Get("customer_vault_id"))
+			_, _ = io.WriteString(w, "response=1&responsetext=SUCCESS&transactionid=val_789&response_code=100")
+			return
+		}
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		seen <- v5CreateSeen{auth: r.Header.Get("Authorization"), body: body}

@@ -111,7 +111,9 @@ func TestLegacyNMIRefreshProviders(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
-			l := w.mirrorBook(tp, w.bookTier("monthly", 999, 30), 1)[0]
+			// A second member keeps the NMI roster non-empty: an empty roster
+			// never proves absence (#842).
+			l := w.mirrorBook(tp, w.bookTier("monthly", 999, 30), 2)[0]
 			w.nmi.providerCancel(l.railSub)
 			w.advance(time.Hour)
 

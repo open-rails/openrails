@@ -66,6 +66,7 @@ var providerWriteSurface = map[string]string{
 	"AddRecurringPlan":                "write", // creates a remote plan
 	"EditRecurringPlan":               "write", // mutates a remote plan
 	"CreateCustomerVault":             "write", // stores a card at the provider
+	"EstablishRecurringAgreement":     "write", // records a credential-on-file verification (no funds move)
 	"UpdateCustomerVault":             "write", // mutates a stored card
 	"DeleteCustomerVault":             "write", // IRREVERSIBLE: destroys the stored card
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
