@@ -140,7 +140,7 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 	t.Parallel()
 	forEachRail(t, func(t *testing.T, rail string) {
 		w := newWorld(t)
-		replica := w.replica()
+		replica := w.sibling()
 		group := "g" + uuid.NewString()[:8]
 		basic := w.tierPrice(group, 1, 1000, monthHours, false)
 		plus := w.tierPrice(group, 2, 2000, monthHours, false)

@@ -84,7 +84,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 		t.Run(rail, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
-			replica := w.replica()
+			replica := w.sibling()
 			client := w.client[embedded]
 			product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 			require.NoError(t, err)

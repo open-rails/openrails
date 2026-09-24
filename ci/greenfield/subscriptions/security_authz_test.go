@@ -130,14 +130,14 @@ func (w *world) rival() *rival {
 	})
 }
 
-// replica is another process of the same merchant on the same database, as
+// sibling is another process of the same merchant on the same database, as
 // hosts run several replicas behind one load balancer.
-func (w *world) replica() *rival {
-	return w.replicaWith(embed.CustomerBillingManagement)
+func (w *world) sibling() *rival {
+	return w.siblingWith(embed.CustomerBillingManagement)
 }
 
-// replicaWith is a replica publishing the given customer route scope.
-func (w *world) replicaWith(scope embed.CustomerHTTPScope) *rival {
+// siblingWith is a sibling publishing the given customer route scope.
+func (w *world) siblingWith(scope embed.CustomerHTTPScope) *rival {
 	return w.peer(w.slug, scope, w.declaredPSPs())
 }
 

@@ -66,7 +66,7 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 		t.Run(rail, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
-			replica := w.replica()
+			replica := w.sibling()
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
@@ -128,7 +128,7 @@ func TestSecurityConcurrentRefundsNeverExceedPayment(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/partial=%t", rail, partial), func(t *testing.T) {
 				t.Parallel()
 				w := newWorld(t)
-				replica := w.replica()
+				replica := w.sibling()
 				e := enroll(t, w, rail, embedded)
 				payment := completed(w.payments(embedded, e.c.id))[0]
 				params := openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer"}
