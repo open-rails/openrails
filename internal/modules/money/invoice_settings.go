@@ -109,9 +109,11 @@ func currentAnniversaryStart(now, anchor time.Time) time.Time {
 	if anchor.IsZero() {
 		anchor = time.Unix(0, 0).UTC()
 	}
+	now = now.UTC()
 	start := anniversaryInMonth(now.Year(), now.Month(), anchor)
 	if start.After(now) {
-		start = addMonthsClamped(start, -1)
+		prev := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+		start = anniversaryInMonth(prev.Year(), prev.Month(), anchor)
 	}
 	return start
 }

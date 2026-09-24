@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -291,6 +292,9 @@ func parseAmountCents(s string) (int64, error) {
 	for _, r := range whole + frac {
 		if r < '0' || r > '9' {
 			return 0, fmt.Errorf("invalid amount %q", s)
+		}
+		if cents > (math.MaxInt64-int64(r-'0'))/10 {
+			return 0, fmt.Errorf("amount %q is out of range", s)
 		}
 		cents = cents*10 + int64(r-'0')
 	}
