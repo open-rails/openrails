@@ -177,22 +177,11 @@ const (
 // whose value is not a string: each is stored JSONB, a provider's own wire, a
 // log context or a page size — never served by a route. Same shrink-only rule.
 var pendingDynamicMoney = map[string]string{
-	// This integration-only loopback server reproduces Stripe's PaymentIntent
-	// and Charge response contracts, not an OpenRails HTTP response. Real
-	// enrollment/renewal tests require numeric minor units on that provider wire.
-	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"amount\"":          notHTTPProviderWire,
-	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"amount_received\"": notHTTPProviderWire,
-	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"amount_captured\"": notHTTPProviderWire,
-	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"captured\"":        "not money: Stripe provider capture-status boolean in an integration-only fixture",
-
 	"internal/http/handlers/admin_credit_grants.go:func ListAdminCreditTransactions \"limit\"":                     notMoneyPageSize,
 	"internal/http/handlers/admin_payments.go:func GetAdminUserPayments \"limit\"":                                 notMoneyPageSize,
 	"internal/http/handlers/admin_payments.go:func adminRefundMetadata \"admin_refund_amount\"":                    notHTTPStoredMetadata,
 	"internal/http/handlers/self_usage_invoices.go:func GetMyInvoices \"limit\"":                                   notMoneyPageSize,
 	"internal/http/request/request.go:func SuccessJSONPaginated \"limit\"":                                         notMoneyPageSize,
-	"internal/integrationharness/nmi_gateway.go:func serveExactRead \"amount\"":                                    notHTTPProviderWire,
-	"internal/integrationharness/stripe_gateway.go:func handle \"price\"":                                          notHTTPProviderWire,
-	"internal/integrationharness/stripe_gateway.go:func subscriptionJSON \"price\"":                                notHTTPProviderWire,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                                 notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                                        notMoneyPurgeInventory,
 	"internal/modules/checkout/session_service.go:func confirmSolanaSession \"solana_token_amount\"":               notHTTPStoredMetadata,

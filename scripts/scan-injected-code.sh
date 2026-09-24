@@ -167,7 +167,12 @@ grep_rule() {
 list_files() {
 	case "$mode" in
 	all)
-		git ls-files -z
+		# A hard-cut deletion can leave the index aware of a path while the
+		# working tree no longer contains it. Scan existing files only; staged
+		# additions/changes are handled by the staged/range modes below.
+		while IFS= read -r -d '' f; do
+			[ -e "$f" ] && printf '%s\0' "$f"
+		done < <(git ls-files -z)
 		if [ "$include_untracked" -eq 1 ]; then
 			git ls-files -z --others --exclude-standard
 		fi

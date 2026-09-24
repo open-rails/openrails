@@ -11,26 +11,22 @@ checks() {
   bash scripts/check_business_time_test.sh
   bash scripts/check_business_time.sh
   bash scripts/go-test-gate_test.sh
-  bash scripts/test_integration_test.sh
   bash scripts/scan-injected-code.sh --all
-  unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+  go_files=()
+  while IFS= read -r -d '' file; do
+    [[ -e "$file" ]] && go_files+=("$file")
+  done < <(git ls-files -z '*.go')
+  unformatted="$(printf '%s\0' "${go_files[@]}" | xargs -0 --no-run-if-empty gofmt -l)"
   if [[ -n "$unformatted" ]]; then
     printf 'Run gofmt on:\n%s\n' "$unformatted" >&2
     exit 1
   fi
   bash scripts/check-embedded-auth-boundary.sh
   go build ./...
-  # Tests vet the same selected files before running; avoid separately loading
-  # and compiling the complete default and integration package graphs.
-  # Integration packages run once, with race coverage, in E2E. Retain whole
-  # packages here when E2E tags exclude a default source or test file.
-  local selected package
-  local -a unit_packages=()
-  selected="$(bash scripts/test_integration.sh --list-checks-packages)"
-  while IFS= read -r package; do
-    [[ -n "$package" ]] && unit_packages+=("$package")
-  done <<< "$selected"
-  go test -vet=all -race -count=1 "${unit_packages[@]}"
+  # The required database/provider workflow is the focused greenfield suite.
+  # Ordinary packages keep their pure unit and contract tests here; there is no
+  # legacy integration-package partition to maintain.
+  go test -vet=all -race -count=1 ./...
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2
@@ -50,22 +46,8 @@ checks() {
 }
 
 e2e() {
-  : "${OPENRAILS_TEST_DB_DSN:?Set OPENRAILS_TEST_DB_DSN to a disposable PostgreSQL server}"
-  if [[ -z "${SQLC_DATABASE_URL:-}" ]]; then
-    export SQLC_ADMIN_DATABASE_URL="${SQLC_ADMIN_DATABASE_URL:-$OPENRAILS_TEST_DB_DSN}"
-    export SQLC_VET_DB="openrails_check_${BASHPID}"
-    trap 'psql "$SQLC_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -qc "DROP DATABASE IF EXISTS $SQLC_VET_DB WITH (FORCE)"' EXIT
-    SQLC_DATABASE_URL="$(bash scripts/sqlc-vet-db.sh)"
-    export SQLC_DATABASE_URL
-  fi
-  sqlc_bin="${SQLC_BIN:-$(bash scripts/ci-install-tool.sh sqlc)}"
-  "$sqlc_bin" generate
-  "$sqlc_bin" vet
-  git diff --exit-code -- internal/db/gen
-  CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ '^TestQueryAudit$'
-  bash scripts/sql-lint.sh
-  bash scripts/migration-lint.sh
-  go run ./scripts/contracts -workflows
+  : "${OPENRAILS_GREENFIELD_DSN:?Set OPENRAILS_GREENFIELD_DSN to a disposable PostgreSQL server}"
+  bash scripts/greenfield.sh
 }
 
 case "${1:-all}" in

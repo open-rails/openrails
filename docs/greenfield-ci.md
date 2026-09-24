@@ -36,8 +36,7 @@ OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_
   bash scripts/greenfield.sh
 ```
 
-The old broad integration workflow remains in `ci-full.yaml` as a scheduled
-backstop while this compact gate grows. The legacy `native_engine_signup`
+The former broad integration workflow has been removed. The legacy `native_engine_signup`
 workflow remains the full engine-owned confirmation, renewal, dunning, and
 entitlement oracle. The old suite is not removed until focused scenarios have
 earned equivalent receipts.

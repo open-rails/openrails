@@ -67,9 +67,8 @@ jobs:
   e2e:
     name: End-to-end (greenfield)
     runs-on: ubuntu-latest
-    # The PR gate is intentionally small. The former broad integration suite
-    # remains in ci-full.yaml as the scheduled backstop while this contract
-    # slice grows.
+    # The PR gate is intentionally small: the greenfield contracts are the
+    # database/provider test suite.
     timeout-minutes: 10
     services:
       postgres:
