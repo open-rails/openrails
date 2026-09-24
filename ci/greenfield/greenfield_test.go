@@ -32,9 +32,6 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN"))
 	if dsn == "" {
-		dsn = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
-	}
-	if dsn == "" {
 		t.Fatal("OPENRAILS_GREENFIELD_DSN must point at a disposable PostgreSQL database")
 	}
 
@@ -108,9 +105,6 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 func (f *fixture) dsn(t *testing.T) string {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN"))
-	if dsn == "" {
-		dsn = strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN"))
-	}
 	return dsn
 }
 
