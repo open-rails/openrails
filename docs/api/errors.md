@@ -56,6 +56,11 @@ Repointing an NMI-billed subscription to another card in the same NMI vault is
 `409 payment_method_same_vault`: NMI schedules bill a vault, not one of its
 cards, so the change would do nothing at NMI. Vault the new card separately.
 
+`409 payment_duplicate_refused`: the provider refused the charge or card
+verification unprocessed as a duplicate of an identical charge (same card and
+amount) it had just made. Nothing was charged or saved; send the request again
+in a few minutes.
+
 NMI-billed (legacy) subscriptions: a cancel while the merchant's destructive
 switch is off is `409 provider_cancel_held` (nothing changed; NMI keeps billing
 until an operator arms the switch); a tier change to a price of another billing

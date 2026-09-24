@@ -112,6 +112,7 @@ func registerSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	}
 
 	// Payment methods.
+	group.Handle(http.MethodPut, "/default-payment-method", h(httphandlers.SetDefaultPaymentMethod))
 	pm := group.Group("/payment-methods")
 	pm.Handle(http.MethodGet, "", h(httphandlers.ListPaymentMethods))
 	pm.Handle(http.MethodPost, "/stripe-setup", h(httphandlers.CreateStripeMethodSetup))

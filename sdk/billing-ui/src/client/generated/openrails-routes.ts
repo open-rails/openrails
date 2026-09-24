@@ -7,6 +7,7 @@ export type OpenRailsCustomerRoute =
   | "GET /billing/v1/me/checkout/{id}"
   | "POST /billing/v1/me/checkout/{id}/confirm"
   | "PUT /billing/v1/me/collection-payment-method"
+  | "PUT /billing/v1/me/default-payment-method"
   | "GET /billing/v1/me/entitlements/active"
   | "GET /billing/v1/me/invoices"
   | "GET /billing/v1/me/invoices/{id}"

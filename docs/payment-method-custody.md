@@ -155,3 +155,23 @@ Custody values are a closed set (`models.Custodians()`, mirrored by the
 `payment_methods_custodian_check` constraint). Adding one is a migration plus a
 constant — deliberately, so an unknown custodian cannot arrive silently on a
 money path.
+
+## Default payment method
+
+A customer with any usable stored method (not parked, not pending delete)
+has exactly one default; with none, no default. The database enforces it:
+a partial unique index allows at most one, and a deferred trigger promotes
+another card at commit whenever the default is deleted, parked or detached
+(the most recently charged card, then a non-expired one, then the newest).
+The first saved card becomes the default; an in-place card replacement keeps
+it. Payment-method reads return `default: true` on it and list it first, so
+hosts preselect it; `SetDefaultPaymentMethod` (or `PUT .../default-payment-method` with `{"payment_method_id": ...}`)
+switches it atomically. An expired card is not demoted by the passage of time;
+it stays default until another card is chosen or it is replaced.
+
+Provider mirror: none is needed. OpenRails names the exact instrument on
+every charge (Stripe payment method id, NMI billing id), so Stripe's customer
+default and NMI's vault priority never select a card for OpenRails-owned
+billing. A provider-owned NMI schedule bills its vault's priority-1 entry; an
+in-place replacement removes the old entry, leaving the new card as the
+vault's only card.

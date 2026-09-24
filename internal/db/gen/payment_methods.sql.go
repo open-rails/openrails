@@ -693,7 +693,7 @@ const listPaymentMethodsByCustomer = `-- name: ListPaymentMethodsByCustomer :man
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
-ORDER BY pm.created_at DESC
+ORDER BY pm.is_default DESC, pm.created_at DESC
 `
 
 type ListPaymentMethodsByCustomerParams struct {
@@ -752,7 +752,7 @@ const listPaymentMethodsByCustomerPaged = `-- name: ListPaymentMethodsByCustomer
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
-ORDER BY pm.created_at DESC
+ORDER BY pm.is_default DESC, pm.created_at DESC
 LIMIT NULLIF($4::int, 0) OFFSET $3::int
 `
 
@@ -1390,6 +1390,74 @@ func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePayme
 		arg.ID,
 		arg.OldRailMethodRef,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getDefaultPaymentMethodID = `-- name: GetDefaultPaymentMethodID :one
+SELECT pm.id FROM openrails.payment_methods pm
+WHERE pm.merchant_id = $1::uuid AND pm.customer_id = $2::uuid AND pm.is_default
+`
+
+type GetDefaultPaymentMethodIDParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// #1084: the customer's default payment method (none when it has no usable one).
+func (q *Queries) GetDefaultPaymentMethodID(ctx context.Context, arg GetDefaultPaymentMethodIDParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDefaultPaymentMethodID, arg.MerchantID, arg.CustomerID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockCustomerDefaultPaymentMethod = `-- name: LockCustomerDefaultPaymentMethod :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.default_payment_method:' || $1::uuid::text || ':' || $2::uuid::text, 0))
+`
+
+type LockCustomerDefaultPaymentMethodParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// The same customer lock the deferred default trigger takes.
+func (q *Queries) LockCustomerDefaultPaymentMethod(ctx context.Context, arg LockCustomerDefaultPaymentMethodParams) error {
+	_, err := q.db.Exec(ctx, lockCustomerDefaultPaymentMethod, arg.MerchantID, arg.CustomerID)
+	return err
+}
+
+const clearDefaultPaymentMethod = `-- name: ClearDefaultPaymentMethod :exec
+UPDATE openrails.payment_methods SET is_default = false
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND is_default AND id <> $3::uuid
+`
+
+type ClearDefaultPaymentMethodParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	KeepID     uuid.UUID
+}
+
+func (q *Queries) ClearDefaultPaymentMethod(ctx context.Context, arg ClearDefaultPaymentMethodParams) error {
+	_, err := q.db.Exec(ctx, clearDefaultPaymentMethod, arg.MerchantID, arg.CustomerID, arg.KeepID)
+	return err
+}
+
+const markDefaultPaymentMethod = `-- name: MarkDefaultPaymentMethod :execrows
+UPDATE openrails.payment_methods SET is_default = true
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id = $3::uuid AND park_reason = ''
+`
+
+type MarkDefaultPaymentMethodParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkDefaultPaymentMethod(ctx context.Context, arg MarkDefaultPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markDefaultPaymentMethod, arg.MerchantID, arg.CustomerID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

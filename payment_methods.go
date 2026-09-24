@@ -23,7 +23,14 @@ type PaymentMethod struct {
 	Health                      *PaymentMethodHealth        `json:"health,omitempty"`
 	Subscriptions               []PaymentMethodSubscription `json:"subscriptions,omitempty"`
 	CollectionDefaultCurrencies []string                    `json:"collection_default_currencies,omitempty"`
+	// Default marks the customer's default method: exactly one whenever the
+	// customer has a usable stored method.
+	Default bool `json:"default"`
 }
+
+// CodePaymentMethodNotUsable: a parked or pending-delete method cannot be
+// the customer's default.
+const CodePaymentMethodNotUsable = "payment_method_not_usable"
 
 type PaymentMethodHealth struct {
 	ExpiryStatus      string     `json:"expiry_status,omitempty"`       // card only: valid|expiring_soon|expired

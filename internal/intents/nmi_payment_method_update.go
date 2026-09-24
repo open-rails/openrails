@@ -308,6 +308,10 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 			switch {
 			case errors.Is(err, nmi.ErrProviderReadOnly):
 				return Parked("nmi provider writes blocked (mode=readonly)")
+			case errors.Is(err, nmi.ErrDuplicateTransaction):
+				// Refused unprocessed by NMI's duplicate window; the next pass
+				// finds nothing under the order and verifies again.
+				return Retryable("NMI refused the replacement card verification as a duplicate; retrying after its window")
 			case errors.As(err, &decline) && !nmi.UncertainResponseCode(decline.ResponseCode):
 				refused = &nmi.Verification{ResponseCode: decline.ResponseCode, ResponseText: strings.TrimSpace(decline.LocalizationID)}
 			case err != nil:

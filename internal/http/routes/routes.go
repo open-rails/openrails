@@ -743,6 +743,8 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	customers.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserBillingProfile), customerRead...)
 	customers.Handle(http.MethodGet, "/payment-methods", h(httphandlers.GetAdminUserPaymentMethods), customerRead...)
 	customers.Handle(http.MethodDelete, "/payment-methods/:id", h(httphandlers.AdminDeletePaymentMethod), revokeWrite...)
+	customerWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsUpdate)}, dbMW...)
+	customers.Handle(http.MethodPut, "/default-payment-method", h(httphandlers.AdminSetDefaultPaymentMethod), customerWrite...)
 	customers.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminUserPayments), payRead...)
 	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), offChannelWrite...)
 	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement), grantWrite...)

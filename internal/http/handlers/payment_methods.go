@@ -224,6 +224,10 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
+		if errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused) {
+			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentDuplicateRefused, err.Error()))
+			return
+		}
 		if providerErr := createPaymentMethodProviderError(err); providerErr != nil {
 			r.APIError(providerErr)
 			return
@@ -240,7 +244,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(paymentMethodToAPI(pm, nil))
+	r.SuccessJSON(singlePaymentMethodToAPI(r, pm))
 }
 
 func createPaymentMethodProviderError(err error) *api.APIError {
@@ -441,7 +445,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(paymentMethodToAPI(updated, nil))
+	r.SuccessJSON(singlePaymentMethodToAPI(r, updated))
 }
 
 func firstNonNilString(values ...*string) *string {
@@ -787,6 +791,7 @@ func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]
 // a loader failure is the caller's 500; the admin profile degrades instead.
 func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]paymentMethodResponse, bool) {
 	response := paymentMethodsToAPI(methods, paymentMethodCharges(r, methods))
+	stampDefaultPaymentMethod(r, methods, response)
 	if err := applyCollectionDefaults(r, payer, methods, response); err != nil {
 		log.WithError(err).Error("failed to load collection payment method defaults")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment method defaults")
@@ -820,4 +825,92 @@ func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, 
 // exercised by failing the loader without corrupting the database.
 var loadCollectionPaymentMethodDefaults = func(r *httprequest.Request, payer identity.CustomerID) (map[uuid.UUID][]string, error) {
 	return money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(r.Request.Context(), payer)
+}
+
+// stampDefaultPaymentMethod marks the customer's default method on an
+// index-aligned response. Best-effort: a lookup failure leaves no mark.
+func stampDefaultPaymentMethod(r *httprequest.Request, methods []*models.PaymentMethod, response []paymentMethodResponse) {
+	if r.State.PaymentMethodService == nil || len(methods) == 0 {
+		return
+	}
+	defaults := map[uuid.UUID]uuid.UUID{}
+	for i, method := range methods {
+		if method == nil {
+			continue
+		}
+		id, seen := defaults[method.CustomerID]
+		if !seen {
+			found, ok, err := r.State.PaymentMethodService.DefaultPaymentMethodID(r.Request.Context(), method.CustomerID)
+			if err != nil {
+				log.WithError(err).Warn("failed to load the default payment method")
+				return
+			}
+			if ok {
+				id = found
+			}
+			defaults[method.CustomerID] = id
+		}
+		response[i].Default = id == method.ID
+	}
+}
+
+func singlePaymentMethodToAPI(r *httprequest.Request, pm *models.PaymentMethod) paymentMethodResponse {
+	out := []paymentMethodResponse{paymentMethodToAPI(pm, nil)}
+	stampDefaultPaymentMethod(r, []*models.PaymentMethod{pm}, out)
+	return out[0]
+}
+
+// SetDefaultPaymentMethod makes one of the caller's usable methods the default.
+func SetDefaultPaymentMethod(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil {
+		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	setDefaultPaymentMethodForCustomer(r, user.ID)
+}
+
+// AdminSetDefaultPaymentMethod is the merchant-scoped SetDefaultPaymentMethod.
+func AdminSetDefaultPaymentMethod(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+	if !ok {
+		return
+	}
+	setDefaultPaymentMethodForCustomer(r, customer.String())
+}
+
+func setDefaultPaymentMethodForCustomer(r *httprequest.Request, customerID string) {
+	var body struct {
+		PaymentMethodID string `json:"payment_method_id" binding:"required"`
+	}
+	if !r.BindJSON(&body) {
+		return
+	}
+	methodID, err := openrails.ParsePaymentMethodID(body.PaymentMethodID)
+	if err != nil || methodID.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
+		return
+	}
+	customer := identity.CustomerIDFromString(customerID)
+	if customer.IsZero() || r.State.PaymentMethodService == nil {
+		r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+		return
+	}
+	switch err := r.State.PaymentMethodService.SetDefaultPaymentMethod(r.Request.Context(), customer.UUID(), methodID.UUID()); {
+	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
+		r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+		return
+	case errors.Is(err, paymentmethods.ErrPaymentMethodNotUsable):
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentMethodNotUsable, err.Error()))
+		return
+	case err != nil:
+		r.InternalError("Failed to set the default payment method", err)
+		return
+	}
+	pm, err := r.State.PaymentMethodService.GetByID(r.Request.Context(), methodID.UUID())
+	if err != nil {
+		r.InternalError("Failed to read the payment method", err)
+		return
+	}
+	r.SuccessJSON(singlePaymentMethodToAPI(r, pm))
 }

@@ -14,7 +14,7 @@ import (
 // #837/#834: all-or-nothing pass brakes; small books still converge.
 func TestCancelBudgetAndRosterBreaker(t *testing.T) {
 	var b CancelBudget
-	for live, want := range map[int]int{0: 3, 9: 3, 20: 3, 100: 5, 500: 25, 1000: 25, 10000: 25} {
+	for live, want := range map[int]int{0: 3, 4: 4, 5: 5, 6: 3, 9: 3, 20: 3, 100: 5, 500: 25, 1000: 25, 10000: 25} {
 		require.Equal(t, want, b.Limit(live), "Limit(%d)", live)
 	}
 	over, why := b.Exceeded(9, 9)
@@ -22,6 +22,10 @@ func TestCancelBudgetAndRosterBreaker(t *testing.T) {
 	require.Contains(t, why, "NONE were applied")
 	over, _ = b.Exceeded(2, 2)
 	require.False(t, over, "two genuine cancellations on a tiny book converge")
+	over, _ = b.Exceeded(4, 4)
+	require.False(t, over, "a four-subscriber book whose schedules all ended converges")
+	over, _ = b.Exceeded(6, 6)
+	require.True(t, over, "no pass cancels a book above the tiny-book size entirely")
 	over, _ = b.Exceeded(25, 1000)
 	require.False(t, over)
 

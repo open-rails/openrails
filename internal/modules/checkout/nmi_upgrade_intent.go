@@ -48,6 +48,22 @@ func (s *nmiUpgradeStep) refuse(err error) {
 	}
 }
 
+// refuseUnexecuted records that the provider holds no charge for the step, so
+// nothing was charged and the customer may try again.
+func (s *nmiUpgradeStep) refuseUnexecuted(code, reason string) {
+	s.Refusal, s.RefusalStatus, s.RefusalCode = reason, http.StatusConflict, code
+}
+
+const (
+	duplicateProrationRefusal = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged, try again in a few minutes"
+	absentProrationRefusal    = "the payment provider holds no charge for this tier change; nothing was charged, try again"
+)
+
+// ProrationUnresolvedFinding is a submitted tier-change charge whose outcome
+// the provider's reads cannot settle. It names the operator resolve path and
+// closes when the operation completes either way.
+const ProrationUnresolvedFinding = "life.tier_change.proration_unresolved"
+
 // nmiScheduleUpdate is the in-place change of the existing NMI schedule's
 // amount. It is a set-to-value operation verified by readback, so retries are
 // idempotent and never touch the schedule's next billing date.
@@ -182,6 +198,14 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		}
 		sale, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: moneyutil.Cents(proration), Currency: p.Currency, OrderID: in.ID.String(), OrderDescription: "Upgrade: " + p.ProductName, StoredCredential: nmidirect.StoredCredentialFor(credential)})
 		if callErr != nil {
+			if errors.Is(callErr, nmi.ErrDuplicateTransaction) {
+				// NMI's duplicate check refused this unique order unprocessed.
+				progress.Proration.refuseUnexecuted(openrails.CodePaymentDuplicateRefused, duplicateProrationRefusal)
+				if err = save("proration", progress.Proration); err != nil {
+					return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
+				}
+				return h.terminal(ctx, in, intents.TerminalWithEvidence(progress.Proration.Refusal, evidence()))
+			}
 			if nmi.RequiresVerification(callErr) {
 				return intents.Ambiguous("proration submission has no exact receipt: " + callErr.Error())
 			}
@@ -209,7 +233,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			return intents.Ambiguous("tier change proration receipt does not qualify: " + err.Error())
 		}
 		if !receiptFound {
-			return intents.Ambiguous("tier change proration receipt is not yet visible")
+			return h.absentProration(ctx, in, p, client, progress.Proration, save, evidence)
 		}
 		receipt, err = store.RetainCollectedReceipt(ctx, in, receipt)
 		if err != nil {
@@ -356,6 +380,52 @@ func (h *NMIUpgradeIntentHandler) targetPlan(ctx context.Context, client *nmi.NM
 	return planID, nil
 }
 
+// absentProration decides a submitted proration with no receipt from the
+// provider's record under the operation's order: nothing after the settle
+// delay means nothing was charged; a lone refused sale is a decline. A read
+// that cannot settle it raises the operator finding.
+func (h *NMIUpgradeIntentHandler) absentProration(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, client *nmi.NMIClient, step *nmiUpgradeStep, save func(string, any) error, evidence func() map[string]any) intents.Outcome {
+	if h.Checkout.now().Before(step.SubmittedAt.Add(intents.LostSubmissionSettle)) {
+		return intents.Ambiguous("tier change proration receipt is not yet visible")
+	}
+	attempts, err := client.ReadOrderAttempts(ctx, in.ID.String())
+	switch {
+	case err != nil:
+		h.raiseProrationUnresolved(ctx, in, p, "the provider's transaction search failed: "+err.Error())
+		return intents.Ambiguous("tier change proration cannot be read: " + err.Error())
+	case attempts.Transactions == 0:
+		step.refuseUnexecuted(openrails.CodeTierChangeRefused, absentProrationRefusal)
+	case attempts.Declined:
+		step.refuse(&nmi.CustomerVaultError{Message: "sale declined", ResponseCode: attempts.DeclineCode, LocalizationID: nmi.LocalizationIDForResponseCode(attempts.DeclineCode)})
+	default:
+		h.raiseProrationUnresolved(ctx, in, p, fmt.Sprintf("the provider holds %d transaction(s) under this order but none qualifies as the accepted charge", attempts.Transactions))
+		return intents.Ambiguous("tier change proration receipt does not qualify")
+	}
+	if err := save("proration", step); err != nil {
+		return intents.AmbiguousWithEvidence("persist proration outcome: "+err.Error(), evidence())
+	}
+	h.closeFinding(ctx, in.MerchantID, ProrationUnresolvedFinding, in.ID.String())
+	return h.terminal(ctx, in, intents.TerminalWithEvidence(step.Refusal, evidence()))
+}
+
+func (h *NMIUpgradeIntentHandler) closeFinding(ctx context.Context, merchantID uuid.UUID, findingType, subject string) {
+	wctx, cancel := intents.LedgerWriteContext(ctx)
+	defer cancel()
+	q := h.Checkout.SubscriptionService.Database().Gen(wctx)
+	if row, err := q.GetReconciliationFindingByIdentity(wctx, gen.GetReconciliationFindingByIdentityParams{MerchantID: merchantID, FindingType: findingType, SubjectKey: subject}); err == nil {
+		_, _ = q.MarkReconciliationFindingVanished(wctx, gen.MarkReconciliationFindingVanishedParams{MerchantID: merchantID, ID: row.ID})
+	}
+}
+
+func (h *NMIUpgradeIntentHandler) raiseProrationUnresolved(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, reason string) {
+	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": openrails.SubscriptionID(p.OldSubscriptionID).String(), "order_id": in.ID.String(), "reason": reason})
+	action := fmt.Sprintf("A tier change charge (order %s) cannot be settled from NMI: %s. Nothing further is charged while this stands. Confirm at NMI, then run `openrails intents resolve --intent %s --step proration --receipt <transaction id>` if it was charged, or `--not-executed` if NMI holds no transaction for the order.", in.ID, reason, in.ID)
+	wctx, cancel := intents.LedgerWriteContext(ctx)
+	defer cancel()
+	_, _ = h.Checkout.SubscriptionService.Database().Gen(wctx).UpsertReconciliationFinding(wctx, gen.UpsertReconciliationFindingParams{MerchantID: in.MerchantID, FindingType: ProrationUnresolvedFinding,
+		SubjectKey: in.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw})
+}
+
 func (h *NMIUpgradeIntentHandler) raiseUpdateStuck(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, cause error) {
 	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": openrails.SubscriptionID(p.OldSubscriptionID).String(),
 		"rail_subscription_id": p.OldProviderSubscriptionID, "action": p.Action, "error": cause.Error()})
@@ -392,9 +462,6 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	if step.Refusal != "" {
 		return intents.Outcome{}, intents.RejectResolution("proration step already has an outcome")
 	}
-	if resolution.NotExecuted {
-		return intents.Outcome{}, intents.RejectResolution("submitted NMI proration has no authoritative nonexecution proof")
-	}
 	client, err := h.Checkout.resolveNMIClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 	if err != nil {
 		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
@@ -406,11 +473,28 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	if owner != in.MerchantID || account != *in.PspID {
 		return intents.Outcome{}, intents.RejectResolution("provider reader names another account")
 	}
+	store := intents.NewStore(h.Checkout.SubscriptionService.Database())
+	if resolution.NotExecuted {
+		// Nonexecution is proven by NMI holding no transaction under the
+		// operation's unique order reference.
+		attempts, err := client.ReadOrderAttempts(ctx, in.ID.String())
+		if err != nil {
+			return intents.Outcome{}, intents.RejectResolution("NMI transaction search is unavailable: %v", err)
+		}
+		if attempts.Transactions != 0 {
+			return intents.Outcome{}, intents.RejectResolution("NMI holds %d transaction(s) under this order; resolve with its receipt", attempts.Transactions)
+		}
+		step.refuseUnexecuted(openrails.CodeTierChangeRefused, absentProrationRefusal)
+		step.Resolution = resolution.Record(h.Checkout.now())
+		if err := store.RecordProgress(ctx, in.ID, map[string]any{"proration": step}); err != nil {
+			return intents.Outcome{}, fmt.Errorf("persist resolved proration step: %w", err)
+		}
+		return h.advance(ctx, in, false), nil
+	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
 	if err != nil || !found {
 		return intents.Outcome{}, intents.RejectResolution("exact tier change proration receipt is unavailable or contradicts accepted terms")
 	}
-	store := intents.NewStore(h.Checkout.SubscriptionService.Database())
 	if _, err = store.RetainCollectedReceipt(ctx, in, receipt); err != nil {
 		return intents.Outcome{}, err
 	}
@@ -460,12 +544,14 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 				return err
 			}
 		}
-		if row, err := txDB.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{MerchantID: in.MerchantID, FindingType: ProviderUpdateStuckFinding, SubjectKey: p.OldSubscriptionID.String()}); err == nil {
-			if _, err := txDB.Gen(ctx).MarkReconciliationFindingVanished(ctx, gen.MarkReconciliationFindingVanishedParams{MerchantID: in.MerchantID, ID: row.ID}); err != nil {
+		for finding, subject := range map[string]string{ProviderUpdateStuckFinding: p.OldSubscriptionID.String(), ProrationUnresolvedFinding: in.ID.String()} {
+			if row, err := txDB.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{MerchantID: in.MerchantID, FindingType: finding, SubjectKey: subject}); err == nil {
+				if _, err := txDB.Gen(ctx).MarkReconciliationFindingVanished(ctx, gen.MarkReconciliationFindingVanishedParams{MerchantID: in.MerchantID, ID: row.ID}); err != nil {
+					return err
+				}
+			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return err
 		}
 		return completion.commit(ctx)
 	})

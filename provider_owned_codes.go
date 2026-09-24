@@ -11,4 +11,9 @@ const (
 	// so another card of the same vault cannot become the subscription's
 	// payment method. Save the card as a new payment method instead.
 	CodePaymentMethodSameVault = "payment_method_same_vault"
+	// CodePaymentDuplicateRefused: the provider refused the charge unprocessed
+	// because an identical charge (same card and amount) was just made. Nothing
+	// was charged; the same request succeeds once the provider's duplicate
+	// window has passed.
+	CodePaymentDuplicateRefused = "payment_duplicate_refused"
 )

@@ -47,6 +47,14 @@
       ]
     },
     {
+      "method": "PUT",
+      "path": "/billing/v1/me/default-payment-method",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/billing/v1/me/entitlements/active",
       "scopes": [

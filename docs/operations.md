@@ -813,7 +813,10 @@ gates one merchant. Disabling either stops that merchant.
 ### Cancellation caps (#837)
 
 Independently of the switch, one pass may cancel at most
-`min(25, max(3, 5% of the merchant's live linked book))` subscriptions. Over
+`min(25, max(3, 5% of the merchant's live linked book))` subscriptions, or the
+whole book when it holds at most 5 live subscriptions (a tiny book whose
+schedules the provider ended must converge; no larger book is ever cancelled
+entirely by one pass). Over
 that, **none** are applied, the merchant's pass halts, and a
 `pull.cancellation.capped` finding lands in the review queue. It is all-or-
 nothing on purpose: a pass that wants to cancel 850 customers is not a pass that

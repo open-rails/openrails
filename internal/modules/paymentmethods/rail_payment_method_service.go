@@ -275,6 +275,9 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	agreementRef, err := client.EstablishRecurringAgreement(ctx, nmiResponse.CustomerVaultID, nmiResponse.BillingID, "pmv-"+methodID.String())
 	if err != nil {
 		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
+		if errors.Is(err, nmi.ErrDuplicateTransaction) {
+			return nil, ErrPaymentDuplicateRefused
+		}
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
 			code := strings.TrimSpace(nmiErr.LocalizationID)
@@ -531,6 +534,10 @@ func stringPtrOrNil(value string) *string {
 var (
 	ErrPaymentMethodUpdateProcessing = errors.New("payment method update is processing; retry the same request to check the result")
 	ErrPaymentMethodRetokenize       = errors.New("payment method was not updated; tokenize the card again")
+	// ErrPaymentDuplicateRefused: the provider refused the card verification
+	// unprocessed as a duplicate of an identical recent request; nothing was
+	// saved and the same request succeeds after its window.
+	ErrPaymentDuplicateRefused = errors.New("the payment provider refused the card verification as a duplicate of an identical recent request; try again in a few minutes")
 )
 
 // PaymentMethodUpdateValidationError is a caller-correctable replacement
