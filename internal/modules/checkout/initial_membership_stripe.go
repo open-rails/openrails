@@ -79,6 +79,9 @@ func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context
 	}
 	switch result.State {
 	case subscriptions.StripeEngineAuthenticationRequired:
+		if h.authenticationAbandoned(p) {
+			return intents.Retryable("abandoned authentication requires gated cancellation of the existing payment")
+		}
 		return intents.AmbiguousWithEvidence("Stripe payment requires customer authentication", map[string]any{"authentication_required": true, "stripe_payment_intent_id": result.PaymentIntentID})
 	case subscriptions.StripeEngineDeclined:
 		if result.FailureCode != "canceled" {
@@ -136,5 +139,20 @@ func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context
 			return intents.Ambiguous(err.Error())
 		}
 	}
+	if result.State == subscriptions.StripeEngineAuthenticationRequired {
+		p, err := subscriptions.DecodeInitialMembershipPayload(current)
+		if err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+		if h.authenticationAbandoned(p) {
+			if _, err := service.CancelAbandonedEnginePayment(ctx, params, result.PaymentIntentID); err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+		}
+	}
 	return h.Verify(ctx, current)
+}
+
+func (h *InitialMembershipIntentHandler) authenticationAbandoned(p InitialMembershipPayload) bool {
+	return h.Checkout.Clock().Now().After(p.Terms.AcceptedAt.Add(subscriptions.EngineAuthenticationWindow))
 }

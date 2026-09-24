@@ -16,6 +16,12 @@ import (
 // expires, so engine access stays bounded by paid time plus this allowance.
 const EngineRenewalGrace = 24 * time.Hour
 
+// EngineAuthenticationWindow bounds how long a first payment may wait on an
+// issuer authentication challenge the payer started. After it the engine
+// closes the payment and the enrollment fails, releasing the product for a
+// new attempt. A renewal's challenge waits out the renewal grace instead.
+const EngineAuthenticationWindow = time.Hour
+
 type graceWriter interface {
 	PushNewEntitlement(context.Context, entitlements.PushNewEntitlementParams) (*models.Entitlement, error)
 }

@@ -226,7 +226,13 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		if !ok {
 			return 404, stripeErr("resource_missing")
 		}
+		if pi["status"] == "succeeded" {
+			return 400, stripeErr("payment_intent_unexpected_state")
+		}
 		pi["status"] = "canceled"
+		if reason := form.Get("cancellation_reason"); reason != "" {
+			pi["cancellation_reason"] = reason
+		}
 		return 200, pi
 	case r.Method == http.MethodGet && seg[0] == "payment_intents" && len(seg) == 2:
 		if pi, ok := f.intents[seg[1]]; ok {
@@ -304,8 +310,10 @@ func (f *stripeFake) createIntent(form url.Values) (int, any) {
 		pi["status"] = "requires_action"
 		return 200, pi
 	default:
-		pi["status"] = "requires_payment_method"
-		pi["last_payment_error"] = obj{"code": "card_declined", "decline_code": decline, "payment_method": obj{"id": pm}}
+		// Stripe detaches the refused method from the intent; it survives
+		// only on last_payment_error.
+		pi["status"], pi["payment_method"] = "requires_payment_method", nil
+		pi["last_payment_error"] = obj{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_method": obj{"id": pm, "object": "payment_method"}}
 		return 402, obj{"error": obj{"type": "card_error", "code": "card_declined", "decline_code": decline, "payment_intent": pi}}
 	}
 }

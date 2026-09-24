@@ -127,10 +127,12 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 			end := e.periodEnd()
 			e.toPeriodEnd()
 			w.restart()
-			require.Eventually(t, func() bool {
+			deadline := time.Now().Add(30 * time.Second)
+			for !w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) {
+				require.True(t, time.Now().Before(deadline), "the runtime renews without a manual pass")
 				w.settle()
-				return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end)
-			}, 30*time.Second, 100*time.Millisecond, "the runtime renews without a manual pass")
+				time.Sleep(100 * time.Millisecond)
+			}
 			require.Len(t, e.providerLedger(), 2)
 			require.True(t, e.c.entitled(e.ent))
 		})
@@ -460,5 +462,128 @@ func TestEngineRenewalRefunds(t *testing.T) {
 			require.Len(t, e.providerLedger(), 2, "the grandfathered member still renews")
 			require.True(t, e.c.entitled(e.ent))
 		})
+	})
+}
+
+// A declined first payment resolves promptly as a refusal: no membership, no
+// charge, and the buyer can enroll again with another card.
+func TestEngineInitialDeclineResolves(t *testing.T) {
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			w := newWorld(t)
+			price := w.membership("content:members", 9_990_000)
+			c := w.newCustomer()
+			declined := c.saveCard(rail, card{Brand: "visa", Last4: "0002", Decline: map[string]string{"stripe": "insufficient_funds", "nmi": "202"}[rail]})
+			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
+				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+				IdempotencyKey: "enroll-declined", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: declined},
+				SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+			})
+			require.NoError(t, err)
+			_, confirm := c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": rail}})
+			t.Logf("confirm: %v", confirm)
+			w.settle()
+			w.until(func() bool {
+				return unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))["status"] == "failed"
+			}, "the declined enrollment resolves as failed")
+			subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+			require.NoError(t, err)
+			require.Empty(t, subs.Data)
+			require.False(t, c.entitled("content:members"))
+			fresh := c.saveCard(rail, visa)
+			c.subscribeAgain(embedded, rail, price.ID, "content:members", fresh)
+			require.True(t, c.entitled("content:members"))
+		})
+	}
+}
+
+// An initial payment awaiting issuer authentication that the buyer abandons
+// must not hold the product hostage: once the checkout lapses the engine
+// closes the payment, and the buyer can enroll again.
+func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
+	w := newWorld(t)
+	price := w.membership("content:members", 9_990_000)
+	c := w.newCustomer()
+	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
+	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
+		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+		IdempotencyKey: "enroll-3ds", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: challenged},
+		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+	})
+	require.NoError(t, err)
+	_, confirm := c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": "stripe"}})
+	t.Logf("confirm: %v", confirm)
+	w.settle()
+	w.advance(2 * day)
+	w.wake()
+	w.until(func() bool {
+		return unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))["status"] == "failed"
+	}, "the abandoned challenge fails the enrollment")
+	require.Len(t, w.stripe.mutations("/v1/payment_intents/"), 1, "the challenged payment itself is closed, once")
+	fresh := c.saveCard("stripe", visa)
+	c.subscribeAgain(embedded, "stripe", price.ID, "content:members", fresh)
+	require.True(t, c.entitled("content:members"))
+	require.Len(t, w.stripe.ledger(""), 1, "only the second card was charged")
+}
+
+// A renewal the issuer challenges keeps access through the renewal grace
+// while the member may authenticate; if they never do, the engine closes the
+// payment, the membership waits past_due for a card, and a new card recovers.
+func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
+	w := newWorld(t)
+	e := enroll(t, w, "stripe", embedded)
+	e.setDecline(visa.Last4, "auth", "")
+	e.toPeriodEnd()
+	w.runRenewals()
+	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
+	require.True(t, e.c.entitled(e.ent), "access holds while the member can still authenticate")
+	w.advance(25 * time.Hour)
+	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the abandoned renewal resolves as a decline")
+	require.False(t, e.c.entitled(e.ent))
+	require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
+	e.replaceCard(mastercard)
+	w.runRenewals()
+	require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
+	require.True(t, e.c.entitled(e.ent))
+}
+
+// NMI's duplicate check refuses a request unprocessed. The engine records the
+// operation as not executed and the next attempt, under a new order, charges
+// exactly once; nothing waits on a verification that can never succeed.
+func TestEngineNMIDuplicateRefusal(t *testing.T) {
+	t.Run("renewal", func(t *testing.T) {
+		w := newWorld(t)
+		e := enroll(t, w, "nmi", embedded)
+		end := e.periodEnd()
+		e.toPeriodEnd()
+		w.nmi.refuseDuplicates(1)
+		w.runRenewals()
+		require.Len(t, e.providerLedger(), 1, "the refused renewal moved no money")
+		w.advance(2 * time.Minute)
+		w.runRenewals()
+		sub := w.subscription(embedded, e.sub)
+		require.True(t, sub.CurrentPeriodEndsAt.After(end), "the next due pass renews")
+		require.Len(t, e.providerLedger(), 2)
+		require.Len(t, completed(w.payments(embedded, e.c.id)), 2)
+	})
+	t.Run("enrollment", func(t *testing.T) {
+		w := newWorld(t)
+		price := w.membership("content:members", 9_990_000)
+		c := w.newCustomer()
+		method := c.saveCard("nmi", visa)
+		w.nmi.refuseDuplicates(1)
+		session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
+			OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+			IdempotencyKey: "enroll-dup", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
+			SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		})
+		require.NoError(t, err)
+		c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": "nmi"}})
+		w.until(func() bool {
+			return unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))["status"] == "failed"
+		}, "the refused enrollment resolves")
+		c.subscribeAgain(embedded, "nmi", price.ID, "content:members", method)
+		require.Len(t, w.nmi.ledger(""), 1)
+		require.True(t, c.entitled("content:members"))
 	})
 }

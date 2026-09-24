@@ -60,6 +60,12 @@ func (c *Charger) chargeRecurring(ctx context.Context, req charge.Request) (char
 		Amount: req.AmountMinor, Currency: req.Currency, OrderID: req.OrderRef,
 		OrderDescription: req.Description, StoredCredential: sc,
 	})
+	if errors.Is(err, nmi.ErrDuplicateTransaction) {
+		// The gateway refused this exact order unprocessed; the accepted
+		// operation resolves as not executed and a new attempt carries a new
+		// order. The receipt read by this order finds nothing either way.
+		return recurringNotDispatched(err)
+	}
 	if err != nil {
 		var refusal *nmi.CustomerVaultError
 		if !errors.As(err, &refusal) || !IsHardDecline(refusal.ResponseCode) {

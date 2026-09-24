@@ -348,9 +348,25 @@ func newSaleError(rawResponse string, output url.Values) error {
 		RawResponse:    rawResponse,
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
-		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
+		unknown := ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
+		if duplicateRefusal(output, responseCode) {
+			return errors.Join(ErrDuplicateTransaction, unknown)
+		}
+		return unknown
 	}
 	return rejection
+}
+
+// ErrDuplicateTransaction marks NMI's duplicate-check refusal (response=3,
+// code 300, "Duplicate transaction"): the gateway matched the card and amount
+// to a recent transaction and rejected THIS request without processing it.
+// Callers holding a unique durable order for the request may treat it as not
+// executed; others keep verifying, as the error is also ambiguous.
+var ErrDuplicateTransaction = errors.New("nmi: gateway refused a duplicate transaction without processing it")
+
+func duplicateRefusal(output url.Values, responseCode int) bool {
+	return strings.TrimSpace(output.Get("response")) == "3" && responseCode == 300 &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(output.Get("responsetext"))), "duplicate transaction")
 }
 
 func parseMobiusResponseCode(output url.Values) int {

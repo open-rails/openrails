@@ -329,6 +329,25 @@ func (w *world) armDestructive() {
 	require.NoError(w.t, err)
 }
 
+// until polls cond, stepping engine time ten minutes and waking due
+// operations between polls, as an idle fleet would over time.
+func (w *world) until(cond func() bool, msg string) {
+	w.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			page, _ := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(workKinds...).First(100))
+			for _, j := range page.Jobs {
+				w.t.Logf("job %d %s %s sched=%s attempt=%d args=%s errs=%v", j.ID, j.Kind, j.State, j.ScheduledAt.Format(time.RFC3339), j.Attempt, j.EncodedArgs, j.Errors)
+			}
+			w.t.Fatalf("timed out: %s", msg)
+		}
+		w.advance(10 * time.Minute)
+		w.wake()
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 type dunningPass struct{}
 
 func (dunningPass) Kind() string { return "openrails.dunning" }

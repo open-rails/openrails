@@ -48,6 +48,7 @@ type nmiFake struct {
 	sales     []*nmiSale
 	attempts  []url.Values
 	schedules map[string]*nmiSchedule
+	duplicate int
 	writes    []providerCall
 	gates     []*gate
 	odd       []string
@@ -292,6 +293,10 @@ func (f *nmiFake) sale(form url.Values) string {
 	if code := v.Card.Decline; code != "" {
 		return "response=2&responsetext=DECLINE&response_code=" + code
 	}
+	if f.duplicate > 0 {
+		f.duplicate--
+		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654321&response_code=300"
+	}
 	s := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: form.Get("amount"),
 		Currency: strings.ToUpper(form.Get("currency")), InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
 		Initial: form.Get("initial_transaction_id"), Card: v.Card, At: time.Now().UTC()}
@@ -326,6 +331,13 @@ func (f *nmiFake) setDecline(last4, code string) {
 			v.Card.Decline = code
 		}
 	}
+}
+
+// refuseDuplicates makes the next n sales trip NMI's duplicate check.
+func (f *nmiFake) refuseDuplicates(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.duplicate = n
 }
 
 // ledger is the gateway's approved sales for a vault.
