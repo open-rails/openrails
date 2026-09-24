@@ -62,7 +62,7 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 
 // CentsToMicros widens a rail minor amount into internal micros. Valid for
 // every registered currency only because every registered currency has the
-// same 10^4 native shift — TestRegistryNativeShiftIsUniform pins that, and
+// same 10^4 native shift — TestRegisteredCurrenciesShareNativeShift pins that, and
 // FAILS the moment a currency is registered that breaks it. Currency-aware
 // callers should prefer RailMinorToNative.
 func CentsToMicros(cents Cents) Micros {
