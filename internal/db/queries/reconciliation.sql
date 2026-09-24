@@ -952,3 +952,12 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   )
 ORDER BY e.customer_id,
          LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) DESC;
+
+-- name: ResolveStandingFinding :execrows
+-- A standing finding whose subject is healthy again closes itself.
+UPDATE openrails.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
+ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+   AND finding_type = sqlc.arg(finding_type)::text
+   AND subject_key = sqlc.arg(subject_key)::text
+   AND status IN ('reconcile_required', 'requires_review');

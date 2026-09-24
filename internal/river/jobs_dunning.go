@@ -292,11 +292,7 @@ const FindingDuePassRefused = "life.due_pass.refused"
 func (w *DunningWorker) recordSubscriptionOutcome(ctx context.Context, sub *models.Subscription, processErr error) error {
 	q := w.DB.Gen(ctx)
 	if processErr == nil {
-		_, err := w.DB.Qx(ctx).Exec(ctx, `
-			UPDATE openrails.reconciliation_findings
-			   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
-			 WHERE merchant_id = $1 AND finding_type = $2 AND subject_key = $3
-			   AND status IN ('reconcile_required', 'requires_review')`, sub.MerchantID, FindingDuePassRefused, sub.ID.String())
+		_, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: sub.MerchantID, FindingType: FindingDuePassRefused, SubjectKey: sub.ID.String()})
 		return err
 	}
 	log.WithContext(ctx).WithError(processErr).WithField("subscription_id", sub.ID).

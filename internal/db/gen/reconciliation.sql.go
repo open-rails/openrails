@@ -2519,6 +2519,30 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 	return result.RowsAffected(), nil
 }
 
+const resolveStandingFinding = `-- name: ResolveStandingFinding :execrows
+UPDATE openrails.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
+ WHERE merchant_id = $1::uuid
+   AND finding_type = $2::text
+   AND subject_key = $3::text
+   AND status IN ('reconcile_required', 'requires_review')
+`
+
+type ResolveStandingFindingParams struct {
+	MerchantID  uuid.UUID
+	FindingType string
+	SubjectKey  string
+}
+
+// A standing finding whose subject is healthy again closes itself.
+func (q *Queries) ResolveStandingFinding(ctx context.Context, arg ResolveStandingFindingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveStandingFinding, arg.MerchantID, arg.FindingType, arg.SubjectKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setSubscriptionNextRetry = `-- name: SetSubscriptionNextRetry :execrows
 UPDATE openrails.subscriptions
 SET next_retry_at = $1::timestamptz, updated_at = now()
