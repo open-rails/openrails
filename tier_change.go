@@ -61,6 +61,10 @@ const (
 	// CodeTierChangeAlreadyScheduled: a different period-end change is already
 	// scheduled on the subscription.
 	CodeTierChangeAlreadyScheduled = "tier_change_already_scheduled"
+	// CodeTierChangeCadenceUnsupported: a provider-billed (NMI) subscription
+	// keeps its schedule's next billing date, so its tier can change only to a
+	// price of the same cadence.
+	CodeTierChangeCadenceUnsupported = "tier_change_cadence_unsupported"
 )
 
 type TierChangePreviewResponse struct {

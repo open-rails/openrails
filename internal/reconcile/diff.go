@@ -893,14 +893,20 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 // another vault, or paused at the provider. The provider owns that schedule,
 // so the finding asks for review and nothing is changed automatically.
 func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscription, r *RemoteSubscription) *Finding {
-	if provider != ProviderNMI || !s.IsLive() || (!remoteLive(r.Status) && !r.Paused) {
+	if provider != ProviderNMI || !s.IsLive() || (!remoteLive(r.Status) && !r.Paused) || s.TierChangePending {
 		return nil
 	}
 	drift := map[string]any{}
+	// NMI bills the price OpenRails expects next: a scheduled change was
+	// already applied to the schedule when it was accepted.
+	billed := s.PriceID
+	if s.ScheduledPriceID != nil {
+		billed = s.ScheduledPriceID
+	}
 	var price *LocalPrice
-	if s.PriceID != nil {
+	if billed != nil {
 		for i := range idx.prices {
-			if idx.prices[i].ID == *s.PriceID {
+			if idx.prices[i].ID == *billed {
 				price = &idx.prices[i]
 			}
 		}
@@ -912,7 +918,10 @@ func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscripti
 				drift["remote_amount_cents"] = strconv.FormatInt(r.AmountCents, 10)
 			}
 		}
-		if r.PlanID != "" {
+		// A schedule whose amount OpenRails changed in place keeps its original
+		// plan id; the plan matters only when the billed amount is not the
+		// expected one.
+		if r.PlanID != "" && len(drift) > 0 {
 			linked := false
 			for _, name := range localRailNames(provider) {
 				for _, cfg := range models.PSPLinksOnRail(price.PSPLinks, models.Rail(name)) {

@@ -323,7 +323,11 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
-       entitlements_spec_snapshot
+       entitlements_spec_snapshot, scheduled_price_id,
+       EXISTS (SELECT 1 FROM openrails.rail_intents ri
+               WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
+                 AND ri.intent_type = 'nmi_upgrade'
+                 AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
 FROM openrails.subscriptions
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL

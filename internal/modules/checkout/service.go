@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -41,7 +40,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -1267,167 +1265,11 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 	return s.PurchaseService.RegisterPurchase(ctx, req)
 }
 
-// processUpgrade runs an NMI tier upgrade (a higher TierRank) as one durable
-// nmi_upgrade operation: an immediate successor enrollment plus the prorated
-// charge for the remaining period, answered on the tier change contract
-// (tier_change_operation.go).
-func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, existingSub *models.Subscription, target railTarget) (*TierChangeResponse, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-
-	newPrice = priceForCheckoutTarget(newPrice, target)
-	if !rails.IsNMI(models.Rail(target.Rail)) {
-		return nil, fmt.Errorf("unsupported rail for upgrades: %s", target.Rail)
-	}
-	if s.Intents == nil || s.Lifecycle == nil {
-		return nil, errors.New("durable upgrade service unavailable")
-	}
-	if target.Scope == nil || target.Scope.ID != existingSub.PspID {
-		return nil, errors.New("upgrade must use the predecessor's PSP account")
-	}
-	ctx = db.WithPSPID(ctx, existingSub.PspID)
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, tierChangeKeyRequired()
-	}
-	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
-	// Replays use the original durable payload, even if pricing or time changed.
-	database := s.SubscriptionService.Database()
-	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
-	if err == nil {
-		return s.replayTierChangeOperation(ctx, prior, &TierChangeRequest{SubscriptionID: existingSub.ID, PriceID: openrails.PriceID(newPrice.ID).String()}, user)
-	}
-	if !db.IsNotFound(err) {
-		return nil, err
-	}
-	if existingSub.Price == nil || existingSub.CurrentPeriodEndsAt == nil {
-		return nil, errors.New("existing subscription missing price or period")
-	}
-	customerID, err := customerIDFromUser(user.ID)
-	if err != nil {
-		return nil, err
-	}
-	if existingSub.CustomerID != customerID {
-		return nil, errors.New("upgrade predecessor belongs to another customer")
-	}
-	now := s.now().UTC()
-	quote, err := QuoteModelBUpgrade(modelBUpgradeOf(existingSub, existingSub.Price, newPrice), now)
-	if err != nil {
-		return nil, err
-	}
-	amount := quote.ChargeNow
-	if _, err = moneyutil.NativeToRailMinorExact(newPrice.Currency, amount); err != nil {
-		return nil, err
-	}
-	if _, err = moneyutil.NativeToRailMinorExact(newPrice.Currency, newPrice.Amount); err != nil {
-		return nil, err
-	}
-	plan, err := requireNMIPlanForTarget(newPrice, target)
-	if err != nil {
-		return nil, err
-	}
-	vault, billing, method, _, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
-	if err != nil {
-		return nil, err
-	}
-	if method == nil {
-		return nil, errors.New("upgrade requires a stored payment method")
-	}
-	methodRow, err := s.SubscriptionService.Database().Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: queryMerchant.UUID(), ID: method.ID})
-	if err != nil {
-		return nil, err
-	}
-	if methodRow.CustomerID != customerID || methodRow.PspID != existingSub.PspID || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef != vault || methodRow.RailMethodRef != billing {
-		return nil, errors.New("upgrade instrument does not match accepted customer and provider account")
-	}
-	end := quote.PeriodEnd
-	startDate, _ := buildNMIFutureStartDate(end, now)
-	payload := subscriptions.NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, Instrument: charge.FreezeInstrument(methodRow), PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
-	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"},
-		func(row gen.OpenrailsRailIntent) error { return tierChangeOwnedBy(row, nmiUpgradeSubject(payload)) })
-	var conflict *pgconn.PgError
-	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
-		// Another unresolved tier change owns this predecessor's provider steps.
-		return nil, s.tierChangeInFlight(ctx, existingSub.ID)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return tierChangeResponse(intent)
-}
-
 // shortHash returns a stable 16-hex-char digest of s, used to build
 // deterministic rail order references from an idempotency key.
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
-}
-
-// processDowngrade handles tier downgrades (scheduled for end of period)
-// Downgrade = user moving to a lower tier (lower TierRank)
-// Behavior: Keep current tier until period ends, then switch to new tier at next renewal
-func (s *CheckoutService) processDowngrade(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	newPrice *models.Price,
-	newProduct *models.Product,
-	existingSub *models.Subscription,
-	target railTarget,
-) (*CheckoutResponse, error) {
-	// CCBill handles downgrades via their own flow
-	if target.Rail == "ccbill" {
-		return &CheckoutResponse{
-			Status:  "blocked",
-			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
-		}, nil
-	}
-
-	// Solana doesn't support subscriptions
-	if target.Rail == "solana" {
-		return nil, errors.New("solana does not support subscription downgrades")
-	}
-
-	// Only NMI-backed rails support programmatic downgrades
-	if !rails.IsNMI(models.Rail(target.Rail)) {
-		return nil, fmt.Errorf("unsupported rail for downgrades: %s", target.Rail)
-	}
-
-	// Validate the new price has NMI configuration
-	if _, err := requireNMIPlanForTarget(newPrice, target); err != nil {
-		return nil, err
-	}
-
-	// A short subscription transaction serializes the change with accepted
-	// recurring recovery. It must not overwrite a prepared quote or a newer
-	// subscription snapshot from checkout's earlier preflight.
-	var err error
-	existingSub, err = subscriptions.NewSubscriptionRepo(s.SubscriptionService.Database()).SchedulePriceChange(ctx, existingSub.ID, existingSub.PriceID, newPrice.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	effectiveDate := "the end of your current billing period"
-	if existingSub.CurrentPeriodEndsAt != nil {
-		effectiveDate = existingSub.CurrentPeriodEndsAt.Format("January 2, 2006")
-	}
-
-	log.WithFields(log.Fields{
-		"user_id":            user.ID,
-		"subscription_id":    existingSub.ID,
-		"current_price_id":   existingSub.PriceID,
-		"scheduled_price_id": newPrice.ID,
-		"effective_date":     effectiveDate,
-	}).Info("scheduled downgrade for end of period")
-
-	return &CheckoutResponse{
-		Status:         "success",
-		Action:         "downgrade",
-		Message:        fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
-		SubscriptionID: &existingSub.ID,
-		DelayedStart:   existingSub.CurrentPeriodEndsAt,
-	}, nil
 }
 
 // TierChange processes a subscription tier change (upgrade or downgrade).
@@ -1530,7 +1372,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	case rail == "stripe":
 		return s.processTierChangeStripe(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	case rails.IsNMI(models.Rail(rail)):
-		return s.processTierChangeNMI(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
+		return s.processProviderNMITierChange(ctx, req, user, newPrice, newProduct, existingSub, action)
 	case rail == "ccbill":
 		return s.processTierChangeCCBill(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
 	case rail == "solana":
@@ -1623,6 +1465,9 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	if existingSub.CollectionPolicy == models.CollectionPolicyEngine {
 		return s.previewEngineTierChange(ctx, resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
 	}
+	if rails.IsNMI(existingSub.Rail) {
+		return s.previewProviderNMITierChange(resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
+	}
 	if newProduct.TierRank < currentProduct.TierRank {
 		if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "downgrade"); err != nil {
 			return nil, err
@@ -1667,18 +1512,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	return resp, nil
 }
 
-// errTierChangeProviderNMI refuses a tier change on an NMI-billed
-// (provider-owned) subscription. NMI keeps billing its own schedule, so a
-// local plan change either leaves NMI charging the old amount or needs a
-// second schedule whose predecessor delete may be held (both billing). Take
-// the subscription over to OpenRails billing, then change tier.
-var errTierChangeProviderNMI = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRequiresEngineBilling,
-	Message: "this subscription is billed on the provider's own schedule; take it over to OpenRails billing (engine takeover) before changing tier"}
-
 func validateTierChangeSubscriptionStatus(subscription *models.Subscription) error {
-	if subscription.CollectionPolicy != models.CollectionPolicyEngine && rails.IsNMI(subscription.Rail) {
-		return errTierChangeProviderNMI
-	}
 	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPastDue {
 		return nil
 	}
@@ -1915,49 +1749,6 @@ func (s *CheckoutService) processTierChangeSolana(
 		SubscriptionID: &subIDStr,
 		Message:        msg,
 	}, nil
-}
-
-// processTierChangeNMI handles NMI-backed subscription tier changes.
-// Upgrades: immediate proration charge + new subscription
-// Downgrades: scheduled for end of billing period
-func (s *CheckoutService) processTierChangeNMI(
-	ctx context.Context,
-	req *TierChangeRequest,
-	user *UserIdentity,
-	newPrice *models.Price,
-	newProduct *models.Product,
-	existingSub *models.Subscription,
-	currentProduct *models.Product,
-	action string,
-) (*TierChangeResponse, error) {
-	// Create a synthetic CheckoutRequest for reuse of existing upgrade/downgrade logic
-	checkoutReq := &CheckoutRequest{
-		PriceID:        req.PriceID,
-		Rail:           string(existingSub.Rail),
-		IdempotencyKey: req.IdempotencyKey,
-	}
-	if user.Email != nil {
-		checkoutReq.Email = strings.TrimSpace(*user.Email)
-	}
-	if existingSub.PaymentMethodID != nil {
-		checkoutReq.PaymentMethodID = openrails.PaymentMethodID(*existingSub.PaymentMethodID).String()
-	}
-
-	// Route to existing methods which handle the heavy lifting. The existing
-	// subscription's persisted PSP identity resolves its exact account; a sibling
-	// account on the same rail must never receive its saved payment method.
-	target, err := s.resolveRailTargetForPSP(ctx, string(existingSub.Rail), existingSub.PspID)
-	if err != nil {
-		return nil, err
-	}
-	if action == "upgrade" {
-		return s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
-	}
-	checkoutResp, err := s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
-	if err != nil {
-		return nil, err
-	}
-	return s.mapCheckoutToTierChangeResponse(checkoutResp, newPrice, action), nil
 }
 
 // processTierChangeCCBill handles CCBill subscription tier changes.

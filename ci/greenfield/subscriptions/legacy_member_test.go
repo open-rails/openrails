@@ -365,38 +365,3 @@ func TestLegacyNMIRefund(t *testing.T) {
 		})
 	}
 }
-
-// Tier change on a legacy NMI subscription is refused, typed, on both Client
-// topologies and the preview: NMI keeps billing its own schedule, so the
-// supported path is the engine takeover, then an engine tier change.
-func TestLegacyNMITierChangeRefused(t *testing.T) {
-	t.Parallel()
-	for _, policy := range []string{"provider", "provider_dunning"} {
-		t.Run(policy, func(t *testing.T) {
-			t.Parallel()
-			w := newWorld(t)
-			w.armDestructive()
-			l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
-				book.Subscriptions[0].CollectionPolicy = policy
-			})
-			up := w.tierPrice("g"+uuid.NewString()[:8], 2, 1999, monthHours, true)
-			down := w.tierPrice("g"+uuid.NewString()[:8], 0, 499, monthHours, true)
-			for _, tp := range []topology{embedded, remote} {
-				for _, target := range []tier{up, down} {
-					_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: target.ID})
-					requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRequiresEngineBilling)
-					_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "tier-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: target.ID})
-					requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRequiresEngineBilling)
-				}
-			}
-			w.settle()
-			sub := w.subscription(embedded, l.sub)
-			require.Equal(t, l.price.ID, sub.PriceID)
-			require.Nil(t, sub.ScheduledPriceID, "nothing scheduled")
-			require.Zero(t, l.engineCharges(), "nothing charged")
-			require.Empty(t, w.nmi.callsTo(http.MethodPost, "transact.php", nil), "no NMI schedule or sale")
-			require.Zero(t, w.nmi.deletesOf(l.railSub))
-			require.Empty(t, w.nmi.unexpected())
-		})
-	}
-}
