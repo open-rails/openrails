@@ -59,6 +59,12 @@ func TestNoLibraryEnvReads(t *testing.T) {
 			if name := d.Name(); strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
 				return filepath.SkipDir
 			}
+			// Nested modules (sdk/*/e2e/server) are their own binaries.
+			if path != root {
+				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
