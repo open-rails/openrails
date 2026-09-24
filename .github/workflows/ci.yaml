@@ -70,26 +70,24 @@ jobs:
     # The PR gate is intentionally small: the greenfield contracts are the
     # database/provider test suite.
     timeout-minutes: 10
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_DB: openrails_test
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports: [5432:5432]
-        options: >-
-          --tmpfs /var/lib/postgresql:rw,size=2g
-          --health-cmd pg_isready --health-interval 2s --health-timeout 5s
-          --health-retries 20
     env:
       OPENRAILS_GREENFIELD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
     steps:
+      # A step rather than a service: the multi-replica fleets (#1075) need
+      # more than the default 100 connections, a server flag services cannot set.
+      - name: Start PostgreSQL
+        run: >-
+          docker run -d --name greenfield-postgres -p 5432:5432
+          --tmpfs /var/lib/postgresql:rw,size=2g
+          -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
+          postgres:18-alpine -c max_connections=300
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
+      - name: Wait for PostgreSQL
+        run: timeout 60 bash -c 'until docker exec greenfield-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
       - name: Run focused greenfield contracts
         run: bash scripts/greenfield.sh
 

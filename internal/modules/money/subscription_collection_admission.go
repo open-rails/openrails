@@ -20,6 +20,11 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// ErrEngineCollectionNotDue is a due-pass admission that found, under the
+// subscription lock, that another writer (a concurrent pass on another
+// replica, a member retry, a cancel) already settled the obligation it read.
+var ErrEngineCollectionNotDue = fmt.Errorf("%w: engine subscription is not due", intents.ErrRebillNotRetryable)
+
 // AdmitDueSubscriptionCollection freezes one due engine obligation. Existing
 // accepted work is recovered before a hold can refuse a new admission.
 func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time) (gen.OpenrailsRailIntent, error) {
@@ -128,7 +133,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			return fmt.Errorf("%w: new engine payment admission is held", intents.ErrRebillNotRetryable)
 		}
 		if !subscriptions.EngineCollectionDue(sub, admittedAt, payer != uuid.Nil) {
-			return fmt.Errorf("%w: engine subscription is not due", intents.ErrRebillNotRetryable)
+			return ErrEngineCollectionNotDue
 		}
 		attempt := 0
 		previous, err := q.GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC()})

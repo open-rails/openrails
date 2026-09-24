@@ -57,6 +57,9 @@ const (
 	// recorded as a parked system-origin intent on the ledger instead of
 	// executed; the scheduled executor drains it at mode=full.
 	dunningOutcomeMaterialized
+	// dunningOutcomeSettled: another replica's pass or a concurrent command
+	// resolved the obligation between this pass's scan and its admission.
+	dunningOutcomeSettled
 )
 
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
@@ -206,6 +209,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	failCount := 0
 	windowExpiredCount := 0
 	materializedCount := 0
+	settledCount := 0
 	var workErr error
 
 	for _, mid := range merchantIDs {
@@ -259,6 +263,8 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 					windowExpiredCount++
 				case dunningOutcomeMaterialized:
 					materializedCount++
+				case dunningOutcomeSettled:
+					settledCount++
 				default:
 					failCount++
 				}
@@ -279,6 +285,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		"failed":         failCount,
 		"window_expired": windowExpiredCount,
 		"materialized":   materializedCount,
+		"settled":        settledCount,
 	}).Info("Dunning: run completed")
 
 	return workErr
@@ -321,6 +328,10 @@ func (w *DunningWorker) processSubscription(
 		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())
 		if errors.Is(err, subscriptions.ErrRenewalHeldByUpgrade) {
 			return dunningOutcomeFailed, nil
+		}
+		if errors.Is(err, money.ErrEngineCollectionNotDue) {
+			// Settled by another writer after this pass read it: nothing to do.
+			return dunningOutcomeSettled, nil
 		}
 		return dunningOutcomeMaterialized, err
 	}

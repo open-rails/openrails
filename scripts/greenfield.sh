@@ -4,7 +4,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${OPENRAILS_GREENFIELD_DSN:?Set OPENRAILS_GREENFIELD_DSN to a disposable PostgreSQL database}"
 
-go test -vet=all -race -count=1 -p 1 -parallel 4 \
-  -tags='greenfield,integration' \
-  -timeout "${OPENRAILS_GREENFIELD_TIMEOUT:-8m}" \
-  ./ci/greenfield/...
+flags=(-vet=all -race -count=1 -tags='greenfield,integration' -timeout "${OPENRAILS_GREENFIELD_TIMEOUT:-8m}")
+
+# Build once, then run the multi-replica fleets (#1075) in their own process
+# beside the other contracts; both share the database.
+go test "${flags[@]}" -run '^$' ./ci/greenfield/...
+(
+	set -o pipefail
+	go test "${flags[@]}" -p 1 -parallel 3 -run '^TestReplicas' ./ci/greenfield/subscriptions 2>&1 | sed -u 's/^/[replicas] /'
+) &
+replicas=$!
+status=0
+go test "${flags[@]}" -p 1 -parallel 4 -skip '^TestReplicas' ./ci/greenfield/... || status=$?
+wait "$replicas" || status=$?
+exit "$status"
