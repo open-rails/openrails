@@ -58,7 +58,7 @@ func (w *world) finitePass(entitlement string) *openrails.Price {
 	return price
 }
 
-func (c *customer) buy(rail, method string, price *openrails.Price, kind openrails.OfferKind, entitlement string) {
+func (c *customer) buyWith(rail, method string, price *openrails.Price, kind openrails.OfferKind, entitlement string) {
 	c.w.t.Helper()
 	_, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), openrails.CreateCheckoutSessionRequest{
 		OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID,
@@ -89,11 +89,11 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			start := w.clock.Now()
-			c.buy(rail, method, price, openrails.OfferFinite, "content:pass")
+			c.buyWith(rail, method, price, openrails.OfferFinite, "content:pass")
 			first := completed(w.payments(embedded, c.id))
 			require.Len(t, first, 1)
 			w.advance(time.Hour)
-			c.buy(rail, method, price, openrails.OfferFinite, "content:pass")
+			c.buyWith(rail, method, price, openrails.OfferFinite, "content:pass")
 			paid := completed(w.payments(embedded, c.id))
 			require.Len(t, paid, 2)
 			require.True(t, c.entitledAt("content:pass", start.Add(45*day)), "the second pass is stacked after the first")
