@@ -17,13 +17,40 @@ func TestFutureProviderScheduleDoesNotEraseDeclinedRenewal(t *testing.T) {
 		Subscriptions: []RemoteSubscription{{RailSubscriptionID: "schedule", Status: SubscriptionStatusActive, NextBillingAt: &next}},
 		Transactions:  []RemoteTransaction{{SubscriptionID: "schedule", Type: TransactionTypeDecline, OccurredAt: end, DeclineCode: "202"}},
 	}
-	got := decideFromSnapshot("schedule", end, snapshot, end.Add(time.Hour), 30*24*time.Hour)
+	got := decideFromSnapshot("schedule", nil, nil, end, snapshot, end.Add(time.Hour), 30*24*time.Hour)
 	if got.Kind != TransitionPastDue || got.NewPeriodEnd != nil {
 		t.Fatalf("next scheduled date is not payment evidence: %+v", got)
 	}
 	snapshot.Transactions = nil
-	if got := decideFromSnapshot("schedule", end, snapshot, end.Add(time.Hour), 30*24*time.Hour); got.Kind != TransitionAdoptPeriodEnd {
+	if got := decideFromSnapshot("schedule", nil, nil, end, snapshot, end.Add(time.Hour), 30*24*time.Hour); got.Kind != TransitionAdoptPeriodEnd {
 		t.Fatalf("schedule adoption without a declined renewal changed: %+v", got)
+	}
+}
+
+// A daily period's previous charge (a day before its end) is not its renewal,
+// and a roster that advanced past the local period without an attributable
+// charge is inconclusive rather than adopted.
+func TestShortPeriodAlignmentAndAdvancedRoster(t *testing.T) {
+	end := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+	start := end.Add(-24 * time.Hour)
+	next := end.Add(24 * time.Hour)
+	snapshot := &RemoteSnapshot{
+		Provider:      ProviderNMI,
+		Subscriptions: []RemoteSubscription{{RailSubscriptionID: "daily", Status: SubscriptionStatusActive, NextBillingAt: &next}},
+		Transactions: []RemoteTransaction{
+			{SubscriptionID: "daily", TransactionID: "previous", Type: TransactionTypeSale, Success: true, OccurredAt: start.Add(2 * time.Hour)},
+			{SubscriptionID: "daily", TransactionID: "declined", Type: TransactionTypeDecline, OccurredAt: end.Add(2 * time.Hour), DeclineCode: "202"},
+		},
+	}
+	if got := decideFromSnapshot("daily", &start, &end, end, snapshot, end.Add(3*time.Hour), 7*24*time.Hour); got.Kind != TransitionPastDue {
+		t.Fatalf("a daily decline is masked by the previous day's charge: %+v", got)
+	}
+	snapshot.Transactions = nil
+	if got := decideFromSnapshot("daily", &start, &end, end, snapshot, end.Add(3*time.Hour), 7*24*time.Hour); got.Kind != TransitionNone {
+		t.Fatalf("an advanced roster without its charge is adopted: %+v", got)
+	}
+	if got := AlignmentSlack(&start, &end); got != 12*time.Hour {
+		t.Fatalf("daily slack = %v", got)
 	}
 }
 

@@ -321,14 +321,22 @@ func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, user
 	return s.NotificationService.MarkAsSeen(ctx, notificationID, notification.CustomerID)
 }
 
-// CancelUserSubscription cancels a user's subscription
-func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, userID string, feedback string) error {
-	subscription, err := s.SubscriptionService.GetActiveSubscription(ctx, userID)
+// CancelUserSubscription cancels the member's named subscription at period
+// end: access stays to the paid period end and a provider schedule is deleted
+// through its durable intent before the next billing.
+func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, feedback string) error {
+	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
 			return ErrSubscriptionNotFound
 		}
-		return fmt.Errorf("load active subscription: %w", err)
+		return fmt.Errorf("load subscription: %w", err)
+	}
+	if payer := identity.CustomerIDFromString(userID); payer.IsZero() || subscription.CustomerID != payer.UUID() {
+		return ErrSubscriptionNotFound
+	}
+	if !providerCancellable(subscription.Status) {
+		return ErrSubscriptionNotActive
 	}
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
@@ -344,38 +352,28 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	switch {
 	case rails.IsNMI(subscription.Rail):
-		// Issue 216: when there is a genuine future undo window, DEFER the
-		// rail-side delete instead of doing it inline. We keep the NMI
-		// subscription alive (so a resume is a no-op rail-side) and schedule
-		// delete_subscription to fire at period_end - safety margin. If the window
-		// has already opened (now >= period_end - margin, common near rebill) or the
-		// period end is unknown/past, we delete IMMEDIATELY exactly as before.
-		deleteAt, defer_ := NMIDeferredDeleteAt(subscription, now)
-		if defer_ && s.deferDelete != nil {
-			// The delete intent is enqueued below, in the SAME transaction as the
-			// cancellation update, so marker and intent commit atomically. The
-			// DeletionScheduledAt marker <-> intent invariant cannot be broken by
-			// a crash between the two writes, and atomic commit kills the old
-			// relevance race (the executor cannot observe the intent before the
-			// cancellation is visible).
-			subscription.DeletionScheduledAt = &deleteAt
-			runAt := deleteAt
-			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
-				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, runAt)
+		// The NMI delete always rides the durable nmi_delete_subscription
+		// intent, committed with the cancellation: the destructive switch,
+		// volume breaker and verify-then-execute apply exactly as for an admin
+		// cancel. With a genuine undo window (issue 216) it is due at
+		// period_end - margin, keeping the schedule for a resume; otherwise now.
+		if subscription.RailSubscriptionID != "" {
+			if s.deferDelete == nil {
+				return fmt.Errorf("nmi remote-delete scheduler unavailable")
 			}
-		} else {
-			// Immediate delete with NMI (no scheduled job).
-			subscription.DeletionScheduledAt = nil
-			if subscription.RailSubscriptionID != "" {
-				client, provider, ok, err := NMIClientForExistingSubscription(ctx, s.NMIResolver, subscription)
-				if err != nil {
-					return fmt.Errorf("resolve subscription PSP: %w", err)
+			if _, err := RequireProviderCancelArmed(ctx, s.SubscriptionService.Database(), subscription, false); err != nil {
+				return err
+			}
+			deleteAt, deferred := NMIDeferredDeleteAt(subscription, now)
+			if !deferred {
+				deleteAt = now
+			}
+			subscription.DeletionScheduledAt = &deleteAt
+			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+				if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(tx), subscription); err != nil {
+					return err
 				}
-				if ok {
-					if err := client.DeleteRecurringSubscription(ctx, subscription.RailSubscriptionID); err != nil {
-						return fmt.Errorf("failed to cancel subscription with rail '%s': %w", provider, err)
-					}
-				}
+				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, deleteAt)
 			}
 		}
 	case subscription.Rail == models.RailCCBill:

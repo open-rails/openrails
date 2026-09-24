@@ -69,6 +69,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		DeferDelete:         r.DeferredDeletes,
 		NotificationService: r.NotificationService,
 		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
+		NMIClients:          r.NMIClients,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}
@@ -307,6 +308,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		&intents.NMIProviderCutover{DB: r.DB, Resolver: r.CollectionResolver, Clock: clock},
+		&intents.NMIEngineTakeover{DB: r.DB, Resolver: r.CollectionResolver, Clock: clock},
 		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.CollectionResolver, clock), // #674: payment-method swap
 		ccbillCancel,
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),

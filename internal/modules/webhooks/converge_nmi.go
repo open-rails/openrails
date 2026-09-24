@@ -98,6 +98,7 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 	snap, err := prober.ProbeSubscription(ctx, reconcile.ProbeSubject{
 		LocalID:            sub.ID,
 		RailSubscriptionID: sub.RailSubscriptionID,
+		PeriodStart:        sub.CurrentPeriodStartsAt,
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
 		ObservedAt:         now,
 	})

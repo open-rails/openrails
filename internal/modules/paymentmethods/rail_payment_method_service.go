@@ -267,9 +267,28 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		return nil, fmt.Errorf("failed to create payment method: %w", err)
 	}
 
+	// The card is saved for recurring use: establish its recurring
+	// credential-on-file agreement now, so an engine membership can move onto
+	// it and renew as merchant-initiated. A refused or unproven verification
+	// leaves nothing saved; a retry verifies a new vault entry.
+	methodID := uuidutil.NewV7()
+	agreementRef, err := client.EstablishRecurringAgreement(ctx, nmiResponse.CustomerVaultID, nmiResponse.BillingID, "pmv-"+methodID.String())
+	if err != nil {
+		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
+		var nmiErr *nmi.CustomerVaultError
+		if errors.As(err, &nmiErr) {
+			code := strings.TrimSpace(nmiErr.LocalizationID)
+			if code == "" && nmiErr.ResponseCode != 0 {
+				code = fmt.Sprintf("nmi_response_%d", nmiErr.ResponseCode)
+			}
+			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error())}
+		}
+		return nil, fmt.Errorf("card verification did not complete; add the card again: %w", err)
+	}
+
 	pm := &models.PaymentMethod{
 		Custodian:  models.CustodianPSP,
-		ID:         uuidutil.NewV7(),
+		ID:         methodID,
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		Rail:       models.Rail(rail),
 		// #682 minting policy (deliberate): ONE NMI vault customer PER CARD —
@@ -281,13 +300,14 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		RailCustomerRef: nmiResponse.CustomerVaultID,
 		RailMethodRef:   nmiResponse.BillingID,
 
-		InitialTransactionID: "",
-		CreatedAt:            s.now(),
-		UpdatedAt:            s.now(),
-		LastFour:             stringPtrOrNil(firstNonEmpty(sanitizeLastFour(nmiResponse.Card.CardNumber), sanitizeLastFour(req.LastFour))),
-		ExpiryDate:           stringPtrOrNil(firstNonEmpty(nmiCardExpiry(nmiResponse.Card.CardExp), sanitizeExpiryDate(req.ExpiryDate))),
-		CardType:             stringPtrOrNil(firstNonEmpty(sanitizeCardType(nmiResponse.Card.CardType), sanitizeCardType(req.CardType))),
-		Metadata:             metadata,
+		InitialTransactionID:         "",
+		StoredCredentialRecurringRef: agreementRef,
+		CreatedAt:                    s.now(),
+		UpdatedAt:                    s.now(),
+		LastFour:                     stringPtrOrNil(firstNonEmpty(sanitizeLastFour(nmiResponse.Card.CardNumber), sanitizeLastFour(req.LastFour))),
+		ExpiryDate:                   stringPtrOrNil(firstNonEmpty(nmiCardExpiry(nmiResponse.Card.CardExp), sanitizeExpiryDate(req.ExpiryDate))),
+		CardType:                     stringPtrOrNil(firstNonEmpty(sanitizeCardType(nmiResponse.Card.CardType), sanitizeCardType(req.CardType), nmi.CardBrandFromMaskedPAN(nmiResponse.Card.CardNumber))),
+		Metadata:                     metadata,
 	}
 	if pspID != nil {
 		pm.PspID = *pspID
@@ -619,8 +639,10 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 	if req.ExpiryDate != nil {
 		expiry = normalizeReplacementExpiry(*req.ExpiryDate)
 	}
-	if lastFour == "" || cardType == "" || expiry == "" {
-		return &PaymentMethodUpdateValidationError{Message: "last_four, card_type, and expiry_date are required from the tokenization response"}
+	// The brand is display metadata; the vault record derives it from the
+	// masked number when the tokenizer omits it.
+	if lastFour == "" || expiry == "" {
+		return &PaymentMethodUpdateValidationError{Message: "last_four and expiry_date are required from the tokenization response"}
 	}
 	req.LastFour = &lastFour
 	req.CardType = &cardType

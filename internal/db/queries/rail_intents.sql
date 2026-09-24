@@ -377,7 +377,17 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         (executed_at IS NOT NULL AND executed_at >= sqlc.arg(since)::timestamptz)
         OR (status IN ('unknown_needs_verify', 'failed_retryable', 'failed_terminal')
             AND updated_at >= sqlc.arg(since)::timestamptz)
+        -- admitted by the breaker and executing now
+        OR (status = 'in_flight' AND EXISTS (
+              SELECT 1 FROM openrails.rail_mutation_logs l
+              WHERE l.merchant_id = rail_intents.merchant_id AND l.rail_intent_id = rail_intents.id
+                AND l.phase = 'attempting' AND l.attempt = rail_intents.attempts))
       );
+
+-- name: LockDestructiveBreaker :exec
+-- Serializes one merchant's breaker admissions; an admission records its
+-- attempt before the lock is released, so the next check counts it.
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.destructive_breaker:' || sqlc.arg(merchant_id)::uuid::text, 0));
 
 -- The breaker's budget baseline: max(floor, pct of active subscriptions).
 -- name: CountActiveSubscriptionsByMerchant :one
@@ -749,7 +759,10 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
         AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
     OR (intent_type='subscription_collection'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
+        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
+    OR (intent_type='nmi_engine_takeover'
+        AND payload->'agreement'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
+        AND (payload->'agreement'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
 ORDER BY id LIMIT 2;
 -- name: ExpireRailIntentByID :execrows
 UPDATE openrails.rail_intents pi
@@ -789,3 +802,10 @@ UPDATE openrails.rail_intents
 SET next_attempt_at = LEAST(next_attempt_at, sqlc.arg(now)::timestamptz), updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status = 'unknown_needs_verify';
+
+-- name: TryLockProviderRefresh :one
+-- Session lock: one provider refresh per merchant across replicas.
+SELECT pg_try_advisory_lock(hashtextextended('openrails.provider_refresh:' || sqlc.arg(merchant_id)::uuid::text, 0))::boolean;
+
+-- name: UnlockProviderRefresh :exec
+SELECT pg_advisory_unlock(hashtextextended('openrails.provider_refresh:' || sqlc.arg(merchant_id)::uuid::text, 0));

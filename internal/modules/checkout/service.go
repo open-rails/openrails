@@ -1667,7 +1667,18 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	return resp, nil
 }
 
+// errTierChangeProviderNMI refuses a tier change on an NMI-billed
+// (provider-owned) subscription. NMI keeps billing its own schedule, so a
+// local plan change either leaves NMI charging the old amount or needs a
+// second schedule whose predecessor delete may be held (both billing). Take
+// the subscription over to OpenRails billing, then change tier.
+var errTierChangeProviderNMI = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRequiresEngineBilling,
+	Message: "this subscription is billed on the provider's own schedule; take it over to OpenRails billing (engine takeover) before changing tier"}
+
 func validateTierChangeSubscriptionStatus(subscription *models.Subscription) error {
+	if subscription.CollectionPolicy != models.CollectionPolicyEngine && rails.IsNMI(subscription.Rail) {
+		return errTierChangeProviderNMI
+	}
 	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPastDue {
 		return nil
 	}

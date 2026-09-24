@@ -133,9 +133,17 @@ type ProductSummary struct {
 	Archived    bool    `json:"archived"`
 }
 
+// CancelSubscriptionRequest cancels at period end (access kept to the paid
+// period end) or, with RevokeAccess, immediately. Both stop provider billing.
 type CancelSubscriptionRequest struct {
 	Reason       string `json:"reason"`
 	RevokeAccess bool   `json:"revoke_access,omitempty"`
+	// AccountDeletion marks the host's irrevocable account-deletion cancel.
+	// While destructive provider actions are disarmed an ordinary cancel of a
+	// provider-billed subscription is refused (CodeProviderCancelHeld); an
+	// account deletion is cancelled locally and its provider schedule delete
+	// waits for the operator's arming.
+	AccountDeletion bool `json:"account_deletion,omitempty"`
 }
 
 type UpdateSubscriptionPaymentMethodRequest struct {

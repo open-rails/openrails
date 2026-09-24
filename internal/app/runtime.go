@@ -94,9 +94,11 @@ type Runtime struct {
 	Clock clockwork.Clock
 	// RiverProducer inserts jobs. Host mode uses the composed worker client;
 	// managed HTTP-only processes use an unstarted producer client.
-	RiverProducer     *river.Client[pgx.Tx]
-	riverProducerPool *pgxpool.Pool
-	RiverClient       *river.Client[pgx.Tx]
+	RiverProducer *river.Client[pgx.Tx]
+	// ProviderRefreshQueue is where per-merchant provider refresh jobs run.
+	ProviderRefreshQueue string
+	riverProducerPool    *pgxpool.Pool
+	RiverClient          *river.Client[pgx.Tx]
 
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService
@@ -118,6 +120,7 @@ type Runtime struct {
 	// composition root alongside the other write-through producers.
 	PaymentSourceUpdateIntents *intents.PaymentSourceUpdateThrough
 	ProviderCutovers           *intents.NMIProviderCutover
+	EngineTakeovers            *intents.NMIEngineTakeover
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService

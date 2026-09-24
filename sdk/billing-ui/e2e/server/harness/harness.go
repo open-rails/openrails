@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkithttp "github.com/open-rails/authkit/adapters/http"
 	"github.com/open-rails/authkit/authhttp"
@@ -127,6 +128,9 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err != nil {
 		return nil, fmt.Errorf("seed catalog: %w", err)
 	}
+	if err := armDestructive(ctx, pool); err != nil {
+		return nil, fmt.Errorf("arm destructive actions: %w", err)
+	}
 	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog}, nil
 }
 
@@ -154,4 +158,18 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 func (r *Runtime) Close() {
 	_ = r.Billing.Close(context.Background())
 	r.Auth.Close()
+}
+
+// armDestructive is the operator arming a reviewed deployment
+// (docs/operations.md): member cancels of provider-billed subscriptions are
+// refused until provider deletes may run.
+func armDestructive(ctx context.Context, pool *pgxpool.Pool) error {
+	schema := pgx.Identifier{BillingSchema}.Sanitize()
+	if _, err := pool.Exec(ctx, `UPDATE `+schema+`.destructive_action_switch SET enabled = true, updated_by = 'billing-ui-e2e'`); err != nil {
+		return err
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO `+schema+`.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
+		SELECT id, true, now(), 'billing-ui-e2e', 'e2e deployment' FROM `+schema+`.merchants WHERE slug = $1
+		ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true`, MerchantSlug)
+	return err
 }

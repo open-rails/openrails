@@ -190,7 +190,9 @@ share of its actual current period, at sub-second precision, credited against th
 new price; cadences may differ — see `docs/merchant-guide.md`); an upgrade whose
 target has no cycle answers `422 tier_change_cycle_unknown`, one without a valid
 current period `422 tier_change_period_unknown`, and one whose credit exceeds the
-target price `409 tier_change_credit_exceeds_price`; downgrades succeed with
+target price `409 tier_change_credit_exceeds_price`; an NMI-billed (legacy)
+subscription answers `409 tier_change_requires_engine_billing` (take it over to
+OpenRails billing first); downgrades succeed with
 a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
 redirect `url`, downgrades are `blocked`; Solana tier changes go through the
 on-chain prepare/confirm routes above. **A tier change requires an
@@ -379,12 +381,12 @@ for those routes.
 |---|---|---|---|
 | GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
 | GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; payments and refunds embed the `product` summary; `Client.GetPayment` |
-| POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail. `Idempotency-Key` required; body `{amount}` or `{full:true}`, optional `reason`, `revoke_access` (explicit). 201 settled, 202 pending; `refund_rail_unavailable`/`refund_unsupported` refusals. `Client.RefundPayment` |
+| POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail. `Idempotency-Key` required; body `{amount}` or `{full:true}`, optional `reason`, `revoke_access` (explicit; on an NMI-billed subscription it also cancels the membership and deletes its NMI schedule, and is refused `409 provider_cancel_held` while destructive actions are disarmed). 201 settled, 202 pending; `refund_rail_unavailable`/`refund_unsupported` refusals. `Client.RefundPayment` |
 | GET | `/v1/merchant/purchase-reviews` | `merchant:payments:read` | Purchases a product archive recorded for review (`status=open\|refunded\|dismissed`, `product_archive_id`); `Client.ListPurchaseReviews` |
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | `merchant:payments:refund` | `{decision: refund\|dismiss, notes}`; refund returns the remaining amount and ends the purchase's access; `Client.ResolvePurchaseReview` |
 | GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
-| POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately |
+| POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately. An NMI-billed cancel while the destructive switch is off answers `409 provider_cancel_held` and raises `life.provider_cancel.held`; `account_deletion: true` cancels locally and holds the NMI delete instead |
 | POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier` | `merchant:subscriptions:update` | Apply a same-group tier change. Body `{ "price_id": "..." }` |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | `merchant:subscriptions:update` | Preview the same tier change without mutation |
@@ -419,6 +421,12 @@ Full request and state-transition details are in
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | `merchant:subscriptions:read` | Validate per-user account cutover |
 | POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:update` | Execute or resume the original durable cutover |
 | GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:read` | Read cutover by idempotency_key |
+| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/preview` | `merchant:subscriptions:read` | Check an NMI-billed subscription for takeover to OpenRails billing; no mutation |
+| POST | `/v1/merchant/subscriptions/{id}/engine-takeover` | `merchant:subscriptions:update` | Durable takeover (Idempotency-Key): delete the NMI schedule at least 24h before the period end, then an engine successor bills the same card from that boundary; `202` while held |
+| GET | `/v1/merchant/subscriptions/{id}/engine-takeover` | `merchant:subscriptions:read` | Latest takeover and its stage |
+| POST | `/v1/merchant/subscriptions/{id}/engine-takeover/abandon` | `merchant:subscriptions:update` | Abandon before the NMI delete is sent; afterwards `409 engine_takeover_committed` |
+| POST | `/v1/merchant/provider-refresh` | `merchant:subscriptions:update` | Run the merchant's provider refresh now; `202 {status: queued\|already_running, job_id}`. `Client.RefreshProviders` |
+| POST | `/v1/merchant/engine-takeovers` | `merchant:subscriptions:update` | Admit takeovers for up to `max_subscriptions` (1-50) eligible NMI-billed subscriptions, earliest boundary first; executions obey the destructive switch and volume breaker |
 | POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B) |
 | POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
 | GET | `/v1/merchant/plan-migrations/{id}` | `merchant:subscriptions:read` | One migration |

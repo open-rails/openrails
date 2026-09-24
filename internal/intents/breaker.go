@@ -21,6 +21,7 @@ import (
 var destructiveIntentTypes = map[string]struct{}{
 	TypeNMIDeleteSubscription:    {},
 	TypeNMIProviderCutover:       {},
+	TypeNMIEngineTakeover:        {}, // deletes the NMI schedule
 	TypeCCBillCancelSubscription: {}, // #696: stops rebilling irreversibly (no resume API)
 	// #674 tail: deleting a vaulted card destroys the stored instrument
 	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
@@ -99,8 +100,11 @@ func NewVolumeBreaker(d *db.DB) *VolumeBreaker { return &VolumeBreaker{db: d} }
 
 // Check reports whether the destructive intent may execute now. held=true
 // means the executor must park it (stays pending). Fails closed: a check
-// error parks the intent rather than executing unexamined.
-func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailIntent, now time.Time) (held bool, reason string, err error) {
+// error parks the intent rather than executing unexamined. Checks are
+// serialized per merchant, and an admitted intent's attempt is recorded by
+// admit in the same transaction, so concurrent executors cannot spend one
+// remaining budget twice.
+func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailIntent, now time.Time, admit func(context.Context, *db.DB) error) (held bool, reason string, err error) {
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")
 	}
@@ -113,10 +117,27 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 	if err := b.db.AssertMerchantScope(ctx, "destructive-volume breaker"); err != nil {
 		return false, "", err
 	}
-	q := b.db.Gen(ctx)
+	err = b.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := b.db.NewWithPgxTx(tx)
+		if err := d.Gen(ctx).LockDestructiveBreaker(ctx, intent.MerchantID); err != nil {
+			return fmt.Errorf("volume breaker: lock: %w", err)
+		}
+		if held, reason, err = b.check(ctx, d, intent, now); err != nil || held {
+			return err
+		}
+		return admit(ctx, d)
+	})
+	if err != nil {
+		return false, "", err
+	}
+	return held, reason, nil
+}
+
+func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.OpenrailsRailIntent, now time.Time) (held bool, reason string, err error) {
+	q := d.Gen(ctx)
 
 	windowStart := now.Add(-DestructiveWindow)
-	finding, found, err := b.finding(ctx, intent.MerchantID)
+	finding, found, err := b.finding(ctx, d, intent.MerchantID)
 	if err != nil {
 		return false, "", fmt.Errorf("volume breaker: load held_bulk finding: %w", err)
 	}
@@ -188,8 +209,8 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 	), nil
 }
 
-func (b *VolumeBreaker) finding(ctx context.Context, merchantID uuid.UUID) (gen.OpenrailsReconciliationFinding, bool, error) {
-	row, err := b.db.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{
+func (b *VolumeBreaker) finding(ctx context.Context, d *db.DB, merchantID uuid.UUID) (gen.OpenrailsReconciliationFinding, bool, error) {
+	row, err := d.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{
 		MerchantID:  merchantID,
 		FindingType: HeldBulkFindingType,
 		SubjectKey:  heldBulkSubjectKey,

@@ -1772,7 +1772,7 @@ func (q *Queries) ListUnjustifiedEntitlementWindows(ctx context.Context, arg Lis
 }
 
 const listUnknownSubscriptions = `-- name: ListUnknownSubscriptions :many
-SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
+SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
@@ -1791,10 +1791,11 @@ type ListUnknownSubscriptionsParams struct {
 }
 
 type ListUnknownSubscriptionsRow struct {
-	ID                  uuid.UUID
-	Rail                string
-	CurrentPeriodEndsAt *time.Time
-	RailSubscriptionID  string
+	ID                    uuid.UUID
+	Rail                  string
+	CurrentPeriodStartsAt *time.Time
+	CurrentPeriodEndsAt   *time.Time
+	RailSubscriptionID    string
 }
 
 // #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
@@ -1819,6 +1820,7 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 		if err := rows.Scan(
 			&i.ID,
 			&i.Rail,
+			&i.CurrentPeriodStartsAt,
 			&i.CurrentPeriodEndsAt,
 			&i.RailSubscriptionID,
 		); err != nil {
@@ -2059,7 +2061,7 @@ func (q *Queries) ReconcileGrantSubscriptionEntitlement(ctx context.Context, arg
 }
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
-SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
+SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE payment_methods.merchant_id = $1::uuid AND rail = ANY ($2::text[])
@@ -2077,6 +2079,7 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	CustomerID      uuid.UUID
 	Rail            string
 	RailCustomerRef string
+	RailMethodRef   string
 	LastFour        *string
 	CardType        *string
 	ExpiryDate      *string
@@ -2099,6 +2102,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 			&i.CustomerID,
 			&i.Rail,
 			&i.RailCustomerRef,
+			&i.RailMethodRef,
 			&i.LastFour,
 			&i.CardType,
 			&i.ExpiryDate,

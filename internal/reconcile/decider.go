@@ -40,6 +40,30 @@ const PeriodGrace = 48 * time.Hour
 // period-end instant. Charge classification and backfill both honor it.
 const renewalAlignmentSlack = 24 * time.Hour
 
+// AlignmentSlack is the renewal alignment window for a period: a day, but
+// never more than half the period, so a short (daily) cycle's PREVIOUS charge
+// can never pass for this period's renewal. Unknown bounds use the day.
+func AlignmentSlack(start, end *time.Time) time.Duration {
+	if start == nil || end == nil || !end.After(*start) {
+		return renewalAlignmentSlack
+	}
+	return min(renewalAlignmentSlack, end.Sub(*start)/2)
+}
+
+// boundaryAdvanced reports that a provider's next billing date lies at least
+// half a period (a day when the period is unknown) beyond the local period
+// end: the provider billed, or tried to bill, a period this row never saw.
+func boundaryAdvanced(next time.Time, start, end *time.Time) bool {
+	if end == nil {
+		return false
+	}
+	gap := renewalAlignmentSlack
+	if start != nil && end.After(*start) {
+		gap = end.Sub(*start) / 2
+	}
+	return next.Sub(*end) >= gap
+}
+
 // DefaultDunningWindow bounds how far past the period end a FAILED renewal is
 // still recoverable (past_due) vs terminal.
 const DefaultDunningWindow = 14 * 24 * time.Hour
@@ -51,6 +75,7 @@ type SubscriptionState struct {
 	Rail               string
 	HasPaymentMethod   bool // payment_method_id IS NOT NULL
 	RailSubscriptionID string
+	PeriodStart        *time.Time // current_period_starts_at: bounds the period's cadence
 	PeriodEnd          *time.Time // current_period_ends_at
 	GraceEndsAt        *time.Time
 	NextRetryScheduled bool // next_retry_at IS NOT NULL
@@ -277,7 +302,7 @@ func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWind
 	// Stage 1: provider truth.
 	var carried Decision // backfill/customer-id survive an inconclusive snapshot
 	if ev.Snapshot != nil && sub.RailSubscriptionID != "" {
-		d := decideFromSnapshot(sub.RailSubscriptionID, periodEnd, ev.Snapshot, now, dunningWindow)
+		d := decideFromSnapshot(sub.RailSubscriptionID, sub.PeriodStart, sub.PeriodEnd, periodEnd, ev.Snapshot, now, dunningWindow)
 		if d.Kind != TransitionNone {
 			return gateCancelCertainty(d, ev)
 		}
@@ -403,7 +428,7 @@ func EvidenceFloorFor(ctx context.Context, database *db.DB, merchantID uuid.UUID
 
 // decideFromSnapshot is the provider-truth law (#632/#633 resolution core,
 // generalized from ResolveUnknownFromSnapshot). TransitionNone = inconclusive.
-func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) Decision {
+func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, periodEnd time.Time, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) Decision {
 	// This subscription's charge events + roster entry from the pull.
 	var txns []RemoteTransaction
 	for i := range snap.Transactions {
@@ -428,7 +453,7 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 	// The renewal for the next period can land up to renewalAlignmentSlack before
 	// the local period-end instant (provider day boundaries); classify and
 	// backfill from that floor so the aligned renewal charge is never dropped.
-	chargeCutoff := periodEnd.Add(-renewalAlignmentSlack)
+	chargeCutoff := periodEnd.Add(-AlignmentSlack(localStart, localEnd))
 	base.Backfill = subscriptionBackfill(txns, chargeCutoff)
 
 	// Latest successful renewal vs latest decline at/after the aligned cutoff.
@@ -478,6 +503,14 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 	//    unpaid period eligible for the failure handling below.
 	if declineTxn == nil && remoteSub != nil && remoteSub.Status == SubscriptionStatusActive {
 		if next := remoteSub.NextBillingAt; next != nil && next.After(now) {
+			if renewTxn == nil && snap.Provider == ProviderNMI && boundaryAdvanced(*next, localStart, localEnd) {
+				// The provider moved past a boundary this snapshot cannot
+				// explain (NMI's bulk transaction report carries no schedule
+				// id). Adopting would skip a period without its charge; a
+				// per-subscription probe decides it on real evidence.
+				base.Reason = "roster_advanced_without_charge_evidence"
+				return base
+			}
 			return with(Decision{Kind: TransitionAdoptPeriodEnd, NewPeriodEnd: next, NewPeriodStart: remoteSub.PeriodStart, Reason: "roster_alive_future_boundary"})
 		}
 	}
@@ -551,7 +584,9 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 		// Rail heuristics survive only as a negative signal (#664): ccbill /
 		// vault-less nmi / stripe / solana are provider-auto-billed, never ours
 		// to charge. The positive "ours" signal is evidence, never rail.
-		oursToBill := sub.Rail == string(models.RailNMI) && sub.HasPaymentMethod
+		// A provider-owned schedule is never ours to bill, whatever instrument
+		// the mirror holds: a missing renewal notice parks it for verification.
+		oursToBill := sub.Rail == string(models.RailNMI) && sub.HasPaymentMethod && sub.CollectionPolicy == models.CollectionPolicyProviderDunning
 		ownership := ev.Charge.PaymentOpenedCurrentPeriod || ev.WatermarkNewerThanPeriodEnd
 		if ev.Charge.RenewalPaymentAfterPeriodEnd {
 			// Billing DID happen — the renewal/advance path owns the row.

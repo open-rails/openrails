@@ -20,6 +20,16 @@ import (
 type nmiVault struct {
 	ID, BillingID string
 	Card          card
+	// Extra are further billing entries (cards) in the same vault, after the
+	// priority-1 entry.
+	Extra []nmiBilling
+	// NoBrand: NMI's customer record omits card_type, as live accounts do.
+	NoBrand bool
+}
+
+type nmiBilling struct {
+	ID   string
+	Card card
 }
 
 type nmiSale struct {
@@ -33,35 +43,38 @@ type nmiSale struct {
 	At                                                         time.Time
 }
 
-// nmiSchedule is a provider-owned recurring plan subscription.
+// nmiSchedule is a provider-owned recurring plan subscription. Days or
+// Months is its plan cadence (Days defaults to 30). A deleted schedule stays
+// readable as NMI's tombstone (delayed_condition=inactive) and leaves the list.
 type nmiSchedule struct {
 	ID, Vault, Plan, Amount string
-	Order, Days             string
+	Order, Days, Months     string
 	NextBilling             time.Time
-	Deleted                 bool
+	Deleted, Paused         bool
 }
 
 // nmiFake is a stateful NMI gateway: Customer Vault (v5), Direct Post sales,
 // Query API searches, v5 transaction reads/refunds and v5 recurring
 // subscriptions. Declines follow each vault's current card.
 type nmiFake struct {
-	mu        sync.Mutex
-	seq       int
-	tokens    map[string]card
-	vaults    map[string]*nmiVault
-	sales     []*nmiSale
-	attempts  []url.Values
-	schedules map[string]*nmiSchedule
-	plans     map[string]obj
-	duplicate int
-	declined  []*nmiSale
-	lose      int
-	lost      int
-	drop      int
-	queryDown bool
-	writes    []providerCall
-	gates     []*gate
-	odd       []string
+	mu          sync.Mutex
+	seq         int
+	tokens      map[string]card
+	vaults      map[string]*nmiVault
+	sales       []*nmiSale
+	attempts    []url.Values
+	schedules   map[string]*nmiSchedule
+	plans       map[string]obj
+	duplicate   int
+	declined    []*nmiSale
+	lose        int
+	lost        int
+	drop        int
+	queryDown   bool
+	writes      []providerCall
+	validations []nmiValidation
+	gates       []*gate
+	odd         []string
 
 	// refusedSaves counts vault creations refused for a card declined "vault".
 	refusedSaves int
@@ -110,7 +123,7 @@ func (f *nmiFake) RoundTrip(r *http.Request) (*http.Response, error) {
 			g = candidate
 		}
 	}
-	sale := strings.HasSuffix(r.URL.Path, "/transact.php")
+	sale := strings.HasSuffix(r.URL.Path, "/transact.php") && !strings.Contains(string(body), "type=validate")
 	lost, dropped := f.lose > 0 && sale, f.drop > 0 && sale
 	if lost {
 		f.lose--
@@ -175,9 +188,15 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 		form[k] = v
 	}
 	switch {
+	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "validate":
+		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
+		_, _ = rec.WriteString(f.validate(form))
 	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "sale":
 		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
 		_, _ = rec.WriteString(f.sale(form))
+	case strings.HasSuffix(p, "/transact.php") && form.Get("recurring") == "update_subscription":
+		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
+		_, _ = rec.WriteString(f.updateSubscription(form))
 	case strings.HasSuffix(p, "/transact.php") && form.Get("recurring") == "add_subscription":
 		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
 		_, _ = rec.WriteString(f.addSubscription(form))
@@ -190,7 +209,7 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 		rec.WriteHeader(http.StatusServiceUnavailable)
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction":
 		rec.Header().Set("Content-Type", "text/xml")
-		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id"), form.Get("subscription_id")))
+		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id"), form.Get("subscription_id"), form.Get("customer_vault_id")))
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "test_mode_status":
 		rec.Header().Set("Content-Type", "text/xml")
 		_, _ = rec.WriteString("<nm_response><test_mode_status>enabled</test_mode_status></nm_response>")
@@ -206,9 +225,18 @@ func nmiNotFound() (int, any) {
 }
 
 func (f *nmiFake) customer(v *nmiVault) obj {
-	one := 1
-	return obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": []obj{{"id": v.BillingID, "priority": &one,
-		"payment_details": obj{"card_number": "4xxxxxxxxxxx" + v.Card.Last4, "card_exp": "1235", "card_type": v.Card.Brand}}}}
+	details := obj{"card_number": map[string]string{"mastercard": "5", "amex": "3"}[v.Card.Brand] + "xxxxxxxxxxx" + v.Card.Last4, "card_exp": "1235", "card_type": v.Card.Brand}
+	if details["card_number"] == "xxxxxxxxxxx"+v.Card.Last4 {
+		details["card_number"] = "4xxxxxxxxxxx" + v.Card.Last4
+	}
+	if v.NoBrand {
+		delete(details, "card_type")
+	}
+	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": details}}
+	for i, b := range v.Extra {
+		billing = append(billing, obj{"id": b.ID, "priority": i + 2, "payment_details": obj{"card_number": "4xxxxxxxxxxx" + b.Card.Last4, "card_exp": "1235", "card_type": b.Card.Brand}})
+	}
+	return obj{"object": "customer", "id": v.ID, "created": "2026-01-01T00:00:00Z", "billing": billing}
 }
 
 func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
@@ -251,11 +279,11 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 		f.vaults[v.ID] = v
 		return 200, f.customer(v)
 	case seg[0] == "customers" && len(seg) == 1 && method == http.MethodGet:
-		var data []obj
-		for _, v := range f.vaults {
-			data = append(data, f.customer(v))
+		data := []obj{}
+		for _, id := range sortedKeys(f.vaults) {
+			data = append(data, f.customer(f.vaults[id]))
 		}
-		return 200, obj{"object": "list", "data": data}
+		return 200, obj{"customers": data, "has_more": false}
 	case seg[0] == "customers" && len(seg) == 2:
 		v, ok := f.vaults[seg[1]]
 		if !ok {
@@ -265,6 +293,9 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 			if c, ok := token(); ok {
 				v.Card = c
 			}
+		}
+		if method == http.MethodDelete {
+			delete(f.vaults, v.ID)
 		}
 		return 200, f.customer(v)
 	case seg[0] == "payments" && len(seg) == 1+1 && seg[1] == "auth":
@@ -315,25 +346,26 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 			return 200, plan
 		}
 		return nmiNotFound()
+	case seg[0] == "plans" && len(seg) == 2 && f.plans[seg[1]] != nil:
+		return 200, f.plans[seg[1]]
 	case seg[0] == "plans" && len(seg) == 2 && strings.HasPrefix(seg[1], "legacy_plan_"):
 		// A legacy book's monthly 9.99 plan, created at NMI long ago.
 		return 200, obj{"object": "plan", "id": seg[1], "plan_name": "Legacy", "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}
-	case seg[0] == "subscriptions" && len(seg) == 1:
-		var data []obj
-		for _, s := range f.schedules {
-			if !s.Deleted {
+	case seg[0] == "subscriptions" && len(seg) == 1 && method == http.MethodGet:
+		data := []obj{}
+		for _, id := range sortedKeys(f.schedules) {
+			if s := f.schedules[id]; !s.Deleted {
 				data = append(data, f.schedule(s))
 			}
 		}
-		return 200, obj{"object": "list", "data": data}
+		return 200, obj{"subscriptions": data, "has_more": false}
 	case seg[0] == "subscriptions" && len(seg) == 2:
 		s, ok := f.schedules[seg[1]]
-		if !ok || s.Deleted {
+		if !ok {
 			return nmiNotFound()
 		}
 		if method == http.MethodDelete {
 			s.Deleted = true
-			return 204, nil
 		}
 		return 200, f.schedule(s)
 	}
@@ -342,12 +374,19 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 }
 
 func (f *nmiFake) schedule(s *nmiSchedule) obj {
-	days := s.Days
-	if days == "" {
+	days, months := s.Days, s.Months
+	if days == "" && months == "" {
 		days = "30"
 	}
-	return obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": "active", "paused_subscription": false,
-		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_amount": s.Amount, "day_frequency": days, "plan_payments": "0"}}
+	condition, paused := "active", "0"
+	if s.Deleted {
+		condition = "inactive"
+	}
+	if s.Paused {
+		paused = "1"
+	}
+	return obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": condition, "paused_subscription": paused, "amount": s.Amount,
+		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_amount": s.Amount, "day_frequency": days, "month_frequency": months, "plan_payments": "0"}}
 }
 
 func decimalCents(cents int64) string {
@@ -426,11 +465,11 @@ func (f *nmiFake) addSubscription(form url.Values) string {
 	return fmt.Sprintf("response=1&responsetext=Subscription+added&subscription_id=%s&orderid=%s&response_code=100", s.ID, form.Get("orderid"))
 }
 
-func (f *nmiFake) search(orderID, transactionID, scheduleID string) string {
+func (f *nmiFake) search(orderID, transactionID, scheduleID, vault string) string {
 	var b strings.Builder
 	b.WriteString("<nm_response>")
 	for _, s := range append(append([]*nmiSale{}, f.sales...), f.declined...) {
-		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) {
+		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) || (vault != "" && s.Vault != vault) {
 			continue
 		}
 		success, code := "1", "100"
@@ -567,13 +606,13 @@ func (f *nmiFake) providerRenew(id string, paid bool) (sale *nmiSale, declined b
 		defer f.mu.Unlock()
 		sale = &nmiSale{TransactionID: f.next("declined"), ScheduleID: id, Vault: s.Vault, BillingID: f.vaults[s.Vault].BillingID, Amount: s.Amount, Currency: "USD", At: s.NextBilling, Declined: "202"}
 		f.sales = append(f.sales, sale)
-		s.NextBilling = s.NextBilling.Add(monthHours * time.Hour)
+		s.NextBilling = s.advance(s.NextBilling)
 		return sale, true
 	}
 	tx := f.legacySale(s.Vault, s.Amount, s.NextBilling)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	s.NextBilling = s.NextBilling.Add(monthHours * time.Hour)
+	s.NextBilling = s.advance(s.NextBilling)
 	sale = f.saleByID(tx)
 	sale.ScheduleID = id
 	return sale, false
@@ -589,4 +628,164 @@ func (f *nmiFake) scheduleLive(id string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return !f.schedules[id].Deleted
+}
+
+// advance is the schedule's next regular billing date after at.
+func (s *nmiSchedule) advance(at time.Time) time.Time {
+	if months, _ := strconv.Atoi(s.Months); months > 0 {
+		return at.AddDate(0, months, 0)
+	}
+	days, _ := strconv.Atoi(s.Days)
+	if days <= 0 {
+		days = 30
+	}
+	return at.AddDate(0, 0, days)
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// updateSubscription is Direct Post recurring=update_subscription: a new
+// vault (payment source) or a new schedule amount.
+func (f *nmiFake) updateSubscription(form url.Values) string {
+	s := f.schedules[form.Get("subscription_id")]
+	if s == nil || s.Deleted {
+		return "response=3&responsetext=Invalid+subscription&response_code=300"
+	}
+	if vault := form.Get("customer_vault_id"); vault != "" {
+		if f.vaults[vault] == nil {
+			return "response=3&responsetext=Invalid+Customer+Vault+Id&response_code=300"
+		}
+		s.Vault = vault
+	}
+	if amount := form.Get("plan_amount"); amount != "" {
+		s.Amount = amount
+	}
+	return fmt.Sprintf("response=1&responsetext=Subscription+updated&subscription_id=%s&response_code=100", s.ID)
+}
+
+// legacyPlan registers a plan created at NMI by the legacy system.
+func (f *nmiFake) legacyPlan(id, amount string, days, months int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.plans[id] = obj{"object": "plan", "id": id, "plan_name": "Legacy " + id, "plan_amount": amount, "plan_payments": "0", "day_frequency": strconv.Itoa(days), "month_frequency": strconv.Itoa(months)}
+}
+
+// legacyScheduleEvery is a provider-owned schedule on a days or months cadence.
+func (f *nmiFake) legacyScheduleEvery(vault, plan, amount string, days, months int, next time.Time) string {
+	id := f.legacySchedule(vault, plan, amount, next)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.schedules[id]
+	s.Days, s.Months = "", ""
+	if months > 0 {
+		s.Months = strconv.Itoa(months)
+	} else {
+		s.Days = strconv.Itoa(days)
+	}
+	return id
+}
+
+// addCard adds a further card to a vault and returns its billing id.
+func (f *nmiFake) addCard(vault string, c card) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v := f.vaults[vault]
+	b := nmiBilling{ID: f.next("bill"), Card: c}
+	v.Extra = append(v.Extra, b)
+	return b.ID
+}
+
+// removeVault deletes a vault at NMI outside OpenRails.
+func (f *nmiFake) removeVault(vault string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.vaults, vault)
+}
+
+// schedule returns a copy of a schedule's current state.
+func (f *nmiFake) scheduleState(id string) nmiSchedule {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return *f.schedules[id]
+}
+
+// editSchedule changes a schedule at NMI outside OpenRails.
+func (f *nmiFake) editSchedule(id string, edit func(*nmiSchedule)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	edit(f.schedules[id])
+}
+
+// scheduleSale records a successful charge NMI's recurring engine made for
+// a schedule at a time, without advancing it (for backdated books).
+func (f *nmiFake) scheduleSale(id string, at time.Time) *nmiSale {
+	f.mu.Lock()
+	s := f.schedules[id]
+	f.mu.Unlock()
+	tx := f.legacySale(s.Vault, s.Amount, at)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sale := f.saleByID(tx)
+	sale.ScheduleID = id
+	return sale
+}
+
+// callsTo is the journal of provider mutations whose path starts with
+// prefix (a v5 path such as "/subscriptions/rsub1", or "transact.php"
+// narrowed by a Direct Post form field).
+func (f *nmiFake) callsTo(method, prefix string, form func(url.Values) bool) []providerCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []providerCall
+	for _, c := range f.writes {
+		if c.Method == method && strings.HasPrefix(c.Path, prefix) && (form == nil || form(c.Form)) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// deletesOf counts DELETE requests for one schedule.
+func (f *nmiFake) deletesOf(id string) int {
+	return len(f.callsTo(http.MethodDelete, "/subscriptions/"+id, nil))
+}
+
+// validate is Direct Post type=validate: a no-funds card verification. The
+// issuer refuses a card it would never honor; a funds decline (202/203)
+// still verifies.
+func (f *nmiFake) validate(form url.Values) string {
+	v := f.vaults[form.Get("customer_vault_id")]
+	if v == nil {
+		return "response=3&responsetext=Invalid+Customer+Vault+Id&response_code=300"
+	}
+	id := f.next("validate")
+	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, Form: form})
+	if code := v.Card.Decline; code != "" && code != "202" && code != "203" {
+		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&response_code=%s", id, code)
+	}
+	return fmt.Sprintf("response=1&responsetext=VALIDATED&transactionid=%s&response_code=100", id)
+}
+
+type nmiValidation struct {
+	TransactionID, Vault string
+	Form                 url.Values
+}
+
+// validationOf is the approved card verification of a vault, or nil.
+func (f *nmiFake) validationOf(vault string) *nmiValidation {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.validations {
+		if f.validations[i].Vault == vault {
+			return &f.validations[i]
+		}
+	}
+	return nil
 }

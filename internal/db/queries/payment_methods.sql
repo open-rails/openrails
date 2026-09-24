@@ -6,7 +6,7 @@ INSERT INTO openrails.payment_methods (
     initial_transaction_id, last_four, card_type, expiry_date,
     metadata, created_at, updated_at, psp_id,
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
-    network_token_par, charge_via
+    network_token_par, charge_via, stored_credential_recurring_ref
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, sqlc.arg(rail_customer_ref), sqlc.arg(rail_method_ref),
     sqlc.arg(initial_transaction_id), sqlc.narg(last_four), sqlc.narg(card_type), sqlc.narg(expiry_date),
@@ -19,7 +19,8 @@ INSERT INTO openrails.payment_methods (
       COALESCE(sqlc.narg(custodian_id)::uuid, (SELECT p.custodian_id FROM openrails.psps p WHERE p.id=sqlc.arg(psp_id)::uuid AND p.merchant_id=sqlc.arg(merchant_id)::uuid)) END,
     sqlc.arg(fingerprint), sqlc.arg(network_token_id),
     sqlc.arg(network_token_status), sqlc.arg(network_token_par),
-    COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy')
+    COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
+    sqlc.arg(stored_credential_recurring_ref)::text
 );
 
 -- name: GetPaymentMethodByID :one

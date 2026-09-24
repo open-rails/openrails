@@ -172,6 +172,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 			Currency:   "", // the subscription resource does not echo currency
 			Raw:        rawJSON(map[string]any{"source": "nmi_recurring_v5", "subscription": s}),
 		}
+		sub.Paused = nmiFlag(s.PausedSubscription)
 		if who, ok := identity[railCustomerRef]; ok {
 			sub.Email = who.Email
 			sub.Username = who.Username
@@ -193,6 +194,12 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 			} else {
 				sub.Status = SubscriptionStatusActive
 			}
+		}
+		if sub.Paused {
+			// A paused schedule bills nothing and is not dead: neither live
+			// nor terminal, so status comparison skips it and the drift check
+			// reports it.
+			sub.Status, sub.RawStatus = SubscriptionStatusUnknown, "paused"
 		}
 		out = append(out, sub)
 	}
@@ -407,16 +414,31 @@ func (f *NMIFetcher) paymentMethodsFromCustomers(customers []nmi.V5Customer) ([]
 			RailCustomerRef: strings.TrimSpace(c.ID),
 			Raw:             rawJSON(map[string]any{"source": "nmi_customer_vault_v5", "customer": c}),
 		}
-		if billing := c.PrimaryBilling(); billing != nil {
-			entry.CardLast4 = cardLast4(billing.PaymentDetails.CardNumber)
-			entry.CardExpiry = strings.TrimSpace(billing.PaymentDetails.CardExp)
-			entry.Email = strings.TrimSpace(billing.Email)
-			identity[entry.RailCustomerRef] = nmiCustomerIdentity{
-				Email:    entry.Email,
-				Username: strings.TrimSpace(strings.TrimSpace(billing.FirstName) + " " + strings.TrimSpace(billing.LastName)),
+		primary := c.PrimaryBilling()
+		if primary == nil {
+			out = append(out, entry)
+			continue
+		}
+		identity[entry.RailCustomerRef] = nmiCustomerIdentity{
+			Email:    strings.TrimSpace(primary.Email),
+			Username: strings.TrimSpace(strings.TrimSpace(primary.FirstName) + " " + strings.TrimSpace(primary.LastName)),
+		}
+		// One entry per card, primary first: a multi-card vault's other
+		// cards are compared on their own billing ids.
+		billings := []*nmi.V5CustomerBilling{primary}
+		for i := range c.Billing {
+			if &c.Billing[i] != primary {
+				billings = append(billings, &c.Billing[i])
 			}
 		}
-		out = append(out, entry)
+		for _, billing := range billings {
+			card := entry
+			card.RailMethodRef = strings.TrimSpace(billing.ID)
+			card.CardLast4 = cardLast4(billing.PaymentDetails.CardNumber)
+			card.CardExpiry = strings.TrimSpace(billing.PaymentDetails.CardExp)
+			card.Email = strings.TrimSpace(billing.Email)
+			out = append(out, card)
+		}
 	}
 	return out, identity, nil
 }
@@ -435,4 +457,10 @@ func cardLast4(masked string) string {
 		}
 	}
 	return last4
+}
+
+// nmiFlag reads a v5 boolean NMI serializes as "0"/"1", a number or a bool.
+func nmiFlag(v any) bool {
+	text := strings.TrimSpace(fmt.Sprint(v))
+	return text == "1" || strings.EqualFold(text, "true")
 }

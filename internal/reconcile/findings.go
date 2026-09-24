@@ -64,6 +64,15 @@ const (
 	// pass halted. Always requires_review — a book-sized cancellation is a
 	// human decision, never an automatic one.
 	FindingCancellationCapped FindingType = "pull.cancellation.capped"
+	// FindingReversalUnlinked: a refund or chargeback reached the charge
+	// mirror (a declared book, a probe) without the sale it reverses. It is
+	// never recorded as a charge; requires_review.
+	FindingReversalUnlinked FindingType = "pull.reversal.unlinked"
+	// FindingProviderScheduleDrift: a matched provider-owned schedule no
+	// longer bills what the local subscription records — its amount, plan,
+	// vault or paused state changed at the provider. Never acted on
+	// automatically; requires_review.
+	FindingProviderScheduleDrift FindingType = "pull.subscription.drift"
 )
 
 // #665 single-writer-per-invariant: the legacy PS-9 entitlement check
@@ -268,6 +277,7 @@ var stateRosterFindingTypes = []FindingType{
 	FindingStatusMismatch,
 	FindingPaymentMethodMismatch,
 	FindingDuplicateSubscriptions,
+	FindingProviderScheduleDrift,
 }
 
 // SeverityRank orders severities worst-first (critical=0 .. low=3) for sorting

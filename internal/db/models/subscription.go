@@ -35,6 +35,8 @@ const (
 	CancelTypeExpired    CancelType = "expired"    // User failed to rebill
 	CancelTypeChargeback CancelType = "chargeback" // Cancelled due to chargeback
 	CancelTypeUpgrade    CancelType = "upgrade"    // Superseded by a tier upgrade
+	// CancelTypeEngineTakeover: NMI stopped billing; an engine successor bills from the boundary.
+	CancelTypeEngineTakeover CancelType = "engine_takeover"
 )
 
 type Subscription struct {

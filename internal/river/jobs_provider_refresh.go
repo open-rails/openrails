@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/progress"
@@ -61,6 +63,10 @@ func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 // ProviderRefreshMerchantArgs is one merchant's refresh job (#719).
 type ProviderRefreshMerchantArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
+	// Requested marks a host-requested refresh: it must observe provider state
+	// from after the request, so it never merges into a scheduled pass that
+	// may already be running.
+	Requested bool `json:"requested,omitempty" river:"unique"`
 }
 
 func (ProviderRefreshMerchantArgs) Kind() string { return KindProviderRefreshMerchant }
@@ -75,6 +81,31 @@ var providerRefreshUniqueStates = []rivertype.JobState{
 	rivertype.JobStateRetryable,
 	rivertype.JobStateRunning,
 	rivertype.JobStateScheduled,
+}
+
+// EnqueueMerchantRefresh requests the merchant's provider refresh now on
+// queue. An in-flight refresh absorbs the request; one scheduled for later
+// (the staggered periodic tick) is started now.
+func EnqueueMerchantRefresh(ctx context.Context, client *river.Client[pgx.Tx], merchantID uuid.UUID, queue string) (jobID int64, alreadyQueued bool, err error) {
+	if client == nil {
+		return 0, false, errors.New("provider refresh: no River producer")
+	}
+	if queue == "" {
+		queue = QueueProviderRefresh
+	}
+	res, err := client.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: merchantID, Requested: true}, &river.InsertOpts{
+		Queue:      queue,
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	if res.UniqueSkippedAsDuplicate && res.Job.State == rivertype.JobStateScheduled {
+		if _, err := client.JobRetry(ctx, res.Job.ID); err != nil {
+			return 0, false, err
+		}
+	}
+	return res.Job.ID, res.UniqueSkippedAsDuplicate, nil
 }
 
 // refreshJobInserter is the slice of river.Client the scheduler uses (test seam).
@@ -258,6 +289,7 @@ type ProviderRefreshWorker struct {
 	// PullEndpoints overrides provider base URLs on store-armed clients
 	// (fake-provider test seam).
 	PullEndpoints reconcile.ProviderEndpoints
+	NMIClients    *railresolve.NMIFactory
 
 	Window          time.Duration
 	SafetyLag       time.Duration
@@ -290,6 +322,16 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshMerchant).WithField("merchant_id", mid)
 	stats := providerRefreshStats{Merchants: 1}
 
+	// One refresh per merchant at a time, across every replica.
+	release, held, err := w.lockMerchant(ctx, mid)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return river.JobSnooze(5 * time.Second)
+	}
+	defer release()
+
 	// #699/#788: fetchers + per-sub probers (#665) arm PER MERCHANT inside
 	// the merchant scope from the armed rail state. A rail that cannot arm is
 	// absent for that merchant (its WARN names merchant/rail/secret); the
@@ -300,9 +342,10 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		Merchants:     w.Merchants,
 		DB:            w.DB,
 		Endpoints:     w.PullEndpoints,
+		NMIClients:    w.NMIClients,
 	}
 
-	err := w.refreshMerchant(ctx, mid, builder, &stats, logger)
+	err = w.refreshMerchant(ctx, mid, builder, &stats, logger)
 
 	logger.WithFields(log.Fields{
 		"merchants":        stats.Merchants,
@@ -729,4 +772,28 @@ type providerRefreshProviderResult struct {
 	Changed         bool
 	// Proofs carries the completed pull's coverage for the #665 gate.
 	Proofs reconcile.PullProofs
+}
+
+func (w *ProviderRefreshWorker) lockMerchant(ctx context.Context, mid uuid.UUID) (release func(), held bool, err error) {
+	pool := w.DB.Pool()
+	if pool == nil {
+		return nil, false, fmt.Errorf("provider refresh: pool not configured")
+	}
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	q := gen.New(conn)
+	if held, err = q.TryLockProviderRefresh(ctx, mid); err != nil || !held {
+		conn.Release()
+		return nil, false, err
+	}
+	return func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := q.UnlockProviderRefresh(unlockCtx, mid); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
+		}
+		conn.Release()
+	}, true, nil
 }

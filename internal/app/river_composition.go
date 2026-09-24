@@ -78,6 +78,7 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		if cfg.JobTimeout == 0 {
 			cfg.JobTimeout = riverNoJobTimeout
 		}
+		r.ProviderRefreshQueue = refreshQueue
 		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers, refreshQueue); err != nil {
 			return err
 		}

@@ -117,6 +117,9 @@ type RemoteSubscription struct {
 	// PeriodStart is the provider's own current period start when it states
 	// one (Stripe); a renewal adopts it rather than assuming the prior end.
 	PeriodStart *time.Time `json:"period_start,omitempty"`
+	// Paused reports a schedule the provider holds without billing (NMI
+	// paused_subscription).
+	Paused bool `json:"paused,omitempty"`
 	// AmountCents is the recurring charge amount in integer cents of Currency.
 	// Zero when the provider does not denominate in fiat (Solana on-chain
 	// amounts are mint base units and live in Raw instead).
@@ -157,6 +160,8 @@ type RemoteTransaction struct {
 type RemotePaymentMethod struct {
 	// RailCustomerRef is the rail vault/customer identifier.
 	RailCustomerRef string `json:"customer_vault_id"`
+	// RailMethodRef names one card of a multi-card vault (NMI billing id).
+	RailMethodRef string `json:"billing_id,omitempty"`
 	// CardLast4 / CardExpiry (MMYY) are populated when the provider exposes
 	// masked card data.
 	CardLast4  string          `json:"card_last4,omitempty"`

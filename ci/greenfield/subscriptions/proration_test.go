@@ -41,34 +41,22 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 	return out
 }
 
-// importNMI lands a provider-owned NMI membership on price (whose plan the
-// engine created) with current period [start, end], via ImportBilling.
-func (w *world) importNMI(price tier, cents int64, start, end time.Time) (*customer, openrails.SubscriptionID) {
+// engineWithLeft enrolls an engine-owned NMI membership on price and moves
+// engine time so left remains in its first period. It returns the customer,
+// the membership and the vault the engine charges.
+func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, openrails.SubscriptionID, string) {
 	t := w.t
 	t.Helper()
 	c := w.newCustomer()
-	vault := w.nmi.legacyVault(visa)
-	amount := fmt.Sprintf("%d.%02d", cents/100, cents%100)
-	railSub := w.nmi.legacySchedule(vault, price.plan, amount, end)
-	customerID, err := openrails.ParseCustomerID(c.id)
-	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(price.ID)
-	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.billingOf(vault)}
-	result, err := w.client[embedded].ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
-		Customers:      []openrails.DeclaredCustomer{{Customer: customerID}},
-		PaymentMethods: []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "import-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
-			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.legacySale(vault, amount, start), Success: true, AmountCents: cents, Currency: "USD", OccurredAt: start}},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Imported, 1, "%+v", result)
-	w.settle()
-	subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
-	require.NoError(t, err)
-	require.Len(t, subs.Data, 1)
-	return c, subs.Data[0].ID
+	sub := c.subscribeAgain(embedded, "nmi", price.ID, price.ent, c.saveCard("nmi", visa))
+	paid := completed(w.payments(embedded, c.id))
+	require.Len(t, paid, 1)
+	w.nmi.mu.Lock()
+	vault := w.nmi.saleByID(paid[0].TransactionID).Vault
+	w.nmi.mu.Unlock()
+	current := w.subscription(embedded, sub)
+	w.advance(current.CurrentPeriodEndsAt.Sub(w.clock.Now()) - left)
+	return c, sub, vault
 }
 
 // requirePreview asserts both Client topologies quote charge (cents) now and
@@ -88,8 +76,9 @@ func (w *world) requirePreview(sub openrails.SubscriptionID, target string, char
 // Upgrades credit the old plan's unused value against its own current
 // period at sub-second precision, whatever the new plan's cadence (#1067).
 // Preview (embedded and remote Client) equals the durable charge, which
-// equals the provider's sale exactly. NMI plans are day-based, so these
-// memberships are provider-owned imports.
+// equals the provider's sale exactly, on engine-owned NMI memberships (a
+// provider-billed NMI subscription refuses tier changes; see
+// TestLegacyNMITierChangeRefused).
 func TestUpgradeProrationAcrossCadences(t *testing.T) {
 	t.Parallel()
 	const h = time.Hour
@@ -112,14 +101,13 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			tp := []topology{embedded, remote}[i%2]
 			group := "g" + uuid.NewString()[:8]
-			old := w.tierPrice(group, 1, row.oldCents, row.oldCycle, true)
-			next := w.tierPrice(group, 2, row.newCent, row.newCyc, true)
-			end := w.clock.Now().Add(row.left)
-			c, sub := w.importNMI(old, row.oldCents, end.Add(-time.Duration(row.oldCycle)*h), end)
+			old := w.tierPrice(group, 1, row.oldCents, row.oldCycle, false)
+			next := w.tierPrice(group, 2, row.newCent, row.newCyc, false)
+			c, sub, vault := w.engineWithLeft(old, row.left)
 			current := w.subscription(tp, sub)
-			require.True(t, end.Equal(*current.CurrentPeriodEndsAt))
+			require.Equal(t, row.left, current.CurrentPeriodEndsAt.Sub(w.clock.Now()))
 			require.Equal(t, time.Duration(row.oldCycle)*h, current.CurrentPeriodEndsAt.Sub(*current.CurrentPeriodStartsAt), "the actual current period")
-			sales := len(w.nmi.ledger(""))
+			sales := len(w.nmi.ledger(vault))
 
 			w.requirePreview(sub, next.ID, row.charge, row.newCyc)
 			done, err := w.client[tp].ChangeTier(t.Context(), sub, "upgrade-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
@@ -127,7 +115,7 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 			w.settle()
 			require.Equal(t, row.charge*10_000, done.AmountDueNow, "charged equals preview")
 
-			ledger := w.nmi.ledger("")
+			ledger := w.nmi.ledger(vault)
 			require.Len(t, ledger, sales+1, "exactly one proration sale")
 			require.Equal(t, row.charge, ledger[len(ledger)-1].Amount, "provider journal carries the quoted amount exactly")
 			require.LessOrEqual(t, row.newCent-row.charge, row.oldCents, "credit never exceeds the amount paid")
@@ -176,15 +164,14 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	group := "g" + uuid.NewString()[:8]
-	old := w.tierPrice(group, 1, 1000, 720, true)
-	short := w.tierPrice(group, 2, 500, 168, true)
-	end := w.clock.Now().Add(700 * time.Hour)
-	_, sub := w.importNMI(old, 1000, end.Add(-720*time.Hour), end)
-	sales := len(w.nmi.ledger(""))
+	old := w.tierPrice(group, 1, 1000, 720, false)
+	short := w.tierPrice(group, 2, 500, 168, false)
+	_, sub, vault := w.engineWithLeft(old, 700*time.Hour)
+	sales := len(w.nmi.ledger(vault))
 
 	// A price without a cycle (the schema forbids one on an auto-renewing
 	// price) cannot open a period: refused, never defaulted to 720h.
-	noCycle := w.tierPrice(group, 3, 5000, 720, true)
+	noCycle := w.tierPrice(group, 3, 5000, 720, false)
 	_, err := w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE key = $1`, noCycle.Key)
 	require.NoError(t, err)
 
@@ -204,7 +191,7 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 		}
 	}
 	w.settle()
-	require.Len(t, w.nmi.ledger(""), sales, "a refused upgrade charges nothing")
+	require.Len(t, w.nmi.ledger(vault), sales, "a refused upgrade charges nothing")
 	require.Equal(t, old.ID, w.subscription(embedded, sub).PriceID)
 }
 

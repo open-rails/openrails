@@ -66,6 +66,7 @@ var providerWriteSurface = map[string]string{
 	"AddRecurringPlan":                "write", // creates a remote plan
 	"EditRecurringPlan":               "write", // mutates a remote plan
 	"CreateCustomerVault":             "write", // stores a card at the provider
+	"EstablishRecurringAgreement":     "write", // records a credential-on-file verification (no funds move)
 	"UpdateCustomerVault":             "write", // mutates a stored card
 	"DeleteCustomerVault":             "write", // IRREVERSIBLE: destroys the stored card
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
@@ -137,6 +138,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/manual_rebill.go:Execute":                       "manual_rebill intent handler",
 	"internal/intents/refund.go:Execute":                              "nmi_refund intent handler",
 	"internal/intents/nmi_provider_cutover.go:advance":                "durable cutover step executor",
+	"internal/intents/nmi_engine_takeover.go:advance":                 "durable engine-takeover step executor; the delete is fenced by delete_submitted and verified by tombstone readback",
 	"internal/intents/nmi_provider_cutover_abandon.go:advanceAbandon": "#657 same durable cutover intent; immutable direction, qualification lock and exact paused-target cancellation receipt; Verify never sends",
 	"internal/intents/nmi_delete.go:Execute":                          "nmi_delete_subscription intent handler",
 	"internal/intents/nmi_payment_source_update.go:Execute":           "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
@@ -145,8 +147,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/manual_rebill_preparation.go:prepareProvider":   "manual_rebill intent pre-charge step; immutable provider preconditions and set/readback retry are proven by TestManualRebillPreparesAcceptedPriceOnceBeforeCharging",
 
 	// --- reactive user/admin cancels ------------------------------------
-	"internal/modules/subscriptions/admin_service.go:cancelWithNMI":         "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",
-	"internal/modules/subscriptions/user_service.go:CancelUserSubscription": "reactive user cancel (see admin_service note)",
+	"internal/modules/subscriptions/admin_service.go:cancelWithNMI": "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",
 
 	// --- vault lifecycle -------------------------------------------------
 	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":       "the create half of the vault lifecycle: no durable intent exists until a vault does",

@@ -122,7 +122,7 @@ func cutoverKey(key string) (string, error) {
 func (h *NMIProviderCutover) freeze(ctx context.Context, d *db.DB, id uuid.UUID, req nmiCutoverRequest) (nmiCutoverPayload, error) {
 	p := nmiCutoverPayload{Request: req, SubscriptionID: id}
 	if id == uuid.Nil || req.TargetPaymentMethodID == uuid.Nil || req.ExpectedSourcePSPID == uuid.Nil || req.ExpectedTargetPSPID == uuid.Nil || req.ExpectedSourcePSPID == req.ExpectedTargetPSPID {
-		return p, cutoverConflict("distinct nonzero source and target PSPs and replacement card required")
+		return p, cutoverConflict("distinct nonzero source and target PSPs and replacement card required; to move NMI billing to OpenRails on the same account use the engine takeover (POST .../engine-takeover)")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {

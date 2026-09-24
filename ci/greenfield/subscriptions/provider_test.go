@@ -280,7 +280,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.runRenewals()
 			require.Equal(t, charges, l.engineCharges(), "OpenRails leaves the provider's dunning alone")
 			// The host's account-deletion callback cancels what it finds.
-			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_2"}))
+			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_2", AccountDeletion: true}))
 			require.NotNil(t, w.subscription(tp, l.sub).CancelledAt)
 			w.advance(time.Hour)
 			w.wake()

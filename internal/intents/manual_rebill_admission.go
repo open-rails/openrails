@@ -97,7 +97,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		// Only an NMI schedule whose recovery OpenRails qualified to own is
+		// rebilled here; engine and provider-owned periods are never charged.
+		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning {
 			return ErrRebillUnsupported
 		}
 		if sub.Status != models.StatusPastDue || sub.CurrentPeriodEndsAt == nil || (!customer && sub.NextRetryAt != nil && sub.NextRetryAt.After(now)) {

@@ -159,7 +159,7 @@ func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.Openr
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		if sub.Status != models.StatusPastDue || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || string(sub.Rail) != p.Rail || sub.RailSubscriptionID != p.RailSubscriptionID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) || failures != p.FailureCount {
+		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning || sub.Status != models.StatusPastDue || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || string(sub.Rail) != p.Rail || sub.RailSubscriptionID != p.RailSubscriptionID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) || failures != p.FailureCount {
 			return errRebillSuperseded
 		}
 		paid, err := rebillPaymentAlreadyObserved(ctx, d, in.MerchantID, p)

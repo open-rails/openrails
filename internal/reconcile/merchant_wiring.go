@@ -83,6 +83,9 @@ type MerchantFetcherBuilder struct {
 	AccountIDs map[Provider]string
 
 	Endpoints ProviderEndpoints
+	// NMIClients is the runtime's shared NMI client factory; its transport
+	// (the fake-provider seam) carries over to pull clients.
+	NMIClients *railresolve.NMIFactory
 }
 
 // Build resolves the merchant's pull credentials and returns the armed plane.
@@ -231,6 +234,9 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, o
 			return // fail closed (logged): a declared account never falls back across planes
 		}
 		factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: railresolve.NMIEndpoints{QueryURL: b.Endpoints.NMIQueryURL, V5BaseURL: b.Endpoints.NMIV5BaseURL}}
+		if b.NMIClients != nil {
+			factory.Transport = b.NMIClients.Transport
+		}
 		client, err := factory.Client(ctx, b.Merchants.Secrets(), mid, scope)
 		if err != nil {
 			// Fail closed: a declared account never falls back across planes.

@@ -191,8 +191,8 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 
 // revokeMembershipAccess ends the access a refunded membership payment
 // bought. An engine membership is also cancelled: the engine would otherwise
-// renew it and grant access again. A provider-owned schedule is the
-// provider's; its access ends here and CancelSubscription stops its billing.
+// renew it and grant access again; so is a provider-billed NMI membership,
+// whose schedule is deleted.
 func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB, paymentID uuid.UUID) error {
 	original, err := payments.NewPaymentService(d, r.Clock).GetByID(ctx, paymentID)
 	if err != nil {
@@ -210,6 +210,24 @@ func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB
 		lifecycle := subscriptions.NewSubscriptionLifecycleService(d, nil, nil, nil, nil, payments.NewPaymentService(d, r.Clock), r.Clock)
 		_, err := lifecycle.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: true})
 		return err
+	}
+	if subscriptions.NeedsProviderScheduleDelete(sub) && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusUnknown) {
+		// A provider-billed membership whose payment is refunded with access
+		// revoked ends now: otherwise the provider bills it again and the
+		// mirror re-grants access. Its schedule delete rides the same durable
+		// nmi_delete operation as a cancel.
+		now := r.now()
+		cancelType := models.CancelTypeMerchant
+		reason := "payment refunded with access revoked"
+		sub.Status, sub.CancelledAt, sub.CancelType, sub.CancelFeedback = models.StatusCancelled, &now, &cancelType, &reason
+		sub.DeletionScheduledAt = &now
+		sub.ClearRetrySchedule()
+		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
+			return err
+		}
+		if err := NewNMIDeleteScheduler(d, nil, OriginAdmin, "refund with access revoked").ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
+			return err
+		}
 	}
 	return entitlements.NewEntitlementService(d, r.Clock).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, r.now(), models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace)
 }

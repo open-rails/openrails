@@ -17,7 +17,11 @@ import (
 )
 
 // ErrProductTierGroupInUse requires an explicit product migration instead of regrouping live subscriptions.
-var ErrProductTierGroupInUse = apperr.New(http.StatusConflict, "product_tier_group_in_use", "product tier group cannot change while subscriptions are live")
+var ErrProductTierGroupInUse = apperr.New(http.StatusConflict, "product_tier_group_in_use", "product tier group cannot change while a live subscription has a plan change in flight")
+
+// ErrProductTierGroupConflict refuses joining products into a group in which
+// a customer would hold two live memberships.
+var ErrProductTierGroupConflict = apperr.New(http.StatusConflict, "product_tier_group_conflict", "a customer holds live subscriptions to more than one product of this tier group")
 
 type ProductService struct {
 	db *db.DB
@@ -326,6 +330,9 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "products_live_subscription_tier_group" {
 			return nil, ErrProductTierGroupInUse
+		}
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_subscriptions_customer_tier_group_active" {
+			return nil, ErrProductTierGroupConflict
 		}
 		return nil, err
 	}

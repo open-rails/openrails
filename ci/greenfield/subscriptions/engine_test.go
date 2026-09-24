@@ -453,7 +453,7 @@ func TestEngineAccountDeletionCancels(t *testing.T) {
 					require.Equal(t, "past_due", w.subscription(tp, e.sub).Status)
 				}
 				attempts := e.providerAttempts()
-				request := openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_1"}
+				request := openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_1", AccountDeletion: true}
 				require.NoError(t, w.client[tp].CancelSubscription(t.Context(), e.sub, request))
 				sub := w.subscription(tp, e.sub)
 				require.Equal(t, "cancelled", sub.Status)

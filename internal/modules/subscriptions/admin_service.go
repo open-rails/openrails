@@ -252,7 +252,7 @@ func providerCancellable(status models.SubscriptionStatus) bool {
 	return status == models.StatusActive || status == models.StatusPastDue || status == models.StatusUnknown
 }
 
-func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
+func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess, accountDeletion bool) error {
 	subscription, err := s.requireSubscription(ctx, subscriptionID)
 	if err != nil {
 		return err
@@ -265,6 +265,10 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	if !providerCancellable(subscription.Status) {
 		return ErrSubscriptionNotActive
+	}
+	deleteHeld, err := RequireProviderCancelArmed(ctx, s.SubscriptionService.Database(), subscription, accountDeletion)
+	if err != nil {
+		return err
 	}
 
 	now := s.now()
@@ -358,7 +362,27 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
-
+		// Immediate cancel: access ends in the same transaction as the cancel;
+		// otherwise standing access is bounded to the paid period.
+		entSvc := entitlements.NewEntitlementService(txdb, s.Clock())
+		if revokeAccess {
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+				return fmt.Errorf("revoke access: %w", err)
+			}
+		} else {
+			accessEnd := now
+			if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
+				accessEnd = *subscription.CurrentPeriodEndsAt
+			}
+			if err := entSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
+				return fmt.Errorf("bound subscription access: %w", err)
+			}
+		}
+		if enqueueRemoteIntent != nil && !deleteHeld {
+			if err := resolveProviderCancelHeld(ctx, txdb, subscription); err != nil {
+				return err
+			}
+		}
 		if enqueueRemoteIntent != nil {
 			return enqueueRemoteIntent(ctx, tx)
 		}
@@ -368,16 +392,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 			return fmt.Errorf("failed to persist cancellation with remote intent: %w", err)
 		}
 		return err
-	}
-
-	if revokeAccess && s.EntitlementService != nil {
-		if err := s.EntitlementService.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
-			log.WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.CustomerID.String(),
-				"error":           err.Error(),
-			}).Error("Failed to revoke entitlements during admin subscription cancellation")
-		}
 	}
 
 	// Add notification

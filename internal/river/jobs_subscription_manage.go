@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -153,7 +154,12 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 		if w.UserSubscriptionService == nil {
 			return fmt.Errorf("user subscription service unavailable")
 		}
-		if err := w.UserSubscriptionService.CancelUserSubscription(ctx, userID, args.Feedback); err != nil {
+		if err := w.UserSubscriptionService.CancelUserSubscription(ctx, userID, sub.ID, args.Feedback); err != nil {
+			// A refusal is final for this request: the member retries once
+			// the operator arms destructive actions.
+			if errors.Is(err, subscriptions.ErrProviderCancelHeld) || errors.Is(err, subscriptions.ErrSubscriptionNotActive) {
+				return river.JobCancel(err)
+			}
 			return err
 		}
 	}
