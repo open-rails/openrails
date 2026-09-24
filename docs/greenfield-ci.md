@@ -11,6 +11,7 @@ money, browser-safe JSON and recovery of the rescue worker itself after a crash.
 
 - NMI and Stripe engine-owned confirmation and renewals;
 - provider-owned schedules and a distinct NMI/OpenRails-dunning hybrid;
+- imported CCBill memberships under CCBill's posts, and refusal of new CCBill sales;
 - soft/terminal declines, retry timing and card replacement;
 - cancellation, resumption, account-deletion cancellation and repricing;
 - refunds, authentication abandonment and interrupted-operation recovery;
