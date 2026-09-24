@@ -232,6 +232,12 @@ func (s *AdminSubscriptionService) requireLockedSubscription(ctx context.Context
 // DeletionScheduledAt marker stays set until the intent's own verify-then-
 // execute leg confirms the NMI subscription is gone), and an ambiguous
 // provider outcome parks for verification instead of lying.
+// providerCancellable is every state in which a provider schedule may still
+// bill: the merchant (or a host's account-deletion callback) can always stop it.
+func providerCancellable(status models.SubscriptionStatus) bool {
+	return status == models.StatusActive || status == models.StatusPastDue || status == models.StatusUnknown
+}
+
 func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
 	subscription, err := s.requireSubscription(ctx, subscriptionID)
 	if err != nil {
@@ -243,7 +249,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess})
 	}
 
-	if subscription.Status != models.StatusActive {
+	if !providerCancellable(subscription.Status) {
 		return ErrSubscriptionNotActive
 	}
 
@@ -284,7 +290,13 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if s.StripeService == nil {
 			return fmt.Errorf("stripe cancellation service unavailable")
 		}
-		if err := s.StripeService.CancelSubscription(ctx, subscription.RailSubscriptionID); err != nil {
+		// A paying member keeps the period they paid for; a delinquent one is
+		// ended now, so Stripe stops retrying its open invoice.
+		cancel := s.StripeService.CancelSubscription
+		if subscription.Status != models.StatusActive {
+			cancel = s.StripeService.EndSubscription
+		}
+		if err := cancel(ctx, subscription.RailSubscriptionID); err != nil {
 			return fmt.Errorf("failed to cancel subscription with Stripe: %w", err)
 		}
 	case subscription.Rail == models.RailSolana:
@@ -302,7 +314,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if err != nil {
 			return err
 		}
-		if subscription.Status != models.StatusActive {
+		if !providerCancellable(subscription.Status) {
 			return ErrSubscriptionNotActive
 		}
 		if subscription.PspID != observedPSP || subscription.Rail != observedRail || subscription.RailSubscriptionID != observedReference {

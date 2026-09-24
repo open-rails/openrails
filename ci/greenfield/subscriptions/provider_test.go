@@ -174,7 +174,80 @@ func (l *legacy) staleNotice() obj {
 // grants and entitlement windows.
 func (w *world) converge() {
 	w.t.Helper()
-	_, err := operator.New(w.rt).Converge(w.t.Context(), w.client[embedded].MerchantID())
+	res, err := operator.New(w.rt).Converge(w.t.Context(), w.client[embedded].MerchantID())
 	require.NoError(w.t, err)
+	w.t.Logf("converge: %+v", res)
 	w.settle()
+}
+
+// Provider-owned lifecycle: cancelling through OpenRails cancels at the
+// provider; a provider-side cancel or failed payment is mirrored locally;
+// the host's account-deletion cancel works whatever state the mirror is in.
+func TestProviderOwnedLifecycle(t *testing.T) {
+	forEach(t, func(t *testing.T, rail string, tp topology) {
+		t.Run("cancel_via_openrails", func(t *testing.T) {
+			w := newWorld(t)
+			w.armDestructive()
+			l := importLegacy(t, w, rail, tp)
+			w.converge()
+			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "member asked"}))
+			w.settle()
+			w.advance(time.Hour)
+			w.wake()
+			require.NotNil(t, w.subscription(tp, l.sub).CancelledAt)
+			if rail == "stripe" {
+				require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"], "Stripe stops renewing")
+			} else {
+				require.False(t, w.nmi.scheduleLive(l.railSub), "the NMI schedule is deleted")
+			}
+			require.True(t, l.c.entitled(l.ent), "the paid period is kept")
+		})
+		t.Run("provider_cancel", func(t *testing.T) {
+			w := newWorld(t)
+			w.armDestructive()
+			l := importLegacy(t, w, rail, tp)
+			w.converge()
+			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerCancelNotice()))
+			sub := w.subscription(tp, l.sub)
+			require.Equal(t, "cancelled", sub.Status, "the provider's own cancellation is mirrored")
+		})
+		t.Run("provider_payment_failed", func(t *testing.T) {
+			w := newWorld(t)
+			l := importLegacy(t, w, rail, tp)
+			w.converge()
+			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(false)))
+			sub := w.subscription(tp, l.sub)
+			require.Equal(t, "past_due", sub.Status, "the provider's failed renewal is mirrored")
+			require.True(t, l.c.entitled(l.ent), "provider-owned dunning keeps standing access")
+			charges := l.engineCharges()
+			w.runRenewals()
+			require.Equal(t, charges, l.engineCharges(), "OpenRails leaves the provider's dunning alone")
+			// The host's account-deletion callback cancels what it finds.
+			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_2"}))
+			require.NotNil(t, w.subscription(tp, l.sub).CancelledAt)
+			w.advance(time.Hour)
+			w.wake()
+			if rail == "stripe" {
+				require.Equal(t, "canceled", w.stripe.subscriptionObject(l.railSub)["status"], "a delinquent Stripe schedule ends now, so its open invoice stops retrying")
+			} else {
+				// Documented: the destructive-action switch ships off and holds
+				// every NMI schedule delete until an operator arms it.
+				require.True(t, w.nmi.scheduleLive(l.railSub), "the delete waits for the operator's switch")
+				w.armDestructive()
+				w.advance(time.Hour)
+				w.wake()
+				require.False(t, w.nmi.scheduleLive(l.railSub), "the held delete runs once armed")
+			}
+		})
+	})
+}
+
+// providerCancelNotice ends the schedule at the provider and returns its notice.
+func (l *legacy) providerCancelNotice() obj {
+	if l.rail == "stripe" {
+		return stripeEvent("customer.subscription.deleted", l.w.stripe.providerCancel(l.railSub))
+	}
+	l.w.nmi.providerCancel(l.railSub)
+	return nmiEvent("recurring.subscription.delete", obj{"subscription_id": l.railSub})
 }

@@ -248,7 +248,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 				// transition (past_due / grace / terminal cancel / renewal) — already
 				// on the merchant-scoped connection, so call Converge directly. Best-
 				// effort: a convergence error must not fail the dunning run.
-				if _, cerr := converge.AfterMutation(mctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID); cerr != nil {
+				if _, cerr := converge.AfterMutation(mctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
 					log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
 						Warn("Dunning: inline converge failed; the sweep will reconcile")
 				}

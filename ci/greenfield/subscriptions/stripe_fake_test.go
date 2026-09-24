@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"encoding/json"
+	"os"
 	"fmt"
 	"io"
 	"net/http"
@@ -144,6 +145,9 @@ func (f *stripeFake) serve(r *http.Request, form url.Values) *httptest.ResponseR
 	}
 	status, out := f.route(r, form)
 	raw, _ := json.Marshal(out)
+	if os.Getenv("GF_DEBUG") != "" && strings.Contains(r.URL.Path, "subscriptions") {
+		fmt.Fprintf(os.Stderr, "STRIPE %s %s -> %d %s\n", r.Method, r.URL.String(), status, raw)
+	}
 	if status == http.StatusOK && r.Method != http.MethodGet && key != "" {
 		f.idem[r.URL.Path+"|"+key] = raw
 	}

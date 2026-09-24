@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -144,8 +145,9 @@ type ConvergeEngine struct {
 
 // NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes
 // (#511 Phase D) plus the post-repair NOTIFY stage (#789).
-func NewConvergeEngine(database *db.DB) *ConvergeEngine {
-	clock := clockwork.NewRealClock()
+// It reads the caller's clock when one is given.
+func NewConvergeEngine(database *db.DB, clocks ...clockwork.Clock) *ConvergeEngine {
+	clock := timeutil.FirstClock(clocks...)
 	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }}
 	// Real clock: the LIFE pass passes its own detection instants (now / grace-end)
 	// explicitly into the cores, so the lifecycle clock only stamps cancelled_at.
@@ -180,8 +182,8 @@ type ConvergeResult struct {
 // Best-effort: convergence failures are returned for the caller to LOG, never to
 // fail the mutation that already succeeded — the sweep is the backstop. Must run
 // on the request's merchant-scoped connection (RLS), after the mutation committed.
-func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID, customer uuid.UUID) (ConvergeResult, error) {
-	return NewConvergeEngine(database).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
+func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID, customer uuid.UUID, clocks ...clockwork.Clock) (ConvergeResult, error) {
+	return NewConvergeEngine(database, clocks...).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
 }
 
 // Converge runs every plane pass for the scope (DERIVE → LIFE → CON), persists

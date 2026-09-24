@@ -34,7 +34,7 @@ func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
 	if !ok || customer == uuid.Nil {
 		return
 	}
-	if _, err := converge.AfterMutation(r.Request.Context(), r.State.DB, mID, customer); err != nil {
+	if _, err := converge.AfterMutation(r.Request.Context(), r.State.DB, mID, customer, r.Clock); err != nil {
 		log.WithContext(r.Request.Context()).WithError(err).
 			Warn("inline converge after mutation failed; background sweep will reconcile")
 	}
