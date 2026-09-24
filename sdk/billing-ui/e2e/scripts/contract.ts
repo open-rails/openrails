@@ -1,4 +1,4 @@
-// Regenerates src/client/generated from the pinned OpenRails in e2e/server.
+// Regenerates src/client/generated from the in-repo OpenRails (e2e/server).
 import { execFileSync } from "node:child_process"
 import path from "node:path"
 

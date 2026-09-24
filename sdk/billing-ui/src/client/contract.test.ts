@@ -1,4 +1,4 @@
-// Every OpenRails route the client calls must be in the pinned route catalog.
+// Every OpenRails route the client calls must be in the in-repo route catalog.
 import { expect, it, vi } from "vitest"
 
 import { createBillingClient } from "./client"

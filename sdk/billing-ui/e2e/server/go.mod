@@ -1,4 +1,4 @@
-module github.com/open-rails/billing-ui/e2e/server
+module github.com/open-rails/openrails/sdk/billing-ui/e2e/server
 
 go 1.26.6
 
@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v0.130.1
-	github.com/open-rails/openrails v0.164.0
+	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -110,3 +110,5 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/open-rails/openrails => ../../../..

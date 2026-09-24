@@ -1,7 +1,7 @@
 import type { z } from "zod"
 
 import { BillingError, localError, readBillingError } from "./errors"
-import { OPENRAILS_CURRENCY_SCALES } from "./generated/openrails-version"
+import { OPENRAILS_CURRENCY_SCALES } from "./generated/openrails-routes"
 import {
   billingStatusSchema,
   cardSetupSchema,

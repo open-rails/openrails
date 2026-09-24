@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/open-rails/billing-ui/e2e/server/harness"
+	"github.com/open-rails/openrails/sdk/billing-ui/e2e/server/harness"
 )
 
 func main() {

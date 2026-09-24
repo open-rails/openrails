@@ -1,5 +1,13 @@
 # Changelog
 
+## Moved into OpenRails
+
+The package now lives in `open-rails/openrails` under `sdk/billing-ui` and
+takes the OpenRails version: each OpenRails release `vX.Y.Z` attaches
+`openrails-billing-ui-X.Y.Z.tgz`. The e2e server and generated contract build
+the OpenRails at the same commit. `OPENRAILS_VERSION` is gone from the
+generated contract.
+
 ## 0.9.0
 
 One embedded card panel for one-time purchases and subscriptions, on every

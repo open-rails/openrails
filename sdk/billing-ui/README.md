@@ -18,11 +18,11 @@ See [Payment form contract](docs/payment-form-contract.md) for the exact-money
 session document, billing fields, browser-autofill behavior, and the checkout
 request schema.
 
-Until the `@openrails` npm scope is live, install the tarball attached to each
-GitHub release:
+The package lives in the OpenRails repository and shares its version: each
+OpenRails release `vX.Y.Z` attaches `openrails-billing-ui-X.Y.Z.tgz`.
 
 ```sh
-pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.5.2/openrails-billing-ui-0.5.2.tgz
+pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
 ```
 
 ```tsx
@@ -104,7 +104,7 @@ provider:
   `BillingError`; they never throw. Cancel and resume are queued by OpenRails
   (202); hooks re-read the subscription until the change shows.
 - Money is exact: `/me` amounts are int64 native-unit strings, scaled by the
-  pinned OpenRails currency registry (`currencies` option to extend it).
+  OpenRails currency registry (`currencies` option to extend it).
 - Messages: English is complete and the fallback; `messages` layers bundles,
   `t` lets the host's i18n win. `useMessages().error(err)` maps error codes.
   Count-dependent messages are CLDR plural nodes (`{ one, other }`, plus an
@@ -123,7 +123,8 @@ from the [`cn`](https://github.com/shadcn-ui/cn) package.
 
 ## E2E against real OpenRails
 
-`e2e/server` is a Go module pinning OpenRails and AuthKit. It serves the
+`e2e/server` is a Go module that builds the OpenRails at this commit (`replace`
+to the repository root) with AuthKit. It serves the
 embedded `/billing/v1` API and `/auth/v1` on a throwaway `postgres:18-alpine`
 container (Docker and Go required), with test-only `POST /__test/users` (user +
 access token) and `POST /__test/users/{id}/billing` (imported subscription,
@@ -131,7 +132,7 @@ sale and saved card on a credential-less NMI PSP).
 
 ```sh
 pnpm test:e2e        # Playwright against the real server
-pnpm contract        # regenerate src/client/generated from the pinned OpenRails
+pnpm contract        # regenerate src/client/generated from the in-repo OpenRails
 pnpm contract:check  # fail if the generated contract is stale
 ```
 

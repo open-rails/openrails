@@ -1,5 +1,4 @@
 {
-  "openrails_version": "v0.164.0",
   "routes": [
     {
       "method": "GET",

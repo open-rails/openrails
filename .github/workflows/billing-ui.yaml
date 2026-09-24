@@ -1,0 +1,67 @@
+name: billing-ui
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - sdk/billing-ui/**
+      - "**/*.go"
+      - "**/*.sql"
+      - go.mod
+      - go.sum
+      - .github/workflows/billing-ui.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: billing-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  billing-ui:
+    name: Billing UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: sdk/billing-ui
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: sdk/billing-ui/package.json
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: sdk/billing-ui/pnpm-lock.yaml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sdk/billing-ui/e2e/server/go.mod
+          cache-dependency-path: |
+            go.sum
+            sdk/billing-ui/e2e/server/go.sum
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm check
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Cross-origin checkout
+        run: pnpm test:browser
+      - name: Generated contract matches this commit
+        run: pnpm contract:check
+      - name: E2E against this commit's OpenRails
+        run: pnpm test:e2e
+      - run: npm pack --dry-run
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: billing-ui-playwright
+          path: sdk/billing-ui/test-results/
+          retention-days: 7
