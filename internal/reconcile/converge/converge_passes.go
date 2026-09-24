@@ -961,44 +961,60 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 		emit(r.EntID, r.UserID, r.Entitlement, r.SourceType, r.SourceID)
 	}
 
-	// consistency.duplicate.provider_charge — more than one settled, non-refunded
-	// charge for the same customer/product/month where only one is expected and no
-	// invoice/proration/operator action explains the overlap (folded from the
-	// retired audit D-2 check). EXCESS → ADMIN, surface-only: collecting money
-	// twice is never auto-undone (a refund is an operator decision); the finding
-	// carries the duplicate payment ids + the #692 refund recommendation.
-	// Severity CRITICAL (#690, Paul): a duplicate charge is money harm — worse
-	// than a freeloader's marginal content access.
+	// consistency.duplicate.provider_charge — more than one captured charge for
+	// ONE period of one subscription (the period each charge paid for, or for
+	// older rows the subscription's cadence). Distinct consecutive periods are
+	// never duplicates, however short the cadence. EXCESS → ADMIN, surface-only:
+	// collecting money twice is never auto-undone (a refund is an operator
+	// decision); the finding carries the duplicate payment ids + the #692 refund
+	// recommendation. Severity CRITICAL (#690): money harm. Findings the scan no
+	// longer reports close themselves.
 	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, gen.ConDuplicateChargesSamePeriodParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate charges: %w", err)
 	}
+	const duplicateChargeType = "consistency.duplicate.provider_charge"
+	subjects := []string{}
 	for i := range dupCharges {
 		d := dupCharges[i]
 		ids := make([]string, len(d.PaymentIds))
 		for j, id := range d.PaymentIds {
 			ids[j] = openrails.PaymentID(id).String()
 		}
+		subID := openrails.SubscriptionID{}
+		if d.SubscriptionID != nil {
+			subID = openrails.SubscriptionID(*d.SubscriptionID)
+		}
+		subject := "provider_charge:" + d.UserID + ":" + subID.String() + ":" + d.PeriodKey
+		subjects = append(subjects, subject)
 		// payment_ids is ordered purchased_at DESC: ids[0] is the later charge —
 		// the default refund target (operator can override before approving).
 		rec := recommend.CancelAndRefundRec(openrails.SubscriptionID{}, openrails.PaymentID(d.PaymentIds[0]))
 		out = append(out, ConvergeFinding{
-			Type:       "consistency.duplicate.provider_charge",
+			Type:       duplicateChargeType,
 			Shape:      ShapeExcess,
 			Class:      ClassAdmin,
 			Severity:   "critical",
-			SubjectKey: "provider_charge:" + d.UserID + ":" + d.ProductID.String() + ":" + d.FirstDate.Format("2006-01"),
+			SubjectKey: subject,
 			Provider:   "self",
 			Evidence: map[string]any{
-				"customer_id": d.UserID, "product_id": openrails.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
+				"customer_id": d.UserID, "subscription_id": subID.String(), "period_start": d.PeriodKey,
+				"product_id": openrails.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10),
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 				recommend.EvidenceKey: rec.Map(),
 			},
-			RecommendedAction: fmt.Sprintf("Customer %s was charged %d times for product %q in %s (total %d micros; payments %s). Refund the later charge %s unless an invoice/proration/operator action explains the overlap.",
-				d.UserID, d.Count, d.ProductKey, d.FirstDate.Format("2006-01"), d.TotalAmount, strings.Join(ids, ", "), ids[0]),
+			RecommendedAction: fmt.Sprintf("Customer %s was charged %d times for the %s period of subscription %s (%q; total %d micros; payments %s). Refund the later charge %s unless an operator action explains it.",
+				d.UserID, d.Count, d.PeriodKey, subID.String(), d.ProductKey, d.TotalAmount, strings.Join(ids, ", "), ids[0]),
 			// surface-only: a refund/credit is an operator decision, never automatic.
 		})
+	}
+	prefix := "provider_charge:"
+	if cust != nil {
+		prefix += cust.String() + ":"
+	}
+	if _, err := q.ResolveVanishedFindings(ctx, gen.ResolveVanishedFindingsParams{MerchantID: scopeMerchantID.UUID(), FindingType: duplicateChargeType, SubjectPrefix: prefix, KeepSubjects: subjects}); err != nil {
+		return nil, fmt.Errorf("con: resolve vanished duplicate charges: %w", err)
 	}
 
 	// consistency.duplicate.ownership (#690) — more than one LIVE paid
