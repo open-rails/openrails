@@ -51,6 +51,9 @@ type nmiSchedule struct {
 	Order, Days, Months     string
 	NextBilling             time.Time
 	Deleted, Paused         bool
+	// Custom is a custom-amount schedule (NMI shows its plan with an empty
+	// plan_name); otherwise the schedule is on the named plan Plan.
+	Custom bool
 }
 
 // nmiFake is a stateful NMI gateway: Customer Vault (v5), Direct Post sales,
@@ -448,8 +451,15 @@ func (f *nmiFake) schedule(s *nmiSchedule) obj {
 	if s.Paused {
 		paused = "1"
 	}
+	name := ""
+	if !s.Custom {
+		name = "Legacy " + s.Plan
+		if plan := f.plans[s.Plan]; plan != nil && fmt.Sprint(plan["plan_name"]) != "" {
+			name = fmt.Sprint(plan["plan_name"])
+		}
+	}
 	return obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": condition, "paused_subscription": paused, "amount": s.Amount,
-		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_amount": s.Amount, "day_frequency": days, "month_frequency": months, "plan_payments": "0"}}
+		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_name": name, "plan_amount": s.Amount, "day_frequency": days, "month_frequency": months, "plan_payments": "0"}}
 }
 
 func decimalCents(cents int64) string {
@@ -755,14 +765,30 @@ func (f *nmiFake) updateSubscription(form url.Values) string {
 		}
 		s.Vault = vault
 	}
-	if amount := form.Get("plan_amount"); amount != "" {
-		s.Amount = amount
-	}
-	if days := form.Get("day_frequency"); days != "" {
-		s.Days, s.Months = days, ""
-	}
-	if months := form.Get("month_frequency"); months != "" {
-		s.Months, s.Days = months, ""
+	// As NMI does: a schedule on a named plan changes only by switching to
+	// another named plan (amount and cadence follow the plan; the next
+	// billing date stays). plan_amount and frequencies are accepted but
+	// ignored there; a custom schedule applies them.
+	if planID := form.Get("plan_id"); planID != "" {
+		plan := f.plans[planID]
+		if plan == nil {
+			return "response=3&responsetext=Invalid+plan&response_code=300"
+		}
+		s.Plan, s.Amount, s.Custom = planID, fmt.Sprint(plan["plan_amount"]), false
+		s.Days, s.Months = fmt.Sprint(plan["day_frequency"]), ""
+		if m := fmt.Sprint(plan["month_frequency"]); m != "" && m != "0" && m != "<nil>" {
+			s.Days, s.Months = "", m
+		}
+	} else if s.Custom {
+		if amount := form.Get("plan_amount"); amount != "" {
+			s.Amount = amount
+		}
+		if days := form.Get("day_frequency"); days != "" {
+			s.Days, s.Months = days, ""
+		}
+		if months := form.Get("month_frequency"); months != "" {
+			s.Months, s.Days = months, ""
+		}
 	}
 	return fmt.Sprintf("response=1&responsetext=Subscription+updated&subscription_id=%s&response_code=100", s.ID)
 }
@@ -906,4 +932,13 @@ func (f *nmiFake) scheduleUpdates(id string) []providerCall {
 	return f.callsTo(http.MethodPost, "transact.php", func(v url.Values) bool {
 		return v.Get("recurring") == "update_subscription" && v.Get("subscription_id") == id
 	})
+}
+
+// customSchedule makes a schedule a custom-amount one (no named plan), as a
+// legacy system that set plan_amount directly left it.
+func (f *nmiFake) customSchedule(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.schedules[id]
+	s.Custom, s.Plan = true, "custom-"+id
 }

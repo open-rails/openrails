@@ -90,6 +90,10 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Positive(t, preview.AmountDueNow)
 			require.NotNil(t, preview.NextChargeDate)
 			require.True(t, end.Equal(*preview.NextChargeDate), "NMI's next billing date is kept")
+			require.Equal(t, time.UTC, preview.NextChargeDate.Location(), "instants are UTC")
+			charged := preview.AmountDueNow / 10_000
+			require.Contains(t, preview.Message, fmt.Sprintf("$%d.%02d now", charged/100, charged%100), "money in the currency's minor units")
+			require.Contains(t, preview.Message, end.UTC().Format("January 2, 2006"))
 			key := "up-" + uuid.NewString()
 			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
@@ -100,8 +104,12 @@ func TestLegacyNMITierChange(t *testing.T) {
 			ledger := l.tierSales()
 			require.Len(t, ledger, sales+1, "exactly one proration sale")
 			require.Equal(t, preview.AmountDueNow/10_000, ledger[len(ledger)-1].Amount, "provider journal carries the quoted amount")
-			require.Len(t, w.nmi.scheduleUpdates(l.railSub), 1, "the schedule is updated once")
+			updates := w.nmi.scheduleUpdates(l.railSub)
+			require.Len(t, updates, 1, "the schedule is updated once")
+			require.Equal(t, next.plan, updates[0].Form.Get("plan_id"), "a named-plan schedule switches to the target's linked plan")
+			require.Empty(t, updates[0].Form.Get("plan_amount"))
 			require.Equal(t, "19.99", w.nmi.scheduleState(l.railSub).Amount)
+			require.Equal(t, next.plan, w.nmi.scheduleState(l.railSub).Plan)
 			require.True(t, w.nmi.scheduleState(l.railSub).NextBilling.Equal(end), "the next billing date does not move")
 			require.Zero(t, w.nmi.scheduleWrites(), "no second schedule, no delete")
 
@@ -120,6 +128,8 @@ func TestLegacyNMITierChange(t *testing.T) {
 
 			w.pull()
 			require.Empty(t, w.openFindings("pull.subscription.drift"), "an OpenRails-initiated change is not drift")
+			w.converge()
+			require.Zero(t, w.accessEndedNotices(l.c.id), "moving up is not access ending")
 
 			// NMI's next renewal bills the new amount and is mirrored once.
 			w.advanceTo(end.Add(time.Hour))
@@ -156,7 +166,9 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.Zero(t, done.AmountDueNow)
 			require.Len(t, l.tierSales(), sales, "nothing charged now")
-			require.Len(t, w.nmi.scheduleUpdates(l.railSub), 1)
+			updates := w.nmi.scheduleUpdates(l.railSub)
+			require.Len(t, updates, 1)
+			require.Equal(t, lower.plan, updates[0].Form.Get("plan_id"))
 			require.Equal(t, "4.99", w.nmi.scheduleState(l.railSub).Amount, "NMI bills the lower amount from its next renewal")
 			sub := w.subscription(tp, l.sub)
 			require.Equal(t, old.ID, sub.PriceID, "the paid period keeps its tier")
@@ -316,4 +328,107 @@ func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 	require.Len(t, l.tierSales(), sales)
 	require.Empty(t, w.nmi.scheduleUpdates(l.railSub))
 	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
+}
+
+// accessEndedNotices counts premium_ended notifications queued for a customer.
+func (w *world) accessEndedNotices(customerID string) int {
+	w.t.Helper()
+	var n int
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM openrails.notifications WHERE customer_id = $1::uuid AND event_type = 'premium_ended'`), customerID).Scan(&n))
+	return n
+}
+
+// A named-plan schedule changes only by switching plans, so a target price
+// without a linked NMI plan of its amount and cycle is refused before any
+// charge, on preview and change, both topologies.
+func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	group := "g" + uuid.NewString()[:8]
+	old := w.tierPrice(group, 2, 999, monthHours, true)
+	unlinked := w.tierPrice(group, 3, 1999, monthHours, false)
+	lower := w.tierPrice(group, 1, 499, monthHours, false)
+	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
+	sales := len(l.tierSales())
+	for _, target := range []tier{unlinked, lower} {
+		for _, tp := range []topology{embedded, remote} {
+			_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: target.ID})
+			requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRequiresLinkedPlan)
+			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: target.ID})
+			requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRequiresLinkedPlan)
+		}
+	}
+	w.settle()
+	require.Len(t, l.tierSales(), sales, "nothing charged")
+	require.Empty(t, w.nmi.scheduleUpdates(l.railSub), "nothing sent to NMI")
+	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
+	require.True(t, l.c.entitled(old.ent))
+}
+
+// A custom-amount schedule (no named plan) takes the new amount directly,
+// whether or not the target price is linked to an NMI plan.
+func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
+	t.Parallel()
+	for _, tp := range []topology{embedded, remote} {
+		t.Run(string(tp), func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			group := "g" + uuid.NewString()[:8]
+			old := w.tierPrice(group, 1, 999, monthHours, true)
+			next := w.tierPrice(group, 2, 1999, monthHours, false)
+			l := w.legacyOnTier(tp, old, 999, monthHours, 10*day)
+			w.nmi.customSchedule(l.railSub)
+			end := l.periodEnd()
+			sales := len(l.tierSales())
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
+			require.NoError(t, err)
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
+			require.NoError(t, err)
+			w.settle()
+			require.Equal(t, "succeeded", done.Status, "%+v", done)
+			require.Equal(t, preview.AmountDueNow, done.AmountDueNow)
+			require.Len(t, l.tierSales(), sales+1)
+			updates := w.nmi.scheduleUpdates(l.railSub)
+			require.Len(t, updates, 1)
+			require.Equal(t, "19.99", updates[0].Form.Get("plan_amount"))
+			require.Empty(t, updates[0].Form.Get("plan_id"))
+			state := w.nmi.scheduleState(l.railSub)
+			require.Equal(t, "19.99", state.Amount)
+			require.True(t, state.NextBilling.Equal(end))
+			require.Equal(t, next.ID, w.subscription(tp, l.sub).PriceID)
+			require.True(t, l.c.entitled(next.ent))
+			require.Zero(t, w.nmi.scheduleWrites())
+		})
+	}
+}
+
+// Recovery of a v0.178.0 operation: admitted in amount mode, stuck because
+// the schedule is on a named plan whose amount NMI will not change. Each
+// retry re-reads the schedule; once it is seen on a named plan the target
+// price's linked plan is used and the operation completes, charging once.
+func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	group := "g" + uuid.NewString()[:8]
+	old := w.tierPrice(group, 1, 999, monthHours, true)
+	next := w.tierPrice(group, 2, 1999, monthHours, true)
+	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
+	w.nmi.customSchedule(l.railSub)
+	sales := len(l.tierSales())
+	w.nmi.failScheduleUpdates(1000)
+	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
+	require.NoError(t, err)
+	w.settle()
+	w.until(func() bool { return len(w.openFindings(tierUpdateStuck)) > 0 }, "the stuck update raises a finding")
+	require.Len(t, l.tierSales(), sales+1)
+	// The schedule turns out to be on a named plan: NMI ignores plan_amount.
+	w.nmi.editSchedule(l.railSub, func(s *nmiSchedule) { s.Custom, s.Plan = false, old.plan })
+	w.nmi.failScheduleUpdates(0)
+	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the operation converges on the linked plan")
+	state := w.nmi.scheduleState(l.railSub)
+	require.Equal(t, next.plan, state.Plan)
+	require.Equal(t, "19.99", state.Amount)
+	require.Len(t, l.tierSales(), sales+1, "exactly one charge")
+	require.Empty(t, w.openFindings(tierUpdateStuck))
+	require.True(t, l.c.entitled(next.ent))
 }

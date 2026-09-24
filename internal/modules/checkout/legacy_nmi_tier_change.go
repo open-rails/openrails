@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -29,6 +30,12 @@ import (
 // downgrade (effective at E) sets the schedule amount now — NMI applies it to
 // future charges only — and schedules the local price; the mirrored renewal at
 // E opens the new tier. Both prices must share the period's cadence.
+
+var errTierChangeLinkedPlan = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRequiresLinkedPlan,
+	Message: "this subscription is on a named NMI plan, which changes only by switching plans; link the new price to an NMI plan of the same amount and billing cycle"}
+
+var errTierChangeScheduleUnavailable = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused,
+	Message: "the provider's billing schedule for this subscription could not be read; try again later"}
 
 var errTierChangeCadence = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeCadenceUnsupported,
 	Message: "this subscription is billed on the provider's schedule, which keeps its billing date; change to a price of the same billing cycle"}
@@ -54,16 +61,61 @@ func providerNMITierAdmissible(sub *models.Subscription, current, target *models
 	return nil
 }
 
-func (s *CheckoutService) previewProviderNMITierChange(resp *TierChangePreviewResponse, sub *models.Subscription, current, target *models.Price, product *models.Product, downgrade bool) (*TierChangePreviewResponse, error) {
+// scheduleTargetPlan reads the subscription's NMI schedule and decides how it
+// moves to target: "" sets the amount of a custom schedule; a plan id switches
+// a named-plan schedule to the target price's linked plan, which must exist at
+// NMI with the target's exact amount and cycle. Decided before any charge.
+func (s *CheckoutService) scheduleTargetPlan(ctx context.Context, sub *models.Subscription, target *models.Price) (string, error) {
+	rt, err := s.resolveRailTargetForPSP(ctx, string(sub.Rail), sub.PspID)
+	if err != nil {
+		return "", err
+	}
+	client, err := s.resolveNMIClient(db.WithPSPID(ctx, sub.PspID), nmiIntentClientName(rt.PSP, string(sub.Rail)))
+	if err != nil || client == nil {
+		return "", errTierChangeScheduleUnavailable
+	}
+	schedule, found, err := client.GetSubscription(ctx, sub.RailSubscriptionID)
+	if err != nil || !found {
+		return "", errTierChangeScheduleUnavailable
+	}
+	if !schedule.NamedPlan() {
+		return "", nil
+	}
+	return linkedTargetPlan(ctx, client, target, checkoutPSPLinkForTarget(target, rt))
+}
+
+// linkedTargetPlan is the target price's NMI plan on the account, verified at
+// NMI: same amount, whole-day cycle equal to the price's, unlimited payments.
+func linkedTargetPlan(ctx context.Context, client *nmi.NMIClient, target *models.Price, link map[string]string) (string, error) {
+	planID := strings.TrimSpace(link["plan_id"])
+	cycle := target.RecurringCycleHours()
+	if planID == "" || cycle == nil || *cycle <= 0 {
+		return "", errTierChangeLinkedPlan
+	}
+	cents, err := moneyutil.NativeToRailMinorExact(target.Currency, target.Amount)
+	if err != nil {
+		return "", err
+	}
+	plan, err := client.GetRecurringPlanDetailByID(ctx, planID, target.Currency)
+	if err != nil || !plan.Found || plan.AmountCents != int64(cents) || plan.DayFrequency*24 != *cycle || (plan.Payments != nil && *plan.Payments != 0) {
+		return "", errTierChangeLinkedPlan
+	}
+	return planID, nil
+}
+
+func (s *CheckoutService) previewProviderNMITierChange(ctx context.Context, resp *TierChangePreviewResponse, sub *models.Subscription, current, target *models.Price, product *models.Product, downgrade bool) (*TierChangePreviewResponse, error) {
 	now := s.now().UTC()
 	if err := providerNMITierAdmissible(sub, current, target, now); err != nil {
 		return nil, err
 	}
-	end := *sub.CurrentPeriodEndsAt
+	if _, err := s.scheduleTargetPlan(ctx, sub, target); err != nil {
+		return nil, err
+	}
+	end := sub.CurrentPeriodEndsAt.UTC()
 	resp.NextChargeDate = &end
 	if downgrade {
 		resp.Action, resp.Effective = "downgrade", "period_end"
-		resp.Message = fmt.Sprintf("No charge now. Your plan changes to %s on %s, then renews at %s.", product.DisplayName, end.Format("January 2, 2006"), formatMinorAmount(target.Amount, target.Currency))
+		resp.Message = fmt.Sprintf("No charge now. Your plan changes to %s on %s, then renews at %s.", product.DisplayName, end.UTC().Format("January 2, 2006"), formatMinorAmount(target.Amount, target.Currency))
 		return resp, nil
 	}
 	quote, err := QuoteKeepBoundaryUpgrade(modelBUpgradeOf(sub, current, target), now)
@@ -71,7 +123,7 @@ func (s *CheckoutService) previewProviderNMITierChange(resp *TierChangePreviewRe
 		return nil, err
 	}
 	resp.Action, resp.Effective, resp.AmountDueNow = "upgrade", "now", quote.ChargeNow
-	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.", formatMinorAmount(quote.ChargeNow, target.Currency), formatMinorAmount(target.Amount, target.Currency), end.Format("January 2, 2006"))
+	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.", formatMinorAmount(quote.ChargeNow, target.Currency), formatMinorAmount(target.Amount, target.Currency), end.UTC().Format("January 2, 2006"))
 	return resp, nil
 }
 
@@ -118,6 +170,10 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if err := providerNMITierAdmissible(sub, current, newPrice, now); err != nil {
 		return nil, err
 	}
+	targetPlan, err := s.scheduleTargetPlan(ctx, sub, newPrice)
+	if err != nil {
+		return nil, err
+	}
 	if !downgrade {
 		if _, err := subscriptions.NewRepriceRepo(database).GetScheduledForSubscription(ctx, sub.ID); err == nil {
 			return nil, errTierChangeScheduled
@@ -152,7 +208,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
 		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: charge.FreezeInstrument(methodRow), PaymentMethodID: methodRow.ID,
 		RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
-		Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)}
+		Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"
 	if downgrade {
 		reason = "customer tier downgrade"

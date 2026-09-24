@@ -250,7 +250,7 @@ func (s *CheckoutService) previewEngineTierChange(ctx context.Context, resp *Tie
 	}
 	end := terms.PeriodEnd
 	resp.Action, resp.Effective, resp.AmountDueNow, resp.NextChargeDate = "upgrade", "now", terms.Amount, &end
-	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.", formatMinorAmount(terms.Amount, target.Currency), formatMinorAmount(target.Amount, target.Currency), end.Format("January 2, 2006"))
+	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.", formatMinorAmount(terms.Amount, target.Currency), formatMinorAmount(target.Amount, target.Currency), end.UTC().Format("January 2, 2006"))
 	return resp, nil
 }
 

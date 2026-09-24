@@ -65,6 +65,11 @@ const (
 	// keeps its schedule's next billing date, so its tier can change only to a
 	// price of the same cadence.
 	CodeTierChangeCadenceUnsupported = "tier_change_cadence_unsupported"
+	// CodeTierChangeRequiresLinkedPlan: the provider-billed (NMI) schedule is
+	// on a named NMI plan, which NMI changes only by switching plans, and the
+	// target price has no linked NMI plan on this account matching its amount
+	// and cycle. Nothing was charged.
+	CodeTierChangeRequiresLinkedPlan = "tier_change_requires_linked_plan"
 )
 
 type TierChangePreviewResponse struct {

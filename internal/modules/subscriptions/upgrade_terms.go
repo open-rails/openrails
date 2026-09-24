@@ -40,6 +40,10 @@ type NMIUpgradePayload struct {
 	PeriodStart               time.Time               `json:"period_start"`
 	PeriodEnd                 time.Time               `json:"period_end"`
 	Entitlements              map[string]*int         `json:"entitlements"`
+	// TargetPlanID is the named NMI plan the schedule switches to when it is
+	// on a named plan (NMI applies plan_amount only to custom schedules).
+	// Empty means the schedule's amount is set directly.
+	TargetPlanID string `json:"target_plan_id,omitempty"`
 }
 
 // Downgrade reports a period-end change: no charge, schedule only.

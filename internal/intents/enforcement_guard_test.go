@@ -60,6 +60,7 @@ var providerWriteSurface = map[string]string{
 	"Void":                            "write", // cancels an authorization
 	"AddRecurringSubscription":        "write", // creates a remote billing schedule
 	"UpdateRecurringSubscription":     "write", // mutates a remote billing schedule
+	"UpdateRecurringSubscriptionPlan": "write", // moves a remote billing schedule to another named plan
 	"DeleteRecurringSubscription":     "write", // IRREVERSIBLE (DES-1)
 	"AttemptManualRebill":             "write", // charges a card off a schedule
 	"UpdateSubscriptionPaymentSource": "write", // repoints a live schedule at another card
@@ -137,7 +138,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/checkout/nmi_sale_intent.go:Execute":               "nmi_sale intent handler",
 	"internal/modules/checkout/initial_membership_intent.go:Execute":     "initial_membership intent handler",
 	"internal/modules/checkout/nmi_upgrade_intent.go:advance":            "durable per-step tier change handler",
-	"internal/modules/checkout/nmi_upgrade_intent.go:pushScheduleAmount": "tier change step: sets the existing schedule amount (set-to-value, readback verified); never deletes",
+	"internal/modules/checkout/nmi_upgrade_intent.go:pushScheduleAmount": "tier change step: sets the existing schedule amount or named plan (set-to-value, readback verified); never deletes",
 	"internal/intents/manual_rebill.go:Execute":                          "manual_rebill intent handler",
 	"internal/intents/refund.go:Execute":                                 "nmi_refund intent handler",
 	"internal/intents/nmi_provider_cutover.go:advance":                   "durable cutover step executor",
