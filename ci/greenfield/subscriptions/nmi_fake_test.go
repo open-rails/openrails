@@ -28,6 +28,7 @@ type nmiSale struct {
 	RefundedCents                                              int64
 	RefundIDs                                                  []string
 	ScheduleID                                                 string
+	Declined                                                   bool
 	At                                                         time.Time
 }
 
@@ -232,17 +233,21 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 		s.RefundedCents += cents
 		refundID := f.next("rf")
 		s.RefundIDs = append(s.RefundIDs, refundID)
-		return 200, obj{"object": "transaction", "id": refundID, "response": "1", "response_code": "100", "response_text": "SUCCESS", "amount": fmt.Sprintf("%.2f", float64(cents)/100)}
+		return 200, obj{"object": "transaction", "id": refundID, "response": "1", "response_code": "100", "response_text": "SUCCESS", "amount": decimalCents(cents)}
 	case seg[0] == "payments" && len(seg) == 2 && method == http.MethodGet:
 		s := f.saleByID(seg[1])
 		if s == nil {
 			return nmiNotFound()
 		}
-		actions := []obj{{"id": s.TransactionID, "type": "sale", "amount": s.Amount, "success": true, "response": "1", "response_code": "100"}}
-		if s.RefundedCents > 0 {
-			actions = append(actions, obj{"id": s.TransactionID + "-r", "type": "refund", "amount": fmt.Sprintf("%.2f", float64(s.RefundedCents)/100), "success": true})
+		response, code := "1", "100"
+		if s.Declined {
+			response, code = "2", "202"
 		}
-		return 200, obj{"object": "transaction", "id": s.TransactionID, "response": "1", "response_code": "100", "amount": s.Amount, "currency": s.Currency, "customer_vault_id": s.Vault, "actions": actions}
+		actions := []obj{{"id": s.TransactionID, "type": "sale", "amount": s.Amount, "success": !s.Declined, "response": response, "response_code": code}}
+		if s.RefundedCents > 0 {
+			actions = append(actions, obj{"id": s.TransactionID + "-r", "type": "refund", "amount": decimalCents(s.RefundedCents), "success": true})
+		}
+		return 200, obj{"object": "transaction", "id": s.TransactionID, "response": response, "response_code": code, "amount": s.Amount, "currency": s.Currency, "customer_vault_id": s.Vault, "actions": actions}
 	case seg[0] == "plans" && len(seg) == 2 && strings.HasPrefix(seg[1], "legacy_plan_"):
 		// A legacy book's monthly 9.99 plan, created at NMI long ago.
 		return 200, obj{"object": "plan", "id": seg[1], "plan_name": "Legacy", "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}
@@ -274,9 +279,24 @@ func (f *nmiFake) schedule(s *nmiSchedule) obj {
 		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_amount": s.Amount, "day_frequency": "30", "plan_payments": "0"}}
 }
 
+func decimalCents(cents int64) string {
+	return fmt.Sprintf("%d.%02d", cents/100, cents%100)
+}
+
 func centsOf(amount string) int64 {
-	f, _ := strconv.ParseFloat(amount, 64)
-	return int64(f*100 + 0.5)
+	whole, fraction, _ := strings.Cut(amount, ".")
+	if len(fraction) > 2 {
+		panic("fake NMI amount has fractional cents: " + amount)
+	}
+	units, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil || units < 0 {
+		panic("invalid fake NMI amount: " + amount)
+	}
+	minor, err := strconv.ParseInt(fraction+strings.Repeat("0", 2-len(fraction)), 10, 64)
+	if err != nil {
+		panic("invalid fake NMI cents: " + amount)
+	}
+	return units*100 + minor
 }
 
 func (f *nmiFake) saleByID(id string) *nmiSale {
@@ -301,8 +321,18 @@ func (f *nmiFake) sale(form url.Values) string {
 		f.duplicate--
 		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654321&response_code=300"
 	}
-	s := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: form.Get("amount"),
-		Currency: strings.ToUpper(form.Get("currency")), InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
+	amount, currency, scheduleID := form.Get("amount"), strings.ToUpper(form.Get("currency")), ""
+	if form.Get("recurring") == "rebill_subscription" {
+		schedule := f.schedules[form.Get("subscription_id")]
+		if schedule == nil || schedule.Deleted || schedule.Vault != v.ID {
+			return "response=3&responsetext=Invalid+subscription&response_code=300"
+		}
+		// NMI charges the saved schedule amount; rebill_subscription does not
+		// take a request amount or advance the next regular billing date.
+		amount, currency, scheduleID = schedule.Amount, "USD", schedule.ID
+	}
+	s := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
+		Currency: currency, InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
 		Initial: form.Get("initial_transaction_id"), Card: v.Card, At: time.Now().UTC()}
 	if s.BillingID == "" {
 		s.BillingID = v.BillingID
@@ -318,8 +348,12 @@ func (f *nmiFake) search(orderID, transactionID, scheduleID string) string {
 		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) {
 			continue
 		}
-		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>1</success><response_code>100</response_code><date>%s</date></action></transaction>",
-			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, s.At.Format("20060102150405"))
+		success, code := "1", "100"
+		if s.Declined {
+			success, code = "0", "202"
+		}
+		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
+			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, success, code, s.At.Format("20060102150405"))
 	}
 	b.WriteString("</nm_response>")
 	return b.String()
@@ -350,7 +384,7 @@ func (f *nmiFake) ledger(vault string) []ledgerEntry {
 	defer f.mu.Unlock()
 	var out []ledgerEntry
 	for _, s := range f.sales {
-		if vault == "" || s.Vault == vault {
+		if !s.Declined && (vault == "" || s.Vault == vault) {
 			out = append(out, ledgerEntry{ID: s.TransactionID, Method: s.Card.Last4, Amount: centsOf(s.Amount), Refunded: s.RefundedCents})
 		}
 	}
@@ -415,13 +449,18 @@ func (f *nmiFake) legacySale(vault, amount string, at time.Time) string {
 }
 
 // providerRenew is NMI's recurring engine charging a schedule; a failed
-// charge leaves the schedule's next billing date in place.
+// charge advances to the next regular date without retrying the failed period.
 func (f *nmiFake) providerRenew(id string, paid bool) (sale *nmiSale, declined bool) {
 	f.mu.Lock()
 	s := f.schedules[id]
 	f.mu.Unlock()
 	if !paid {
-		return nil, true
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		sale = &nmiSale{TransactionID: f.next("declined"), ScheduleID: id, Vault: s.Vault, BillingID: f.vaults[s.Vault].BillingID, Amount: s.Amount, Currency: "USD", At: s.NextBilling, Declined: true}
+		f.sales = append(f.sales, sale)
+		s.NextBilling = s.NextBilling.Add(monthHours * time.Hour)
+		return sale, true
 	}
 	tx := f.legacySale(s.Vault, s.Amount, s.NextBilling)
 	f.mu.Lock()

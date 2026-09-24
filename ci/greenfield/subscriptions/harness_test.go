@@ -24,6 +24,7 @@ import (
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -108,10 +109,8 @@ type world struct {
 }
 
 func dsn(t testing.TB) string {
-	for _, key := range []string{"OPENRAILS_GREENFIELD_DSN", "OPENRAILS_TEST_DB_DSN"} {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
+	if v := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN")); v != "" {
+		return v
 	}
 	t.Fatal("OPENRAILS_GREENFIELD_DSN must point at a disposable PostgreSQL database")
 	return ""
@@ -249,8 +248,8 @@ func (w *world) restart() { w.stop(); w.start() }
 
 // kill ends the process as SIGKILL does: nothing it was doing gets recorded.
 // The running jobs and in-flight operations are captured at the instant of
-// death, the process stops, and those rows are put back exactly as the dead
-// process left them (its beat long stopped) before a new process starts.
+// death, the process stops, and those rows are put back as the dead process
+// left them, aged past River's one-hour rescue threshold, before restart.
 func (w *world) kill() {
 	w.t.Helper()
 	ctx := w.t.Context()
@@ -280,7 +279,7 @@ func (w *world) kill() {
 	rows.Close()
 	require.NotEmpty(w.t, jobIDs, "a job was running at the kill")
 	w.stop()
-	_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.river_job SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '10 minutes' WHERE id = ANY($1)`, jobIDs)
+	_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.river_job SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '2 hours' WHERE id = ANY($1)`, jobIDs)
 	require.NoError(w.t, err)
 	for _, r := range intents {
 		_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.rail_intents SET status = $2, claimed_until = $3 WHERE id = $1::uuid`, r.id, r.status, r.claimed)
@@ -311,7 +310,7 @@ var workKinds = []string{"openrails.provider_operation", "openrails.subscription
 // snoozed into the wall-clock future stays asleep until wake.
 func (w *world) settle() {
 	w.t.Helper()
-	require.Eventually(w.t, func() bool {
+	if !assert.Eventually(w.t, func() bool {
 		page, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(workKinds...).States(rivertype.JobStateScheduled).First(100))
 		if err != nil {
 			return false
@@ -336,7 +335,15 @@ func (w *world) settle() {
 			}
 		}
 		return true
-	}, 30*time.Second, 25*time.Millisecond, "operations settle")
+	}, 30*time.Second, 25*time.Millisecond, "operations settle") {
+		page, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(workKinds...).First(100))
+		if err == nil {
+			for _, job := range page.Jobs {
+				w.t.Logf("unsettled job %d %s %s attempts=%d scheduled=%s errors=%v", job.ID, job.Kind, job.State, job.Attempt, job.ScheduledAt, job.Errors)
+			}
+		}
+		w.t.FailNow()
+	}
 }
 
 // waitJob waits for one inserted engine job, then for the work it caused.
