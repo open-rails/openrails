@@ -196,7 +196,11 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   the period end the user expects.
 - Tier changes go through `POST /v1/me/subscriptions/{id}/change-tier` (target price
   must share the tier group). Stripe and NMI upgrade immediately with proration;
-  downgrades are scheduled for period end (`delayed_start`). CCBill upgrades redirect
+  downgrades are scheduled for period end (`delayed_start`, `effective:
+  "period_end"`), with no refund. On engine-owned subscriptions the upgrade is one
+  engine charge on the saved card (with issuer authentication when required) that
+  replaces the subscription with a successor on the new price; nothing changes if it
+  is declined. CCBill upgrades redirect
   to a FlexForm; Solana does not support tier changes.
 - **Upgrade proration** resets the period: the customer pays `new price − credit`
   now for a fresh period of the new price's cycle, where `credit = old price ×

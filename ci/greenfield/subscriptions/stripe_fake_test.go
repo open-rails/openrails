@@ -403,6 +403,23 @@ func (f *stripeFake) completeSetup(setupID string, c card) {
 	s["status"], s["payment_method"] = "succeeded", pm
 }
 
+// authenticate completes the issuer challenge on a payment awaiting it, as
+// the customer's browser does with the payment's client secret.
+func (f *stripeFake) authenticate(paymentIntent string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pi, ok := f.intents[paymentIntent]
+	if !ok || pi["status"] != "requires_action" {
+		return false
+	}
+	amount := pi["amount"].(int64)
+	ch := obj{"object": "charge", "id": f.id("ch"), "amount": amount, "amount_captured": amount, "currency": pi["currency"], "customer": pi["customer"], "payment_method": pi["payment_method"],
+		"payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false}
+	f.charges[ch["id"].(string)] = ch
+	pi["status"], pi["amount_received"], pi["latest_charge"] = "succeeded", amount, ch["id"]
+	return true
+}
+
 // setDecline changes how the issuer answers future charges on every card
 // ending in last4.
 func (f *stripeFake) setDecline(last4, decline string) {

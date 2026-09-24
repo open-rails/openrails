@@ -53,17 +53,21 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		}
 	}
 	if effects.RevokeRemoved {
-		names, err := entitlementsService.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, sub.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, name := range names {
-			if _, keep := sub.EntitlementsSpecSnapshot[name]; keep {
-				continue
-			}
-			sourceType, sourceID := models.EntitlementSourceSubscription, sub.ID
-			if err := entitlementsService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &sourceType, SourceID: &sourceID, Reason: models.EntitlementRevokeDowngrade}); err != nil {
+		// A benefit the new plan drops ends now, including the renewal grace
+		// the old plan pre-appended past its period.
+		for _, source := range []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace} {
+			names, err := entitlementsService.ListDistinctEntitlementNamesBySource(ctx, source, sub.ID)
+			if err != nil {
 				return nil, err
+			}
+			for _, name := range names {
+				if _, keep := sub.EntitlementsSpecSnapshot[name]; keep {
+					continue
+				}
+				sourceType, sourceID := source, sub.ID
+				if err := entitlementsService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &sourceType, SourceID: &sourceID, Reason: models.EntitlementRevokeDowngrade}); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

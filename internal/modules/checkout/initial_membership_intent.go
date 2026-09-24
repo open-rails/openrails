@@ -500,6 +500,11 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 
 		}
 		if success {
+			if p.Upgrade() {
+				if err := h.Checkout.Lifecycle.SupersedeForUpgradeTx(ctx, d, p.Terms, models.Rail(in.Rail)); err != nil {
+					return err
+				}
+			}
 			providerSub := schedule.SubscriptionID()
 			transaction := ""
 			if paid {
@@ -529,6 +534,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				}
 			}
 			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"], evidence["message"] = p.Terms.SubscriptionID.String(), providerSub, transaction, "success", "Subscription created successfully"
+			if p.Upgrade() {
+				evidence["message"] = "Upgraded to " + p.Terms.ProductName
+			}
 			if receipt.ReversalKind() != "" {
 				evidence["message"] = "Payment recorded; enrollment canceled after provider reversal"
 			}

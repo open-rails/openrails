@@ -117,6 +117,13 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// An unresolved upgrade of this customer's tier group owns the
+		// membership: it either replaces it or releases it untouched.
+		if _, err := q.GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: mid.UUID(), CustomerID: sub.CustomerID, ProductID: sub.ProductID}); err == nil {
+			return subscriptions.ErrRenewalHeldByUpgrade
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		if s.EngineAdmissionHold {
 			return fmt.Errorf("%w: new engine payment admission is held", intents.ErrRebillNotRetryable)
 		}

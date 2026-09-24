@@ -14,7 +14,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // A durable tier change — an NMI upgrade (nmi_upgrade_intent.go) or a Stripe
@@ -67,6 +69,14 @@ func decodeTierChangeSubject(in gen.OpenrailsRailIntent) (tierChangeSubject, err
 			return tierChangeSubject{}, err
 		}
 		return p.subject(), nil
+	case TypeInitialMembership:
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		if err != nil {
+			return tierChangeSubject{}, err
+		}
+		if p.Upgrade() {
+			return tierChangeSubject{UserID: p.Terms.CustomerID.String(), SubscriptionID: p.Terms.Replaces.SubscriptionID, RequestedPrice: p.RequestedPrice, PriceID: p.Terms.PriceID}, nil
+		}
 	}
 	return tierChangeSubject{}, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
 }
@@ -78,7 +88,7 @@ func decodeTierChangeSubject(in gen.OpenrailsRailIntent) (tierChangeSubject, err
 // customer, subscription or target.
 func tierChangeOwnedBy(row gen.OpenrailsRailIntent, want tierChangeSubject) error {
 	got, err := decodeTierChangeSubject(row)
-	if err != nil || got.UserID != want.UserID || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID {
+	if err != nil || !sameCustomer(got.UserID, want.UserID) || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID {
 		return tierChangeIdempotencyConflict()
 	}
 	return nil
@@ -100,6 +110,10 @@ func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeR
 	store := intents.NewStore(s.SubscriptionService.Database())
 	in, err := store.GetByIdempotencyKey(ctx, tierChangeIdempotencyKey(req.IdempotencyKey))
 	if db.IsNotFound(err) {
+		// An engine upgrade is an initial_membership operation under the same key.
+		in, err = store.GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(tierChangeIdempotencyKey(req.IdempotencyKey)))
+	}
+	if db.IsNotFound(err) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -118,7 +132,7 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 		return nil, err
 	}
 	price := strings.TrimSpace(req.PriceID)
-	if user == nil || subject.UserID != user.ID ||
+	if user == nil || !sameCustomer(subject.UserID, user.ID) ||
 		(req.SubscriptionID != uuid.Nil && req.SubscriptionID != subject.SubscriptionID) ||
 		(price != subject.RequestedPrice && price != openrails.PriceID(subject.PriceID).String()) {
 		return nil, tierChangeIdempotencyConflict()
@@ -142,6 +156,8 @@ func tierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error)
 		return nmiUpgradeTierChangeResponse(in)
 	case TypeStripeTierChange:
 		return stripeTierChangeResponse(in)
+	case TypeInitialMembership:
+		return engineUpgradeTierChangeResponse(in)
 	}
 	return nil, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
 }
@@ -179,17 +195,43 @@ func tierChangeRefused(in gen.OpenrailsRailIntent, providerStatus int, declineCo
 
 // refuseTierChangeInFlight points a new request at the unresolved tier change
 // that owns the subscription, before anything reads provider state it may be
-// moving.
-func (s *CheckoutService) refuseTierChangeInFlight(ctx context.Context, subscriptionID uuid.UUID) error {
-	live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, subscriptionID)
+// moving. An engine upgrade owns it through its tier group's unresolved
+// enrollment.
+func (s *CheckoutService) refuseTierChangeInFlight(ctx context.Context, sub *models.Subscription) error {
+	database := s.SubscriptionService.Database()
+	live, err := intents.NewStore(database).LiveTierChange(ctx, sub.ID)
 	switch {
 	case err == nil:
 		return &TierChangeInFlightError{OperationID: live.ID}
+	case !db.IsNotFound(err):
+		return err
+	}
+	if sub.CollectionPolicy != models.CollectionPolicyEngine {
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	owner, err := database.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: mid.UUID(), CustomerID: sub.CustomerID, ProductID: sub.ProductID})
+	switch {
+	case err == nil:
+		return &TierChangeInFlightError{OperationID: owner.ID}
 	case db.IsNotFound(err):
 		return nil
 	default:
 		return err
 	}
+}
+
+// sameCustomer compares customer ids by value, not spelling.
+func sameCustomer(a, b string) bool {
+	left, errLeft := uuid.Parse(strings.TrimSpace(a))
+	right, errRight := uuid.Parse(strings.TrimSpace(b))
+	if errLeft != nil || errRight != nil {
+		return strings.TrimSpace(a) == strings.TrimSpace(b)
+	}
+	return left == right
 }
 
 // tierChangeInFlight answers an enqueue that lost the subject index race: the

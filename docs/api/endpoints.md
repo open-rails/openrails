@@ -170,7 +170,21 @@ prepare → wallet signs → confirm):
 | POST | `/v1/me/subscriptions/{id}/solana-tier-change` | Prepare the on-chain tier-change transaction |
 | POST | `/v1/me/subscriptions/{id}/solana-tier-change/confirm` | Confirm the signed tier change |
 
-Tier-change response: `{ object: "tier_change", status: "succeeded"|"processing"|"requires_action"|"blocked", action, price_id, url?, subscription_id?, next_action?, delayed_start?, message?, operation_id? }`.
+Tier-change response: `{ object: "tier_change", status: "succeeded"|"processing"|"requires_action"|"blocked", action, effective: "now"|"period_end", price_id, url?, subscription_id?, next_action?, delayed_start?, amount_due_now, next_charge_amount, next_charge_date?, message?, operation_id? }`.
+**Engine-owned subscriptions** (Stripe and NMI, `collection_policy: "engine"`):
+an upgrade is effective `now` — one engine charge of `amount_due_now` (new price −
+unused credit, as previewed) on the subscription's saved card; on success a
+successor subscription (the returned `subscription_id`) opens a fresh period of the
+new cadence and the old one is cancelled (`cancel_type: "upgrade"`), and renewals
+bill the new price. A declined charge changes nothing (`402` with the decline
+reason); an issuer challenge answers `requires_action` with
+`next_action.type: "payment_authentication"` and `operation_id` (authenticate via
+`/v1/me/payment-operations/{operation_id}/authentication`, then replay the same
+`Idempotency-Key`). A downgrade is effective at `period_end`: nothing is charged or
+refunded, access and price stay until the period ends, and that renewal bills the
+new price for a period of its cadence; the same downgrade replays, another pending
+change answers `409 tier_change_already_scheduled`. A tier change while the period
+has ended or its renewal is unresolved answers `409 tier_change_renewal_due`.
 Stripe/NMI upgrades succeed immediately with proration (the old plan's unused
 share of its actual current period, at sub-second precision, credited against the
 new price; cadences may differ — see `docs/merchant-guide.md`); an upgrade whose

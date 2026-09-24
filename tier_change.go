@@ -7,6 +7,7 @@ type TierChangeResponse struct {
 	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
+	Effective      string                         `json:"effective,omitempty"`       // now (upgrade) | period_end (downgrade)
 	PriceID        string                         `json:"price_id"`                  // Target price ID
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
@@ -23,10 +24,11 @@ type TierChangeResponse struct {
 	AmountDueNow     int64      `json:"amount_due_now,string"`
 	NextChargeAmount int64      `json:"next_charge_amount,string"`
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
-	// OperationID names the durable provider operation behind a Stripe tier
-	// change or an NMI upgrade. A "processing" answer (HTTP 202) carries it
-	// while the provider outcome is unresolved; the same Idempotency-Key
-	// replays the stored result.
+	// OperationID names the durable operation behind an upgrade or a Stripe
+	// tier change. A "processing" answer (HTTP 202) carries it while the
+	// outcome is unresolved, and a "requires_action" answer names the payment
+	// the customer must authenticate (GET /v1/me/payment-operations/{id}/
+	// authentication); the same Idempotency-Key replays the stored result.
 	OperationID string `json:"operation_id,omitempty"`
 }
 
@@ -53,6 +55,12 @@ const (
 	// larger than the target price (e.g. a long-cadence plan moving to a
 	// short-cadence one early in its period); upgrades never forfeit credit.
 	CodeTierChangeCreditExceedsPrice = "tier_change_credit_exceeds_price"
+	// CodeTierChangeRenewalDue: an engine-owned subscription's current period
+	// has ended or its renewal is unresolved; the renewal settles first.
+	CodeTierChangeRenewalDue = "tier_change_renewal_due"
+	// CodeTierChangeAlreadyScheduled: a different period-end change is already
+	// scheduled on the subscription.
+	CodeTierChangeAlreadyScheduled = "tier_change_already_scheduled"
 )
 
 type TierChangePreviewResponse struct {
