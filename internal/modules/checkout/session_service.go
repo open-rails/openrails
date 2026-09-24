@@ -1960,16 +1960,11 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 		oldPeriodEndsAt: oldSub.CurrentPeriodEndsAt,
 	}
 	if isUpgrade {
-		firstChargeMicros, _, err := CalculateModelBUpgradeCharge(
-			PriceAmountOf(oldPrice),
-			PriceAmountOf(newPrice),
-			oldSub.CurrentPeriodEndsAt,
-			newPrice.RecurringCycleHours(),
-			s.now(),
-		)
+		quote, err := QuoteModelBUpgrade(modelBUpgradeOf(oldSub, oldPrice, newPrice), s.now())
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+			return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionValidation, err)
 		}
+		firstChargeMicros := quote.ChargeNow
 		decimals, err := solanamodule.RequireTokenDecimals(ctx, s.rails, newTerms.mintSymbol, s.solanaMints)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)

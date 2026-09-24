@@ -22,7 +22,6 @@ import (
 // Neither is computed at all now: the helper refuses.
 func TestModelBUpgradeRefusesCrossCurrency(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	periodEnd := timePtr(now.Add(28 * 24 * time.Hour))
 	cycle := intPtr(30 * 24)
 
 	for _, tc := range []struct {
@@ -52,10 +51,10 @@ func TestModelBUpgradeRefusesCrossCurrency(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			first, _, err := CalculateModelBUpgradeCharge(tc.old, tc.new, periodEnd, cycle, now)
+			q, err := quoteAt(tc.old, tc.new, 720*time.Hour, 672*time.Hour, cycle, now)
 			require.Error(t, err)
 			require.ErrorIs(t, err, subscriptions.ErrRepriceCrossCurrency)
-			require.Zero(t, first, "no amount may be produced from a refused calculation")
+			require.Zero(t, q, "no amount may be produced from a refused calculation")
 		})
 	}
 }
@@ -65,15 +64,8 @@ func TestModelBUpgradeRefusesCrossCurrency(t *testing.T) {
 func TestModelBUpgradeAllowsSameCurrency(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
 
-	first, cycle, err := CalculateModelBUpgradeCharge(
-		PriceAmount{Micros: 20_000_000, Currency: "USD"},
-		PriceAmount{Micros: 50_000_000, Currency: " usd "},
-		timePtr(now.Add(28*24*time.Hour)),
-		intPtr(30*24),
-		now,
-	)
+	q, err := quoteAt(PriceAmount{Micros: 20_000_000, Currency: "USD"}, PriceAmount{Micros: 50_000_000, Currency: " usd "}, 720*time.Hour, 672*time.Hour, intPtr(720), now)
 	require.NoError(t, err)
-	require.Equal(t, int64(31_330_000), first)
-	require.Equal(t, 30*24, cycle)
+	require.Equal(t, int64(31_330_000), q.ChargeNow)
 	require.False(t, errors.Is(err, subscriptions.ErrRepriceCrossCurrency))
 }

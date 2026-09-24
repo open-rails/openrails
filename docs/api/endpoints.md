@@ -171,7 +171,12 @@ prepare → wallet signs → confirm):
 | POST | `/v1/me/subscriptions/{id}/solana-tier-change/confirm` | Confirm the signed tier change |
 
 Tier-change response: `{ object: "tier_change", status: "succeeded"|"processing"|"requires_action"|"blocked", action, price_id, url?, subscription_id?, next_action?, delayed_start?, message?, operation_id? }`.
-Stripe/NMI upgrades succeed immediately with proration; downgrades succeed with
+Stripe/NMI upgrades succeed immediately with proration (the old plan's unused
+share of its actual current period, at sub-second precision, credited against the
+new price; cadences may differ — see `docs/merchant-guide.md`); an upgrade whose
+target has no cycle answers `422 tier_change_cycle_unknown`, one without a valid
+current period `422 tier_change_period_unknown`, and one whose credit exceeds the
+target price `409 tier_change_credit_exceeds_price`; downgrades succeed with
 a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
 redirect `url`, downgrades are `blocked`; Solana tier changes go through the
 on-chain prepare/confirm routes above. **A tier change requires an

@@ -198,6 +198,16 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   must share the tier group). Stripe and NMI upgrade immediately with proration;
   downgrades are scheduled for period end (`delayed_start`). CCBill upgrades redirect
   to a FlexForm; Solana does not support tier changes.
+- **Upgrade proration** resets the period: the customer pays `new price − credit`
+  now for a fresh period of the new price's cycle, where `credit = old price ×
+  time left / current period length`, measured on the subscription's actual current
+  period to the nanosecond and rounded once, up to a whole minor unit (never above
+  what was paid). Cadences may differ (1h → 30d, 30d → 7d, 90d → 365d). Refusals
+  are typed: `422 tier_change_cycle_unknown` (target has no positive cycle),
+  `422 tier_change_period_unknown` (no valid current period) and `409
+  tier_change_credit_exceeds_price` (the unused credit is larger than the target
+  price, e.g. a monthly plan early in its period moving to a cheaper weekly one;
+  credit is never forfeited — change at period end instead).
 
 ### Managing customers day-to-day
 

@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 // TestSolanaUpgradeReducedFirstCharge composes the two pure functions the Solana
 // tier-change PREPARE endpoint chains for an UPGRADE (#272, math shared with the
-// #267/#268 Model-B policy): CalculateModelBUpgradeCharge to get the reduced first
+// #267/#268 Model-B policy): QuoteModelBUpgrade to get the reduced first
 // charge in MICROS, then FiatMicrosToStablecoinBaseUnits to get the on-chain
 // FirstChargeBaseUnits in USDC base units (#671). It pins that an upgrade composes
 // the RIGHT reduced amount (not the full new price, never a 10,000x cents-misread)
@@ -62,10 +63,12 @@ func TestSolanaUpgradeReducedFirstCharge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			firstMicros, gotCycle, err := CalculateModelBUpgradeCharge(usd(tt.oldFull), usd(tt.newFull), tt.periodEnd, &cycle, now)
+			start := tt.periodEnd.Add(-time.Duration(cycle) * time.Hour)
+			q, err := QuoteModelBUpgrade(ModelBUpgrade{Old: usd(tt.oldFull), New: usd(tt.newFull), PeriodStart: &start, PeriodEnd: tt.periodEnd, NewCycleHours: &cycle}, now)
 			if err != nil {
 				t.Fatalf("same-currency proration must not error: %v", err)
 			}
+			firstMicros, gotCycle := q.ChargeNow, int(q.PeriodEnd.Sub(q.PeriodStart).Hours())
 			if firstMicros != tt.wantFirstMicros {
 				t.Fatalf("first charge micros: expected %d, got %d", tt.wantFirstMicros, firstMicros)
 			}
@@ -97,7 +100,8 @@ func TestSolanaUpgradeFirstChargeHonoursTokenDecimals(t *testing.T) {
 	cycle := 30 * 24
 
 	// $20 -> $50 with 28 days left => 31_330_000 micros (see above).
-	firstMicros, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_000), timePtr(now.Add(28*24*time.Hour)), &cycle, now)
+	q, _ := quoteAt(usd(20_000_000), usd(50_000_000), time.Duration(cycle)*time.Hour, 28*24*time.Hour, &cycle, now)
+	firstMicros := q.ChargeNow
 	if firstMicros != 31_330_000 {
 		t.Fatalf("first charge micros: got %d", firstMicros)
 	}
@@ -136,13 +140,13 @@ func TestSolanaDowngradeHasZeroFirstCharge(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
 	cycle := 30 * 24
 
-	// A "downgrade" (newFull < oldFull) routed through the Model-B charge clamps to
-	// 0 micros, and the prepare endpoint additionally SKIPS this computation for a
-	// downgrade entirely — either way the composed first charge is zero.
-	firstMicros, _, _ := CalculateModelBUpgradeCharge(usd(50_000_000), usd(20_000_000), timePtr(now.Add(15*24*time.Hour)), &cycle, now)
-	if firstMicros != 0 {
-		t.Fatalf("a downgrade must not produce a positive Model-B first charge, got %d micros", firstMicros)
+	// A "downgrade" (credit larger than the new price) routed through the Model-B
+	// quote is refused, and the prepare endpoint SKIPS this computation for a
+	// downgrade entirely — the composed first charge stays zero.
+	if _, err := quoteAt(usd(50_000_000), usd(20_000_000), time.Duration(cycle)*time.Hour, 15*24*time.Hour, &cycle, now); !errors.Is(err, ErrTierChangeCreditExceedsPrice) {
+		t.Fatalf("a downgrade-shaped quote must be refused, got %v", err)
 	}
+	var firstMicros int64
 	gotUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(context.Background(), moneyutil.Micros(firstMicros), "USDC", 6, nil)
 	if err != nil {
 		t.Fatalf("convert first charge: %v", err)

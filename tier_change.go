@@ -43,6 +43,16 @@ const (
 	// CodeTierChangeIdempotencyKeyRequired: a tier change needs a client
 	// Idempotency-Key; it is the only way to read back a lost response.
 	CodeTierChangeIdempotencyKeyRequired = "tier_change_idempotency_key_required"
+	// CodeTierChangeCycleUnknown: the target price has no positive billing
+	// cycle, so an upgrade's new period is undefined.
+	CodeTierChangeCycleUnknown = "tier_change_cycle_unknown"
+	// CodeTierChangePeriodUnknown: the subscription has no valid current
+	// period to prorate against.
+	CodeTierChangePeriodUnknown = "tier_change_period_unknown"
+	// CodeTierChangeCreditExceedsPrice: the current plan's unused value is
+	// larger than the target price (e.g. a long-cadence plan moving to a
+	// short-cadence one early in its period); upgrades never forfeit credit.
+	CodeTierChangeCreditExceedsPrice = "tier_change_credit_exceeds_price"
 )
 
 type TierChangePreviewResponse struct {
