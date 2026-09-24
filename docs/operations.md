@@ -521,7 +521,11 @@ supersedes it, and a decline or cancellation revokes it. A card-fixable
 decline, or a terminal outcome while the destructive switch is off, leaves the
 membership `past_due` waiting for a new card; a new card retries at the next
 due pass. Issuer authentication a payer never completes is closed after one
-hour for a first payment and after the renewal allowance for a renewal.
+hour for a first payment and after the renewal allowance for a renewal. A
+renewal whose submission never reached the provider is re-sent under the same
+reference once the provider's read shows nothing for 5 minutes (at most twice);
+an unreadable provider or spent cap raises `life.submission.unresolved`
+(docs/provider-uncertainty.md).
 
 ## Provider Refresh (#574) and the unknown cohort (#632/#664/#665)
 

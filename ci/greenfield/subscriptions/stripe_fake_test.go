@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,6 +73,9 @@ type stripeFake struct {
 	writes    []providerCall
 	gates     []*gate
 	odd       []string
+	lose      int
+	lost      int
+	listDown  bool
 }
 
 func newStripeFake() *stripeFake {
@@ -97,7 +101,25 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 			g = candidate
 		}
 	}
+	creates := r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents"
+	lost := f.lose > 0 && creates
+	if lost {
+		f.lose--
+		f.lost++
+	}
+	down := f.listDown && r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents"
 	f.mu.Unlock()
+	if lost {
+		return nil, errors.New("connection reset before Stripe received the request")
+	}
+	if down {
+		rec := httptest.NewRecorder()
+		rec.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = rec.WriteString(`{"error":{"type":"api_error","message":"unavailable"}}`)
+		res := rec.Result()
+		res.Request = r
+		return res, nil
+	}
 	if g != nil {
 		g.once.Do(func() { close(g.arrived) })
 		select {
@@ -113,6 +135,21 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 	res := rec.Result()
 	res.Request = r
 	return res, nil
+}
+
+// loseSubmissions makes the next n PaymentIntent creates fail in transit,
+// never reaching Stripe.
+func (f *stripeFake) loseSubmissions(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lose = n
+}
+
+// listUnavailable makes the PaymentIntent list fail.
+func (f *stripeFake) listUnavailable(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listDown = down
 }
 
 func (f *stripeFake) hold(g *gate) *gate {

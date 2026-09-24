@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ type nmiSale struct {
 	RefundedCents                                              int64
 	RefundIDs                                                  []string
 	ScheduleID                                                 string
+	Declined                                                   string
 	At                                                         time.Time
 }
 
@@ -50,6 +52,11 @@ type nmiFake struct {
 	attempts  []url.Values
 	schedules map[string]*nmiSchedule
 	duplicate int
+	declined  []*nmiSale
+	lose      int
+	lost      int
+	drop      int
+	queryDown bool
 	writes    []providerCall
 	gates     []*gate
 	odd       []string
@@ -98,7 +105,22 @@ func (f *nmiFake) RoundTrip(r *http.Request) (*http.Response, error) {
 			g = candidate
 		}
 	}
+	sale := strings.HasSuffix(r.URL.Path, "/transact.php")
+	lost, dropped := f.lose > 0 && sale, f.drop > 0 && sale
+	if lost {
+		f.lose--
+		f.lost++
+	} else if dropped {
+		f.drop--
+	}
 	f.mu.Unlock()
+	if lost {
+		return nil, errors.New("connection reset before the gateway received the request")
+	}
+	if dropped {
+		f.serve(r, body)
+		return nil, errors.New("connection reset before the gateway's answer arrived")
+	}
 	if g != nil {
 		g.once.Do(func() { close(g.arrived) })
 		select {
@@ -139,6 +161,8 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "sale":
 		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
 		_, _ = rec.WriteString(f.sale(form))
+	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction" && f.queryDown:
+		rec.WriteHeader(http.StatusServiceUnavailable)
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction":
 		rec.Header().Set("Content-Type", "text/xml")
 		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id"), form.Get("subscription_id")))
@@ -295,7 +319,9 @@ func (f *nmiFake) sale(form url.Values) string {
 		return "response=3&responsetext=Invalid+Customer+Vault+Id&response_code=300"
 	}
 	if code := v.Card.Decline; code != "" {
-		return "response=2&responsetext=DECLINE&response_code=" + code
+		d := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, Amount: form.Get("amount"), Currency: strings.ToUpper(form.Get("currency")), Declined: code, At: time.Now().UTC()}
+		f.declined = append(f.declined, d)
+		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&orderid=%s&response_code=%s", d.TransactionID, d.OrderID, code)
 	}
 	if f.duplicate > 0 {
 		f.duplicate--
@@ -314,12 +340,16 @@ func (f *nmiFake) sale(form url.Values) string {
 func (f *nmiFake) search(orderID, transactionID, scheduleID string) string {
 	var b strings.Builder
 	b.WriteString("<nm_response>")
-	for _, s := range f.sales {
+	for _, s := range append(append([]*nmiSale{}, f.sales...), f.declined...) {
 		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) {
 			continue
 		}
-		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>1</success><response_code>100</response_code><date>%s</date></action></transaction>",
-			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, s.At.Format("20060102150405"))
+		success, code := "1", "100"
+		if s.Declined != "" {
+			success, code = "0", s.Declined
+		}
+		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
+			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, success, code, s.At.Format("20060102150405"))
 	}
 	b.WriteString("</nm_response>")
 	return b.String()
@@ -335,6 +365,29 @@ func (f *nmiFake) setDecline(last4, code string) {
 			v.Card.Decline = code
 		}
 	}
+}
+
+// loseSubmissions makes the next n sales fail in transit, never reaching
+// the gateway.
+func (f *nmiFake) loseSubmissions(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lose = n
+}
+
+// dropResponses makes the gateway process the next n sales and lose each
+// answer in transit.
+func (f *nmiFake) dropResponses(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.drop = n
+}
+
+// queryUnavailable makes the Query API fail.
+func (f *nmiFake) queryUnavailable(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queryDown = down
 }
 
 // refuseDuplicates makes the next n sales trip NMI's duplicate check.
