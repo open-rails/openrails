@@ -75,7 +75,7 @@ type Price struct {
 	UnitAmount int64  `json:"unit_amount,string" yaml:"unit_amount"` // native units at the currency's registered scale
 
 	// Key (#774) is optional; when omitted it auto-defaults to
-	// "<product-key>-<interval>" (see billingservice.PriceIntervalLabel) as
+	// "<product-key>-<interval>" (see openrails.CreatePriceRequest.Key) as
 	// long as the product declares only ONE price at that interval. Two or
 	// more prices at the same interval (e.g. a promo alongside the standard
 	// price) must each carry an explicit key — apply refuses the ambiguity

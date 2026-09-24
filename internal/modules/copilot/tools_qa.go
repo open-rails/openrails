@@ -11,34 +11,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
 )
-
-// priceIntervalLabel mirrors internal/service.PriceIntervalLabel (#774) exactly —
-// duplicated rather than imported because internal/service transitively imports
-// internal/app, which imports this package (a cycle). Keep in sync with
-// internal/service/price_key.go and internal/migrate/postgres/0001_schema.up.sql's
-// trg_prices_default_key/prices_default_key backfill CASE if the interval
-// buckets ever change.
-func priceIntervalLabel(accessDurationHours *int, autoRenew bool) string {
-	if !autoRenew || accessDurationHours == nil {
-		return "onetime"
-	}
-	switch *accessDurationHours {
-	case 168:
-		return "weekly"
-	case 720, 744:
-		return "monthly"
-	case 2160, 2184:
-		return "quarterly"
-	case 8760, 8784:
-		return "yearly"
-	default:
-		return fmt.Sprintf("%dd", *accessDurationHours/24)
-	}
-}
 
 // activeSubscriberCount is the per-price-row subscriber count primitive: the
 // COUNT(*) query only (Limit:0 discards the items page — cheap regardless of
@@ -116,7 +93,7 @@ func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]c
 				ProductKey: p.Key, ProductName: p.DisplayName,
 				PriceKey: price.Key, PriceID: price.ID,
 				Amount: price.Amount, Currency: price.Currency,
-				Interval:   priceIntervalLabel(price.AccessDurationHours, price.AutoRenew),
+				Interval:   cadence.PriceIntervalLabel(price.AccessDurationHours, price.AutoRenew),
 				ActiveSubs: active, Grandfathered: grand,
 			})
 		}
@@ -236,7 +213,7 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 		fmt.Sprintf("price_key: %s", price.Key),
 		fmt.Sprintf("product: %s (%s)", product.DisplayName, product.Key),
 		fmt.Sprintf("amount: %s", moneyutil.FormatAmount(price.Amount, price.Currency)),
-		fmt.Sprintf("interval: %s", priceIntervalLabel(price.AccessDurationHours, price.AutoRenew)),
+		fmt.Sprintf("interval: %s", cadence.PriceIntervalLabel(price.AccessDurationHours, price.AutoRenew)),
 		fmt.Sprintf("active_subscribers: %d", active),
 		fmt.Sprintf("grandfathered (on prior versions): %d", grand),
 		pending,

@@ -92,7 +92,10 @@ type PriceCreateParams struct {
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
 	// this price's substance-version chain — distinct from ID, which stays the
 	// #662 immutable substance UUID. Optional: auto-defaults to
-	// "<product-key>-<interval>" when omitted (see PriceIntervalLabel).
+	// "<product-key>-<interval>" when omitted: <n>h, <n>d on whole days, or
+	// weekly/monthly/quarterly/yearly for exactly 168/720/2160/8760 hours. A
+	// default key held by a price on another cadence is refused with
+	// ErrPriceKeyCadenceConflict.
 	// With ProductData, a different financial substance under the same key is
 	// a conflict: use a new key for a new immutable offer. With ProductID or ProductKey,
 	// declaring the SAME key with a DIFFERENT financial substance is a version

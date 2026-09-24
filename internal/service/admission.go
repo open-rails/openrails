@@ -540,6 +540,9 @@ type MerchantConfiguration struct {
 	// reprice service falls back to
 	// subscriptions.DefaultRepriceNoticeWindowDays when unset).
 	RepriceNoticeWindowDays *int
+	// RenewalReceiptMinIntervalHours (#1069) spaces renewal receipts per
+	// subscription. A nil pointer preserves the stored value.
+	RenewalReceiptMinIntervalHours *int
 	// ArrearsGraceDays / ArrearsDelinquencyFloor (or#878) are the arrears
 	// delinquency policy: how long past due_at a payer keeps grace, and the
 	// smallest overdue balance that can escalate. A nil pointer preserves the
@@ -584,6 +587,7 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		InvoiceBillingBoundary:             cfg.InvoiceBillingBoundary,
 		AlertEmail:                         &alertEmail,
 		RepriceNoticeWindowDays:            cfg.RepriceNoticeWindowDays,
+		RenewalReceiptMinIntervalHours:     cfg.RenewalReceiptMinIntervalHours,
 		ArrearsGraceDays:                   cfg.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:            cfg.ArrearsDelinquencyFloor,
 		CheckoutRouting:                    routing,
@@ -668,6 +672,12 @@ func applyMerchantConfiguration(cfg models.MerchantConfiguration, in MerchantCon
 			return cfg, fmt.Errorf("reprice_notice_window_days must be >= 0")
 		}
 		cfg.RepriceNoticeWindowDays = in.RepriceNoticeWindowDays
+	}
+	if in.RenewalReceiptMinIntervalHours != nil {
+		if *in.RenewalReceiptMinIntervalHours < 0 {
+			return cfg, fmt.Errorf("renewal_receipt_min_interval_hours must be >= 0")
+		}
+		cfg.RenewalReceiptMinIntervalHours = in.RenewalReceiptMinIntervalHours
 	}
 	if in.ArrearsGraceDays != nil {
 		if *in.ArrearsGraceDays < 0 {

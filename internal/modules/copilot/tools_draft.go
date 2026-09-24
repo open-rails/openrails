@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -309,7 +310,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 		}
 	}
 
-	interval := priceIntervalLabel(args.AccessDurationHours, args.AutoRenew)
+	interval := cadence.PriceIntervalLabel(args.AccessDurationHours, args.AutoRenew)
 	key := strings.TrimSpace(args.NewPriceKey)
 	if key == "" {
 		key = productKey + "-" + interval

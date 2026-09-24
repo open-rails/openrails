@@ -38,6 +38,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -1738,7 +1739,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 		if existingSub.CurrentPeriodEndsAt != nil {
 			resp.Message = fmt.Sprintf("No charge now. Your plan changes to %s on %s, then %s.",
 				newProduct.DisplayName,
-				existingSub.CurrentPeriodEndsAt.Format("January 2, 2006"),
+				cadence.FormatInstant(*existingSub.CurrentPeriodEndsAt, cadence.Period(existingSub.CurrentPeriodStartsAt, existingSub.CurrentPeriodEndsAt)),
 				formatMinorAmount(newPrice.Amount, newPrice.Currency))
 		}
 		return resp, nil

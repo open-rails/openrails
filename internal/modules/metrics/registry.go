@@ -105,23 +105,10 @@ func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (strin
 }
 
 const (
-	// monthlyNormExpr converts a price to a monthly-normalized amount (native currency units):
-	// cycles >= ~27d divide by the rounded month count; shorter cycles scale up
-	// by 730h/month. Deterministic; pinned by tests.
-	monthlyNormExpr = `CASE
-		WHEN pr.access_duration_hours IS NULL THEN 0
-		WHEN pr.access_duration_hours >= 648 THEN round(pr.amount::numeric / GREATEST(round(pr.access_duration_hours / 730.0), 1))::bigint
-		ELSE round(pr.amount::numeric * 730.0 / pr.access_duration_hours)::bigint END`
-
-	// billingCycleExpr labels a price's cadence from access_duration_hours.
-	billingCycleExpr = `CASE
-		WHEN pr.access_duration_hours IS NULL THEN 'one_time'
-		WHEN pr.access_duration_hours < 48 THEN 'daily'
-		WHEN pr.access_duration_hours < 336 THEN 'weekly'
-		WHEN pr.access_duration_hours < 1440 THEN 'monthly'
-		WHEN pr.access_duration_hours < 3600 THEN 'quarterly'
-		WHEN pr.access_duration_hours < 6480 THEN 'semiannual'
-		ELSE 'annual' END`
+	// monthlyNormExpr and billingCycleExpr are the schema's shared definitions
+	// (migration 0004), also used by fleet MRR.
+	monthlyNormExpr  = `openrails.monthly_normalized_amount(pr.amount, pr.access_duration_hours)`
+	billingCycleExpr = `openrails.billing_cycle_label(pr.access_duration_hours)`
 
 	// streamExpr classifies a payment's revenue stream.
 	streamExpr = `CASE
@@ -142,7 +129,7 @@ var Dimensions = []Dimension{
 	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
 	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseProductID(s) })},
 	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParsePriceID(s) })},
-	{Name: "billing_cycle", Description: "price cadence: daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
+	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "unknown"}},
 	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseCustomerID(s) })},

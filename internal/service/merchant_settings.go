@@ -46,7 +46,7 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.Me
 	doc.config, err = applyMerchantConfiguration(models.MerchantConfiguration{}, MerchantConfiguration{
 		Profile: profile, InvoiceCollectionThreshold: in.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor: in.InvoiceMonthlyFloor, InvoiceBillingBoundary: in.InvoiceBillingBoundary, AlertEmail: in.AlertEmail,
-		RepriceNoticeWindowDays: in.RepriceNoticeWindowDays, ArrearsGraceDays: in.ArrearsGraceDays,
+		RepriceNoticeWindowDays: in.RepriceNoticeWindowDays, RenewalReceiptMinIntervalHours: in.RenewalReceiptMinIntervalHours, ArrearsGraceDays: in.ArrearsGraceDays,
 		ArrearsDelinquencyFloor: in.ArrearsDelinquencyFloor, CheckoutRouting: in.CheckoutRouting,
 		DelegatedInvokerWastedSpendWindows: windows,
 	})
@@ -164,7 +164,7 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 		out = openrails.MerchantSettings{
 			InvoiceCollectionThreshold: cfg.InvoiceCollectionThreshold,
 			InvoiceMonthlyFloor:        cfg.InvoiceMonthlyFloor, InvoiceBillingBoundary: cfg.InvoiceBillingBoundary, AlertEmail: cfg.AlertEmail,
-			RepriceNoticeWindowDays: cfg.RepriceNoticeWindowDays, ArrearsGraceDays: cfg.ArrearsGraceDays,
+			RepriceNoticeWindowDays: cfg.RepriceNoticeWindowDays, RenewalReceiptMinIntervalHours: cfg.RenewalReceiptMinIntervalHours, ArrearsGraceDays: cfg.ArrearsGraceDays,
 			ArrearsDelinquencyFloor: cfg.ArrearsDelinquencyFloor, CheckoutRouting: cfg.CheckoutRouting,
 		}
 		if cfg.Profile != nil {
