@@ -5,7 +5,7 @@ intentionally independent of `internal/dbtest`, `internal/integrationharness`,
 Redis, testcontainers, provider credentials, browser automation, and direct
 application-table SQL.
 
-The first slice has five focused scenarios:
+The first slice has seven focused scenarios:
 
 - fresh migration plus replay, product/price creation, and entitlement offer
   selection;
@@ -15,6 +15,10 @@ The first slice has five focused scenarios:
   including changed-fingerprint rejection and entitlement access checks.
 - signed Stripe completion, duplicate delivery, and stale expiration converge
   to one successful purchase and entitlement.
+- provider-owned NMI subscription import preserves the provider schedule,
+  dunning state, retry history, and replay behavior;
+- engine-owned NMI admission remains local to OpenRails, creates no NMI
+  recurring schedule, and waits for customer confirmation before charging.
 
 Each test creates one random OpenRails schema in the PostgreSQL service, applies
 the public `embed.ApplyMigrations` entry point, constructs an embedded runtime,
@@ -30,5 +34,7 @@ OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_
 ```
 
 The old broad integration workflow remains in `ci-full.yaml` as a scheduled
-backstop while this compact gate grows. It is not removed until focused
-scenarios have earned equivalent receipts.
+backstop while this compact gate grows. The legacy `native_engine_signup`
+workflow remains the full engine-owned confirmation, renewal, dunning, and
+entitlement oracle. The old suite is not removed until focused scenarios have
+earned equivalent receipts.
