@@ -57,7 +57,7 @@ DELETE FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.a
 SELECT * FROM openrails.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
-ORDER BY pm.created_at DESC;
+ORDER BY pm.is_default DESC, pm.created_at DESC;
 
 -- name: CountPaymentMethodsByCustomer :one
 SELECT count(*) FROM openrails.payment_methods pm
@@ -68,7 +68,7 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT * FROM openrails.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
-ORDER BY pm.created_at DESC
+ORDER BY pm.is_default DESC, pm.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetPaymentMethodByRailMethodRefForPSP :one
@@ -330,3 +330,20 @@ UPDATE openrails.payment_methods SET
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND rail_method_ref = sqlc.arg(old_rail_method_ref)::text;
+
+-- name: GetDefaultPaymentMethodID :one
+-- #1084: the customer's default payment method (none when it has no usable one).
+SELECT pm.id FROM openrails.payment_methods pm
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = sqlc.arg(customer_id)::uuid AND pm.is_default;
+
+-- name: LockCustomerDefaultPaymentMethod :exec
+-- The same customer lock the deferred default trigger takes.
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.default_payment_method:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(customer_id)::uuid::text, 0));
+
+-- name: ClearDefaultPaymentMethod :exec
+UPDATE openrails.payment_methods SET is_default = false
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND is_default AND id <> sqlc.arg(keep_id)::uuid;
+
+-- name: MarkDefaultPaymentMethod :execrows
+UPDATE openrails.payment_methods SET is_default = true
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason = '';

@@ -133,6 +133,24 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, opti
 	return &out, nil
 }
 
+// SetDefaultPaymentMethod makes one of the customer's usable methods its
+// default; the previous default stops being one in the same transaction.
+func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string, methodID PaymentMethodID, requestOptions ...RequestOption) (*PaymentMethod, error) {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return nil, err
+	}
+	method, err := requireTypedID("payment_method_id", methodID)
+	if err != nil {
+		return nil, err
+	}
+	var out PaymentMethod
+	if err := c.do(ctx, http.MethodPut, path+"/payment-methods/"+method+"/default", nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // PaymentMethodDeletion distinguishes completed deletion from a durable
 // operation awaiting provider reconciliation. Pending is never reported deleted.
 type PaymentMethodDeletion struct{ Pending bool }

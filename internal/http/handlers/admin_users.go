@@ -142,6 +142,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 			// methods without defaults; GetAdminUserPaymentMethods keeps the
 			// hard failure.
 			methods := paymentMethodsToAPI(pms, paymentMethodCharges(r, pms))
+			stampDefaultPaymentMethod(r, pms, methods)
 			if err := applyCollectionDefaults(r, customerID, pms, methods); err != nil {
 				log.WithError(err).WithField("user_id", path.UserID).
 					Warn("failed to load collection payment method defaults; profile payment methods returned without them")
