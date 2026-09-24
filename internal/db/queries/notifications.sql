@@ -125,3 +125,16 @@ WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = openrails.current_merc
   AND (sqlc.narg(seen)::boolean IS NULL OR (nq.read_at IS NOT NULL) = sqlc.narg(seen)::boolean)
 ORDER BY nq.created_at DESC
 LIMIT $3::int OFFSET $4::int;
+
+-- #1069: renewal-receipt throttle — a receipt for this subscription whose
+-- renewal period started after since.
+-- name: RenewalReceiptSince :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.notifications nq
+    WHERE nq.recipient_kind = 'customer'
+      AND nq.merchant_id = openrails.current_merchant_id()
+      AND nq.customer_id = sqlc.arg(customer_id)::uuid
+      AND nq.event_type = 'premium_renewed'
+      AND nq.data->>'subscription_id' = sqlc.arg(subscription_id)::text
+      AND (nq.data->>'period_start')::timestamptz > sqlc.arg(since)::timestamptz
+)::boolean AS found;

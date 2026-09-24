@@ -14,42 +14,30 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// PriceIntervalLabel derives the canonical interval name used by #774's
-// auto-default price key (`<product-key>-<interval>`). Mirrored EXACTLY by
-// internal/migrate/postgres/0001_schema.up.sql's trg_prices_default_key
-// (prices_default_key) trigger function's CASE expression — keep the two in
-// sync so a forward re-apply never relabels a backfilled key.
-func PriceIntervalLabel(accessDurationHours *int, autoRenew bool) string {
-	if !autoRenew || accessDurationHours == nil {
-		return "onetime"
-	}
-	switch *accessDurationHours {
-	case 168:
-		return "weekly"
-	case 720, 744:
-		return "monthly"
-	case 2160, 2184:
-		return "quarterly"
-	case 8760, 8784:
-		return "yearly"
-	default:
-		return fmt.Sprintf("%dd", *accessDurationHours/24)
-	}
-}
-
 // resolvePriceKey returns the explicit key when supplied, else the
-// auto-default `<product-key>-<interval>`. Batch applications require explicit
-// price keys; this default belongs to individual price creation. Changing the
+// auto-default `<product-key>-<interval>` (cadence.PriceIntervalLabel), and
+// whether the default was used. Batch applications require explicit price
+// keys; this default belongs to individual price creation. Changing the
 // financial terms at a key creates or reuses a financial version.
-func resolvePriceKey(product *models.Product, req CreatePriceRequest) string {
+func resolvePriceKey(product *models.Product, req CreatePriceRequest) (string, bool) {
 	key := strings.TrimSpace(req.Key)
 	if key != "" {
-		return key
+		return key, false
 	}
-	return product.Key + "-" + PriceIntervalLabel(req.AccessDurationHours, req.AutoRenew)
+	return product.Key + "-" + cadence.PriceIntervalLabel(req.AccessDurationHours, req.AutoRenew), true
+}
+
+// defaultKeyCadenceConflict refuses a defaulted key whose current holder bills
+// on another cadence: a default key never repoints across cadences.
+func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req CreatePriceRequest, key string) error {
+	if !defaulted || holder == nil || cadence.Same(holder.AccessDurationHours, holder.AutoRenew, req.AccessDurationHours, req.AutoRenew) {
+		return nil
+	}
+	return fmt.Errorf("%w: default key %q is held by price %s on another cadence; supply an explicit key", ErrPriceKeyCadenceConflict, key, holder.ID)
 }
 
 // GetPriceByKey resolves a price by its #774 key — the CURRENT (non-archived)

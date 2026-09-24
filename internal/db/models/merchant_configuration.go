@@ -40,6 +40,11 @@ type MerchantConfiguration struct {
 	// (30). Zero is a valid explicit merchant choice (no minimum enforced).
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 
+	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription
+	// (#1069). Nil ⇒ subscriptions.DefaultRenewalReceiptMinIntervalHours; zero
+	// sends one receipt per renewal.
+	RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
+
 	// CheckoutRouting (or#288) is the merchant's deterministic processor
 	// preference policy: ordered rules, first match wins. Empty ⇒ the built-in
 	// default order.

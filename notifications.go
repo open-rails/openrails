@@ -47,9 +47,12 @@ type NotificationData struct {
 	NewAmount      *int64         `json:"new_amount,omitempty,string"`
 	EffectiveAt    *time.Time     `json:"effective_at,omitempty"`
 
-	// Renewal that applied a scheduled downgrade (premium_renewed).
-	DowngradeApplied bool   `json:"downgrade_applied,omitempty"`
-	NewProduct       string `json:"new_product,omitempty"`
+	// Renewal receipt (premium_renewed): the renewed period, and whether it
+	// applied a scheduled downgrade.
+	PeriodStart      *time.Time `json:"period_start,omitempty"`
+	PeriodEnd        *time.Time `json:"period_end,omitempty"`
+	DowngradeApplied bool       `json:"downgrade_applied,omitempty"`
+	NewProduct       string     `json:"new_product,omitempty"`
 
 	// Arrears delinquency (account_delinquent, account_delinquency_cleared).
 	OverdueAmount   *int64     `json:"overdue_amount,omitempty,string"`

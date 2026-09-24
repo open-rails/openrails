@@ -105,6 +105,10 @@ type CatalogPrice struct {
 	PendingManualActions []PendingAction `json:"pending_manual_actions,omitempty"`
 }
 
+// ErrPriceKeyCadenceConflict refuses a price created without a key whose
+// default key is already held by a price on another cadence.
+var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict", ErrConflict)
+
 type CreatePriceRequest struct {
 	// Select exactly one existing ProductID/ProductKey or new ProductData.
 	ProductID   ProductID                     `json:"product_id"`
@@ -114,7 +118,10 @@ type CreatePriceRequest struct {
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
 	// this price's substance-version chain — distinct from ID, which stays the
 	// #662 immutable substance UUID. Optional: auto-defaults to
-	// "<product-key>-<interval>" when omitted (see PriceIntervalLabel).
+	// "<product-key>-<interval>" when omitted: <n>h, <n>d on whole days, or
+	// weekly/monthly/quarterly/yearly for exactly 168/720/2160/8760 hours. A
+	// default key held by a price on another cadence is refused with
+	// ErrPriceKeyCadenceConflict.
 	// Declaring the SAME key with a DIFFERENT financial substance is a version
 	// bump: the new/reactivated substance row becomes the key's current
 	// target and the previously-current row is archived (grandfathered).

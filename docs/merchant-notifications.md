@@ -30,3 +30,14 @@ rows enter the notification email sweep. Retention applies to both recipient
 kinds: by default read rows expire after 90 days and all rows after 180 days.
 Reading a notification never acknowledges a financial or lifecycle event in
 `host_outbox`.
+
+## Renewal receipts
+
+The first purchase always sends its confirmation, and every failure,
+cancellation and downgrade notice is always sent. Renewal receipts are spaced
+per subscription by `renewal_receipt_min_interval_hours` (default 24): a renewal
+whose period starts less than that interval after the membership start or the
+last receipted renewal creates no `premium_renewed` notification. Hourly and
+daily members therefore get at most one receipt a day; weekly and longer
+cadences get one per renewal. `0` sends a receipt for every renewal. Receipts
+carry `subscription_id`, `period_start` and `period_end`.

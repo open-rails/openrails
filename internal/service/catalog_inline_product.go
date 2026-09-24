@@ -71,12 +71,15 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 		if err != nil {
 			return err
 		}
-		key := resolvePriceKey(model, req)
+		key, defaulted := resolvePriceKey(model, req)
 		if err := lockCatalogKey(ctx, tx, mid, "price-key", key); err != nil {
 			return err
 		}
 		current, err := prices.GetCurrentByKey(ctx, mid.UUID(), key)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := defaultKeyCadenceConflict(defaulted, current, req, key); err != nil {
 			return err
 		}
 		expected := priceDeterministicID(product.ID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)

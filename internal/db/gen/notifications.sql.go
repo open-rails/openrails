@@ -494,6 +494,33 @@ func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg P
 	return found, err
 }
 
+const renewalReceiptSince = `-- name: RenewalReceiptSince :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.notifications nq
+    WHERE nq.recipient_kind = 'customer'
+      AND nq.merchant_id = openrails.current_merchant_id()
+      AND nq.customer_id = $1::uuid
+      AND nq.event_type = 'premium_renewed'
+      AND nq.data->>'subscription_id' = $2::text
+      AND (nq.data->>'period_start')::timestamptz > $3::timestamptz
+)::boolean AS found
+`
+
+type RenewalReceiptSinceParams struct {
+	CustomerID     uuid.UUID
+	SubscriptionID string
+	Since          time.Time
+}
+
+// #1069: renewal-receipt throttle — a receipt for this subscription whose
+// renewal period started after since.
+func (q *Queries) RenewalReceiptSince(ctx context.Context, arg RenewalReceiptSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, renewalReceiptSince, arg.CustomerID, arg.SubscriptionID, arg.Since)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
 const updateNotification = `-- name: UpdateNotification :execrows
 UPDATE openrails.notifications SET
     customer_id = $2::uuid,

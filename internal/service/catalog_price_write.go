@@ -39,7 +39,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req CreatePriceRequest,
 		// amounts forever yields exactly two rows, never a third), re-point the
 		// key. Skipped entirely when the caller creates the price pre-archived
 		// (never claims the "current" pointer for its key).
-		key := resolvePriceKey(product, req)
+		key, defaulted := resolvePriceKey(product, req)
 		if err := lockCatalogKey(ctx, tx, tid, "product", product.Key); err != nil {
 			return err
 		}
@@ -54,6 +54,9 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req CreatePriceRequest,
 			}
 			if displaced != nil && displaced.ProductID != product.ID {
 				return ErrCatalogConflict
+			}
+			if err := defaultKeyCadenceConflict(defaulted, displaced, req, key); err != nil {
+				return err
 			}
 			if displaced != nil && displaced.ID != priceID {
 				if err := prices.SetArchived(ctx, displaced.ID, true); err != nil {

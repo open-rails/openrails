@@ -5,8 +5,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
+
+// periodInstant renders a boundary of this period (with time of day for
+// periods shorter than two days).
+func (d SubscriptionEmailData) periodInstant(t time.Time) string {
+	return cadence.FormatInstant(t, d.PeriodEnd.Sub(d.PeriodStart))
+}
 
 type EmailContent struct {
 	Subject string
@@ -34,7 +41,7 @@ func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmai
 			<p>Enjoy!</p>
 			<p>The %s Team</p>
 		`, premiumName, data.Username, data.SubscriptionID, amountLine,
-			data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.PaymentMethod, storeName),
+			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.PaymentMethod, storeName),
 		Plain: fmt.Sprintf(`
 			Welcome to %s!
 
@@ -51,7 +58,7 @@ func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmai
 			Enjoy!
 			The %s Team
 		`, premiumName, data.Username, data.SubscriptionID, amountLine,
-			data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.PaymentMethod, storeName),
+			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.PaymentMethod, storeName),
 	}
 }
 
@@ -75,7 +82,7 @@ func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData
 			<p>Your access continues uninterrupted.</p>
 			<p>The %s Team</p>
 		`, data.Username, premiumName, data.SubscriptionID, amountLine,
-			data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.TransactionID, storeName),
+			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.TransactionID, storeName),
 		Plain: fmt.Sprintf(`
 			Subscription Renewed Successfully
 
@@ -93,12 +100,12 @@ func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData
 
 			The %s Team
 		`, data.Username, premiumName, data.SubscriptionID, amountLine,
-			data.PeriodStart.Format("Jan 2, 2006"), data.PeriodEnd.Format("Jan 2, 2006"), data.TransactionID, storeName),
+			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.TransactionID, storeName),
 	}
 }
 
 func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmailData, reason PremiumEndReason) EmailContent {
-	periodEnd := data.PeriodEnd.Format("Jan 2, 2006")
+	periodEnd := data.periodInstant(data.PeriodEnd)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	subject := fmt.Sprintf("Your %s subscription has been cancelled", premiumName)
 	reasonBlurb := "We've cancelled your membership as requested."
@@ -151,7 +158,7 @@ func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmai
 }
 
 func RenderSubscriptionExpiredEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
-	periodEnd := data.PeriodEnd.Format("Jan 2, 2006")
+	periodEnd := data.periodInstant(data.PeriodEnd)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	linkHTML := ""
 	linkText := ""

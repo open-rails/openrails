@@ -13,6 +13,9 @@ var (
 	ErrProductNotFound  = apperr.New(http.StatusNotFound, "product_not_found", "product not found")
 	ErrPriceNotFound    = apperr.New(http.StatusNotFound, "price_not_found", "price not found")
 	ErrPriceKeyNotFound = apperr.New(http.StatusNotFound, "price_key_not_found", "price key not found")
+	// ErrPriceKeyCadenceConflict: a defaulted price key is held by a price on
+	// another cadence (openrails.ErrPriceKeyCadenceConflict).
+	ErrPriceKeyCadenceConflict = apperr.New(http.StatusConflict, "price_key_cadence_conflict", "default price key is held by a price on another cadence")
 	// ErrCatalogConflict is a unique-constraint collision on a catalog write.
 	ErrCatalogConflict = apperr.New(http.StatusConflict, api.CodeResourceConflict, "a resource with these attributes already exists")
 )

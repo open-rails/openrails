@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -211,27 +212,28 @@ func (s *EmailService) sendPaymentFailed(ctx context.Context, data SubscriptionE
 func (s *EmailService) SendEntitlementExpiration(ctx context.Context, userEmail, username, entitlementName string, expiresAt time.Time) error {
 	subject := fmt.Sprintf("Your %s access expires soon", entitlementName)
 	storeName := s.storeName(ctx)
-	daysUntilExpiry := int(time.Until(expiresAt).Hours() / 24)
+	remaining := cadence.FormatRemaining(expiresAt.Sub(s.now()))
+	expiresOn := cadence.FormatInstant(expiresAt, expiresAt.Sub(s.now()))
 	htmlContent := fmt.Sprintf(`
 		<h2>Access Expiring Soon</h2>
 		<p>Hi %s,</p>
-		<p>This is a reminder that your <strong>%s</strong> access will expire in %d days on <strong>%s</strong>.</p>
+		<p>This is a reminder that your <strong>%s</strong> access will expire in %s on <strong>%s</strong>.</p>
 		<p>To continue enjoying premium features, please renew your subscription before the expiration date.</p>
 		<p>Thank you for being a valued member!</p>
 		<p>The %s Team</p>
-	`, username, entitlementName, daysUntilExpiry, expiresAt.Format("January 2, 2006"), storeName)
+	`, username, entitlementName, remaining, expiresOn, storeName)
 	plainContent := fmt.Sprintf(`
 		Access Expiring Soon
 
 		Hi %s,
 
-		Your %s access will expire in %d days on %s.
+		Your %s access will expire in %s on %s.
 
 		To continue enjoying premium features, please renew your subscription before the expiration date.
 
 		Thank you for being a valued member!
 		The %s Team
-	`, username, entitlementName, daysUntilExpiry, expiresAt.Format("January 2, 2006"), storeName)
+	`, username, entitlementName, remaining, expiresOn, storeName)
 	return s.SendEmail(ctx, userEmail, subject, htmlContent, plainContent)
 }
 

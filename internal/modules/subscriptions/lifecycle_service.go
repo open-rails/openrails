@@ -1192,7 +1192,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			return err
 		}
 		renewalApplied = true
-		notifications = append(notifications, notification)
+		if notification != nil {
+			notifications = append(notifications, notification)
+		}
 
 		return nil
 	})
