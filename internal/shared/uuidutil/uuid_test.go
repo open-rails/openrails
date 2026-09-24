@@ -31,7 +31,8 @@ func TestDeterministicIDIsStableAndInjective(t *testing.T) {
 		}
 		seen[id] = parts
 	}
-	if NewV7().Version() != 7 || NewV7() == NewV7() {
+	a, b := NewV7(), NewV7()
+	if a.Version() != 7 || a == b {
 		t.Fatal("NewV7 must mint distinct v7 ids")
 	}
 }
