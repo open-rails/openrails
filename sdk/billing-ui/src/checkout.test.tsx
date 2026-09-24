@@ -1,0 +1,1186 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { Checkout } from "./checkout"
+import { createBillingClient } from "./client/client"
+import { BillingProvider } from "./react/provider"
+import { CheckoutModal } from "./modal"
+import { createFixtureSource, fixtureSession } from "./fixtures"
+import type { CheckoutSource } from "./source"
+import type { PaymentRailOption } from "./types"
+
+function checkoutOption(
+  rail: "nmi" | "stripe" | "ccbill" | "solana",
+  publicConfig?: Record<string, string>
+): PaymentRailOption {
+  const driver =
+    rail === "nmi"
+      ? "collect_js"
+      : rail === "solana"
+        ? "solana_pay"
+        : "redirect"
+  return {
+    id: `option_${rail}`,
+    rail,
+    mode: rail === "solana" ? "one_off" : "subscription",
+    driver,
+    public_config: publicConfig,
+  }
+}
+
+const createQR = vi.hoisted(() =>
+  vi.fn(() => ({
+    append(element: HTMLElement) {
+      element.append(document.createElement("canvas"))
+    },
+  }))
+)
+
+vi.mock("@solana/pay", () => ({ createQR }))
+
+afterEach(() => {
+  document.getElementById("openrails-collectjs")?.remove()
+  Reflect.deleteProperty(window, "CollectJS")
+  createQR.mockClear()
+  vi.useRealTimers()
+})
+
+function ccbillSource(pay: CheckoutSource["pay"]): CheckoutSource {
+  return {
+    async getSession() {
+      return fixtureSession({
+        rails: [checkoutOption("ccbill")],
+      })
+    },
+    pay,
+  }
+}
+
+describe("Checkout", () => {
+  it("renders the fixture session to ready state", async () => {
+    render(<Checkout source={createFixtureSource()} />)
+    await waitFor(() => {
+      // Both summary variants exist in the DOM; the container query decides
+      // which is visible.
+      expect(screen.getAllByText("Acme Demo").length).toBeGreaterThan(0)
+    })
+    expect(
+      screen.getByText("Subscribe for $99.00 every 30 days")
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Payment method")).toBeInTheDocument()
+    expect(screen.getAllByText("Card").length).toBeGreaterThan(0)
+    expect(screen.getByText("Stripe")).toBeInTheDocument()
+    expect(screen.getByText("Crypto")).toBeInTheDocument()
+    // 720h is 30 days in OpenRails, not a calendar month.
+    expect(screen.getAllByText("/ 30 days").length).toBeGreaterThan(0)
+    expect(document.body).toHaveTextContent("Renews every 30 days")
+    expect(document.body).not.toHaveTextContent(/month/i)
+  })
+
+  it("renders exact money at the plan's registered scale", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            plan: {
+              display_name: "Lifetime",
+              unit_amount: "9223372036854775807",
+              currency: "JPY",
+              unit_decimals: 4,
+              automatically_renews: false,
+            },
+            line_items: [
+              { label: "Lifetime", amount: "9223372036854775807" },
+              { label: "Launch discount", amount: "-9223372036854775807" },
+            ],
+            tax: "12345",
+            due_today: undefined,
+            rails: [checkoutOption("nmi")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    expect(
+      await screen.findByText("Pay ¥922,337,203,685,477.5807")
+    ).toBeInTheDocument()
+    expect(screen.getByText("-¥922,337,203,685,477.5807")).toBeInTheDocument()
+    // Tax, and the exact sum of the two items plus tax.
+    expect(screen.getAllByText("¥1.2345")).toHaveLength(2)
+    expect(screen.getByText("Due today").nextSibling).toHaveTextContent(
+      "¥1.2345"
+    )
+  })
+
+  it("refuses a due-today sum that leaves int64 instead of rounding it", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            line_items: [
+              { label: "A", amount: "9223372036854775807" },
+              { label: "B", amount: "1" },
+            ],
+            rails: [checkoutOption("nmi")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    expect(await screen.findByText("Due today")).toBeInTheDocument()
+    expect(screen.getByText("Due today").nextSibling).toHaveTextContent(
+      "USD amount exceeds the exact display range"
+    )
+  })
+
+  it("renders one native cardholder identity with browser autofill semantics", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            rails: [checkoutOption("nmi")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    const form = await screen.findByRole("form", { name: "Secure payment" })
+    expect(form).toHaveAttribute("autocomplete", "on")
+    expect(form).toHaveAttribute("name", "openrails-checkout")
+
+    const names = screen.getAllByLabelText("Name on card")
+    expect(names).toHaveLength(1)
+    expect(names[0]).toHaveAttribute("name", "name_on_card")
+    expect(names[0]).toHaveAttribute("autocomplete", "cc-name")
+    expect(screen.queryByLabelText("First name")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Last name")).not.toBeInTheDocument()
+
+    const country = screen.getByLabelText("Country")
+    expect(country).toBeInstanceOf(HTMLSelectElement)
+    expect(country).toHaveAttribute("name", "country")
+    expect(country).toHaveAttribute("autocomplete", "billing country")
+
+    // The browser locale's region is the default; the buyer can change it.
+    expect(country).toHaveValue("US")
+    fireEvent.change(country, { target: { value: "" } })
+    const initialPostal = screen.getByLabelText("Postal code")
+    expect(initialPostal).toHaveAttribute("name", "zip")
+    expect(initialPostal).toHaveAttribute("autocomplete", "billing postal-code")
+    expect(initialPostal).toBeRequired()
+
+    fireEvent.change(country, { target: { value: "AG" } })
+    expect(screen.getByLabelText("Postal code (optional)")).not.toBeRequired()
+
+    fireEvent.change(country, { target: { value: "US" } })
+    const usPostal = screen.getByLabelText("ZIP code")
+    expect(usPostal).toBeRequired()
+    expect(usPostal).toHaveAttribute("inputmode", "numeric")
+    expect(usPostal).toHaveAttribute("pattern", "[0-9]{5}(?:-[0-9]{4})?")
+  })
+
+  it("keeps inactive rail billing controls hidden, disabled, and uniquely identified", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            rails: [checkoutOption("nmi"), checkoutOption("ccbill")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    const form = await screen.findByRole("form", { name: "Secure payment" })
+    expect(screen.getAllByLabelText("Name on card")).toHaveLength(1)
+
+    fireEvent.click(screen.getByText("CCBill"))
+
+    const names = screen.getAllByLabelText("Name on card")
+    expect(names).toHaveLength(2)
+    expect(
+      names.filter((field) => !field.hasAttribute("disabled"))
+    ).toHaveLength(1)
+    expect(
+      names.find((field) => field.id.includes("-card-name-on-card"))
+    ).toBeDisabled()
+    expect(
+      names.find((field) => field.id.includes("-ccbill-name-on-card"))
+    ).not.toBeDisabled()
+
+    const ids = [...form.querySelectorAll<HTMLElement>("[id]")].map(
+      (field) => field.id
+    )
+    expect(new Set(ids).size).toBe(ids.length)
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to CCBill" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Name on card is required"
+    )
+  })
+
+  it("renders expired sessions terminally", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({ session: { status: "expired" } })}
+      />
+    )
+    await waitFor(() => {
+      expect(
+        screen.getByText("This checkout link has expired")
+      ).toBeInTheDocument()
+    })
+  })
+
+  it("renders blocked sessions with the capability message", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            status: "blocked",
+            failure_message: "This purchase is not available for this account.",
+            rails: [],
+          },
+        })}
+      />
+    )
+
+    expect(
+      await screen.findByText("This purchase isn’t available")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("This purchase is not available for this account.")
+    ).toBeInTheDocument()
+  })
+
+  it("withholds a rail paired with the wrong browser driver", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            rails: [
+              {
+                id: "option_bad",
+                rail: "nmi",
+                mode: "subscription",
+                driver: "redirect",
+              },
+            ],
+          },
+        })}
+      />
+    )
+
+    expect(
+      await screen.findByText("Checkout isn’t available right now")
+    ).toBeInTheDocument()
+  })
+
+  it("reports an already-settled session to its host", async () => {
+    const onComplete = vi.fn()
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            status: "succeeded",
+            payment_id: "pay_existing",
+            subscription_id: "sub_existing",
+          },
+        })}
+        onComplete={onComplete}
+      />
+    )
+
+    expect(
+      (await screen.findAllByText("Payment complete")).length
+    ).toBeGreaterThan(0)
+    expect(onComplete).toHaveBeenCalledOnce()
+    expect(onComplete).toHaveBeenCalledWith({
+      status: "succeeded",
+      payment_id: "pay_existing",
+      subscription_id: "sub_existing",
+    })
+  })
+
+  it("keeps an empty CCBill submission client-side", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>()
+    render(<Checkout source={ccbillSource(pay)} />)
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue to CCBill" })
+    )
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Name on card is required"
+    )
+    expect(pay).not.toHaveBeenCalled()
+  })
+
+  it("submits only the required CCBill card billing details", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "failed",
+      failure_message: "Test stop",
+    })
+    render(<Checkout source={ccbillSource(pay)} />)
+
+    await screen.findByRole("button", { name: "Continue to CCBill" })
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Jane Tester" },
+    })
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "US" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "62704" },
+    })
+
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument()
+    const name = screen.getByLabelText("Name on card")
+    expect(name).toHaveAttribute("name", "name_on_card")
+    expect(name).toHaveAttribute("autocomplete", "cc-name")
+    expect(screen.getByLabelText("Country")).toHaveAttribute(
+      "autocomplete",
+      "billing country"
+    )
+    expect(screen.getByLabelText("ZIP code")).toHaveAttribute(
+      "autocomplete",
+      "billing postal-code"
+    )
+    expect(screen.queryByLabelText("Address")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("City")).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText("State / region (optional)")
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Continue to CCBill" }))
+
+    await waitFor(() => {
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_ccbill",
+        name_on_card: "Jane Tester",
+        zip: "62704",
+        country: "US",
+      })
+    })
+  })
+
+  it("pays with a stored card without tokenizing a new one", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "succeeded",
+      payment_id: "pay_saved",
+    })
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("nmi", {
+              tokenization_key: "preview_tokenization_key",
+              tokenization_url: "preview://collect",
+            }),
+          ],
+          saved_methods: [
+            {
+              id: "pm_saved_1",
+              option_id: "option_nmi",
+              rail: "nmi",
+              brand: "visa",
+              last_four: "1111",
+              exp_month: 10,
+              exp_year: 2029,
+            },
+          ],
+        })
+      },
+      pay,
+    }
+
+    render(<Checkout source={source} />)
+
+    const saved = await screen.findByRole("radio", { name: /Visa/ })
+    fireEvent.click(saved)
+    fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe) / }))
+
+    await waitFor(() => {
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_nmi",
+        payment_method_id: "pm_saved_1",
+      })
+    })
+  })
+
+  it("shows a stored-card failure and keeps the card payable", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "failed",
+      failure_message:
+        "That saved card is no longer available. Choose another card.",
+    })
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("nmi", {
+              tokenization_key: "preview_tokenization_key",
+              tokenization_url: "preview://collect",
+            }),
+          ],
+          saved_methods: [
+            {
+              id: "pm_saved_1",
+              option_id: "option_nmi",
+              rail: "nmi",
+              brand: "visa",
+              last_four: "1111",
+            },
+          ],
+        })
+      },
+      pay,
+    }
+
+    render(<Checkout source={source} />)
+
+    // The stored card is selected by default, so the button is live even
+    // though the new-card fields are hidden.
+    const button = await screen.findByRole("button", {
+      name: /^(Pay|Subscribe) /,
+    })
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+
+    // The failure must be visible: the card-field slot is hidden in this state.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That saved card is no longer available. Choose another card."
+    )
+  })
+
+  it("falls back to new-card entry when the customer picks it", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "succeeded",
+    })
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("nmi", {
+              tokenization_key: "preview_tokenization_key",
+              tokenization_url: "preview://collect",
+            }),
+          ],
+          saved_methods: [
+            {
+              id: "pm_saved_1",
+              option_id: "option_nmi",
+              rail: "nmi",
+              brand: "visa",
+              last_four: "1111",
+            },
+          ],
+        })
+      },
+      pay,
+    }
+
+    render(<Checkout source={source} />)
+
+    fireEvent.click(
+      await screen.findByRole("radio", { name: "Use a new card" })
+    )
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "李 小龍" },
+    })
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "JP" },
+    })
+    fireEvent.change(screen.getByLabelText("Postal code"), {
+      target: { value: "100-0001" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^(Pay|Subscribe) / }))
+
+    await waitFor(() => {
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_nmi",
+        payment_token: "preview_payment_token",
+        name_on_card: "李 小龍",
+        country: "JP",
+        zip: "100-0001",
+        last_four: "4242",
+        card_type: "visa",
+        expiry_date: "12/27",
+      })
+    })
+  })
+
+  it("names the Solana method after the host-bound token and network", async () => {
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("ccbill"),
+            checkoutOption("solana", {
+              token_symbol: "usdc",
+              token_name: "USD Coin",
+              network: "devnet",
+            }),
+          ],
+        })
+      },
+      pay: vi.fn(),
+    }
+
+    render(<Checkout source={source} />)
+
+    expect(
+      await screen.findByText("USD Coin (USDC) on Solana devnet")
+    ).toBeInTheDocument()
+  })
+
+  it("does not offer a Solana option the host bound no token to", async () => {
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [checkoutOption("ccbill"), checkoutOption("solana")],
+        })
+      },
+      pay: vi.fn(),
+    }
+
+    render(<Checkout source={source} />)
+
+    // One remaining rail: no chooser, just its body.
+    expect(await screen.findByText(/CCBill’s secure page/)).toBeInTheDocument()
+    expect(screen.queryByText("Crypto")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("radio", { name: /Crypto/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it("creates a Solana transfer request and renders the official QR", async () => {
+    const transactionURL =
+      "solana:recipient?amount=19.99&spl-token=mint&reference=reference"
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "requires_action",
+      transaction_url: transactionURL,
+    })
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [checkoutOption("solana", { token_symbol: "usd1" })],
+        })
+      },
+      pay,
+    }
+
+    render(<Checkout source={source} />)
+
+    await waitFor(() => {
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_solana",
+        token_symbol: "USD1",
+      })
+    })
+    expect(
+      await screen.findByRole("img", { name: "Solana Pay QR code" })
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(createQR).toHaveBeenCalledWith(
+        transactionURL,
+        208,
+        "#ffffff",
+        "#18181b"
+      )
+    })
+    expect(
+      screen.getByRole("link", { name: "Open in wallet" })
+    ).toHaveAttribute("href", transactionURL)
+    expect(
+      screen.getByText("19.99 USD1 · Watching for payment…")
+    ).toBeInTheDocument()
+  })
+
+  it("resumes a pending Solana request without creating another", async () => {
+    const transactionURL =
+      "solana:recipient?amount=8.50&spl-token=mint&reference=reference"
+    const pay = vi.fn<CheckoutSource["pay"]>()
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          status: "requires_action",
+          transaction_url: transactionURL,
+          rails: [checkoutOption("solana", { token_symbol: "USDC" })],
+        })
+      },
+      pay,
+    }
+
+    render(<Checkout source={source} />)
+
+    expect(
+      await screen.findByRole("img", { name: "Solana Pay QR code" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("8.50 USDC · Watching for payment…")
+    ).toBeInTheDocument()
+    expect(pay).not.toHaveBeenCalled()
+  })
+
+  it("polls a pending Solana request through settlement", async () => {
+    vi.useFakeTimers()
+    const transactionURL =
+      "solana:recipient?amount=5.00&spl-token=mint&reference=reference"
+    const created = fixtureSession({
+      rails: [checkoutOption("solana", { token_symbol: "USDC" })],
+    })
+    const succeeded = fixtureSession({
+      status: "succeeded",
+      payment_id: "pay_solana",
+      rails: [],
+    })
+    const getSession = vi
+      .fn<CheckoutSource["getSession"]>()
+      .mockResolvedValueOnce(created)
+      .mockResolvedValueOnce(succeeded)
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "requires_action",
+      transaction_url: transactionURL,
+    })
+    const onComplete = vi.fn()
+
+    render(<Checkout source={{ getSession, pay }} onComplete={onComplete} />)
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(pay).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000)
+    })
+
+    expect(screen.getAllByText("Payment complete").length).toBeGreaterThan(0)
+    expect(onComplete).toHaveBeenCalledWith({
+      status: "succeeded",
+      payment_id: "pay_solana",
+      subscription_id: undefined,
+    })
+  })
+})
+
+describe("CheckoutModal", () => {
+  it("hosts the flow with inline callbacks without update loops", async () => {
+    render(
+      <CheckoutModal
+        open
+        onOpenChange={() => {}}
+        source={createFixtureSource()}
+        onPhaseChange={() => {}}
+      />
+    )
+    await waitFor(() => {
+      expect(
+        screen.getByText("Subscribe for $99.00 every 30 days")
+      ).toBeInTheDocument()
+    })
+    const dialog = screen.getByRole("dialog")
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')
+    expect(overlay?.parentElement).toBe(dialog.parentElement)
+    expect(dialog.parentElement).toHaveAttribute("data-slot", "dialog-portal")
+    expect(dialog).toHaveClass(
+      "orck",
+      "w-[860px]",
+      "max-h-[calc(100dvh-2rem)]",
+      "overflow-hidden",
+      "ring-0",
+      "[&>[data-slot=dialog-close]]:top-5",
+      "[&>[data-slot=dialog-close]]:right-5"
+    )
+    expect(dialog.querySelector(".overflow-y-auto")).toHaveClass(
+      "max-h-[calc(100dvh-6rem)]",
+      "touch-pan-y",
+      "overscroll-contain",
+      "pr-6",
+      "[scrollbar-width:none]",
+      "[-webkit-overflow-scrolling:touch]",
+      "[&::-webkit-scrollbar]:hidden"
+    )
+  })
+
+  it("themes the modal shell and close control in dark mode", async () => {
+    render(
+      <CheckoutModal
+        open
+        onOpenChange={() => {}}
+        source={createFixtureSource()}
+        appearance={{
+          theme: "dark",
+          variables: {
+            primary: "oklch(0.7 0.2 250)",
+            radius: "1rem",
+          },
+        }}
+      />
+    )
+
+    await screen.findByText("Subscribe for $99.00 every 30 days")
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveAttribute("data-orck-theme", "dark")
+    expect(dialog.style.getPropertyValue("--primary")).toBe(
+      "oklch(0.7 0.2 250)"
+    )
+    expect(dialog.style.getPropertyValue("--radius")).toBe("1rem")
+    expect(dialog).toHaveClass(
+      "bg-background",
+      "text-foreground",
+      "[&>[data-slot=dialog-close]]:text-foreground"
+    )
+    expect(screen.getByRole("button", { name: "Close" })).toBeVisible()
+  })
+
+  it("preloads and remounts aligned Collect.js fields when Card is reselected", async () => {
+    const configure = vi.fn()
+    configure.mockImplementation((config: Record<string, unknown>) => {
+      const fieldsAvailable = config.fieldsAvailableCallback
+      if (typeof fieldsAvailable === "function") fieldsAvailable()
+    })
+    window.CollectJS = {
+      configure,
+      startPaymentRequest: vi.fn(),
+    }
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("stripe"),
+            checkoutOption("nmi", {
+              tokenization_key: "public_test_key",
+              tokenization_url: "https://secure.nmi.com/token/Collect.js",
+            }),
+          ],
+        })
+      },
+      async pay() {
+        return { status: "succeeded" }
+      },
+    }
+
+    render(<CheckoutModal open onOpenChange={() => {}} source={source} />)
+
+    expect(await screen.findByText("Stripe")).toBeInTheDocument()
+    expect(screen.getByText("Card").closest("label")).not.toHaveClass(
+      "font-semibold"
+    )
+    const script = await waitFor(() => {
+      const element = document.getElementById("openrails-collectjs")
+      expect(element).toBeInstanceOf(HTMLScriptElement)
+      return element as HTMLScriptElement
+    })
+    expect(Object.keys(script.dataset)).toEqual(["tokenizationKey"])
+    fireEvent.load(script)
+
+    expect(configure).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        customCss: expect.objectContaining({
+          height: "38px",
+          "line-height": "38px",
+          padding: "0 8px",
+          "background-color": expect.any(String),
+          color: expect.any(String),
+        }),
+        fields: {
+          ccnumber: {
+            selector: expect.stringMatching(/^#orck-.+-cc-number$/),
+            title: "Card number",
+            placeholder: "1234 1234 1234 1234",
+          },
+          ccexp: {
+            selector: expect.stringMatching(/^#orck-.+-cc-expiry$/),
+            title: "Expiration date",
+            placeholder: "MM / YY",
+          },
+          cvv: {
+            selector: expect.stringMatching(/^#orck-.+-cc-cvv$/),
+            title: "Card security code",
+            placeholder: "CVC",
+          },
+        },
+      })
+    )
+    expect(configure).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByText("Card"))
+    await waitFor(() => expect(configure).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByText("Stripe"))
+    expect(configure).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(screen.getByText("Card"))
+    await waitFor(() => expect(configure).toHaveBeenCalledTimes(3))
+  })
+
+  it("finishes loading Collect.js after the modal closes and reopens", async () => {
+    const configure = vi.fn()
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("nmi", {
+              tokenization_key: "public_test_key",
+              tokenization_url: "https://payments.example.test/collect.js",
+            }),
+          ],
+        })
+      },
+      async pay() {
+        return { status: "succeeded" }
+      },
+    }
+
+    const view = render(
+      <CheckoutModal open onOpenChange={() => {}} source={source} />
+    )
+    const script = await waitFor(() => {
+      const element = document.getElementById("openrails-collectjs")
+      expect(element).toBeInstanceOf(HTMLScriptElement)
+      return element as HTMLScriptElement
+    })
+
+    view.rerender(
+      <CheckoutModal open={false} onOpenChange={() => {}} source={source} />
+    )
+    view.rerender(
+      <CheckoutModal open onOpenChange={() => {}} source={source} />
+    )
+    await screen.findByText("Card number")
+
+    window.CollectJS = {
+      configure,
+      startPaymentRequest: vi.fn(),
+    }
+    fireEvent.load(script)
+
+    await waitFor(() => expect(configure).toHaveBeenCalledOnce())
+    expect(
+      screen.queryByText("Card fields failed to load")
+    ).not.toBeInTheDocument()
+  })
+
+  it("uses settled copy in a modal instead of claiming it will redirect", async () => {
+    const source = createFixtureSource({
+      session: { rails: [checkoutOption("stripe")] },
+      payResult: { status: "succeeded" },
+      payDelayMs: 1,
+    })
+
+    render(<CheckoutModal open onOpenChange={() => {}} source={source} />)
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue to Stripe" })
+    )
+
+    expect(await screen.findByText("You're all set.")).toBeInTheDocument()
+    expect(screen.queryByText(/Returning to/)).not.toBeInTheDocument()
+  })
+})
+
+describe("accepted processing", () => {
+  it("polls a pending NMI payment without tokenizing or submitting again", async () => {
+    const pay = vi.fn().mockResolvedValue({ status: "processing" })
+    const getSession = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureSession())
+      .mockResolvedValueOnce(
+        fixtureSession({ status: "processing", expires_at: null })
+      )
+      .mockResolvedValue(
+        fixtureSession({ status: "succeeded", payment_id: "pay_verified" })
+      )
+    const onComplete = vi.fn()
+    render(<Checkout source={{ getSession, pay }} onComplete={onComplete} />)
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(screen.getByText("Confirming payment…")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", {
+        name: "Subscribe for $99.00 every 30 days",
+      })
+    ).not.toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000)
+    })
+    expect(screen.getAllByText("Payment complete").length).toBeGreaterThan(0)
+    expect(pay).toHaveBeenCalledTimes(1)
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_id: "pay_verified",
+        status: "succeeded",
+      })
+    )
+  })
+  it("retains an ambiguous pay failure and ignores local expiry", async () => {
+    const pay = vi.fn().mockRejectedValue(new Error("connection lost"))
+    const getSession = vi
+      .fn()
+      .mockResolvedValue(
+        fixtureSession({ expires_at: new Date(Date.now() + 100).toISOString() })
+      )
+    render(<Checkout source={{ getSession, pay }} />)
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500)
+    })
+    expect(screen.getByText("Confirming payment…")).toBeInTheDocument()
+    expect(
+      screen.queryByText("This checkout link has expired")
+    ).not.toBeInTheDocument()
+    expect(pay).toHaveBeenCalledTimes(1)
+    expect(getSession.mock.calls.length).toBeGreaterThan(1)
+  })
+  it("keeps awaiting an ambiguous pay through stale ready reads until settlement", async () => {
+    const pay = vi.fn().mockRejectedValue(new Error("response lost"))
+    const getSession = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureSession())
+      .mockResolvedValueOnce(fixtureSession({ status: "requires_action" }))
+      .mockResolvedValueOnce(fixtureSession({ status: "created" }))
+      .mockResolvedValue(
+        fixtureSession({ status: "succeeded", payment_id: "settled" })
+      )
+    render(<Checkout source={{ getSession, pay }} />)
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(screen.getByText("Confirming payment…")).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", {
+          name: "Subscribe for $99.00 every 30 days",
+        })
+      ).not.toBeInTheDocument()
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(screen.getAllByText("Payment complete").length).toBeGreaterThan(0)
+    expect(pay).toHaveBeenCalledTimes(1)
+  })
+  it("loads processing without an available rail and waits for definitive failure", async () => {
+    const source: CheckoutSource = {
+      getSession: vi
+        .fn()
+        .mockResolvedValueOnce(
+          fixtureSession({ status: "processing", rails: [], expires_at: null })
+        )
+        .mockResolvedValue(fixtureSession({ status: "failed" })),
+      pay: vi.fn(),
+    }
+    render(<Checkout source={source} />)
+    await screen.findByText("Confirming payment…")
+    expect(
+      await screen.findByText("Payment failed", {}, { timeout: 5000 })
+    ).toBeInTheDocument()
+    expect(source.pay).not.toHaveBeenCalled()
+  })
+})
+
+it("does not apply a previous source's payment result after a source switch", async () => {
+  let resolve!: (value: { status: "succeeded" }) => void
+  const pending = new Promise<{ status: "succeeded" }>((done) => {
+    resolve = done
+  })
+  const oldSource: CheckoutSource = {
+    getSession: async () => fixtureSession(),
+    pay: vi.fn().mockReturnValue(pending),
+  }
+  const complete = vi.fn()
+  const { rerender } = render(
+    <Checkout source={oldSource} onComplete={complete} />
+  )
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+  )
+  const next = createFixtureSource({
+    session: { merchant: { display_name: "Second merchant" } },
+  })
+  rerender(<Checkout source={next} onComplete={complete} />)
+  await screen.findAllByText("Second merchant")
+  await act(async () => {
+    resolve({ status: "succeeded" })
+    await pending
+  })
+  expect(complete).not.toHaveBeenCalled()
+  expect(
+    screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+  ).toBeEnabled()
+})
+
+describe("one card panel", () => {
+  const nmiRail = checkoutOption("nmi", {
+    tokenization_key: "preview_tokenization_key",
+    tokenization_url: "preview://collect",
+  })
+
+  it("saves a new card to the account first and charges it by id", async () => {
+    const calls: { path: string; body: unknown }[] = []
+    const fetch = vi.fn(async (input: string, init: RequestInit) => {
+      calls.push({ path: input, body: JSON.parse(String(init.body)) })
+      return Response.json({
+        id: "pm_new",
+        psp_id: "option_nmi",
+        card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2027 },
+      })
+    })
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "succeeded",
+    })
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <Checkout
+          source={{
+            getSession: async () =>
+              fixtureSession({
+                rails: [{ ...nmiRail, psp_key: "nmi" }],
+                saved_methods: [],
+              }),
+            pay,
+          }}
+        />
+      </BillingProvider>
+    )
+    // One rail: no provider chooser.
+    await screen.findByLabelText("Name on card")
+    expect(
+      screen.queryByRole("radiogroup", { name: "Payment method" })
+    ).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    await waitFor(() =>
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_nmi",
+        payment_method_id: "pm_new",
+      })
+    )
+    expect(calls).toEqual([
+      {
+        path: "/billing/v1/me/payment-methods",
+        body: expect.objectContaining({
+          provider: "nmi",
+          payment_token: "preview_payment_token",
+          last_four: "4242",
+          card_type: "visa",
+          expiry_date: "12/27",
+        }),
+      },
+    ])
+  })
+
+  it("keeps the panel after a decline and retries with another card", async () => {
+    const pay = vi
+      .fn<CheckoutSource["pay"]>()
+      .mockResolvedValueOnce({
+        status: "failed",
+        failure: {
+          reason: "insufficient_funds",
+          message: "Your card has insufficient funds.",
+          field: "",
+        },
+      })
+      .mockResolvedValueOnce({ status: "succeeded" })
+    const onComplete = vi.fn()
+    render(
+      <Checkout
+        source={{
+          getSession: async () => {
+            const session = fixtureSession({ rails: [nmiRail] })
+            return {
+              ...session,
+              saved_methods: session.saved_methods?.map((method) => ({
+                ...method,
+                option_id: nmiRail.id,
+              })),
+            }
+          },
+          pay,
+        }}
+        onComplete={onComplete}
+      />
+    )
+    const button = await screen.findByRole("button", {
+      name: "Subscribe for $99.00 every 30 days",
+    })
+    fireEvent.click(button)
+    expect(
+      await screen.findByText("Your card has insufficient funds.")
+    ).toBeInTheDocument()
+    expect(pay).toHaveBeenLastCalledWith({
+      option_id: "option_nmi",
+      payment_method_id: "pm_preview_visa",
+    })
+    fireEvent.click(screen.getByRole("radio", { name: /5454/ }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    await waitFor(() => expect(onComplete).toHaveBeenCalled())
+    expect(pay).toHaveBeenLastCalledWith({
+      option_id: "option_nmi",
+      payment_method_id: "pm_preview_mc",
+    })
+  })
+
+  it("shows a field-specific decline next to that field", async () => {
+    const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
+      status: "failed",
+      failure: {
+        reason: "incorrect_cvc",
+        message: "The security code is incorrect.",
+        field: "cvc",
+      },
+    })
+    render(
+      <Checkout
+        source={{
+          getSession: async () =>
+            fixtureSession({ rails: [nmiRail], saved_methods: [] }),
+          pay,
+        }}
+      />
+    )
+    fireEvent.change(await screen.findByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Subscribe for $99.00 every 30 days" })
+    )
+    const message = await screen.findByText("The security code is incorrect.")
+    expect(message).toHaveAttribute("id", expect.stringMatching(/cvv-error$/))
+  })
+})
