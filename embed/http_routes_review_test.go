@@ -178,8 +178,9 @@ func TestConfiguredRoutesOmitDisabledCatalogMutations(t *testing.T) {
 	require.NoError(t, err)
 	reads := 0
 	for _, route := range routes {
-		// Subscription repricing changes billing agreements, not catalog definitions.
-		if strings.Contains(route.Path, "/catalog") && !strings.Contains(route.Path, "/catalog/reprice-") {
+		// Subscription repricing changes billing agreements, not catalog
+		// definitions; offer lookup is a read carrying its keys in a POST body.
+		if strings.Contains(route.Path, "/catalog") && !strings.Contains(route.Path, "/catalog/reprice-") && !strings.HasSuffix(route.Path, "/offers/lookup") {
 			require.Contains(t, []string{http.MethodGet, http.MethodHead, http.MethodOptions}, route.Method, route.Path)
 			reads++
 		}
