@@ -124,7 +124,10 @@ func TestDefaultPaymentMethod(t *testing.T) {
 		c.setDefault(tp, newest)
 		require.Equal(t, newest, c.requireOneDefault("set default"))
 		require.Equal(t, newest, c.listedDefault(tp))
-		c.setDefault(tp, first)
+		// The customer's own route switches it back.
+		mine := unwrap(c.must(http.MethodPut, "/default-payment-method", "", map[string]any{"payment_method_id": first}))
+		require.Equal(t, true, mine["default"])
+		require.Equal(t, first, c.requireOneDefault("customer set default"))
 
 		// The second card funds a membership and is charged: most recently used.
 		price := w.membership("content:default-"+rail, 9_990_000)

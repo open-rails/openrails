@@ -224,7 +224,7 @@ for an unresolved sale.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/v1/me/payment-methods` | List stored methods with currency-qualified collection defaults; `default: true` marks the customer's default, listed first. Query: `limit`, `offset` |
-| PUT | `/v1/me/payment-methods/{id}/default` | Make a usable method the default (the previous default stops being one atomically); `409 payment_method_not_usable` for a parked or pending-delete method |
+| PUT | `/v1/me/default-payment-method` | Body `{"payment_method_id": ...}`. Make a usable method the default (the previous default stops being one atomically); `409 payment_method_not_usable` for a parked or pending-delete method |
 | POST | `/v1/me/payment-methods` | Store an NMI card. Body: `payment_token` (Collect.js) + billing details |
 | PUT | `/v1/me/payment-methods/{id}` | Durably replace an NMI card. Requires tokenization's `payment_token`, `last_four` and `expiry_date` (`card_type` optional); billing fields are optional. Returns the updated method when confirmed, `202` with no body while converging, `409 payment_method_update_retry_required` when a fresh token is required, or `502 payment_method_update_failed` for a terminal provider conflict. |
 | DELETE | `/v1/me/payment-methods/{id}` | Delete an NMI method through the durable provider-aware workflow. Returns `204` when complete, `202` while provider convergence continues, and an error when refused/failed. Stripe cards are managed through Stripe Billing Portal. |
@@ -393,7 +393,7 @@ for those routes.
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | `merchant:payments:refund` | `{decision: refund\|dismiss, notes}`; refund returns the remaining amount and ends the purchase's access; `Client.ResolvePurchaseReview` |
 | GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
-| PUT | `/v1/merchant/customers/{customer_id}/payment-methods/{id}/default` | `merchant:customer-settings:update` | Make a customer's usable method the default (`Client.SetDefaultPaymentMethod`) |
+| PUT | `/v1/merchant/customers/{customer_id}/default-payment-method` | `merchant:customer-settings:update` | Body `{"payment_method_id": ...}`. Make a customer's usable method the default (`Client.SetDefaultPaymentMethod`) |
 | POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately. An NMI-billed cancel while the destructive switch is off answers `409 provider_cancel_held` and raises `life.provider_cancel.held`; `account_deletion: true` cancels locally and holds the NMI delete instead |
 | POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
 | POST | `/v1/merchant/subscriptions/{id}/change-tier` | `merchant:subscriptions:update` | Apply a same-group tier change. Body `{ "price_id": "..." }` |

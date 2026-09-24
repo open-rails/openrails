@@ -880,11 +880,13 @@ func AdminSetDefaultPaymentMethod(r *httprequest.Request) {
 }
 
 func setDefaultPaymentMethodForCustomer(r *httprequest.Request, customerID string) {
-	path := new(paymentMethodURI)
-	if !r.BindURI(path) {
+	var body struct {
+		PaymentMethodID string `json:"payment_method_id" binding:"required"`
+	}
+	if !r.BindJSON(&body) {
 		return
 	}
-	methodID, err := openrails.ParsePaymentMethodID(path.ID)
+	methodID, err := openrails.ParsePaymentMethodID(body.PaymentMethodID)
 	if err != nil || methodID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
 		return

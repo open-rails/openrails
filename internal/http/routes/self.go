@@ -112,6 +112,7 @@ func registerSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	}
 
 	// Payment methods.
+	group.Handle(http.MethodPut, "/default-payment-method", h(httphandlers.SetDefaultPaymentMethod))
 	pm := group.Group("/payment-methods")
 	pm.Handle(http.MethodGet, "", h(httphandlers.ListPaymentMethods))
 	pm.Handle(http.MethodPost, "/stripe-setup", h(httphandlers.CreateStripeMethodSetup))
@@ -119,7 +120,6 @@ func registerSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	pm.Handle(http.MethodPost, "/stripe-setup/:id/confirm", h(httphandlers.ConfirmStripeMethodSetup))
 	pm.Handle(http.MethodPost, "", h(httphandlers.CreatePaymentMethod))
 	pm.Handle(http.MethodPut, "/:id", h(httphandlers.UpdatePaymentMethod))
-	pm.Handle(http.MethodPut, "/:id/default", h(httphandlers.SetDefaultPaymentMethod))
 	pm.Handle(http.MethodDelete, "/:id", h(httphandlers.DeletePaymentMethod))
 
 	// Checkout creation is disabled in management-only scope, but an app-created

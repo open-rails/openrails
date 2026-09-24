@@ -165,7 +165,7 @@ another card at commit whenever the default is deleted, parked or detached
 (the most recently charged card, then a non-expired one, then the newest).
 The first saved card becomes the default; an in-place card replacement keeps
 it. Payment-method reads return `default: true` on it and list it first, so
-hosts preselect it; `SetDefaultPaymentMethod` (or `PUT .../payment-methods/{id}/default`)
+hosts preselect it; `SetDefaultPaymentMethod` (or `PUT .../default-payment-method` with `{"payment_method_id": ...}`)
 switches it atomically. An expired card is not demoted by the passage of time;
 it stays default until another card is chosen or it is replaced.
 

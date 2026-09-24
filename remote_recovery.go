@@ -145,7 +145,7 @@ func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string,
 		return nil, err
 	}
 	var out PaymentMethod
-	if err := c.do(ctx, http.MethodPut, path+"/payment-methods/"+method+"/default", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPut, path+"/default-payment-method", map[string]string{"payment_method_id": method}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
