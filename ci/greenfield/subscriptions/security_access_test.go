@@ -337,4 +337,3 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		require.True(t, found, "%+v", cfg)
 	})
 }
-
