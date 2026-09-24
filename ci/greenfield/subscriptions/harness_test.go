@@ -101,6 +101,8 @@ type world struct {
 	nmi    *nmiFake
 	auth   *verifier
 	cfg    func(*config.Config)
+	// declare adjusts the merchant's provider declaration before start.
+	declare func(map[string]embed.PSPConfig)
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
@@ -210,14 +212,18 @@ func (w *world) start() {
 	if w.cfg != nil {
 		w.cfg(cfg)
 	}
+	psps := map[string]embed.PSPConfig{
+		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": whsecStripe}}},
+		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}},
+		"ccbill": {"ccbill": {AccountID: ccbillAcct}},
+	}
+	if w.declare != nil {
+		w.declare(psps)
+	}
 	rt, err := embed.New(t.Context(), embed.Options{
-		Auth: identity,
-		HTTP: &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: embed.CustomerBillingManagement}}},
-		Merchant: &embed.MerchantDeclaration{Slug: w.slug, Config: embed.MerchantConfig{DisplayName: w.slug, PSPs: map[string]embed.PSPConfig{
-			"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": whsecStripe}}},
-			"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}},
-			"ccbill": {"ccbill": {AccountID: ccbillAcct}},
-		}}},
+		Auth:            identity,
+		HTTP:            &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: embed.CustomerBillingManagement}}},
+		Merchant:        &embed.MerchantDeclaration{Slug: w.slug, Config: embed.MerchantConfig{DisplayName: w.slug, PSPs: psps}},
 		Config:          cfg,
 		PGXPool:         pool,
 		River:           embed.RiverFromHost(),

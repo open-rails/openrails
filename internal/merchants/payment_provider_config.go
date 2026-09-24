@@ -294,7 +294,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		lastVerifiedAt = &now
 	}
 
-	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, enabled, req, secretNames, secretKeys, credentialsValidated, lastVerifiedAt)
+	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, enabled, req, secretNames, secretKeys, credentialsValidated, lastVerifiedAt, credentialTransitionPublication{RetireWebhookOverlap: req.RetireWebhookOverlap})
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}

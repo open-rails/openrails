@@ -46,6 +46,12 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	// decorative, not a wiring that makes the purge reachable (Service.Delete
 	// still has no route and no CLI; see merchants.PurgeInventory).
 	svc.WithDestructivePolicy(destructive.New(r.DB))
+	overlap, err := r.Config.WebhookSecretOverlapDuration()
+	if err != nil {
+		backend.Close()
+		return r.armingFailure(err)
+	}
+	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap)
 	r.ArmMerchantsService(svc, store)
 	r.MerchantSecretBackend = backend
 	r.MerchantSecretPing = backend.Ping

@@ -169,35 +169,32 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 			versions = map[string]int{}
 		}
 
-		if transitionFrom == "" && rail == "stripe" {
-			preserved, hasPreserved := merged["webhook_signing_secret_previous"]
-			if _, rotating := refs["webhook_signing_secret"]; rotating {
-				if current, exists := merged["webhook_signing_secret"]; exists {
-					if hasPreserved {
-						return fmt.Errorf("merchants: webhook rotation overlap requires explicit retirement before another rotation")
-					}
-					preserved, hasPreserved = current, true
+		// SEC-29: rotating the webhook secret keeps the outgoing one only for a
+		// bounded overlap; a supplied previous secret is accepted only from the
+		// managed endpoint rollover. Retirement ends the overlap at once.
+		overlapUntil := time.Time{}
+		if transitionFrom == "" && hasWebhookOverlap(rail) {
+			if _, supplied := refs["webhook_signing_secret_previous"]; supplied && publication.WebhookEndpointID == "" {
+				return apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied")
+			}
+			next, rotating := refs["webhook_signing_secret"]
+			current, hasCurrent := merged["webhook_signing_secret"]
+			if rotating && hasCurrent && !publication.RetireWebhookOverlap {
+				changed, err := s.secretRefsDiffer(ctx, id, current, next)
+				if err != nil {
+					return err
+				}
+				if changed {
+					refs["webhook_signing_secret_previous"] = current
 				}
 			}
-			_, rotating := refs["webhook_signing_secret"]
-			_, replacingPrevious := refs["webhook_signing_secret_previous"]
-			if hasPreserved && (rotating || replacingPrevious) {
-				if supplied, exists := refs["webhook_signing_secret_previous"]; exists {
-					oldSecret, err := ReadSecretRef(ctx, s.secrets, id, preserved)
-					if err != nil {
-						return err
-					}
-					newSecret, err := ReadSecretRef(ctx, s.secrets, id, supplied)
-					if err != nil {
-						return err
-					}
-					if oldSecret.Value != newSecret.Value {
-						return ErrCredentialOperationConflict
-					}
+			if _, keeping := refs["webhook_signing_secret_previous"]; keeping {
+				overlapUntil = s.now().Add(s.overlapWindow())
+				if publication.OverlapFor > 0 {
+					overlapUntil = s.now().Add(publication.OverlapFor)
 				}
-				// Preserve the exact original reference, even when the caller
-				// redundantly supplies its value. Caller data cannot retire overlap.
-				refs["webhook_signing_secret_previous"] = preserved
+			} else if !publication.RetireWebhookOverlap {
+				overlapUntil = webhookOverlapExpiry(existing.Evidence)
 			}
 		}
 
@@ -208,6 +205,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		if publication.RetireWebhookOverlap {
 			delete(merged, "webhook_signing_secret_previous")
 			retired["webhook_signing_secret_previous"] = true
+			overlapUntil = time.Time{}
 		}
 		for key, ref := range refs {
 			// Backend versions belong to immutable candidate names; each new
@@ -263,6 +261,10 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		}
 		doc["credential_refs"] = merged
 		doc["retired_credentials"] = retired
+		delete(doc, "webhook_overlap_expires_at")
+		if !overlapUntil.IsZero() {
+			doc["webhook_overlap_expires_at"] = overlapUntil.UTC().Format(time.RFC3339)
+		}
 		if publication.WebhookEndpointID != "" {
 			doc["webhook_endpoint_id"] = publication.WebhookEndpointID
 		} else if _, changed := refs["webhook_signing_secret"]; changed && transitionFrom == "" {
@@ -297,8 +299,10 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 type credentialTransitionPublication struct {
 	WebhookEndpointID    string
 	RetireWebhookOverlap bool
-	From                 string
-	SnapshotRefs         map[string]SecretRef
+	// OverlapFor overrides the configured overlap (managed endpoint rollover).
+	OverlapFor   time.Duration
+	From         string
+	SnapshotRefs map[string]SecretRef
 }
 
 func credentialPublicationMetadata(enabled bool, public map[string]string, keys []string, source, custody, endpoint string, retire bool) ([]byte, error) {
@@ -393,4 +397,20 @@ func (s *Service) replayProviderCredentialPublication(ctx context.Context, id me
 		return row, true, ErrCredentialOperationConflict
 	}
 	return row, true, nil
+}
+
+// secretRefsDiffer compares two published credential values privately.
+func (s *Service) secretRefsDiffer(ctx context.Context, id merchant.ID, a, b SecretRef) (bool, error) {
+	left, err := ReadSecretRef(ctx, s.secrets, id, a)
+	if errors.Is(err, ErrSecretNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	right, err := ReadSecretRef(ctx, s.secrets, id, b)
+	if err != nil {
+		return false, err
+	}
+	return left.Value != right.Value, nil
 }

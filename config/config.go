@@ -176,6 +176,16 @@ type Config struct {
 	// PROVIDER_BILLING_QUIESCENCE_INTERVAL.
 	ProviderBillingQuiescenceInterval string `koanf:"provider_billing_quiescence_interval,omitempty"`
 
+	// WebhookSecretOverlap bounds how long a rotated-out webhook signing secret
+	// keeps verifying (SEC-29): a Go duration, empty = 24h, at most 168h.
+	// Env: WEBHOOK_SECRET_OVERLAP.
+	WebhookSecretOverlap string `koanf:"webhook_secret_overlap,omitempty"`
+
+	// ReturnOrigins are the exact origins (scheme://host[:port]) checkout
+	// success/cancel and billing-portal return URLs may name (SEC-33). Empty
+	// allows only the origin of PublicBillingBaseURL. Env: RETURN_ORIGINS.
+	ReturnOrigins []string `koanf:"return_origins,omitempty"`
+
 	// TrustedProxies lists CIDRs (e.g. "10.0.0.0/8") whose X-Forwarded-For is
 	// trusted (#746: one proxy-aware client-IP resolver for rate limiting,
 	// abuse tracking, webhook IPAddress recording, and the CCBill IP
@@ -1223,6 +1233,9 @@ func Validate(cfg *Config) error {
 	}
 	if err := validateSecretBackend(cfg); err != nil {
 		return fmt.Errorf("secret_backend config validation failed: %w", err)
+	}
+	if err := validateSecurityPolicy(cfg); err != nil {
+		return err
 	}
 
 	if err := validateSourceCIDRs(cfg.TrustedProxies); err != nil {

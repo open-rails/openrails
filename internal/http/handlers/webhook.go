@@ -469,10 +469,10 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		r.ErrorJSON(http.StatusBadRequest, "Webhook account_id is required")
 		return false
 	}
-	var signingKey string
+	var keys merchants.NMIWebhookSecrets
 	var err error
 	var found bool
-	signingKey, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
+	keys, found, err = r.State.Merchants.LoadNMIWebhookSigningSecretForAccount(r.Request.Context(), merchantID, accountID)
 	if err == nil && !found {
 		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 		return false
@@ -496,7 +496,15 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	// X-… spellings were speculative aliases: accepting them widened the set of
 	// headers an attacker could aim a forged signature at for no gateway that
 	// ever sends them.
-	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, strings.TrimSpace(r.Request.Header.Get("Webhook-Signature")))
+	header := strings.TrimSpace(r.Request.Header.Get("Webhook-Signature"))
+	signingKey := keys.Current
+	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, header)
+	// SEC-29: the rotated-out secret verifies only inside its bounded overlap.
+	if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) && strings.TrimSpace(keys.Previous) != "" {
+		if again, againErr := webhookutil.PrepareNMI(provider, body, keys.Previous, header); againErr == nil {
+			prepared, err, signingKey = again, nil, keys.Previous
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, webhookutil.ErrNMIWebhookSecretMissing),
