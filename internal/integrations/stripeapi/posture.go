@@ -89,6 +89,9 @@ func PostureCheck(transport http.RoundTripper, secretKey, connected, declared st
 func (f *Factory) VerifyPosture(ctx context.Context, secretKey, declared string) providerposture.Status {
 	key := PostureKey(secretKey, APIBase, "")
 	if f != nil && f.base != nil {
+		if liveSecretKey(secretKey) {
+			return providerposture.Status{Key: key, Verdict: providerposture.Live, Err: errors.New("stripe live key with an injected transport")}
+		}
 		return providerposture.Status{Key: key, Verdict: providerposture.Simulated}
 	}
 	return providerposture.Process().Verify(ctx, key, f.PostureCheckFor(secretKey, declared))
@@ -97,7 +100,12 @@ func (f *Factory) VerifyPosture(ctx context.Context, secretKey, declared string)
 // PostureCheckFor returns the startup check for a declared account's key.
 func (f *Factory) PostureCheckFor(secretKey, declared string) providerposture.Check {
 	if f != nil && f.base != nil {
-		return func(context.Context) (providerposture.Verdict, error) { return providerposture.Simulated, nil }
+		return func(context.Context) (providerposture.Verdict, error) {
+			if liveSecretKey(secretKey) {
+				return providerposture.Live, errors.New("stripe live key with an injected transport")
+			}
+			return providerposture.Simulated, nil
+		}
 	}
 	return PostureCheck(http.DefaultTransport, secretKey, "", declared)
 }
@@ -110,7 +118,7 @@ func requirePosture(req *http.Request, transport http.RoundTripper) error {
 	endpoint := req.URL.Scheme + "://" + req.URL.Host
 	account := req.Header.Get("Stripe-Account")
 	if ip := net.ParseIP(req.URL.Hostname()); ip != nil && ip.IsLoopback() {
-		if strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_") {
+		if liveSecretKey(secretKey) {
 			return fmt.Errorf("%w: stripe live key under sandbox posture", providerposture.ErrDisarmed)
 		}
 		return nil
@@ -123,4 +131,9 @@ func requestSecret(req *http.Request) string {
 		return user
 	}
 	return strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
+}
+
+// liveSecretKey reports a live-mode Stripe secret or restricted key.
+func liveSecretKey(secretKey string) bool {
+	return strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
 }

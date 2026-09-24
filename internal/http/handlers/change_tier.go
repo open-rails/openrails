@@ -31,6 +31,10 @@ func ChangeTier(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
 		return
 	}
+	// An upgrade charges the saved card now.
+	if !customerInitiatedChargeAllowed(r) {
+		return
+	}
 
 	subscriptionIDStr := r.Param("id")
 	if subscriptionIDStr == "" {
@@ -173,6 +177,6 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 	case errors.Is(err, subscriptions.ErrRepriceCrossCurrency):
 		r.ErrorJSON(http.StatusBadRequest, "cannot change to a plan in a different currency")
 	default:
-		r.ErrorJSON(http.StatusInternalServerError, "tier change request failed")
+		writeRefusal(r, err, "tier change request failed")
 	}
 }

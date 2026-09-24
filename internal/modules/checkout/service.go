@@ -1497,10 +1497,8 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 	if currentProduct.ID == newProduct.ID {
 		return nil, ErrTierChangeSameProduct
 	}
-	if currentProduct.TierGroup != nil && newProduct.TierGroup != nil {
-		if strings.TrimSpace(*currentProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
-			return nil, ErrTierChangeDifferentGroup
-		}
+	if !sameTierGroup(currentProduct, newProduct) {
+		return nil, ErrTierChangeDifferentGroup
 	}
 	// A tier group may mix currencies (the catalog allows a per-currency price
 	// per plan), but a SUBSCRIPTION cannot move across one: proration would
@@ -1603,10 +1601,8 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	if currentProduct.ID == newProduct.ID {
 		return nil, ErrTierChangeSameProduct
 	}
-	if currentProduct.TierGroup != nil && newProduct.TierGroup != nil {
-		if strings.TrimSpace(*currentProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
-			return nil, ErrTierChangeDifferentGroup
-		}
+	if !sameTierGroup(currentProduct, newProduct) {
+		return nil, ErrTierChangeDifferentGroup
 	}
 	// Same FX refusal as TierChange (#820) — the preview must never quote a
 	// number the charge would refuse to honour.

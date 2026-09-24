@@ -151,12 +151,16 @@ func TestPublicPSPConfigForServesOnlyWhitelistedSettings(t *testing.T) {
 		// public settings live on ITS row, so they are poisoned/served there.
 		want := map[string]string{}
 		for _, s := range profile.Settings {
-			if tc.custodian != nil {
-				tc.custodian.Settings[s.Setting] = "public-" + s.Setting
-			} else {
-				settings[s.Setting] = "public-" + s.Setting
+			value := "public-" + s.Setting
+			if s.Allowed != nil {
+				value = "https://secure.nmi.com/token/Collect.js"
 			}
-			want[s.Field] = "public-" + s.Setting
+			if tc.custodian != nil {
+				tc.custodian.Settings[s.Setting] = value
+			} else {
+				settings[s.Setting] = value
+			}
+			want[s.Field] = value
 		}
 		// A custodian displaces the rail's own tokenizer keys; declaring both
 		// is refused, so drop them from the poison set in that case.

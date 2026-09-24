@@ -442,7 +442,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(i
 -- name: GetLiveTierChangeRailIntent :one
 SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
-  AND intent_type IN ('nmi_upgrade', 'stripe_tier_change')
+  AND intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
 -- name: LockRailIntentForCollectionCompletion :one

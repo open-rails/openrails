@@ -14,11 +14,13 @@ package stripeapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/providerposture"
 )
 
 // ErrProviderReadOnly is returned for every mutating Stripe request when
@@ -60,9 +62,15 @@ func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.readOnly && mutating {
 		return nil, ErrProviderReadOnly
 	}
-	if t.sandbox && !t.fixture && mutating {
-		if err := requirePosture(req, t.transport()); err != nil {
-			return nil, err
+	if t.sandbox && mutating {
+		// An injected transport is not a posture exemption for a live key.
+		if t.fixture && liveSecretKey(requestSecret(req)) {
+			return nil, fmt.Errorf("%w: stripe live key under sandbox posture", providerposture.ErrDisarmed)
+		}
+		if !t.fixture {
+			if err := requirePosture(req, t.transport()); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// Pin the API version (#587). Clone so we don't mutate the caller's request

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -19,6 +20,21 @@ import (
 
 // DefaultNMICollectJSURL is the standard NMI Collect.js script URL.
 const DefaultNMICollectJSURL = "https://secure.networkmerchants.com/token/Collect.js"
+
+// NMICollectJSURLAllowed accepts only NMI's own Collect.js script. The URL is
+// loaded into the payment page, so a configured value can never name another
+// origin (SEC-32).
+func NMICollectJSURLAllowed(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "/token/Collect.js" {
+		return false
+	}
+	switch strings.ToLower(u.Host) {
+	case "secure.networkmerchants.com", "secure.nmi.com":
+		return true
+	}
+	return false
+}
 
 // ErrNoActivePSP means the merchant has PSPs on the
 // requested rail/environment, but all are archived and therefore drain-only.
@@ -132,7 +148,7 @@ func (s *Service) LoadNMITokenizationConfig(ctx context.Context, id merchant.ID,
 	}
 
 	cfg.CollectJSURL = collectURL
-	if cfg.CollectJSURL == "" {
+	if !NMICollectJSURLAllowed(cfg.CollectJSURL) {
 		cfg.CollectJSURL = DefaultNMICollectJSURL
 	}
 	return cfg, nil

@@ -12,6 +12,7 @@ package recommend
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/open-rails/openrails"
 )
@@ -170,15 +171,30 @@ func CancelAndRefundRec(subscriptionID openrails.SubscriptionID, refundPaymentID
 	return Recommendation{Action: ActionCancelAndRefund, Params: params}
 }
 
-// MergeParams overlays operator override_params onto the recommendation's
-// params (override wins). Neither input is mutated.
-func MergeParams(params, overrides map[string]any) map[string]any {
+// ApplyOverrides overlays operator override_params onto the recommendation's
+// params. Overrides tune how a recommendation executes, never what it acts on:
+// the object ids a recommendation names are fixed, and product_id may only fill
+// a recommendation whose product source is gone. Neither input is mutated.
+func ApplyOverrides(params, overrides map[string]any) (map[string]any, error) {
 	merged := make(map[string]any, len(params)+len(overrides))
 	for k, v := range params {
 		merged[k] = v
 	}
 	for k, v := range overrides {
+		switch k {
+		case "amount", "reason", "as_of", "revoke_access":
+		case "product_id":
+			if _, set := params[k]; set {
+				return nil, fmt.Errorf("override_params cannot change %s", k)
+			}
+		case "entitlement_id", "customer_id", "subscription_id", "refund_payment_id":
+			if current, set := params[k]; !set || fmt.Sprint(current) != fmt.Sprint(v) {
+				return nil, fmt.Errorf("override_params cannot change %s", k)
+			}
+		default:
+			return nil, fmt.Errorf("override_params cannot set %s", k)
+		}
 		merged[k] = v
 	}
-	return merged
+	return merged, nil
 }

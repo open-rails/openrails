@@ -22,6 +22,10 @@ money, browser-safe JSON and recovery of the rescue worker itself after a crash.
   records nothing afterwards. The fleets run in a second `go test` process
   beside the rest, which is why CI starts PostgreSQL with 300 connections.
 
+Adversarial cases (IDOR, merchant isolation, webhook forgery, double-spend
+races, revocation, credential class, provider configuration) are indexed in
+[security tests](security-tests.md).
+
 See the [feature coverage map](greenfield-coverage.md) for what these tests do
 and do not establish. Test count is not a percentage of functionality covered.
 

@@ -61,7 +61,7 @@ func GetMyBalance(r *httprequest.Request) {
 	}
 	snap, err := svc.GetCreditAccount(r.Request.Context(), payer, currency)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		writeRefusal(r, err, "balance unavailable")
 		return
 	}
 	r.SuccessJSON(selfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})

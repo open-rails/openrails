@@ -49,6 +49,9 @@ type publicSetting struct {
 	// it. Only legitimate where the value is a property of the rail, not of the
 	// merchant (NMI's Collect.js URL). "" = no default.
 	Default string
+	// Allowed, when set, accepts a configured value; anything else is served
+	// as Default. Script URLs a browser loads are never merchant-arbitrary.
+	Allowed func(string) bool
 }
 
 // railPublicProfile is a rail's browser-facing contract.
@@ -79,7 +82,7 @@ var publicRailProfiles = map[string]railPublicProfile{
 			// single-use tokens; charging needs the security_key, which is a
 			// secret and lives in the secret store, not here.
 			{Setting: "tokenization_key", Field: "tokenization_key", Required: true},
-			{Setting: "tokenization_url", Field: "tokenization_url", Default: DefaultNMICollectJSURL},
+			{Setting: "tokenization_url", Field: "tokenization_url", Default: DefaultNMICollectJSURL, Allowed: NMICollectJSURLAllowed},
 		},
 	},
 	// Stripe: embedded Elements once its publishable key (public by design) is
@@ -169,7 +172,7 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 
 	for _, want := range profile.Settings {
 		value := publicSettingValue(scope.Settings, want.Setting)
-		if value == "" {
+		if value == "" || (want.Allowed != nil && !want.Allowed(value)) {
 			value = want.Default
 		}
 		if value == "" {

@@ -925,8 +925,8 @@ func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.Openra
 	return s.db.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
 }
 
-// LiveTierChange returns the unresolved tier change (NMI upgrade or Stripe
-// tier change) that owns the subscription; db.IsNotFound when none does.
+// LiveTierChange returns the unresolved tier change (NMI upgrade, Stripe tier
+// change or engine upgrade) that owns the subscription; db.IsNotFound when none does.
 func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (gen.OpenrailsRailIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

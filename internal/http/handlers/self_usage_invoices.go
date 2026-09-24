@@ -30,7 +30,7 @@ func GetMyUsage(r *httprequest.Request) {
 	}
 	rows, err := svc.GetUsage(r.Request.Context(), payer, currency, from, to)
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		writeRefusal(r, err, "usage unavailable")
 		return
 	}
 	r.SuccessJSON(map[string]any{"usage": rows, "currency": currency, "from": from, "to": to})

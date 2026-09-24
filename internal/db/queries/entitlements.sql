@@ -200,6 +200,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
 );
 
 -- name: SoftDeleteFutureOneOffEntitlements :exec
+WITH retracted AS (
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
@@ -207,7 +208,22 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_o
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
+  AND ent.start_at >= sqlc.arg(end_at)::timestamptz
+    RETURNING ent.grant_id
+)
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
+FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
 
 -- name: RevokeActiveOneOffEntitlements :exec
 UPDATE openrails.entitlements ent SET
@@ -228,8 +244,8 @@ SELECT EXISTS (
     WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
-      AND ent.revoked_at IS NULL
-      AND ent.deleted_at IS NULL
+      -- A purchase projects once: a revoked or retracted window is final.
+      AND (ent.source_type = 'one_off' OR (ent.revoked_at IS NULL AND ent.deleted_at IS NULL))
 );
 
 -- name: ListEntitlementsByCustomer :many
@@ -315,12 +331,28 @@ ORDER BY ent.end_at DESC NULLS LAST
 LIMIT 1;
 
 -- name: SoftDeleteEntitlementByID :exec
+WITH retracted AS (
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL;
+  AND ent.deleted_at IS NULL
+    RETURNING ent.grant_id
+)
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
+FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
 
 -- name: RevokeActiveTimelineWindows :exec
 -- Revoke every currently-active window on the timeline, optionally filtered
@@ -341,6 +373,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
 -- name: SoftDeleteFutureTimelineWindows :exec
 -- Soft-delete every future scheduled window on the timeline, optionally
 -- filtered to one source (NULL filter = any).
+WITH retracted AS (
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
@@ -350,7 +383,22 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
   AND ent.start_at > sqlc.arg(now)::timestamptz
   AND (sqlc.narg(source_type)::text IS NULL OR ent.source_type = sqlc.narg(source_type)::text)
-  AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid);
+  AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid)
+    RETURNING ent.grant_id
+)
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
+FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
+  AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
 
 -- name: ListActiveEntitlementRecordsByCustomerIDs :many
 -- Batch read (#354/#491): active entitlement rows for MANY payable customer ids

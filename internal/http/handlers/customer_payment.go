@@ -28,6 +28,20 @@ func customerActionPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	}
 	return selfAccountPayer(r)
 }
+
+// customerInitiatedChargeAllowed refuses a customer-initiated charge from a
+// delegated credential that is not the customer's own interactive session
+// (automation, unknown class or an invoker). Requests without a delegated
+// principal are authenticated by the standalone user session.
+func customerInitiatedChargeAllowed(r *httprequest.Request) bool {
+	p, ok := middleware.PrincipalFromRequest(r)
+	if ok && (p.InvokerScoped() || p.CredentialClass != billingauth.CredentialClassUserSession) {
+		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
+		return false
+	}
+	return true
+}
+
 func paymentActionKey(r *httprequest.Request) (string, bool) {
 	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 255 {

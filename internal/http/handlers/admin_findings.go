@@ -266,7 +266,10 @@ func resolveFindingOutcome(r *httprequest.Request, store *reconcile.PGStore, fin
 	if err != nil {
 		return nil, http.StatusBadRequest, "invalid override_params: " + err.Error()
 	}
-	params := recommend.MergeParams(rec.Params, overrides)
+	params, err := recommend.ApplyOverrides(rec.Params, overrides)
+	if err != nil {
+		return nil, http.StatusBadRequest, "invalid override_params: " + err.Error()
+	}
 	execution, execErr := executeFindingAction(r, finding, rec.Action, params, notes)
 	if execErr != nil {
 		// PARTIAL FAILURE: the finding stays OPEN; the error (plus whatever

@@ -97,6 +97,10 @@ func CreateCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
+	// A saved method or card token is charged at creation.
+	if (strings.TrimSpace(req.Payment.PaymentMethodID) != "" || strings.TrimSpace(req.Payment.PaymentToken) != "") && !customerInitiatedChargeAllowed(r) {
+		return
+	}
 	// The pre-gate checks a NAMED PSP. An omitted selector is the routing
 	// request (or#288) — there is nothing to pre-gate, and routing itself fails
 	// closed when no PSP can serve the price.
