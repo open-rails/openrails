@@ -85,13 +85,13 @@ func TestConfirmedNonPurchaseReferencesRouteToSessionMirror(t *testing.T) {
 // A replayed payment row matches the pending reference only when reference,
 // session, customer, price, amount and currency all agree.
 func TestSolanaPaymentMatchesPending(t *testing.T) {
-	priceID := uuid.New()
+	priceID, userID := uuid.New(), uuid.NewString()
 	newPending := func() *PendingSolanaPayment {
-		return &PendingSolanaPayment{UserID: "user_123", PriceID: priceID.String(), SessionID: "session_123", Amount: 1000, Currency: "USD"}
+		return &PendingSolanaPayment{UserID: userID, PriceID: priceID.String(), SessionID: "session_123", Amount: 1000, Currency: "USD"}
 	}
 	newPayment := func() *models.Payment {
 		return &models.Payment{
-			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
+			CustomerID: identity.CustomerIDFromString(userID).UUID(),
 			PriceID:    priceID,
 			Amount:     1000,
 			Currency:   "usd",
@@ -116,7 +116,7 @@ func TestSolanaPaymentMatchesPending(t *testing.T) {
 			return "reference_123"
 		},
 		"other customer": func(_ *models.Payment, pp *PendingSolanaPayment) string {
-			pp.UserID = "user_456"
+			pp.UserID = uuid.NewString()
 			return "reference_123"
 		},
 		"other price": func(p *models.Payment, _ *PendingSolanaPayment) string {

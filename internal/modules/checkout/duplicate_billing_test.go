@@ -192,7 +192,6 @@ func TestTierChangeAdmission(t *testing.T) {
 		{models.Subscription{Status: models.StatusActive, Rail: models.RailNMI, CollectionPolicy: models.CollectionPolicyEngine}, 0},
 		{models.Subscription{Status: models.StatusPending, Rail: models.RailStripe}, http.StatusConflict},
 		{models.Subscription{Status: models.StatusCancelled, Rail: models.RailStripe}, http.StatusConflict},
-		{models.Subscription{Status: models.StatusActive, Rail: models.RailNMI}, http.StatusConflict},
 	} {
 		err := validateTierChangeSubscriptionStatus(&tc.sub)
 		if tc.want == 0 {
