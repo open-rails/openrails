@@ -31,14 +31,13 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	// Allowlisted path prefixes (relative to the module root). One-line
 	// justification per entry — anything else that reads env FAILS.
 	allowedPrefixes := map[string]string{
-		"cmd/":                                   "binary boundary: the process entrypoint owns flags and env",
-		"examples/":                              "standalone example apps: each is its own main(), a binary boundary like cmd/",
-		"config/":                                "mounted secret-file access for explicit host loading",
-		"hostauth/config/":                       "standalone configuration-loading boundary",
-		"tests/":                                 "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
-		"scripts/":                               "operational tooling run as its own process, not importable library code",
-		"internal/dbtest/":                       "test-support package: container/DSN discovery for test binaries",
-		"internal/integrations/vault/vaulttest/": "test-support package: VAULT_ADDR/VAULT_TOKEN external-server override, mirrors dbtest",
+		"cmd/":             "binary boundary: the process entrypoint owns flags and env",
+		"examples/":        "standalone example apps: each is its own main(), a binary boundary like cmd/",
+		"config/":          "mounted secret-file access for explicit host loading",
+		"hostauth/config/": "standalone configuration-loading boundary",
+		"tests/":           "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
+		"scripts/":         "operational tooling run as its own process, not importable library code",
+		"internal/dbtest/": "test-support package: container/DSN discovery for test binaries",
 	}
 
 	root, err := filepath.Abs("..")
