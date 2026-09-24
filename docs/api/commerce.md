@@ -49,7 +49,7 @@ Money is exact: `plan.unit_amount`, `line_items[].amount`, `tax` and
 `openrails.NewHostedCheckoutPlan(product, price)`, which stamps the scale from
 the registry (`openrails.LookupCurrency`, the same table as
 `GET /v1/currencies`) and refuses an unregistered currency; never hardcode a
-scale. `openrails.HostedCheckoutDriver(rail)` names the browser driver for
-each `ListCheckoutRailOptions` result and reports rails the package cannot
-execute, which must not be offered. The package (0.3.0 and later) rejects a
+scale. `ListCheckoutRailOptions` lists exactly the armed PSPs whose rail can
+make this sale, each with its browser `driver` and `public_config`; copy them
+into the session's `rails` and skip an option without a driver. The package (0.3.0 and later) rejects a
 numeric amount or a missing `unit_decimals` as an unavailable session.

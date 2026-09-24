@@ -134,6 +134,8 @@ catalog.
   - `wallet` — the buyer's wallet signs; chain/token detail comes from
     `GET /v1/solana/config` and `GET /v1/solana/tokens`.
 - `key` is the value to send as checkout's `payment.rail`.
+- Which of these can sell a given price is answered per price by
+  `ListCheckoutRailOptions` (`GET /v1/merchant/checkout-options`), see below.
 - `custodian` is **who holds the card**, which is not the same question as `rail` (who charges
   it). `psp` means the gateway itself; anything else is a third party whose SDK your page
   tokenizes against — same rail, different script and different public key. Read `flow` and
@@ -154,6 +156,27 @@ Rail-specific gotchas the UI must handle:
   return `requires_action` with a top-level `url` — redirect. Solana: 400, unsupported.
 - `POST /v1/checkout` (the session-auth surface) rejects a second subscription in the
   same tier group with `status: "blocked"` — send those users to `change-tier`.
+
+### Checkout rail eligibility (#1078)
+
+A PSP is offered for a price iff it is armed (credentials resolve and its
+posture verification did not disarm it) and its rail can make that kind of new
+sale, per the rail registry:
+
+| Rail | One-time | New subscription |
+|---|---|---|
+| NMI, Stripe | yes | engine-collected on a saved card (no trial phase) |
+| Solana | yes (Solana Pay) | the price's published on-chain plan |
+| CCBill | no | no (imported subscriptions keep working) |
+
+Each `ListCheckoutRailOptions` result carries `driver` (`collect_js`,
+`stripe_elements`, `redirect`, `solana_pay`) and `public_config` (NMI/Stripe
+public keys; Solana `token_symbol`, `token_name`, `network`). `@openrails/billing-ui`
+renders them as they are (`checkoutRails(options)`); hosts add no rail logic.
+Catalog application refuses an active price that declares PSPs when none of
+them, nor any armed rail selling on local terms, can sell it
+(`price_not_sellable`); a checkout nothing can serve fails with the per-PSP
+skip reasons.
 
 ### Checkout
 

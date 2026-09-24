@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -20,6 +21,8 @@ type CheckoutRailOption struct {
 	PSPID    uuid.UUID
 	Rail     string
 	Mode     string
+	// Token is the settlement token the price binds on this PSP (Solana), or "".
+	Token string
 }
 
 // ListCheckoutRailOptions returns payment providers that this runtime can use
@@ -99,9 +102,31 @@ func (s *CheckoutSessionService) listCheckoutRailOptionsForPrice(ctx context.Con
 			PSPID:    candidate.PSPID,
 			Rail:     candidate.Rail,
 			Mode:     string(mode),
+			Token:    boundSettlementToken(price, candidate),
 		})
 	}
 	return options, nil
+}
+
+// boundSettlementToken is the token a Solana price link fixes: the published
+// plan's mint for a subscription, or a declared token for a one-time sale.
+func boundSettlementToken(price *models.Price, candidate RoutingCandidate) string {
+	if candidate.Rail != string(models.RailSolana) {
+		return ""
+	}
+	var link map[string]string
+	if candidate.PSPID != uuid.Nil {
+		link = price.ForPSP(candidate.PSPID).PSPLinkForRail(models.RailSolana)
+	}
+	if link == nil {
+		link = price.PSPLinkForRail(models.RailSolana)
+	}
+	for _, key := range []string{"mint_symbol", "token"} {
+		if token := strings.ToUpper(strings.TrimSpace(link[key])); token != "" {
+			return token
+		}
+	}
+	return ""
 }
 
 func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessionMode {
@@ -115,88 +140,55 @@ func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessio
 // checkoutRailSkipReason reports why this PSP cannot serve the price under mode,
 // or "" when it can. It is the single readiness verdict behind both the option
 // list and routing's fallback classes (or#288) — one place decides, so the
-// advertised list and the routed choice can never disagree.
+// advertised list and the routed choice can never disagree. Which sale kinds a
+// rail supports is the rail registry's capability, never a list here (#1078).
 func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.PSPConfig, mode models.CheckoutSessionMode) string {
 	price = priceForCheckoutTarget(price, target)
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed
 	}
-	if mode == models.CheckoutSessionModeSubscription {
-		if price.Amount <= 0 || price.TrialUnitAmount != nil || price.TrialDurationHours != nil || price.RecurringCycleHours() == nil {
-			return models.CheckoutRoutingSkipModeUnsupported
-		}
-		switch target.Rail {
-		case "stripe":
-			if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
-				return models.CheckoutRoutingSkipCredentialsMissing
-			}
-			return ""
-		case "nmi":
-			if providerConfig.NMI == nil || strings.TrimSpace(providerConfig.NMI.SecurityKey) == "" {
-				return models.CheckoutRoutingSkipCredentialsMissing
-			}
-			return ""
-		default:
-			return models.CheckoutRoutingSkipModeUnsupported
-		}
+	rail := models.Rail(target.Rail)
+	if _, known := rails.Lookup(rail); !known {
+		return models.CheckoutRoutingSkipUnknownSelector
 	}
-	switch target.Rail {
-	case string(models.RailStripe):
+	subscription := mode == models.CheckoutSessionModeSubscription
+	if subscription && (price.Amount <= 0 || price.RecurringCycleHours() == nil) {
+		return models.CheckoutRoutingSkipModeUnsupported
+	}
+	trial := price.TrialUnitAmount != nil || price.TrialDurationHours != nil
+	if !rails.CanSellNew(rail, subscription, trial) {
+		return models.CheckoutRoutingSkipModeUnsupported
+	}
+	if s.pspDisarmed != nil && target.Scope != nil && s.pspDisarmed(target.Scope.ID) {
+		return models.CheckoutRoutingSkipPostureDisarmed
+	}
+	link := checkoutPSPLinkForTarget(price, target)
+	switch rail {
+	case models.RailStripe:
 		if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
 		}
-		if mode == models.CheckoutSessionModeOneOff {
-			return ""
-		}
-		if stripePaidIntroUnsupported(price) {
-			return models.CheckoutRoutingSkipModeUnsupported
-		}
-		targetPriceID := strings.TrimSpace(checkoutPSPLinkForTarget(price, target)[models.RailKeyStripePriceID])
-		executionPriceID, err := getStripePriceID(price)
-		if err != nil || targetPriceID == "" || targetPriceID != executionPriceID {
-			return models.CheckoutRoutingSkipLinkMissing
-		}
 		return ""
-	case string(models.RailNMI):
+	case models.RailNMI:
 		// A one-time NMI sale is a direct gateway charge on the tokenized or
 		// vaulted card: an armed PSP is enough, no provider plan (#1055).
 		if providerConfig.NMI == nil || strings.TrimSpace(providerConfig.NMI.SecurityKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
 		}
 		return ""
-	case string(models.RailCCBill):
-		if mode != models.CheckoutSessionModeSubscription {
-			return models.CheckoutRoutingSkipModeUnsupported
-		}
-		// The dash-joined composite account id (#697) is CCBill's identity, so a
-		// malformed one is a credential fault, not a link fault.
-		if providerConfig.CCBill == nil {
-			return models.CheckoutRoutingSkipCredentialsMissing
-		}
-		if _, _, err := config.SplitCCBillAccountID(providerConfig.EffectiveAccountID()); err != nil {
-			return models.CheckoutRoutingSkipCredentialsMissing
-		}
-		link := checkoutPSPLinkForTarget(price, target)
-		targetForm := strings.TrimSpace(link[models.RailKeyCCBillFormName])
-		targetFlexID := strings.TrimSpace(link[models.RailKeyCCBillFlexID])
-		executionForm, executionFlexID, ok := price.GetCCBillFlexForm()
-		if !ok || targetForm == "" || targetFlexID == "" ||
-			targetForm != executionForm || targetFlexID != executionFlexID {
-			return models.CheckoutRoutingSkipLinkMissing
-		}
-		return ""
-	case string(models.RailSolana):
+	case models.RailSolana:
 		if providerConfig.Solana == nil || len(providerConfig.Solana.Tokens) == 0 {
 			return models.CheckoutRoutingSkipCredentialsMissing
 		}
-		if checkoutPSPLinkForTarget(price, target) == nil {
+		if link == nil {
 			return models.CheckoutRoutingSkipLinkMissing
 		}
-		if mode == models.CheckoutSessionModeSubscription {
+		if subscription {
 			if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
 				return models.CheckoutRoutingSkipServiceUnavailable
 			}
-			targetTerms, targetErr := parseSolanaPlanTerms(checkoutPSPLinkForTarget(price, target))
+			// The subscriber signs into the price's published on-chain plan.
+			targetTerms, targetErr := parseSolanaPlanTerms(link)
 			executionTerms, executionErr := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
 			if targetErr != nil || executionErr != nil || targetTerms != executionTerms {
 				return models.CheckoutRoutingSkipLinkMissing
@@ -208,7 +200,8 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 		}
 		return ""
 	default:
-		return models.CheckoutRoutingSkipUnknownSelector
+		// A rail the registry lets sell but checkout cannot execute.
+		return models.CheckoutRoutingSkipModeUnsupported
 	}
 }
 

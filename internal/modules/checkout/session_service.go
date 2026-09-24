@@ -175,6 +175,14 @@ type CheckoutSessionService struct {
 	solanaConfirmTierChange solanaLifecycleConfirmTierChange
 	subscriptionReader      subscriptionReader
 	solanaSubscriptionRows  solanaSubscriptionRowReader
+
+	// pspDisarmed reports a PSP whose credentials failed posture verification.
+	pspDisarmed func(uuid.UUID) bool
+}
+
+// SetPSPPosture wires the verdict checkout consults before offering a PSP.
+func (s *CheckoutSessionService) SetPSPPosture(disarmed func(uuid.UUID) bool) {
+	s.pspDisarmed = disarmed
 }
 
 // solanaLifecyclePrepareCancel builds the unsigned cancel_subscription tx with an
@@ -717,7 +725,8 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 
 	// A saved custodian card creates a priced agreement for a later verified
 	// customer action. Persist the quote with the row before returning it.
-	if mode == models.CheckoutSessionModeSubscription && (rail == "nmi" || rail == "stripe") && req.Payment.PaymentMethodID != "" {
+	engineEnrollment := mode == models.CheckoutSessionModeSubscription && rails.NewSubscriptionFor(models.Rail(rail)) == rails.NewSubscriptionEngine
+	if engineEnrollment && req.Payment.PaymentMethodID != "" {
 		methodID, err := openrails.ParsePaymentMethodID(req.Payment.PaymentMethodID)
 		if err != nil {
 			return nil, ErrCheckoutSessionValidation
@@ -736,7 +745,9 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		session.Status = models.CheckoutSessionStatusRequiresAction
 	}
 
-	if mode == models.CheckoutSessionModeSubscription {
+	// Engine-collected rails enroll only on a quoted saved method; an on-chain
+	// plan enrolls through the subscriber's wallet below.
+	if engineEnrollment {
 		if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
 			return nil, fmt.Errorf("%w: engine enrollment requires a supported saved NMI or Stripe method", ErrCheckoutSessionValidation)
 		}

@@ -185,6 +185,13 @@ func ServiceListCheckoutRailOptions(r *httprequest.Request) {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
 		return
 	}
+	if len(out) > 0 {
+		config, ok := checkoutConfig(r)
+		if !ok {
+			return
+		}
+		advertiseCheckoutOptions(out, config)
+	}
 	r.SuccessJSON(out)
 }
 

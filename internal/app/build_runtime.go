@@ -223,6 +223,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	solanaRPCResolver := &solanamodule.MerchantRPCBuilder{
 		Config:      cfg,
 		MerchantsFn: merchantsFn,
+		Endpoint:    cfg.SandboxSolanaRPCURL(),
 	}
 
 	var userDirectory openrails.UserDirectory
@@ -374,6 +375,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.NMIClients = nmiClients
 	if serviceInstances.CheckoutService != nil {
 		serviceInstances.CheckoutService.NMIClients = nmiClients
+	}
+	if serviceInstances.CheckoutSessionService != nil {
+		serviceInstances.CheckoutSessionService.SetPSPPosture(runtime.PSPPostureDisarmed)
 	}
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.NMIClients = nmiClients

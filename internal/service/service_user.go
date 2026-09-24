@@ -45,12 +45,16 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceID, priceKey
 		if option.PSPID != uuid.Nil {
 			pspID = option.PSPID.String()
 		}
-		result = append(result, CheckoutRailOption{
+		out := CheckoutRailOption{
 			Selector: option.Selector,
 			PSPID:    pspID,
 			Rail:     option.Rail,
 			Mode:     option.Mode,
-		})
+		}
+		if option.Token != "" {
+			out.PublicConfig = map[string]string{"token_symbol": option.Token}
+		}
+		result = append(result, out)
 	}
 	return result, nil
 }

@@ -90,8 +90,8 @@ this package.
 
 ## Solana Pay
 
-The package never assumes which token a Solana option settles in. The host
-binds the token on the option's `public_config`:
+The package never assumes which token a Solana option settles in. OpenRails
+binds the token on the advertised option's `public_config` (hosts copy it):
 
 - `token_symbol` — required; the SPL mint symbol the price is bound to
   (`USDC`, `USD1`, …). It is sent back verbatim (uppercased) as the pay

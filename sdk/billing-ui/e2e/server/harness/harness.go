@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authkithttp "github.com/open-rails/authkit/adapters/http"
@@ -17,6 +18,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -32,6 +34,7 @@ const (
 	PSPAccountID = "billing-ui-e2e"
 	// ManagePrefix mounts the CustomerBillingManagement scope beside /v1/me.
 	ManagePrefix = "/v1/manage"
+	SolanaPSPKey = "solana"
 )
 
 type Runtime struct {
@@ -39,6 +42,9 @@ type Runtime struct {
 	Billing *openrailsembed.Runtime
 	Client  *openrails.Client
 	Catalog Catalog
+	// Solana is the loopback chain the armed Solana PSP reads.
+	Solana  *solanafake.Node
+	BaseURL string
 }
 
 // Open connects to dsn and applies AuthKit and OpenRails migrations.
@@ -64,6 +70,13 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 // New builds both runtimes and seeds the catalog. The server runs River
 // workers because customer cancel/resume are queued jobs.
 func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers bool) (_ *Runtime, err error) {
+	chain := solanafake.New()
+	defer func() {
+		if err != nil {
+			chain.Close()
+		}
+	}()
+	signer := solanago.NewWallet().PrivateKey
 	auth, err := embedded.New(embedded.Config{
 		Schema: AuthSchema,
 		HTTP:   authhttp.Config{DirectPeerIP: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1"}},
@@ -99,15 +112,25 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			{Merchant: MerchantSlug, Scope: openrailsembed.CustomerBillingManagement, Prefix: ManagePrefix},
 		}},
 		Merchant: &openrailsembed.MerchantDeclaration{
-			Slug:   MerchantSlug,
-			Config: openrailsembed.MerchantConfig{DisplayName: "billing-ui e2e"},
-			PSPs:   []openrailsembed.PSPDeclaration{{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}},
+			Slug: MerchantSlug,
+			Config: openrailsembed.MerchantConfig{DisplayName: "billing-ui e2e", PSPs: map[string]openrailsembed.PSPConfig{
+				// An armed Solana PSP on devnet: checkout offers it (#1078).
+				SolanaPSPKey: {"solana": {
+					Signer:   &openrailsembed.PSPSignerConfig{Mode: "local_keypair"},
+					Secrets:  map[string]string{"private_key": signer.String()},
+					Settings: map[string]any{"rpc_provider": "public", "tokens": map[string]any{"SOL": map[string]any{}, "DUSD": map[string]any{}}},
+				}},
+			}},
+			PSPs: []openrailsembed.PSPDeclaration{{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}},
 		},
 		Config: &openrailsconfig.Config{
-			TestMode:            openrailsconfig.CredentialPostureSandbox,
-			ProviderWriteMode:   openrailsconfig.ProviderWriteModeFull,
-			AllowCatalogUpdates: true,
-			DB:                  &openrailsconfig.DBConfig{URL: dsn, Schema: BillingSchema},
+			TestMode:             openrailsconfig.CredentialPostureSandbox,
+			ProviderWriteMode:    openrailsconfig.ProviderWriteModeFull,
+			AllowCatalogUpdates:  true,
+			DB:                   &openrailsconfig.DBConfig{URL: dsn, Schema: BillingSchema},
+			PublicBillingBaseURL: baseURL + "/billing",
+			ReturnOrigins:        []string{baseURL},
+			ProviderSandbox:      &openrailsconfig.ProviderSandboxConfig{SolanaRPCURL: chain.URL()},
 		},
 		PGXPool:    pool,
 		RunWorkers: workers,
@@ -124,14 +147,14 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err != nil {
 		return nil, err
 	}
-	catalog, err := seedCatalog(ctx, client)
+	catalog, err := seedCatalog(ctx, client, chain, signer.PublicKey())
 	if err != nil {
 		return nil, fmt.Errorf("seed catalog: %w", err)
 	}
 	if err := armDestructive(ctx, pool); err != nil {
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}
-	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog}, nil
+	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog, Solana: chain, BaseURL: baseURL}, nil
 }
 
 // BillingRoutes returns the embedded billing routes, relative to /billing.
@@ -158,6 +181,7 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 func (r *Runtime) Close() {
 	_ = r.Billing.Close(context.Background())
 	r.Auth.Close()
+	r.Solana.Close()
 }
 
 // armDestructive is the operator arming a reviewed deployment

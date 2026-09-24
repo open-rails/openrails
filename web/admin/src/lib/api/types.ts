@@ -353,6 +353,7 @@ export type CheckoutRoutingSkip =
   | "credentials_missing"
   | "link_missing"
   | "mode_unsupported"
+  | "posture_disarmed"
   | "service_unavailable"
   | "resolve_failed"
 

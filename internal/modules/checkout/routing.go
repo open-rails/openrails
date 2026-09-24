@@ -139,7 +139,8 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 			Policy:     models.CheckoutRoutingPolicyExplicit,
 			Candidates: []RoutingCandidate{{Selector: target.PSP, Rail: target.Rail, PSPID: targetPSPID(target)}},
 		}
-		if _, err := targets.railSource().RailConfig(ctx, target.Rail, targetAccountID(target)); err != nil {
+		providerConfig, err := targets.railSource().RailConfig(ctx, target.Rail, targetAccountID(target))
+		if err != nil {
 			decision.Target = railTarget{}
 			if errors.Is(err, railresolve.ErrRailNotArmed) {
 				decision.Candidates[0].Skip = models.CheckoutRoutingSkipNotArmed
@@ -147,6 +148,13 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 			}
 			decision.Candidates[0].Skip = models.CheckoutRoutingSkipResolveFailed
 			return decision, fmt.Errorf("resolve payment provider %q: %w", selector, err)
+		}
+		// Named, not swept: no fallback, but the PSP must still be able to
+		// make this sale (#1078: a named CCBill never enrolls a new subscription).
+		if skip := s.checkoutRailSkipReason(in.Price, target, providerConfig, in.Mode); skip != "" {
+			decision.Target = railTarget{}
+			decision.Candidates[0].Skip = skip
+			return decision, fmt.Errorf("%w: payment provider %q cannot sell this price (%s)", ErrNoRoutableProcessor, selector, skip)
 		}
 		return decision, nil
 	}
@@ -170,7 +178,11 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 		decision.Candidates = append(decision.Candidates, candidate)
 	}
 	if decision.Target.PSP == "" {
-		return decision, ErrNoRoutableProcessor
+		skipped := make([]string, 0, len(decision.Candidates))
+		for _, c := range decision.Candidates {
+			skipped = append(skipped, c.Selector+":"+c.Skip)
+		}
+		return decision, fmt.Errorf("%w (%s)", ErrNoRoutableProcessor, strings.Join(skipped, ", "))
 	}
 	return decision, nil
 }
