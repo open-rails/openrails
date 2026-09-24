@@ -55,6 +55,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			})
 			require.NoError(t, err)
 			charges := len(w.railLedger(rail))
+			pendingStatus := unwrap(alice.must(http.MethodGet, "/checkout/"+pending.ID, "", nil))["status"]
 
 			for _, tc := range []struct {
 				method, path string
@@ -101,7 +102,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			require.True(t, alice.entitled("content:members"))
 			require.False(t, mallory.entitled("content:other"))
 			require.Len(t, w.railLedger(rail), charges, "no request charged anyone")
-			require.Equal(t, "pending", unwrap(alice.must(http.MethodGet, "/checkout/"+pending.ID, "", nil))["status"])
+			require.Equal(t, pendingStatus, unwrap(alice.must(http.MethodGet, "/checkout/"+pending.ID, "", nil))["status"], "Alice's checkout is untouched")
 
 			// Each renewal is paid by its own member's card.
 			w.advance(w.subscription(embedded, mallorySub).CurrentPeriodEndsAt.Sub(w.clock.Now()) + 1)
@@ -201,7 +202,11 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	// Each process binds its own River producer, as a host replica does.
+	if slug != w.slug {
+		return w.serve(slug, rt)
+	}
+	// A replica binds its own River producer and workers. Another merchant
+	// stays headless: one fleet per merchant runtime in this harness.
 	jobs, err := riverkit.New(t.Context(), w.pool, &river.Config{
 		Schema: w.schema, Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 2}},
 		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
@@ -213,6 +218,11 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 		defer cancel()
 		_ = jobs.StopAndCancel(ctx)
 	})
+	return w.serve(slug, rt)
+}
+
+func (w *world) serve(slug string, rt *embed.Runtime) *rival {
+	t := w.t
 	bundle, err := openrailshttp.Routes(rt)
 	require.NoError(t, err)
 	mux := http.NewServeMux()
@@ -270,6 +280,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
 	})
 	require.Error(t, err, "a foreign merchant's saved card is not chargeable")
+	require.NotContains(t, err.Error(), "River", "refused by ownership, not by the headless harness")
 	require.Len(t, e.providerLedger(), 1, "nothing charged the member's card")
 
 	// Staff authorized for merchant A cannot select merchant B on either
