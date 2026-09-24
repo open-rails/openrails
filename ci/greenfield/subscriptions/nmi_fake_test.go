@@ -126,6 +126,18 @@ func (f *nmiFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		f.serve(r, body)
 		return nil, errors.New("connection reset before the gateway's answer arrived")
 	}
+	if g != nil && g.served {
+		rec := f.serve(r, body)
+		g.once.Do(func() { close(g.arrived) })
+		select {
+		case <-g.release:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+		res := rec.Result()
+		res.Request = r
+		return res, nil
+	}
 	if g != nil {
 		g.once.Do(func() { close(g.arrived) })
 		select {

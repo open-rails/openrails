@@ -683,6 +683,19 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		if reconcileErr == nil && match == nil {
 			unmatchedCount++
 			cbMetadata["requires_manual_review"] = true
+			// SEC-33: an unmatched chargeback is durable operator work, never a log line.
+			if err := recordLedgerRepairAlert(ctx, s.NotificationService, s.DB, s.now(), ledgerRepairAlert{
+				Provider:      rail,
+				Operation:     "chargeback_unmatched",
+				TransactionID: "chargeback:" + cb.ID.Trimmed(),
+				Err:           fmt.Errorf("NMI chargeback %s matched no single charge (%v)", cb.ID.Trimmed(), cbMetadata["reconciliation_status"]),
+				Metadata:      cbMetadata,
+			}); err != nil {
+				reconcileErrors++
+				if ledgerAlertErr == nil {
+					ledgerAlertErr = err
+				}
+			}
 		}
 
 		if reconcileErr == nil && match != nil {
@@ -734,7 +747,18 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				}
 			}
 
-			if _, seen := processedSubs[match.SubscriptionID]; seen {
+			if match.SubscriptionID == uuid.Nil {
+				// SEC-33: a charged-back one-time purchase loses what it bought,
+				// exactly as a Stripe dispute of a one-off does.
+				if err := s.revokeNMIChargedBackPurchase(ctx, match.PaymentID); err != nil {
+					reconcileErrors++
+					cbMetadata["termination_status"] = "failed"
+					cbMetadata["termination_error"] = err.Error()
+					rememberTerminationError(err)
+				} else {
+					cbMetadata["termination_status"] = "access_revoked"
+				}
+			} else if _, seen := processedSubs[match.SubscriptionID]; seen {
 				cbMetadata["termination_status"] = "already_processed_in_batch"
 			} else {
 				processedSubs[match.SubscriptionID] = struct{}{}
@@ -803,7 +827,11 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 
 			if entryLedgerErr != nil {
 				paymentID := match.PaymentID
-				subID := match.SubscriptionID
+				var subID *uuid.UUID
+				if match.SubscriptionID != uuid.Nil {
+					id := match.SubscriptionID
+					subID = &id
+				}
 				alertTransactionID := chargebackTransactionID
 				if strings.TrimSpace(alertTransactionID) == "" {
 					alertTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
@@ -814,7 +842,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					TransactionID:     alertTransactionID,
 					UserID:            match.UserID,
 					OriginalPaymentID: &paymentID,
-					SubscriptionID:    &subID,
+					SubscriptionID:    subID,
 					Err:               entryLedgerErr,
 					Metadata: map[string]any{
 						"batch_id":                        batchID,
@@ -853,6 +881,21 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 	}
 	if terminationErr != nil {
 		return fmt.Errorf("terminate subscriptions for NMI chargeback batch: %w", terminationErr)
+	}
+	return nil
+}
+
+// revokeNMIChargedBackPurchase ends the entitlements and product access a
+// charged-back one-time payment funded.
+func (s *NMIWebhookService) revokeNMIChargedBackPurchase(ctx context.Context, paymentID uuid.UUID) error {
+	if s.DB == nil {
+		return errors.New("database unavailable for NMI chargeback revocation")
+	}
+	if err := entitlements.NewEntitlementService(s.DB, s.Clock).EndActiveByPayment(ctx, paymentID, models.EntitlementRevokeChargeback); err != nil {
+		return fmt.Errorf("revoke one-off entitlements after NMI chargeback: %w", err)
+	}
+	if _, err := productaccess.NewService(s.DB, s.Clock).RevokeProductAccessByPayment(ctx, paymentID, models.ProductAccessRevokeChargeback); err != nil {
+		return fmt.Errorf("revoke product access after NMI chargeback: %w", err)
 	}
 	return nil
 }

@@ -108,6 +108,34 @@ func capCCBillRetryAt(nextRetryAt, paidTermEnd *time.Time) *time.Time {
 	return &candidate
 }
 
+// boundCCBillPeriodEnd caps a CCBill-announced period end at one billing
+// cycle plus ccbillGraceCap past the later of the current paid end and now
+// (SEC-33): CCBill signs nothing, so one posted date must never buy years.
+// An unknown cycle fails closed.
+func boundCCBillPeriodEnd(candidate *time.Time, sub *models.Subscription, now time.Time) (*time.Time, error) {
+	if candidate == nil {
+		return nil, nil
+	}
+	if sub == nil || sub.Price == nil {
+		return nil, MarkWebhookErrorNonRetryable(fmt.Errorf("ccbill period end requires the subscription price cycle"))
+	}
+	hours := sub.Price.RecurringCycleHours()
+	if hours == nil || *hours <= 0 {
+		return nil, MarkWebhookErrorNonRetryable(fmt.Errorf("ccbill period end refused: price %s has no billing cycle", sub.Price.ID))
+	}
+	anchor := now.UTC()
+	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(anchor) {
+		anchor = sub.CurrentPeriodEndsAt.UTC()
+	}
+	limit := anchor.Add(time.Duration(*hours)*time.Hour + ccbillGraceCap)
+	if candidate.After(limit) {
+		log.WithFields(log.Fields{"subscription_id": sub.ID, "announced": candidate, "bounded": limit}).
+			Warn("CCBill announced a period end beyond one billing cycle; bounded")
+		return &limit, nil
+	}
+	return candidate, nil
+}
+
 func shouldIgnoreCCBillRenewalFailure(sub *models.Subscription, failureRenewalAt *time.Time) (bool, string) {
 	if sub == nil {
 		return false, ""
@@ -1134,8 +1162,11 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 			return fmt.Errorf("missing nextRenewalDate")
 		}
 
-		// Update subscription billing date
-		sub.CurrentPeriodEndsAt = parsed
+		bounded, err := boundCCBillPeriodEnd(parsed, sub, s.now())
+		if err != nil {
+			return err
+		}
+		sub.CurrentPeriodEndsAt = bounded
 
 		if err := subService.Update(ctx, sub); err != nil {
 			return fmt.Errorf("failed to update subscription billing date: %w", err)
@@ -1229,6 +1260,24 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 	}
 	if renewalDate == nil || !renewalDate.After(s.now().UTC()) {
 		return fmt.Errorf("reactivation requires future nextRenewalDate")
+	}
+	// SEC-33: a reactivation carries no payment. It restores the period already
+	// paid for and never extends it; CCBill's next RenewalSuccess pays for more.
+	if s.SubscriptionService == nil {
+		return fmt.Errorf("subscription service not configured")
+	}
+	current, err := s.SubscriptionService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
+	if err != nil {
+		return fmt.Errorf("load subscription for reactivation: %w", err)
+	}
+	paidEnd := current.CurrentPeriodEndsAt
+	if paidEnd == nil || !paidEnd.After(s.now().UTC()) {
+		log.WithContext(ctx).WithFields(log.Fields{"rail_subscription_id": pSubscriptionID, "transaction_id": transactionID}).
+			Warn("CCBill UserReactivation with no paid period remaining; access waits for a paid renewal")
+		return nil
+	}
+	if renewalDate.After(*paidEnd) {
+		renewalDate = paidEnd
 	}
 
 	sub, err := s.SubscriptionLifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
@@ -1372,7 +1421,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 				} else {
 					if _, refundErr := paymentService.Refund(ctx, originalPayment.ID, reversalID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund); refundErr != nil {
 						err := fmt.Errorf("failed to persist CCBill refund payment: %w", refundErr)
-						if shouldTerminate {
+						if shouldTerminate && !errors.Is(refundErr, payments.ErrRefundReservationPending) {
 							refundLedgerErr = err
 							log.WithContext(ctx).WithError(err).Error("Failed to persist CCBill refund ledger; continuing access revocation")
 						} else {
@@ -1847,6 +1896,9 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 	paidTermEnd, err := parseCCBillDateUsingTimestamp(data.NextRenewalDate)
 	if err != nil {
 		return fmt.Errorf("failed to parse nextRenewalDate '%s': %w", data.NextRenewalDate, err)
+	}
+	if paidTermEnd, err = boundCCBillPeriodEnd(paidTermEnd, prevSub, s.now()); err != nil {
+		return err
 	}
 
 	// RenewMembership now creates the Payment record internally

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/pkg/merchant"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -768,10 +769,39 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 			purchasedAt = bt
 		}
 	}
-	// xs-007 row 35: a landing after the quote expired is honoured — the
-	// buyer signed the quoted token amount and it settled. The lateness is
-	// recorded because it is the merchant's rate exposure, not the buyer's
-	// fault; the quote's TTL is price validity, not a refusal of settled money.
+	// SEC-33: a quote is honoured only shortly past its expiry. A transfer
+	// landing later settles at a stale token price, so it grants nothing: the
+	// money is surfaced to the operator (refund or manual grant) and the
+	// reference is consumed.
+	if solanaSettlementTooLate(purchasedAt, pending.ExpiresAt) {
+		if err := webhooks.RecordLedgerRepairAlert(ctx, nil, p.db, *purchasedAt, webhooks.LedgerRepairAlert{
+			Provider:       string(models.RailSolana),
+			Operation:      "late_quote_settlement",
+			TransactionID:  signature,
+			UserID:         pending.UserID,
+			IdempotencyKey: "solana-late:" + signature,
+			Err:            fmt.Errorf("transfer landed %s after its quote expired", purchasedAt.Sub(pending.ExpiresAt).Round(time.Second)),
+			Metadata: map[string]any{
+				"reference":           reference,
+				"checkout_session_id": strings.TrimSpace(pending.SessionID),
+				"price_id":            pending.PriceID,
+				"quote_expired_at":    pending.ExpiresAt.UTC().Format(time.RFC3339),
+				"landed_at":           purchasedAt.UTC().Format(time.RFC3339),
+				"token":               pending.Token,
+				"token_amount":        pending.TokenAmount,
+				"fiat_amount":         pending.Amount,
+				"currency":            pending.Currency,
+			},
+		}); err != nil {
+			return fmt.Errorf("record late Solana settlement alert: %w", err)
+		}
+		log.WithFields(log.Fields{"reference": reference, "signature": signature}).
+			Warn("Solana payment landed past its quote's late window; not granted, operator alerted")
+		return nil
+	}
+	// xs-007 row 35: a landing shortly after the quote expired is honoured —
+	// the buyer signed the quoted token amount and it settled within
+	// solanaLateSettlementWindow; the lateness is the merchant's rate exposure.
 	if purchasedAt != nil && !pending.ExpiresAt.IsZero() && purchasedAt.After(pending.ExpiresAt) {
 		log.WithFields(log.Fields{
 			"reference":        reference,
@@ -840,6 +870,13 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 	p.markCheckoutSessionSucceeded(ctx, pending, result.PaymentID, signature)
 
 	return nil
+}
+
+// solanaLateSettlementWindow bounds how long past its expiry a token quote is honoured.
+const solanaLateSettlementWindow = 30 * time.Minute
+
+func solanaSettlementTooLate(landedAt *time.Time, expiresAt time.Time) bool {
+	return landedAt != nil && !expiresAt.IsZero() && landedAt.After(expiresAt.Add(solanaLateSettlementWindow))
 }
 
 func solanaPaymentMatchesPending(payment *models.Payment, reference string, pending *PendingSolanaPayment) bool {

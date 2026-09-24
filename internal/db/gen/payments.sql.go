@@ -1339,18 +1339,23 @@ SELECT p.id AS payment_id,
        p.purchased_at AS purchased_at,
        COALESCE(pm.last_four, '')::text AS card_last4
 FROM openrails.payments p
-JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
+LEFT JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
+  AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
+  AND sub.deleted_at IS NULL AND sub.rail::text = p.rail::text
 LEFT JOIN openrails.payment_methods pm ON pm.id = sub.payment_method_id
 WHERE p.merchant_id = $1::uuid AND p.psp_id = $2::uuid
-  AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
-  AND p.subscription_id IS NOT NULL
+  AND (p.subscription_id IS NULL OR sub.id IS NOT NULL)
+  AND p.refunded_payment_id IS NULL
   AND p.deleted_at IS NULL
-  AND sub.deleted_at IS NULL
   AND p.rail = $3
-  AND sub.rail::text = p.rail::text
   AND p.amount > 0
   AND p.amount = $4::bigint * 10000
-  AND RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = $5::text
+  AND (RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = $5::text
+    OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = $5::text
+    OR (p.subscription_id IS NULL AND EXISTS (
+      SELECT 1 FROM openrails.payment_methods cpm
+      WHERE cpm.merchant_id = p.merchant_id AND cpm.customer_id = p.customer_id AND cpm.psp_id = p.psp_id
+        AND RIGHT(regexp_replace(COALESCE(cpm.last_four, ''), '[^0-9]', '', 'g'), 4) = $5::text)))
   AND p.purchased_at >= $6::timestamptz
   AND p.purchased_at <= $7::timestamptz
 ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - $8::timestamptz))) ASC,
@@ -1381,9 +1386,9 @@ type MatchChargebackPaymentsRow struct {
 	CardLast4            string
 }
 
-// NMI chargeback reconciliation (webhooks/nmi.go): candidate subscription
-// payments matched by amount + card last4 within ±7d of the chargeback date,
-// closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
+// NMI chargeback reconciliation (webhooks/nmi.go): candidate charges
+// (subscription or one-time) matched by amount + card last4 within ±7d of the
+// chargeback date, closest-in-time first. LIMIT 2 so the caller can detect ambiguity.
 func (q *Queries) MatchChargebackPayments(ctx context.Context, arg MatchChargebackPaymentsParams) ([]MatchChargebackPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, matchChargebackPayments,
 		arg.MerchantID,

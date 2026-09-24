@@ -324,6 +324,19 @@ func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// ListRefunds returns every reversal row linked to paymentID, pending ones included.
+func (r *PaymentRepo) ListRefunds(ctx context.Context, paymentID uuid.UUID) ([]*models.Payment, error) {
+	queryMerchant, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &paymentID})
+	if err != nil {
+		return nil, err
+	}
+	return models.PaymentsFromGen(rows)
+}
+
 func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
