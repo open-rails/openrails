@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -615,6 +616,11 @@ func (h *NMIEngineTakeover) commit(ctx context.Context, in gen.OpenrailsRailInte
 		legacy.ClearRetrySchedule()
 		if err := repo.UpdateAt(ctx, legacy, now); err != nil {
 			return err
+		}
+		// The legacy membership's access ends where the successor's paid
+		// period begins: bounded here, never left for a sweep to close.
+		if err := entitlements.NewEntitlementService(d, h.Clock).BoundSubscriptionAccess(ctx, legacy.ID, p.Anchor); err != nil {
+			return fmt.Errorf("bound legacy access: %w", err)
 		}
 		start, end, method := p.Agreement.PeriodStart, p.Agreement.PeriodEnd, p.PaymentMethodID
 		successor := &models.Subscription{

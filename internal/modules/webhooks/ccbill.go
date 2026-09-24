@@ -17,6 +17,7 @@ import (
 	identitydir "github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -1362,15 +1363,13 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 			return fmt.Errorf("failed to get subscription: %w", err)
 		}
 
-		// Determine if we should terminate the subscription based on refund type
+		// The merchant's provider_refund_access policy decides, against the
+		// charged price (CCBill reports the refund, not its original charge).
 		shouldTerminate := false
-		// Determine if we should terminate the subscription based on refund amount
-		// If refund amount is significant relative to the subscription price, terminate
 		if sub.Price != nil && sub.Price.Amount > 0 {
-			// Use integer math: percentage = (refundCents * 100) / priceAmount
-			refundPercentage := (int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))) * 100) / sub.Price.Amount
-			if refundPercentage >= 80 { // If refund is 80%+ of price, terminate
-				shouldTerminate = true
+			var err error
+			if shouldTerminate, err = merchantconfig.ProviderRefundRevokes(ctx, txdb, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), sub.Price.Amount); err != nil {
+				return err
 			}
 		}
 

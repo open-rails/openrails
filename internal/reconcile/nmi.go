@@ -406,6 +406,17 @@ func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams
 	return f.paymentMethodsFromCustomers(customers)
 }
 
+// ConfirmPaymentMethods re-reads one vault (GET /v5/customers/{id}); an
+// absent vault yields no cards.
+func (f *NMIFetcher) ConfirmPaymentMethods(ctx context.Context, railCustomerRef string) ([]RemotePaymentMethod, error) {
+	customer, found, err := f.Client.GetCustomer(ctx, railCustomerRef)
+	if err != nil || !found {
+		return nil, err
+	}
+	out, _, err := f.paymentMethodsFromCustomers([]nmi.V5Customer{customer})
+	return out, err
+}
+
 func (f *NMIFetcher) paymentMethodsFromCustomers(customers []nmi.V5Customer) ([]RemotePaymentMethod, map[string]nmiCustomerIdentity, error) {
 	out := make([]RemotePaymentMethod, 0, len(customers))
 	identity := make(map[string]nmiCustomerIdentity, len(customers))

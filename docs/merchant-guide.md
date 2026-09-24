@@ -263,6 +263,11 @@ reserved); CCBill and off-rail payments return `ErrRefundUnsupported`. Provider
 write gates (read-only mode, NMI test-mode qualification) park the operation:
 the refund is returned `pending` and settles when the gate allows it.
 
+A refund made in the provider's own dashboard carries no `revoke_access`
+choice; the merchant setting `provider_refund_access` decides it on every rail:
+`revoke_on_full` (default: access ends once the charge is fully refunded),
+`revoke_on_any`, or `keep`. Set it with `SetMerchantSettings`.
+
 ### Archiving a product with purchase refunds
 
 `Client.ArchiveProduct` (`POST /v1/merchant/catalog/product-archives`, catalog

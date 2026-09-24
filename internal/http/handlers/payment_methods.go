@@ -424,6 +424,12 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, validation.Message))
 			return
 		}
+		var refused *paymentmethods.PaymentMethodError
+		if errors.As(err, &refused) {
+			log.WithError(err).WithFields(fields).Info("Replacement card refused by the issuer; the previous card stays in use")
+			writePaymentMethodError(r, refused)
+			return
+		}
 		var terminal *paymentmethods.PaymentMethodUpdateFailedError
 		if errors.As(err, &terminal) {
 			log.WithError(err).WithFields(fields).Error("Payment method update failed permanently")

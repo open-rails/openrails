@@ -908,8 +908,9 @@ func nmiChargebackTransactionID(chargebackID, originalTransactionID string) stri
 	return "chargeback:" + strings.TrimSpace(originalTransactionID)
 }
 
-// handleRefundSuccess processes NMI refund.success webhooks
-// Matches CCBill logic: if refund >= 80% of subscription price, terminate subscription
+// handleRefundSuccess processes NMI refund.success webhooks: the refund is
+// recorded against its charge and the merchant's provider_refund_access policy
+// decides whether that charge's access ends.
 func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	log.WithContext(ctx).
 		WithField("eventType", s.Data.EventType).
@@ -972,22 +973,16 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		return s.handleNMIOneOffRefund(ctx, txnID, originalTxnID, refundAmountCents)
 	}
 
-	// Determine if we should terminate subscription based on refund amount.
-	// Missing original references are not safe to complete silently because we cannot
-	// link the refund to the ledger entry that funded entitlement.
-	shouldTerminate := false
-	if subscription != nil && subscription.Price != nil && subscription.Price.Amount > 0 && originalTxnID != "" {
-		refundPercentage := (int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))) * 100) / subscription.Price.Amount
-		if refundPercentage >= 80 {
-			shouldTerminate = true
-		}
-	} else if subscription != nil && originalTxnID == "" {
+	// Missing original references are not safe to complete silently because we
+	// cannot link the refund to the ledger entry that funded entitlement.
+	if originalTxnID == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"refund_transaction_id": txnID,
 			"subscription_ref":      nmiSubID,
 		}).Warn("NMI refund missing original transaction ID; skipping lifecycle termination")
 		return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
 	}
+	var refunded *models.Payment
 
 	// Persist refund in the payments ledger as a negative payment linked to the original payment.
 	// This complements analytics/event logging and keeps reconciliation/auditing consistent.
@@ -1002,6 +997,11 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 				"refund_transaction_id": txnID,
 				"payment_id":            existingRefund.ID,
 			}).Info("Refund payment already exists; skipping duplicate ledger insert")
+			if existingRefund.RefundedPaymentID != nil {
+				if refunded, err = s.PaymentService.GetByID(ctx, *existingRefund.RefundedPaymentID); err != nil {
+					return fmt.Errorf("lookup original NMI payment for existing refund: %w", err)
+				}
+			}
 		case lookupErr != nil && !db.IsNotFound(lookupErr):
 			log.WithContext(ctx).WithError(lookupErr).WithField("refund_transaction_id", txnID).
 				Warn("Failed to check existing refund payment by transaction ID")
@@ -1020,9 +1020,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			}
 
 			if originalPayment == nil {
-				// No `shouldTerminate = false` here: this path returns an
-				// error, so the flag is never read again. The caller sees the
-				// failure and nothing is terminated.
 				log.WithContext(ctx).WithFields(log.Fields{
 					"refund_transaction_id":   txnID,
 					"subscription_id":         subscription.ID,
@@ -1039,6 +1036,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 					}).Warn("Failed to persist refund payment record")
 					return fmt.Errorf("persist refund payment record: %w", refundErr)
 				} else {
+					refunded = originalPayment
 					log.WithContext(ctx).WithFields(log.Fields{
 						"refund_transaction_id": txnID,
 						"original_payment_id":   originalPayment.ID,
@@ -1050,40 +1048,21 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 	}
 
-	if shouldTerminate && subscription != nil {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":         subscription.ID,
-			"refund_amount_cents":     refundAmountCents,
-			"subscription_fee_micros": subscription.Price.Amount,
-		}).Warn("Terminating subscription due to significant refund (>=80%)")
-
-		// Use lifecycle service to cancel membership with immediate revocation
-		rail := models.Rail(s.Rail)
-		cancelReason := "Refund processed"
-
-		if s.SubscriptionLifecycleService == nil {
-			return fmt.Errorf("subscription lifecycle service is required to terminate NMI refund subscription %s", subscription.ID)
+	terminated := false
+	if refunded != nil && s.PaymentService != nil {
+		total, err := s.PaymentService.GetRefundTotalByPaymentID(ctx, refunded.ID)
+		if err != nil {
+			return fmt.Errorf("calculate NMI refund total: %w", err)
 		}
-		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-			Rail:               &rail,
-			RailSubscriptionID: &nmiSubID,
-			SubscriptionID:     &subscription.ID,
-			CancelType:         models.CancelTypeMerchant,
-			CancelFeedback:     &cancelReason,
-			RevokeAccess:       true,
-		}); err != nil {
-			return fmt.Errorf("cancel membership after NMI refund: %w", err)
+		if terminated, err = s.providerRefundAccess().apply(ctx, models.Rail(s.Rail), refunded, total, "NMI refund processed"); err != nil {
+			return err
 		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":      subscription.ID,
-			"rail_subscription_id": nmiSubID,
-		}).Info("Subscription cancelled after refund meet threshold")
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"transaction_id":          txnID,
-		"refund_amount_cents":     refundAmountCents,
-		"subscription_terminated": shouldTerminate,
+		"transaction_id":      txnID,
+		"refund_amount_cents": refundAmountCents,
+		"access_revoked":      terminated,
 	}).Info("NMI refund processed")
 
 	return nil
@@ -1139,31 +1118,12 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 	if err != nil {
 		return fmt.Errorf("calculate NMI refund total: %w", err)
 	}
-	if refundedTotal < original.Amount {
-		return nil
-	}
-	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
-		reason := "NMI refund processed"
-		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-			SubscriptionID: original.SubscriptionID,
-			Rail:           &rail,
-			CancelType:     models.CancelTypeMerchant,
-			CancelFeedback: &reason,
-			RevokeAccess:   true,
-		}); err != nil {
-			return fmt.Errorf("cancel subscription after NMI refund: %w", err)
-		}
-	} else if original.SubscriptionID == nil && s.DB != nil {
-		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
-		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund); err != nil {
-			return fmt.Errorf("revoke one-off entitlements after NMI refund: %w", err)
-		}
-		paSvc := productaccess.NewService(s.DB, s.Clock)
-		if _, err := paSvc.RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeRefund); err != nil {
-			return fmt.Errorf("revoke product access after NMI refund: %w", err)
-		}
-	}
-	return nil
+	_, err = s.providerRefundAccess().apply(ctx, rail, original, refundedTotal, "NMI refund processed")
+	return err
+}
+
+func (s *NMIWebhookService) providerRefundAccess() providerRefundAccess {
+	return providerRefundAccess{DB: s.DB, Clock: s.Clock, Lifecycle: s.SubscriptionLifecycleService}
 }
 
 // handleRefundFailure logs failed refund attempts

@@ -194,6 +194,9 @@ doesn't surprise you:
 - **"Processor" in webhook payloads** (`processor_id`,
   `transaction_was_declined_by_processor`) is NMI's backend *acquirer*, not
   anything you configure in OpenRails.
-- **Large refunds cancel.** A refund ≥ 80% of the subscription price
-  terminates the subscription and revokes access, matching the CCBill rail's
-  behavior.
+- **Dashboard refunds follow `provider_refund_access`** (merchant settings;
+  same rule on every rail): `revoke_on_full` (default) ends the charge's access
+  once it is fully refunded, `revoke_on_any` on any refund, `keep` never. An
+  NMI-billed membership that ends this way also has its NMI schedule deleted
+  (held, with a `life.provider_cancel.held` finding, while destructive actions
+  are disarmed). Refunds made through OpenRails follow their `revoke_access`.

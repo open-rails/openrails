@@ -474,6 +474,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
 		EvidenceFloor: e.evidenceFloor(ctx),
 	})
+	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
 	bindApplyActions(findings, binding.ID)
 
 	if snap.Capabilities.Transactions {

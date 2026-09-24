@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -81,9 +82,18 @@ var errNMICardDataGap = errors.New("NMI billing entry returned incomplete masked
 // incomplete provider card data.
 const PaymentMethodDataGapFinding = "life.payment_method_update.provider_data_gap"
 
+// nmiPaymentMethodUpdateProgress is the replacement's durable boundary. The
+// new card is staged as a further billing entry of the same vault and
+// verified there; only an approved verification moves the method onto it, so
+// the local card and its recurring agreement always describe one card, and a
+// refused card leaves the previous card and agreement in use.
 type nmiPaymentMethodUpdateProgress struct {
-	SubmissionStarted bool    `json:"submission_started"`
-	OldCard           nmiCard `json:"old_card"`
+	SubmissionStarted     bool    `json:"submission_started"`
+	OldCard               nmiCard `json:"old_card"`
+	StagedBillingID       string  `json:"staged_billing_id,omitempty"`
+	VerificationSubmitted bool    `json:"verification_submitted,omitempty"`
+	AgreementRef          string  `json:"agreement_ref,omitempty"`
+	Finalized             bool    `json:"finalized,omitempty"`
 }
 
 func decodeNMIPaymentMethodUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMethodUpdatePayload, error) {
@@ -113,12 +123,11 @@ func decodeNMIPaymentMethodUpdateProgress(intent gen.OpenrailsRailIntent) (nmiPa
 }
 
 type NMIPaymentMethodUpdateHandler struct {
-	DB            *db.DB
-	Rails         RailClientResolver
-	Store         *Store
-	Clock         clockwork.Clock
-	Policy        BackoffPolicy
-	finalizeWrite func(context.Context, *models.PaymentMethod) error
+	DB     *db.DB
+	Rails  RailClientResolver
+	Store  *Store
+	Clock  clockwork.Clock
+	Policy BackoffPolicy
 }
 
 func NewNMIPaymentMethodUpdateHandler(d *db.DB, rails RailClientResolver, store *Store, clock clockwork.Clock) *NMIPaymentMethodUpdateHandler {
@@ -145,102 +154,197 @@ func (h *NMIPaymentMethodUpdateHandler) CheckRelevance(context.Context, gen.Open
 }
 
 func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	payload, err := decodeNMIPaymentMethodUpdatePayload(intent)
-	if err != nil {
-		return Terminal(err.Error())
-	}
-	pm, client, outcome, ok := h.dependencies(ctx, intent, payload)
-	if !ok {
-		return outcome
-	}
-	progress, err := decodeNMIPaymentMethodUpdateProgress(intent)
-	if err != nil {
-		return Terminal(err.Error())
-	}
-	remote, present, err := readNMIPaymentMethodCard(ctx, client, payload.RailCustomerRef, payload.RailMethodRef)
-	if errors.Is(err, errNMICardDataGap) {
-		return h.dataGap(ctx, intent, payload)
-	}
-	if err != nil {
-		return Retryable("provider read before card replacement failed: " + err.Error())
-	}
-	if !present {
-		return Terminal("stored card is absent at NMI; replacement cannot apply")
-	}
-
-	if progress.SubmissionStarted {
-		return h.reconcile(ctx, intent, payload, pm, remote, progress.OldCard)
-	}
-	if !intent.CreatedAt.IsZero() && !h.now().Before(intent.CreatedAt.Add(collectJSTokenLifetime)) {
-		return retokenizeTerminal("Collect.js token expired before the replacement could be submitted")
-	}
-	if h.Store == nil {
-		return Parked("payment method update progress store not wired")
-	}
-	if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{
-		"submission_started": true,
-		"old_card":           remote,
-	}); err != nil {
-		return Retryable("record card replacement submission boundary: " + err.Error())
-	}
-
-	if err := client.UpdateCustomerVault(ctx, payload.providerUpdate()); err != nil {
-		switch {
-		case errors.Is(err, nmi.ErrProviderReadOnly):
-			return Parked("nmi provider writes blocked (mode=readonly)")
-		case nmi.IsTransportAmbiguous(err):
-			return Ambiguous("card replacement outcome unknown: " + err.Error())
-		default:
-			return Terminal("card replacement rejected cleanly: " + err.Error())
-		}
-	}
-
-	confirmed, present, err := readNMIPaymentMethodCard(ctx, client, payload.RailCustomerRef, payload.RailMethodRef)
-	if errors.Is(err, errNMICardDataGap) {
-		return h.dataGap(ctx, intent, payload)
-	}
-	if err != nil {
-		return Ambiguous("card replacement accepted, but confirmation read failed: " + err.Error())
-	}
-	if !present {
-		return Ambiguous("card replacement accepted, but the stored card disappeared before confirmation")
-	}
-	if !payload.TargetCard.matches(confirmed) {
-		return Ambiguous("card replacement accepted, but NMI has not confirmed the requested masked card")
-	}
-	return h.finalize(ctx, intent, pm, confirmed, payload.NameOnCard, "provider_confirmed_inline")
+	return h.advance(ctx, intent, false)
 }
 
 func (h *NMIPaymentMethodUpdateHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+	return h.advance(ctx, intent, true)
+}
+
+// verificationOrderID is the replacement's card-verification order reference:
+// a retry finds an earlier verification by it instead of verifying twice.
+func verificationOrderID(intentID uuid.UUID) string { return "pmu-" + intentID.String() }
+
+// advance drives one replacement: stage the new card in the vault, verify it
+// as a recurring agreement, move the method onto it (card and agreement
+// together), then retire the replaced billing entry. Each provider step is
+// resumed from the durable progress; a single-use token is never resubmitted.
+func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.OpenrailsRailIntent, verifying bool) Outcome {
 	payload, err := decodeNMIPaymentMethodUpdatePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
-	}
-	pm, client, outcome, ok := h.dependencies(ctx, intent, payload)
-	if !ok {
-		return outcome
 	}
 	progress, err := decodeNMIPaymentMethodUpdateProgress(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	if !progress.SubmissionStarted || !progress.OldCard.complete() {
-		return Terminal("card replacement is missing its durable submission boundary")
+	pm, client, outcome, ok := h.dependencies(ctx, intent, payload, progress)
+	if !ok {
+		return outcome
 	}
-	remote, present, err := readNMIPaymentMethodCard(ctx, client, payload.RailCustomerRef, payload.RailMethodRef)
+	vault, oldBilling := payload.RailCustomerRef, payload.RailMethodRef
+	readFailed := func(what string, err error) Outcome {
+		if verifying || progress.SubmissionStarted {
+			return Ambiguous(what + ": " + err.Error())
+		}
+		return Retryable(what + ": " + err.Error())
+	}
+	customer, found, err := client.GetCustomer(ctx, vault)
+	if err != nil {
+		return readFailed("provider vault read failed", err)
+	}
+	if !found {
+		return Terminal("stored card vault is absent at NMI; replacement cannot apply")
+	}
+
+	if progress.Finalized {
+		if _, present := billingEntry(customer, oldBilling); present {
+			if err := client.DeleteCustomerBillingEntry(ctx, vault, oldBilling); err != nil {
+				return Retryable("retire the replaced billing entry: " + err.Error())
+			}
+		}
+		return Succeeded(map[string]any{"confirmation": "replacement_card_verified", "payment_method_id": pm.ID, "billing_id": progress.StagedBillingID, "intent_id": intent.ID})
+	}
+
+	old, err := entryCard(customer, oldBilling)
 	if errors.Is(err, errNMICardDataGap) {
 		return h.dataGap(ctx, intent, payload)
 	}
 	if err != nil {
-		return Ambiguous("provider read while verifying card replacement failed: " + err.Error())
+		return Terminal("stored card is absent at NMI; replacement cannot apply")
 	}
-	if !present {
-		return Terminal("stored card disappeared at NMI while replacement was unresolved")
+
+	staged := progress.StagedBillingID
+	if !progress.SubmissionStarted {
+		if verifying {
+			return Terminal("card replacement is missing its durable submission boundary")
+		}
+		if !intent.CreatedAt.IsZero() && !h.now().Before(intent.CreatedAt.Add(collectJSTokenLifetime)) {
+			return retokenizeTerminal("Collect.js token expired before the replacement could be submitted")
+		}
+		if h.Store == nil {
+			return Parked("payment method update progress store not wired")
+		}
+		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"submission_started": true, "old_card": old}); err != nil {
+			return Retryable("record card replacement submission boundary: " + err.Error())
+		}
+		progress.SubmissionStarted, progress.OldCard = true, old
+		known := make([]string, 0, len(customer.Billing))
+		for _, b := range customer.Billing {
+			known = append(known, b.ID)
+		}
+		id, err := client.AddCustomerBillingEntry(ctx, vault, payload.providerUpdate().CreateCustomerVaultData, known)
+		switch {
+		case errors.Is(err, nmi.ErrProviderReadOnly):
+			return Parked("nmi provider writes blocked (mode=readonly)")
+		case err != nil && nmi.IsTransportAmbiguous(err):
+			return Ambiguous("replacement card staging outcome unknown: " + err.Error())
+		case err != nil:
+			return Terminal("card replacement rejected cleanly: " + err.Error())
+		}
+		staged = id
+		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"staged_billing_id": staged}); err != nil {
+			return Ambiguous("record staged billing entry: " + err.Error())
+		}
+		if customer, found, err = client.GetCustomer(ctx, vault); err != nil || !found {
+			return Ambiguous("read the vault after staging the replacement card failed")
+		}
 	}
-	return h.reconcile(ctx, intent, payload, pm, remote, progress.OldCard)
+	if staged == "" {
+		// The staging request's outcome was lost: the entry NMI added is the
+		// one carrying the requested card beside the replaced one.
+		var candidates []string
+		for _, b := range customer.Billing {
+			if card, err := billingCard(b); err == nil && strings.TrimSpace(b.ID) != oldBilling && payload.TargetCard.matches(card) {
+				candidates = append(candidates, strings.TrimSpace(b.ID))
+			}
+		}
+		switch len(candidates) {
+		case 0:
+			return retokenizeTerminal("NMI still has only the original card; the single-use replacement token cannot be submitted again")
+		case 1:
+			staged = candidates[0]
+		default:
+			return Terminal("NMI holds several entries matching the replacement card; refusing to guess which was staged")
+		}
+		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"staged_billing_id": staged}); err != nil {
+			return Ambiguous("record staged billing entry: " + err.Error())
+		}
+	}
+	stagedCard, err := entryCard(customer, staged)
+	if errors.Is(err, errNMICardDataGap) {
+		return h.dataGap(ctx, intent, payload)
+	}
+	if err != nil {
+		return Terminal("the staged replacement card disappeared at NMI")
+	}
+	if !payload.TargetCard.matches(stagedCard) {
+		return TerminalWithEvidence("NMI staged a different card than the requested replacement; refusing to use it", map[string]any{"provider_card": stagedCard})
+	}
+
+	ref := progress.AgreementRef
+	if ref == "" {
+		order := verificationOrderID(intent.ID)
+		var refused *nmi.Verification
+		if progress.VerificationSubmitted {
+			v, found, err := client.ReadVerificationByOrderID(ctx, order)
+			if err != nil {
+				return Ambiguous("read the replacement card verification: " + err.Error())
+			}
+			if found && v.Approved {
+				ref = v.TransactionID
+			} else if found {
+				refused = &nmi.Verification{ResponseCode: v.ResponseCode}
+			}
+		}
+		if ref == "" && refused == nil {
+			if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"verification_submitted": true}); err != nil {
+				return Ambiguous("record verification boundary: " + err.Error())
+			}
+			// A verification moves no funds; one lost before NMI recorded it
+			// is sent again under the same order reference.
+			ref, err = client.EstablishRecurringAgreement(ctx, vault, staged, order)
+			var decline *nmi.CustomerVaultError
+			switch {
+			case errors.Is(err, nmi.ErrProviderReadOnly):
+				return Parked("nmi provider writes blocked (mode=readonly)")
+			case errors.As(err, &decline) && !nmi.UncertainResponseCode(decline.ResponseCode):
+				refused = &nmi.Verification{ResponseCode: decline.ResponseCode, ResponseText: strings.TrimSpace(decline.LocalizationID)}
+			case err != nil:
+				return Ambiguous("replacement card verification outcome unknown: " + err.Error())
+			}
+		}
+		if refused != nil {
+			// The issuer refused the new card: it never becomes the method's
+			// card, and the previous card and agreement stay in use.
+			if _, present := billingEntry(customer, staged); present {
+				if err := client.DeleteCustomerBillingEntry(ctx, vault, staged); err != nil {
+					return Retryable("remove the refused replacement card: " + err.Error())
+				}
+			}
+			// The customer-facing decline code: NMI's localization id when it
+			// named one, else its response code.
+			code := refused.ResponseText
+			if code == "" {
+				code = fmt.Sprintf("nmi_response_%d", refused.ResponseCode)
+			}
+			return TerminalWithEvidence("the card issuer refused to verify the replacement card", map[string]any{"declined": true, "decline_code": code, "response_code": refused.ResponseCode})
+		}
+		if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{"agreement_ref": ref}); err != nil {
+			return Ambiguous("record replacement card agreement: " + err.Error())
+		}
+	}
+
+	if out := h.finalize(ctx, intent, pm, oldBilling, staged, stagedCard, ref, payload.NameOnCard); out.Class != OutcomeSucceeded {
+		return out
+	}
+	if err := client.DeleteCustomerBillingEntry(ctx, vault, oldBilling); err != nil {
+		return Retryable("retire the replaced billing entry: " + err.Error())
+	}
+	return Succeeded(map[string]any{"confirmation": "replacement_card_verified", "payment_method_id": pm.ID, "billing_id": staged, "provider_card": stagedCard, "intent_id": intent.ID})
 }
 
-func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload) (*models.PaymentMethod, *nmi.NMIClient, Outcome, bool) {
+func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload, progress nmiPaymentMethodUpdateProgress) (*models.PaymentMethod, *nmi.NMIClient, Outcome, bool) {
 	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, payload.PaymentMethodID)
 	if err != nil {
 		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
@@ -248,8 +352,12 @@ func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent
 		}
 		return nil, nil, Retryable("load payment method: " + err.Error()), false
 	}
+	billing := strings.TrimSpace(payload.RailMethodRef)
+	if progress.Finalized {
+		billing = progress.StagedBillingID
+	}
 	if pm.CustomerID.String() != payload.UserID || strings.TrimSpace(pm.RailCustomerRef) != strings.TrimSpace(payload.RailCustomerRef) ||
-		strings.TrimSpace(pm.RailMethodRef) != strings.TrimSpace(payload.RailMethodRef) {
+		strings.TrimSpace(pm.RailMethodRef) != billing {
 		return nil, nil, Terminal("payment method identity changed while card replacement was pending"), false
 	}
 	if strings.HasPrefix(pm.ParkReason, "delete:") {
@@ -268,54 +376,86 @@ func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent
 	return pm, client, Outcome{}, true
 }
 
-func (h *NMIPaymentMethodUpdateHandler) reconcile(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload, pm *models.PaymentMethod, remote, old nmiCard) Outcome {
-	switch {
-	case payload.TargetCard.matches(remote):
-		return h.finalize(ctx, intent, pm, remote, payload.NameOnCard, "provider_confirmed_by_read")
-	case old.complete() && old.matches(remote):
-		return retokenizeTerminal("NMI still has the original card; the single-use replacement token cannot be submitted again")
-	default:
-		return TerminalWithEvidence(
-			"NMI has a different card than both the original and requested replacement; refusing to overwrite out-of-band state",
-			map[string]any{"provider_card": remote},
-		)
+// finalize moves the method onto the verified billing entry: its card, its
+// recurring agreement and the durable finalized mark commit together.
+func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, pm *models.PaymentMethod, oldBilling, staged string, card nmiCard, ref, nameOnCard string) Outcome {
+	metadata := map[string]any{}
+	for k, v := range pm.Metadata {
+		metadata[k] = v
 	}
+	if name := strings.TrimSpace(nameOnCard); name != "" {
+		metadata["name_on_card"] = name
+	}
+	raw, err := models.ToJSONB(metadata)
+	if err != nil {
+		return Terminal("encode payment method metadata: " + err.Error())
+	}
+	now := h.now()
+	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.DB.NewWithPgxTx(tx)
+		n, err := d.Gen(ctx).ReplacePaymentMethodCard(ctx, gen.ReplacePaymentMethodCardParams{
+			NewRailMethodRef: staged, LastFour: stringPtr(card.LastFour), CardType: stringPtr(card.CardType), ExpiryDate: stringPtr(card.ExpiryDate),
+			Metadata: raw, RecurringRef: ref, UpdatedAt: now, MerchantID: intent.MerchantID, ID: pm.ID, OldRailMethodRef: oldBilling,
+		})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("payment method changed before the replacement card could be recorded")
+		}
+		if err := NewStore(d).RecordProgress(ctx, intent.ID, map[string]any{"finalized": true}); err != nil {
+			return err
+		}
+		_, err = d.Gen(ctx).WakeEngineSubscriptionsForPaymentMethod(ctx, gen.WakeEngineSubscriptionsForPaymentMethodParams{MerchantID: intent.MerchantID, PaymentMethodID: pm.ID, Now: now})
+		return err
+	})
+	if err != nil {
+		return Ambiguous("replacement card verified, but local finalize failed: " + err.Error())
+	}
+	return Succeeded(nil)
 }
 
-func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, pm *models.PaymentMethod, remote nmiCard, nameOnCard, confirmation string) Outcome {
-	latest, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, pm.ID)
-	if err != nil {
-		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
-			return Terminal("payment method row was removed before card replacement could finalize")
+// billingEntry finds a vault billing entry by id.
+func billingEntry(customer nmi.V5Customer, billingID string) (nmi.V5CustomerBilling, bool) {
+	ref := strings.TrimSpace(billingID)
+	for _, b := range customer.Billing {
+		if strings.TrimSpace(b.ID) == ref {
+			return b, true
 		}
-		return Ambiguous("load payment method for local finalize: " + err.Error())
 	}
-	latest.LastFour = stringPtr(remote.LastFour)
-	latest.CardType = stringPtr(remote.CardType)
-	latest.ExpiryDate = stringPtr(remote.ExpiryDate)
-	if name := strings.TrimSpace(nameOnCard); name != "" {
-		if latest.Metadata == nil {
-			latest.Metadata = map[string]any{}
+	return nmi.V5CustomerBilling{}, false
+}
+
+var errNMIBillingEntryAbsent = errors.New("billing entry absent")
+
+// entryCard is the masked card of one billing entry ("" = the primary).
+func entryCard(customer nmi.V5Customer, billingID string) (nmiCard, error) {
+	if strings.TrimSpace(billingID) == "" {
+		if primary := customer.PrimaryBilling(); primary != nil {
+			return billingCard(*primary)
 		}
-		latest.Metadata["name_on_card"] = name
+		return nmiCard{}, errNMIBillingEntryAbsent
 	}
-	latest.UpdatedAt = h.now()
-	finalize := h.finalizeWrite
-	if finalize == nil {
-		finalize = paymentmethods.NewPaymentMethodRepo(h.DB).Update
+	b, ok := billingEntry(customer, billingID)
+	if !ok {
+		return nmiCard{}, errNMIBillingEntryAbsent
 	}
-	if err := finalize(ctx, latest); err != nil {
-		return Ambiguous("provider card confirmed, but local finalize failed: " + err.Error())
+	return billingCard(b)
+}
+
+func billingCard(b nmi.V5CustomerBilling) (nmiCard, error) {
+	card := nmiCard{
+		LastFour:   maskedLastFour(b.PaymentDetails.CardNumber),
+		CardType:   strings.TrimSpace(b.PaymentDetails.CardType),
+		ExpiryDate: normalizeNMIExpiry(b.PaymentDetails.CardExp),
 	}
-	if _, err := h.DB.Gen(ctx).WakeEngineSubscriptionsForPaymentMethod(ctx, gen.WakeEngineSubscriptionsForPaymentMethodParams{MerchantID: intent.MerchantID, PaymentMethodID: latest.ID, Now: h.now()}); err != nil {
-		return Ambiguous("provider card confirmed, but waking its memberships failed: " + err.Error())
+	if card.CardType == "" {
+		card.CardType = nmi.CardBrandFromMaskedPAN(b.PaymentDetails.CardNumber)
 	}
-	return Succeeded(map[string]any{
-		"confirmation":      confirmation,
-		"payment_method_id": latest.ID,
-		"provider_card":     remote,
-		"intent_id":         intent.ID,
-	})
+	if !card.complete() {
+		return nmiCard{}, errNMICardDataGap
+	}
+	return card, nil
 }
 
 func (p NMIPaymentMethodUpdatePayload) providerUpdate() nmi.UpdateCustomerVaultData {
@@ -337,39 +477,6 @@ func (p NMIPaymentMethodUpdatePayload) providerUpdate() nmi.UpdateCustomerVaultD
 			Address2:     p.Address2,
 		},
 	}
-}
-
-func readNMIPaymentMethodCard(ctx context.Context, client *nmi.NMIClient, vaultID, billingID string) (nmiCard, bool, error) {
-	customer, found, err := client.GetCustomer(ctx, vaultID)
-	if err != nil || !found {
-		return nmiCard{}, false, err
-	}
-	var billing *nmi.V5CustomerBilling
-	if ref := strings.TrimSpace(billingID); ref != "" {
-		for j := range customer.Billing {
-			if strings.TrimSpace(customer.Billing[j].ID) == ref {
-				billing = &customer.Billing[j]
-				break
-			}
-		}
-	} else {
-		billing = customer.PrimaryBilling()
-	}
-	if billing == nil {
-		return nmiCard{}, false, nil
-	}
-	card := nmiCard{
-		LastFour:   maskedLastFour(billing.PaymentDetails.CardNumber),
-		CardType:   strings.TrimSpace(billing.PaymentDetails.CardType),
-		ExpiryDate: normalizeNMIExpiry(billing.PaymentDetails.CardExp),
-	}
-	if card.CardType == "" {
-		card.CardType = nmi.CardBrandFromMaskedPAN(billing.PaymentDetails.CardNumber)
-	}
-	if !card.complete() {
-		return nmiCard{}, false, errNMICardDataGap
-	}
-	return card, true, nil
 }
 
 func maskedLastFour(value string) string {
@@ -494,6 +601,9 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 	case StatusFailedTerminal, StatusSuperseded, StatusExpired:
 		out.Terminal = true
 		out.Retokenize = intentEvidenceBool(row.ResultEvidence, "retokenize")
+		if intentEvidenceBool(row.ResultEvidence, "declined") {
+			out.DeclineCode = intentEvidenceString(row.ResultEvidence, "decline_code")
+		}
 	}
 	return out, nil
 }
@@ -507,6 +617,15 @@ func intentEvidenceBool(raw []byte, key string) bool {
 		return false
 	}
 	value, _ := evidence[key].(bool)
+	return value
+}
+
+func intentEvidenceString(raw []byte, key string) string {
+	var evidence map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
+		return ""
+	}
+	value, _ := evidence[key].(string)
 	return value
 }
 

@@ -239,10 +239,15 @@ type MerchantSettings struct {
 	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription:
 	// a renewal starting sooner than this after the membership start or the
 	// last receipted renewal sends none. Nil uses 24; 0 receipts every renewal.
-	RenewalReceiptMinIntervalHours *int                   `json:"renewal_receipt_min_interval_hours,omitempty"`
-	ArrearsGraceDays               *int                   `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor        *int64                 `json:"arrears_delinquency_floor,omitempty,string"`
-	CheckoutRouting                *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
+	RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
+	// ProviderRefundAccess decides what a refund made in the provider's own
+	// dashboard does to access, on every rail: ProviderRefundRevokeOnFull
+	// (default), ProviderRefundRevokeOnAny or ProviderRefundKeep. Refunds made
+	// through OpenRails follow their own revoke_access choice.
+	ProviderRefundAccess    *string                `json:"provider_refund_access,omitempty"`
+	ArrearsGraceDays        *int                   `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor *int64                 `json:"arrears_delinquency_floor,omitempty,string"`
+	CheckoutRouting         *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".

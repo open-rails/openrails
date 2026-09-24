@@ -27,3 +27,10 @@ type CheckoutRoutingMatch struct {
 func (m CheckoutRoutingMatch) IsCatchAll() bool {
 	return m.Currency == "" && m.Product == "" && m.Price == "" && m.Mode == "" && m.Country == ""
 }
+
+// MerchantSettings.ProviderRefundAccess values.
+const (
+	ProviderRefundRevokeOnFull = "revoke_on_full"
+	ProviderRefundRevokeOnAny  = "revoke_on_any"
+	ProviderRefundKeep         = "keep"
+)
