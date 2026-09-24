@@ -219,7 +219,11 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}
-	if !sub.CurrentPeriodEndsAt.Add(collection.Window(*cycle)).After(s.now().UTC()) {
+	window, err := collection.Window(*cycle)
+	if err != nil {
+		return nil, err
+	}
+	if !sub.CurrentPeriodEndsAt.Add(window).After(s.now().UTC()) {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}

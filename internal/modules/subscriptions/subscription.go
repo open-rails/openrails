@@ -73,8 +73,6 @@ const (
 	CurrencyUSD = "USD"
 	CurrencyEUR = "EUR"
 
-	BillingCycleMonthly = 30
-
 	WebhookSourceCCBill = "ccbill_webhook"
 	WebhookSourceNMI    = "nmi_webhook"
 	WebhookSourceSystem = "system"

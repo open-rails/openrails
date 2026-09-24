@@ -376,7 +376,10 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}
 			// plan.retryAttempts was loaded BEFORE the FailMembership above
 			// recorded this failure, so the schedule gap is looked up at +1.
-			gap := collection.NextRetryIn(plan.cycleHours, plan.retryAttempts+1)
+			gap, err := collection.NextRetryIn(plan.cycleHours, plan.retryAttempts+1)
+			if err != nil {
+				return crankOutcome{}, fmt.Errorf("solana crank: %w", err)
+			}
 			if gap <= 0 {
 				// That failure was terminal under the schedule (FailMembership
 				// cancelled the membership); advance one period so this record

@@ -8,8 +8,15 @@
 package collection
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -21,22 +28,55 @@ import (
 //	cycle < 4 days        -> no retries (the first failure is terminal)
 //	4 days <= cycle < 28  -> +1d, +2d                  ("weekly": 3 failures total)
 //	cycle >= 28 days      -> +2d, +5d, +9d, +13d       ("monthly": 5 failures total)
-//	unknown (<= 0)        -> monthly schedule, defensively (callers log)
+//	unknown (<= 0)        -> ErrUnknownCycle: nothing is scheduled or charged
 //
-// Boundary rationale: the derived staleness window (last offset + one day of
-// slack) must fit WELL INSIDE one billing cycle, so a subscription is never
-// still dunning the old period when the next charge is due.
+// Boundary rationale: the derived staleness window (last offset + slack) must
+// fit WELL INSIDE one billing cycle, so a subscription is never still dunning
+// the old period when the next charge is due.
 const (
 	// MinRetryCycleHours is the shortest billing cycle that gets any retries at
 	// all; below it the first failure is terminal. 96h (4 days).
 	MinRetryCycleHours = 4 * 24
-	// MonthlyCycleHours is where the monthly (capped) tier starts — and the
-	// cycle the invoice-arrears consumer bills on. 672h (28 days).
+	// MonthlyCycleHours is where the monthly (capped) tier starts. 672h (28 days).
 	MonthlyCycleHours = 28 * 24
-	// windowSlack is added past the last retry offset when deriving the
-	// staleness window: 24h tolerates a late worker run.
-	windowSlack = 24 * time.Hour
+	// maxWindowSlack is the most slack added past the last retry offset: 24h
+	// tolerates a late worker run. Short cycles get half their cycle instead
+	// (windowSlack), so the window always ends inside the cycle.
+	maxWindowSlack = 24 * time.Hour
 )
+
+// ErrUnknownCycle is a collection asked to schedule without a billing cycle.
+// Consumers fail closed: nothing is charged, retried or terminated on a
+// guessed cadence, and an operator finding (FindingUnknownCycle) is raised.
+var ErrUnknownCycle = errors.New("billing cycle is unknown")
+
+// UnknownCycleError carries the offending cycle; it matches ErrUnknownCycle.
+type UnknownCycleError struct{ CycleHours int }
+
+func (e *UnknownCycleError) Error() string {
+	return fmt.Sprintf("%s (cycle %dh)", ErrUnknownCycle, e.CycleHours)
+}
+
+func (e *UnknownCycleError) Is(target error) bool { return target == ErrUnknownCycle }
+
+// FindingUnknownCycle is a collection that refused to run for want of a cycle.
+const FindingUnknownCycle = "life.cadence.unknown"
+
+type findingWriter interface {
+	UpsertReconciliationFinding(context.Context, gen.UpsertReconciliationFindingParams) (gen.OpenrailsReconciliationFinding, error)
+}
+
+// RecordUnknownCycle raises the operator finding for subject (a subscription
+// or invoice id) that collection refused because its cycle is unknown.
+func RecordUnknownCycle(ctx context.Context, q findingWriter, merchantID uuid.UUID, subject, consumer string, cause error) error {
+	evidence, _ := json.Marshal(map[string]any{"subject": subject, "consumer": consumer, "error": cause.Error()})
+	action := fmt.Sprintf("%s %s has no billing cycle, so collection refuses to charge, retry or end it (%v). Give its price a recurring cadence or resolve it by hand", consumer, subject, cause)
+	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: merchantID, FindingType: FindingUnknownCycle, SubjectKey: subject,
+		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
+	})
+	return err
+}
 
 var (
 	// offsetsWeekly: 2 retries, one day apart.
@@ -52,25 +92,25 @@ var (
 
 // RetryOffsets returns the hardcoded retry schedule for a billing cycle in
 // HOURS. An empty schedule means no retries — the first failure is terminal.
-// cycleHours <= 0 means unknown; the monthly schedule is returned defensively.
 // Callers must not mutate the returned slice.
-func RetryOffsets(cycleHours int) []time.Duration {
+func RetryOffsets(cycleHours int) ([]time.Duration, error) {
 	switch {
 	case cycleHours <= 0:
-		return offsetsMonthly
+		return nil, &UnknownCycleError{CycleHours: cycleHours}
 	case cycleHours < MinRetryCycleHours:
-		return nil
+		return nil, nil
 	case cycleHours < MonthlyCycleHours:
-		return offsetsWeekly
+		return offsetsWeekly, nil
 	default:
-		return offsetsMonthly
+		return offsetsMonthly, nil
 	}
 }
 
 // MaxFailures returns how many consecutive failures (counting the initial
 // one) a billing cycle tolerates before collection goes terminal.
-func MaxFailures(cycleHours int) int {
-	return len(RetryOffsets(cycleHours)) + 1
+func MaxFailures(cycleHours int) (int, error) {
+	offsets, err := RetryOffsets(cycleHours)
+	return len(offsets) + 1, err
 }
 
 // NextRetryIn returns how long after the failures-th consecutive failure
@@ -78,15 +118,15 @@ func MaxFailures(cycleHours int) int {
 // The gaps reproduce the offset schedule when each retry runs on time and
 // degrade gracefully when the worker is late — the next retry is always
 // relative to the failure that just happened, never in the past.
-func NextRetryIn(cycleHours, failures int) time.Duration {
-	offsets := RetryOffsets(cycleHours)
-	if failures < 1 || failures > len(offsets) {
-		return 0
+func NextRetryIn(cycleHours, failures int) (time.Duration, error) {
+	offsets, err := RetryOffsets(cycleHours)
+	if err != nil || failures < 1 || failures > len(offsets) {
+		return 0, err
 	}
 	if failures == 1 {
-		return offsets[0]
+		return offsets[0], nil
 	}
-	return offsets[failures-1] - offsets[failures-2]
+	return offsets[failures-1] - offsets[failures-2], nil
 }
 
 // Window returns the DERIVED staleness window (#344, #359): how long past the
@@ -95,22 +135,29 @@ func NextRetryIn(cycleHours, failures int) time.Duration {
 // and the row parks for provider verification. Expiry is NOT a terminal
 // outcome (#839): a clock reading is not evidence a subscription is dead.
 //
-// window = last retry offset + one day of slack. A 0-retry cycle (sub-4-day
-// cadence) has no offsets, so its window is the slack alone — NOT zero (#839):
-// a zero window is true by construction the moment a row lapses, which would
-// close every daily subscription on its first collection touch without ever
-// attempting the charge it is queued for.
-func Window(cycleHours int) time.Duration {
-	offsets := RetryOffsets(cycleHours)
-	if len(offsets) == 0 {
-		return windowSlack
+// window = last retry offset + min(24h, cycle/2). A 0-retry cycle (sub-4-day
+// cadence) has no offsets, so its window is the slack alone — NOT zero (#839),
+// and never a whole cycle: an hourly membership gets 30 minutes, a daily one
+// 12 hours. Window(cycle) < cycle for every known cycle.
+func Window(cycleHours int) (time.Duration, error) {
+	offsets, err := RetryOffsets(cycleHours)
+	if err != nil {
+		return 0, err
 	}
-	return offsets[len(offsets)-1] + windowSlack
+	slack := windowSlack(time.Duration(cycleHours) * time.Hour)
+	if len(offsets) == 0 {
+		return slack, nil
+	}
+	return offsets[len(offsets)-1] + slack, nil
+}
+
+func windowSlack(cycle time.Duration) time.Duration {
+	return min(maxWindowSlack, cycle/2)
 }
 
 // BillingCycleHoursOf returns the price's billing cycle in HOURS, or 0 when
-// the price or its cycle is unknown (one-time prices) — the defensive
-// monthly-fallback input to the schedule functions.
+// the price or its cycle is unknown (one-time prices), which the schedule
+// functions refuse with ErrUnknownCycle.
 func BillingCycleHoursOf(price *models.Price) int {
 	if price == nil {
 		return 0
@@ -128,8 +175,7 @@ func BillingCycleHoursOf(price *models.Price) int {
 // on the weekly offsets and an annual one on the monthly offsets, instead of
 // every invoice being dunned on a hardcoded month (or#828).
 //
-// A degenerate or unset period returns 0 = unknown, which the schedule
-// functions above handle defensively (monthly).
+// A degenerate or unset period returns 0 = unknown (ErrUnknownCycle).
 func CycleHoursBetween(from, to time.Time) int {
 	if from.IsZero() || to.IsZero() || !to.After(from) {
 		return 0

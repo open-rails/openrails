@@ -158,7 +158,11 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			return err
 		}
 		p := subscriptions.ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.RebillOrderReference(key), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
-		windowEnd := terms.PeriodStart.Add(collection.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)))
+		window, err := collection.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour))
+		if err != nil {
+			return err
+		}
+		windowEnd := terms.PeriodStart.Add(window)
 		if !windowEnd.After(now) {
 			return ErrRebillNotRetryable
 		}

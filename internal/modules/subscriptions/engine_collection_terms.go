@@ -123,3 +123,13 @@ func EngineCollectionDue(sub *models.Subscription, at time.Time, customer bool) 
 	}
 	return sub.Status == models.StatusActive || (sub.Status == models.StatusPastDue && sub.NextRetryAt != nil && !sub.NextRetryAt.After(at))
 }
+
+// AuthenticationDeadline is when an unanswered issuer challenge on this
+// renewal is abandoned: acceptance plus the grace of the renewal's period.
+func (p SubscriptionCollectionPayload) AuthenticationDeadline() (time.Time, error) {
+	grace, err := EngineRenewalGrace(p.Renewal.PeriodEnd.Sub(p.Renewal.PeriodStart))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return p.AcceptedAt.Add(grace), nil
+}

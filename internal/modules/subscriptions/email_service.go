@@ -550,13 +550,13 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 	periodEnd := s.now()
 	if subscription.CurrentPeriodStartsAt != nil {
 		periodStart = *subscription.CurrentPeriodStartsAt
-		if cycleHours := price.RecurringCycleHours(); cycleHours != nil {
-			periodEnd = periodStart.Add(time.Duration(*cycleHours) * time.Hour)
-		} else {
-			periodEnd = periodStart.AddDate(0, 1, 0)
-		}
-		if subscription.CurrentPeriodEndsAt != nil {
+		switch cycleHours := price.RecurringCycleHours(); {
+		case subscription.CurrentPeriodEndsAt != nil:
 			periodEnd = *subscription.CurrentPeriodEndsAt
+		case cycleHours != nil && *cycleHours > 0:
+			periodEnd = periodStart.Add(time.Duration(*cycleHours) * time.Hour)
+		default:
+			return nil, fmt.Errorf("subscription %s has no period end and price %s no billing cycle", subscription.ID, price.ID)
 		}
 	}
 

@@ -468,14 +468,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		// recurring and one-off/durable prices (RecurringCycleHours is AutoRenew-gated).
 		periodEndsAt = periodStartsAt.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
 	default:
-		// #651: no provider period and no declared access duration. Don't silently
-		// invent a cadence — warn, then fall back to 30d so the row stays valid.
-		log.WithContext(ctx).WithFields(log.Fields{
-			"price_id":   price.ID,
-			"product_id": price.ProductID,
-			"user_id":    params.UserID,
-		}).Warn("price has no access duration and provider supplied no period end; defaulting membership period to 30d")
-		periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
+		// #651: no provider period and no declared access duration. A cadence
+		// is never invented.
+		return nil, nil, fmt.Errorf("create membership on price %s: %w", price.ID, &collection.UnknownCycleError{})
 	}
 	var product *models.Product
 	if terms := params.Prepared; terms != nil {
@@ -693,7 +688,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			}).Info("Granted subscription entitlement")
 		}
 		if len(entNames) > 0 {
-			if err := pushEngineRenewalGrace(ctx, entitlementService, subscription, entNames, periodEndsAt); err != nil {
+			if err := pushEngineRenewalGrace(ctx, entitlementService, subscription, entNames, periodStartsAt, periodEndsAt); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1142,38 +1137,24 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if terms := params.Prepared; terms != nil {
 			periodStartsAt, periodEndsAt = terms.PeriodStart.UTC(), terms.PeriodEnd.UTC()
 		} else {
-			// Calculate new billing period. A renewing subscription's price is
-			// recurring; fall back to 30d (720h) if its cadence is somehow unset.
-			cycleHours := collection.BillingCycleHoursOf(price)
-			if cycleHours <= 0 {
-				// #651: a renewing subscription should carry a recurring cadence; if it
-				// doesn't, warn instead of silently inventing 30d.
-				log.WithContext(ctx).WithFields(log.Fields{
-					"price_id":             price.ID,
-					"rail_subscription_id": params.RailSubscriptionID,
-				}).Warn("renewing price has no billing cadence; defaulting renewal period to 30d")
-				cycleHours = 30 * 24
-			}
-			cycleWindow := time.Duration(cycleHours) * time.Hour
-			if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
+			// The provider's period wins; otherwise the price's cadence extends
+			// it. Without either, the renewal fails closed rather than
+			// inventing a month.
+			switch {
+			case params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero():
 				periodStartsAt = params.CurrentPeriodStartsAt.UTC()
-				if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
-					periodEndsAt = params.CurrentPeriodEndsAt.UTC()
-				} else {
-					periodEndsAt = periodStartsAt.Add(cycleWindow)
-				}
-			} else if subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.IsZero() {
+			case subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.IsZero():
 				periodStartsAt = *subscription.CurrentPeriodEndsAt
-				periodEndsAt = periodStartsAt.Add(cycleWindow)
-			} else {
-				now := s.now()
-				periodStartsAt = now
-				periodEndsAt = now.Add(cycleWindow)
+			default:
+				periodStartsAt = s.now()
 			}
 			if params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt) {
 				periodEndsAt = params.CurrentPeriodEndsAt.UTC()
+			} else if cycleHours := collection.BillingCycleHoursOf(price); cycleHours > 0 {
+				periodEndsAt = periodStartsAt.Add(time.Duration(cycleHours) * time.Hour)
+			} else {
+				return fmt.Errorf("renew membership %s on price %s: %w", subscription.ID, price.ID, &collection.UnknownCycleError{CycleHours: cycleHours})
 			}
-
 		}
 
 		// Both observed and accepted inputs share one local effect writer.
@@ -1278,8 +1259,8 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		if err := entSvc.ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
 			return fmt.Errorf("resume membership: reopen subscription access: %w", err)
 		}
-		if subscription.CurrentPeriodEndsAt != nil {
-			if err := pushEngineRenewalGrace(ctx, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodEndsAt); err != nil {
+		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
+			if err := pushEngineRenewalGrace(ctx, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}
@@ -2125,6 +2106,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	// or#870 bucket 2: the decline means the customer must fix their card.
 	// Drives the payment_method_update_required notification below.
 	var needsPaymentMethodUpdate bool
+	var unknownCycle uuid.UUID
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail":                 params.Rail,
@@ -2303,15 +2285,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 					cycleHours = collection.BillingCycleHoursOf(price)
 				}
 			}
-			if cycleHours <= 0 {
-				// A past_due subscription on a one-time price shouldn't exist;
-				// defensively dun it on the monthly schedule.
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"price_id":        subscription.PriceID,
-				}).Warn("FailMembership: subscription has no billing cycle (one-time price?); using monthly dunning schedule")
+			// An unknown cycle fails closed: nothing is retried or cancelled on
+			// a guessed cadence; the caller raises the operator finding.
+			maxFailures, err := collection.MaxFailures(cycleHours)
+			if err != nil {
+				unknownCycle = subscription.MerchantID
+				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
-			maxFailures := collection.MaxFailures(cycleHours)
 
 			terminal := params.Terminal
 			if !terminal {
@@ -2351,7 +2331,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				subscription.EndedAt = &now
 				subscription.ClearRetrySchedule()
 			} else {
-				nextRetry := now.Add(collection.NextRetryIn(cycleHours, *subscription.RetryAttempts))
+				gap, err := collection.NextRetryIn(cycleHours, *subscription.RetryAttempts)
+				if err != nil {
+					return err
+				}
+				nextRetry := now.Add(gap)
 				subscription.NextRetryAt = &nextRetry
 			}
 		}
@@ -2519,6 +2503,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	})
 
 	if err != nil {
+		if errors.Is(err, collection.ErrUnknownCycle) && unknownCycle != uuid.Nil {
+			if ferr := collection.RecordUnknownCycle(ctx, s.DB.Gen(ctx), unknownCycle, params.SubscriptionID.String(), "subscription", err); ferr != nil {
+				return errors.Join(err, ferr)
+			}
+		}
 		return err
 	}
 
