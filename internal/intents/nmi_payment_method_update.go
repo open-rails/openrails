@@ -61,15 +61,25 @@ type nmiCard struct {
 	ExpiryDate string `json:"expiry_date"`
 }
 
+// complete: last four and expiry identify a masked card. NMI may omit the
+// brand, so it is optional.
 func (c nmiCard) complete() bool {
-	return c.LastFour != "" && c.CardType != "" && c.ExpiryDate != ""
+	return c.LastFour != "" && c.ExpiryDate != ""
 }
 
+// matches compares brands only when both sides state one.
 func (c nmiCard) matches(other nmiCard) bool {
-	return c.LastFour == other.LastFour &&
-		canonicalCardType(c.CardType) == canonicalCardType(other.CardType) &&
-		c.ExpiryDate == other.ExpiryDate
+	a, b := canonicalCardType(c.CardType), canonicalCardType(other.CardType)
+	return c.LastFour == other.LastFour && c.ExpiryDate == other.ExpiryDate && (a == "" || b == "" || a == b)
 }
+
+// errNMICardDataGap is a stored card NMI reports without its last four or
+// expiry: deterministic, so retrying cannot resolve it.
+var errNMICardDataGap = errors.New("NMI billing entry returned incomplete masked card metadata")
+
+// PaymentMethodDataGapFinding is raised when a card replacement stops on
+// incomplete provider card data.
+const PaymentMethodDataGapFinding = "life.payment_method_update.provider_data_gap"
 
 type nmiPaymentMethodUpdateProgress struct {
 	SubmissionStarted bool    `json:"submission_started"`
@@ -148,6 +158,9 @@ func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.
 		return Terminal(err.Error())
 	}
 	remote, present, err := readNMIPaymentMethodCard(ctx, client, payload.RailCustomerRef, payload.RailMethodRef)
+	if errors.Is(err, errNMICardDataGap) {
+		return h.dataGap(ctx, intent, payload)
+	}
 	if err != nil {
 		return Retryable("provider read before card replacement failed: " + err.Error())
 	}
@@ -183,6 +196,9 @@ func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.
 	}
 
 	confirmed, present, err := readNMIPaymentMethodCard(ctx, client, payload.RailCustomerRef, payload.RailMethodRef)
+	if errors.Is(err, errNMICardDataGap) {
+		return h.dataGap(ctx, intent, payload)
+	}
 	if err != nil {
 		return Ambiguous("card replacement accepted, but confirmation read failed: " + err.Error())
 	}
@@ -212,6 +228,9 @@ func (h *NMIPaymentMethodUpdateHandler) Verify(ctx context.Context, intent gen.O
 		return Terminal("card replacement is missing its durable submission boundary")
 	}
 	remote, present, err := readNMIPaymentMethodCard(ctx, client, payload.RailCustomerRef, payload.RailMethodRef)
+	if errors.Is(err, errNMICardDataGap) {
+		return h.dataGap(ctx, intent, payload)
+	}
 	if err != nil {
 		return Ambiguous("provider read while verifying card replacement failed: " + err.Error())
 	}
@@ -344,8 +363,11 @@ func readNMIPaymentMethodCard(ctx context.Context, client *nmi.NMIClient, vaultI
 		CardType:   strings.TrimSpace(billing.PaymentDetails.CardType),
 		ExpiryDate: normalizeNMIExpiry(billing.PaymentDetails.CardExp),
 	}
+	if card.CardType == "" {
+		card.CardType = nmi.CardBrandFromMaskedPAN(billing.PaymentDetails.CardNumber)
+	}
 	if !card.complete() {
-		return nmiCard{}, false, errors.New("NMI billing entry returned incomplete masked card metadata")
+		return nmiCard{}, false, errNMICardDataGap
 	}
 	return card, true, nil
 }
@@ -493,4 +515,16 @@ func valueOrEmpty(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
+}
+
+// dataGap ends a replacement NMI cannot describe and raises an operator
+// finding; the local card keeps its last confirmed metadata.
+func (h *NMIPaymentMethodUpdateHandler) dataGap(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload) Outcome {
+	evidence, _ := json.Marshal(map[string]any{"payment_method_id": payload.PaymentMethodID.String(), "customer_vault_id": payload.RailCustomerRef, "billing_id": payload.RailMethodRef, "intent_id": intent.ID.String()})
+	action := "NMI returned this stored card without its last four digits or expiry. Check the customer vault at NMI; the customer can add the card again."
+	if _, err := h.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: intent.MerchantID, FindingType: PaymentMethodDataGapFinding,
+		SubjectKey: payload.PaymentMethodID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+		return Retryable("record card data gap finding: " + err.Error())
+	}
+	return Terminal(errNMICardDataGap.Error())
 }

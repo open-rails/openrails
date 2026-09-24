@@ -105,6 +105,8 @@ func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod)
 		NetworkTokenStatus:   m.NetworkTokenStatus,
 		NetworkTokenPar:      m.NetworkTokenPAR,
 		ChargeVia:            m.ChargeVia, // "" -> DB default 'pan_proxy'
+
+		StoredCredentialRecurringRef: m.StoredCredentialRecurringRef,
 	})
 	if err != nil {
 		return err

@@ -113,10 +113,9 @@ rail id owned by another customer, lifecycle-slot conflict) never fails the
 batch — it stays parked and is reported loudly.
 
 **Entitlements are derived, not imported.** The book has no entitlement
-record kind. Subscription access follows from subscription standing and from
-the derive pass: run `rt.Converge` (the operator-triggerable
-merchant-wide convergence) after import to materialize grants + entitlement
-windows from the imported subscriptions/payments immediately. Operator/manual
+record kind. Subscription access follows from subscription standing: each
+import runs the derive pass for the book's customers before it returns, so
+imported members are entitled immediately (a replay re-derives). Operator/manual
 comps — access with no payment behind it — ride the same book as
 `admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
 derives the windows. `Client.ImportBilling` posts the same book over
@@ -147,8 +146,8 @@ billing data over this seam:
    subscriptions + their transactions. Keep the host's stable ids as
    `source_id` so re-runs are exact and results are auditable per row. Declare
    admin/manual comps as `admin_grants` in the same book.
-5. **Converge.** Run `ConvergeMerchant` once so entitlements/grants derive
-   now rather than on the next scheduled sweep.
+5. **Access is derived by the import itself** for the book's customers; no
+   merchant-wide `ConvergeMerchant` is required.
 6. **Boot with `PROVIDER_WRITE_MODE=limited` — set before first start.**
    Imported stale `past_due` rows are immediately "due"; a full-behavior boot
    would start charging them within hours.
@@ -175,7 +174,7 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
   real provider evidence. Absent evidence never costs a customer access.
 - **Adoption alone never grants access.** An adopted-active row re-anchors
   its period end only; entitlement windows come from real charges and the
-  derive pass — hence step 5.
+  derive pass the import runs.
 - **Period anchoring**: `current_period_ends_at` = the declared
   `paid_through`; the period start is one billing cycle back, clamped to
   `started_at`. Provider-billed rails then renew on the *provider's*
@@ -218,7 +217,8 @@ them; NMI keeps billing until you hand a membership over.
    date and OpenRails never deletes the paused schedule. A card reference the
    book does not declare blocks its row. Declared refunds and chargebacks are
    not recorded as charges; unlinked ones surface as `pull.reversal.unlinked`.
-   Re-post the same book: everything must report `skipped`. Run `Converge`.
+   Re-post the same book: everything must report `skipped`. Imported members
+   are entitled when the call returns.
 2. **Review findings.** Boot, let one provider refresh pull run (advisory until
    armed), then triage every open finding: `pull.subscription.missing` (NMI
    schedules absent from the book), `pull.subscription.dead`,
@@ -234,7 +234,12 @@ them; NMI keeps billing until you hand a membership over.
 4. **Operate.** Renewals arrive from NMI webhooks and from the refresh pull
    (each NMI transaction becomes one local payment); cancels delete the NMI
    schedule once; card updates repoint the schedule to the new vault; refunds
-   go to NMI. Tier changes on an NMI-owned membership are refused with
+   go to NMI, and a refund with `revoke_access` also ends the membership and
+   deletes its NMI schedule (refused with `provider_cancel_held` while
+   disarmed). `Client.RefreshProviders` (`POST /v1/merchant/provider-refresh`)
+   runs the merchant's provider refresh now, from embedded or remote hosts;
+   otherwise it runs every four hours, and NMI's own subscription webhooks
+   converge the schedule they name at once. Tier changes on an NMI-owned membership are refused with
    `tier_change_requires_engine_billing`: take the membership over first.
 5. **(Optional) staged takeover to OpenRails billing.** `TakeOverBilling`
    (one membership) or `TakeOverBillingBatch` (a capped batch) deletes the NMI

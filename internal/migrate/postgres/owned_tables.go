@@ -127,6 +127,7 @@ var OwnedFunctions = []string{
 	"price_interval_label(integer, boolean)",
 	"prices_default_key()",
 	"products_guard_tier_group()",
+	"products_propagate_tier_group()",
 	"psp_owner_by_identity(text, text, text)",
 	"psp_rail_merchant_ids(text[], integer, uuid)",
 	"redrivable_plan_change_merchant_ids(integer)",

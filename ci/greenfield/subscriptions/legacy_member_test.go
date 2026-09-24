@@ -344,8 +344,22 @@ func TestLegacyNMIRefund(t *testing.T) {
 			require.Equal(t, want, got.AmountRefunded)
 			require.Equal(t, http.StatusOK, w.deliver("nmi", w.refundNotice("nmi")), "NMI's own refund notice does not re-decide it")
 			require.Equal(t, !row.revoke, l.c.entitled(l.ent), "access follows revoke_access")
-			require.True(t, w.nmi.scheduleLive(l.railSub), "a refund never deletes the NMI schedule")
-			require.Zero(t, w.nmi.deletesOf(l.railSub))
+			if row.revoke {
+				// Revoking access ends the membership: NMI stops billing it,
+				// exactly once, and nothing re-grants the access.
+				require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
+				w.until(func() bool { return w.nmi.deletesOf(l.railSub) > 0 }, "the NMI schedule delete")
+				w.converge()
+				w.pull()
+				w.advance(time.Hour)
+				w.wake()
+				require.Equal(t, 1, w.nmi.deletesOf(l.railSub), "exactly one NMI delete")
+				require.False(t, l.c.entitled(l.ent), "revoked access stays revoked through converge and pull")
+			} else {
+				require.True(t, w.nmi.scheduleLive(l.railSub), "a refund without revoke leaves NMI billing")
+				require.Zero(t, w.nmi.deletesOf(l.railSub))
+				require.Equal(t, "active", w.subscription(tp, l.sub).Status)
+			}
 			require.Zero(t, l.engineCharges())
 			require.Empty(t, w.nmi.unexpected())
 		})

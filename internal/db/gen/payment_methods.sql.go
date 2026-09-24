@@ -211,7 +211,7 @@ INSERT INTO openrails.payment_methods (
     initial_transaction_id, last_four, card_type, expiry_date,
     metadata, created_at, updated_at, psp_id,
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
-    network_token_par, charge_via
+    network_token_par, charge_via, stored_credential_recurring_ref
 ) VALUES (
     $1, $4::uuid, $2, $3, $5, $6,
     $7, $8, $9, $10,
@@ -224,32 +224,34 @@ INSERT INTO openrails.payment_methods (
       COALESCE($16::uuid, (SELECT p.custodian_id FROM openrails.psps p WHERE p.id=$14::uuid AND p.merchant_id=$4::uuid)) END,
     $17, $18,
     $19, $20,
-    COALESCE(NULLIF($21::text, ''), 'pan_proxy')
+    COALESCE(NULLIF($21::text, ''), 'pan_proxy'),
+    $22::text
 )
 `
 
 type CreatePaymentMethodParams struct {
-	ID                   uuid.UUID
-	CustomerID           uuid.UUID
-	Rail                 string
-	MerchantID           uuid.UUID
-	RailCustomerRef      string
-	RailMethodRef        string
-	InitialTransactionID string
-	LastFour             *string
-	CardType             *string
-	ExpiryDate           *string
-	Metadata             []byte
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	PspID                uuid.UUID
-	Custodian            string
-	CustodianID          *uuid.UUID
-	Fingerprint          string
-	NetworkTokenID       string
-	NetworkTokenStatus   string
-	NetworkTokenPar      string
-	ChargeVia            string
+	ID                           uuid.UUID
+	CustomerID                   uuid.UUID
+	Rail                         string
+	MerchantID                   uuid.UUID
+	RailCustomerRef              string
+	RailMethodRef                string
+	InitialTransactionID         string
+	LastFour                     *string
+	CardType                     *string
+	ExpiryDate                   *string
+	Metadata                     []byte
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+	PspID                        uuid.UUID
+	Custodian                    string
+	CustodianID                  *uuid.UUID
+	Fingerprint                  string
+	NetworkTokenID               string
+	NetworkTokenStatus           string
+	NetworkTokenPar              string
+	ChargeVia                    string
+	StoredCredentialRecurringRef string
 }
 
 // openrails.payment_methods.
@@ -276,6 +278,7 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 		arg.NetworkTokenStatus,
 		arg.NetworkTokenPar,
 		arg.ChargeVia,
+		arg.StoredCredentialRecurringRef,
 	)
 	if err != nil {
 		return 0, err

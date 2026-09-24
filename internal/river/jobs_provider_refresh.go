@@ -78,6 +78,31 @@ var providerRefreshUniqueStates = []rivertype.JobState{
 	rivertype.JobStateScheduled,
 }
 
+// EnqueueMerchantRefresh requests the merchant's provider refresh now on
+// queue. An in-flight refresh absorbs the request; one scheduled for later
+// (the staggered periodic tick) is started now.
+func EnqueueMerchantRefresh(ctx context.Context, client *river.Client[pgx.Tx], merchantID uuid.UUID, queue string) (jobID int64, alreadyQueued bool, err error) {
+	if client == nil {
+		return 0, false, errors.New("provider refresh: no River producer")
+	}
+	if queue == "" {
+		queue = QueueProviderRefresh
+	}
+	res, err := client.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: merchantID}, &river.InsertOpts{
+		Queue:      queue,
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	if res.UniqueSkippedAsDuplicate && res.Job.State == rivertype.JobStateScheduled {
+		if _, err := client.JobRetry(ctx, res.Job.ID); err != nil {
+			return 0, false, err
+		}
+	}
+	return res.Job.ID, res.UniqueSkippedAsDuplicate, nil
+}
+
 // refreshJobInserter is the slice of river.Client the scheduler uses (test seam).
 type refreshJobInserter interface {
 	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)

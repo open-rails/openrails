@@ -23,6 +23,8 @@ type nmiVault struct {
 	// Extra are further billing entries (cards) in the same vault, after the
 	// priority-1 entry.
 	Extra []nmiBilling
+	// NoBrand: NMI's customer record omits card_type, as live accounts do.
+	NoBrand bool
 }
 
 type nmiBilling struct {
@@ -55,23 +57,24 @@ type nmiSchedule struct {
 // Query API searches, v5 transaction reads/refunds and v5 recurring
 // subscriptions. Declines follow each vault's current card.
 type nmiFake struct {
-	mu        sync.Mutex
-	seq       int
-	tokens    map[string]card
-	vaults    map[string]*nmiVault
-	sales     []*nmiSale
-	attempts  []url.Values
-	schedules map[string]*nmiSchedule
-	plans     map[string]obj
-	duplicate int
-	declined  []*nmiSale
-	lose      int
-	lost      int
-	drop      int
-	queryDown bool
-	writes    []providerCall
-	gates     []*gate
-	odd       []string
+	mu          sync.Mutex
+	seq         int
+	tokens      map[string]card
+	vaults      map[string]*nmiVault
+	sales       []*nmiSale
+	attempts    []url.Values
+	schedules   map[string]*nmiSchedule
+	plans       map[string]obj
+	duplicate   int
+	declined    []*nmiSale
+	lose        int
+	lost        int
+	drop        int
+	queryDown   bool
+	writes      []providerCall
+	validations []nmiValidation
+	gates       []*gate
+	odd         []string
 
 	// refusedSaves counts vault creations refused for a card declined "vault".
 	refusedSaves int
@@ -120,7 +123,7 @@ func (f *nmiFake) RoundTrip(r *http.Request) (*http.Response, error) {
 			g = candidate
 		}
 	}
-	sale := strings.HasSuffix(r.URL.Path, "/transact.php")
+	sale := strings.HasSuffix(r.URL.Path, "/transact.php") && !strings.Contains(string(body), "type=validate")
 	lost, dropped := f.lose > 0 && sale, f.drop > 0 && sale
 	if lost {
 		f.lose--
@@ -185,6 +188,9 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 		form[k] = v
 	}
 	switch {
+	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "validate":
+		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
+		_, _ = rec.WriteString(f.validate(form))
 	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "sale":
 		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
 		_, _ = rec.WriteString(f.sale(form))
@@ -219,7 +225,14 @@ func nmiNotFound() (int, any) {
 }
 
 func (f *nmiFake) customer(v *nmiVault) obj {
-	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": obj{"card_number": "4xxxxxxxxxxx" + v.Card.Last4, "card_exp": "1235", "card_type": v.Card.Brand}}}
+	details := obj{"card_number": map[string]string{"mastercard": "5", "amex": "3"}[v.Card.Brand] + "xxxxxxxxxxx" + v.Card.Last4, "card_exp": "1235", "card_type": v.Card.Brand}
+	if details["card_number"] == "xxxxxxxxxxx"+v.Card.Last4 {
+		details["card_number"] = "4xxxxxxxxxxx" + v.Card.Last4
+	}
+	if v.NoBrand {
+		delete(details, "card_type")
+	}
+	billing := []obj{{"id": v.BillingID, "priority": 1, "payment_details": details}}
 	for i, b := range v.Extra {
 		billing = append(billing, obj{"id": b.ID, "priority": i + 2, "payment_details": obj{"card_number": "4xxxxxxxxxxx" + b.Card.Last4, "card_exp": "1235", "card_type": b.Card.Brand}})
 	}
@@ -280,6 +293,9 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 			if c, ok := token(); ok {
 				v.Card = c
 			}
+		}
+		if method == http.MethodDelete {
+			delete(f.vaults, v.ID)
 		}
 		return 200, f.customer(v)
 	case seg[0] == "payments" && len(seg) == 1+1 && seg[1] == "auth":
@@ -739,4 +755,37 @@ func (f *nmiFake) callsTo(method, prefix string, form func(url.Values) bool) []p
 // deletesOf counts DELETE requests for one schedule.
 func (f *nmiFake) deletesOf(id string) int {
 	return len(f.callsTo(http.MethodDelete, "/subscriptions/"+id, nil))
+}
+
+// validate is Direct Post type=validate: a no-funds card verification. The
+// issuer refuses a card it would never honor; a funds decline (202/203)
+// still verifies.
+func (f *nmiFake) validate(form url.Values) string {
+	v := f.vaults[form.Get("customer_vault_id")]
+	if v == nil {
+		return "response=3&responsetext=Invalid+Customer+Vault+Id&response_code=300"
+	}
+	id := f.next("validate")
+	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, Form: form})
+	if code := v.Card.Decline; code != "" && code != "202" && code != "203" {
+		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&response_code=%s", id, code)
+	}
+	return fmt.Sprintf("response=1&responsetext=VALIDATED&transactionid=%s&response_code=100", id)
+}
+
+type nmiValidation struct {
+	TransactionID, Vault string
+	Form                 url.Values
+}
+
+// validationOf is the approved card verification of a vault, or nil.
+func (f *nmiFake) validationOf(vault string) *nmiValidation {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.validations {
+		if f.validations[i].Vault == vault {
+			return &f.validations[i]
+		}
+	}
+	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"sort"
 	"strings"
 
@@ -56,6 +57,8 @@ type Options struct {
 	DB         *db.DB
 	MerchantID merchant.ID
 	Book       DeclaredBilling
+	// Clock is the runtime clock the post-import derivation evaluates at.
+	Clock clockwork.Clock
 }
 
 // Import lands a host-declared billing book. Explicitly-cancelled facts
@@ -321,7 +324,49 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		sort.Strings(res.Blocked)
 		return nil
 	})
-	return res, err
+	if err != nil {
+		return res, err
+	}
+	// Access is derived now, for exactly the book's customers, by the same
+	// convergence an operator run performs: an imported member is entitled
+	// without a merchant-wide pass. A replay re-derives, so a failure here
+	// heals on the next post of the same book.
+	if err := deriveImportedAccess(ctx, database, merchantID, opts.Book, opts.Clock); err != nil {
+		return res, fmt.Errorf("import committed; deriving access failed (re-post the book to retry): %w", err)
+	}
+	return res, nil
+}
+
+func deriveImportedAccess(ctx context.Context, database *db.DB, merchantID merchant.ID, book DeclaredBilling, clock clockwork.Clock) error {
+	customers := map[uuid.UUID]struct{}{}
+	for _, c := range book.Customers {
+		customers[c.Customer.UUID()] = struct{}{}
+	}
+	for _, s := range book.Subscriptions {
+		customers[s.Customer.UUID()] = struct{}{}
+	}
+	for _, g := range book.AdminGrants {
+		customers[g.Customer.UUID()] = struct{}{}
+	}
+	delete(customers, uuid.Nil)
+	ids := make([]uuid.UUID, 0, len(customers))
+	for id := range customers {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	var clocks []clockwork.Clock
+	if clock != nil {
+		clocks = append(clocks, clock)
+	}
+	engine := converge.NewConvergeEngine(database, clocks...)
+	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		for i := range ids {
+			if _, err := engine.Converge(ctx, converge.Scope{Merchant: merchantID, Customer: &ids[i]}); err != nil {
+				return fmt.Errorf("customer %s: %w", ids[i], err)
+			}
+		}
+		return nil
+	})
 }
 
 func nilIfEmpty(s string) *string {

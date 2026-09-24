@@ -795,6 +795,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	subs.Handle(http.MethodGet, "/:id/engine-takeover", h(httphandlers.GetEngineTakeover), subRead...)
 	subs.Handle(http.MethodPost, "/:id/engine-takeover/abandon", h(httphandlers.AbandonEngineTakeover), subWrite...)
 	rr.Handle(http.MethodPost, "/engine-takeovers", h(httphandlers.EngineTakeoverBatch), subWrite...)
+	rr.Handle(http.MethodPost, "/provider-refresh", h(httphandlers.RefreshProviders), subWrite...)
 	// #773 reprice: schedule a single subscription's price move at its next
 	// renewal on/after effective_at.
 	subs.Handle(http.MethodPost, "/:id/reprice", h(httphandlers.CreateSubscriptionReprice), subWrite...)
