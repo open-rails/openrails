@@ -23,7 +23,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 func TestStandaloneCustomerExposureUnderConsole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
 	reject := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})

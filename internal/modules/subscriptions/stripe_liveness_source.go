@@ -51,6 +51,10 @@ type StripeLivenessRecord struct {
 	LatestInvoiceCurrency      string
 	LatestInvoiceCreated       time.Time
 	LatestInvoiceBillingReason string
+	// LatestInvoiceCollectionFailed: Stripe tried to collect the invoice
+	// and failed. A draft (not yet finalized) or an open invoice with no
+	// attempt yet is a renewal in progress, not a decline.
+	LatestInvoiceCollectionFailed bool
 }
 
 // StripeLivenessProber probes one remote Stripe subscription. Interface so
@@ -87,9 +91,14 @@ type stripeLivenessSubscriptionEnvelope struct {
 	CurrentPeriodEnd   int64             `json:"current_period_end"`
 	Customer           string            `json:"customer"`
 	Metadata           map[string]string `json:"metadata"`
-	Items              struct {
+	// Since API 2025-03-31 (and so on the pinned version) the billing period
+	// lives on the subscription items; the top-level fields are the legacy
+	// shape and are read only when present.
+	Items struct {
 		Data []struct {
-			Price struct {
+			CurrentPeriodStart int64 `json:"current_period_start"`
+			CurrentPeriodEnd   int64 `json:"current_period_end"`
+			Price              struct {
 				ID string `json:"id"`
 			} `json:"price"`
 		} `json:"data"`
@@ -100,6 +109,18 @@ type stripeLivenessSubscriptionEnvelope struct {
 		Paid          bool   `json:"paid"`
 		Charge        string `json:"charge"`
 		PaymentIntent string `json:"payment_intent"`
+		// Payments carries the charge/PaymentIntent on the pinned version,
+		// where the invoice no longer has top-level charge fields.
+		Payments struct {
+			Data []struct {
+				Status  string `json:"status"`
+				Payment struct {
+					Charge        string `json:"charge"`
+					PaymentIntent string `json:"payment_intent"`
+				} `json:"payment"`
+			} `json:"data"`
+		} `json:"payments"`
+		AttemptCount  int64  `json:"attempt_count"`
 		AmountPaid    int64  `json:"amount_paid"`
 		AmountDue     int64  `json:"amount_due"`
 		Currency      string `json:"currency"`
@@ -132,17 +153,33 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 		rec.CurrentPeriodEnd = time.Unix(env.CurrentPeriodEnd, 0).UTC()
 	}
 	if len(env.Items.Data) > 0 {
-		rec.PriceID = strings.TrimSpace(env.Items.Data[0].Price.ID)
+		item := env.Items.Data[0]
+		rec.PriceID = strings.TrimSpace(item.Price.ID)
+		if env.CurrentPeriodStart == 0 && item.CurrentPeriodStart > 0 {
+			rec.CurrentPeriodStart = time.Unix(item.CurrentPeriodStart, 0).UTC()
+		}
+		if env.CurrentPeriodEnd == 0 && item.CurrentPeriodEnd > 0 {
+			rec.CurrentPeriodEnd = time.Unix(item.CurrentPeriodEnd, 0).UTC()
+		}
 	}
 	inv := env.LatestInvoice
 	if strings.TrimSpace(inv.ID) != "" {
+		charge, intent := inv.Charge, inv.PaymentIntent
+		for _, payment := range inv.Payments.Data {
+			if strings.EqualFold(strings.TrimSpace(payment.Status), "paid") {
+				charge = normalize.FirstNonEmpty(charge, payment.Payment.Charge)
+				intent = normalize.FirstNonEmpty(intent, payment.Payment.PaymentIntent)
+			}
+		}
 		rec.LatestInvoicePaid = inv.Paid || strings.EqualFold(strings.TrimSpace(inv.Status), "paid")
 		rec.LatestInvoiceID = strings.TrimSpace(inv.ID)
-		rec.LatestInvoiceTransactionID = normalize.FirstNonEmpty(inv.Charge, inv.PaymentIntent, inv.ID)
+		rec.LatestInvoiceTransactionID = normalize.FirstNonEmpty(charge, intent, inv.ID)
 		rec.LatestInvoiceAmountPaid = inv.AmountPaid
 		rec.LatestInvoiceAmountDue = inv.AmountDue
 		rec.LatestInvoiceCurrency = strings.TrimSpace(inv.Currency)
 		rec.LatestInvoiceBillingReason = strings.TrimSpace(inv.BillingReason)
+		status := strings.ToLower(strings.TrimSpace(inv.Status))
+		rec.LatestInvoiceCollectionFailed = !rec.LatestInvoicePaid && (status == "uncollectible" || (status == "open" && inv.AttemptCount > 0))
 		if inv.Created > 0 {
 			rec.LatestInvoiceCreated = time.Unix(inv.Created, 0).UTC()
 		}
@@ -150,7 +187,8 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 	return rec, nil
 }
 
-// ProbeSubscription fetches GET /v1/subscriptions/{id}?expand[]=latest_invoice.
+// ProbeSubscription fetches GET /v1/subscriptions/{id} with its latest
+// invoice and that invoice's payments expanded.
 // A 404 returns Found=false with a nil error — at Stripe that is an answer
 // (remote absent), not a transport failure.
 func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSubscriptionID string) (StripeLivenessRecord, error) {
@@ -174,7 +212,8 @@ func (p *HTTPStripeLivenessProber) ProbeSubscription(ctx context.Context, railSu
 	}
 
 	values := url.Values{}
-	values.Set("expand[]", "latest_invoice")
+	values.Add("expand[]", "latest_invoice")
+	values.Add("expand[]", "latest_invoice.payments")
 	reqURL := base + "/v1/subscriptions/" + url.PathEscape(id) + "?" + values.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {

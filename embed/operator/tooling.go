@@ -22,7 +22,7 @@ func (r *Operator) Converge(ctx context.Context, merchantID merchant.ID) (Conver
 		return ConvergeResult{}, err
 	}
 	return hosttools.ConvergeMerchant(ctx, hosttools.ConvergeMerchantOptions{
-		Config: r.app.Config, PGXPool: r.app.Runtime.DB.Pool(), MerchantID: merchantID,
+		Config: r.app.Config, PGXPool: r.app.Runtime.DB.Pool(), MerchantID: merchantID, Clock: r.app.Runtime.Clock,
 	})
 }
 

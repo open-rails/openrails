@@ -56,8 +56,9 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 		})},
 		HTTP: &embed.HTTPConfig{Checkout: true},
 		Config: &config.Config{
-			TestMode: config.CredentialPostureSandbox,
-			DB:       &config.DBConfig{URL: dsn},
+			ProviderWriteMode: config.ProviderWriteModeReadOnly,
+			TestMode:          config.CredentialPostureSandbox,
+			DB:                &config.DBConfig{URL: dsn},
 		},
 		PGXPool: pool,
 		River:   embed.RiverFromHost(),

@@ -18,7 +18,7 @@ func TestProviderCredentialSnapshotEnforcesStripePostureBeforeSeeding(t *testing
 			t.Run(string(posture)+"/"+key, func(t *testing.T) {
 				store, err := merchants.NewManifestSecretStoreWithIdentity("11111111-1111-4111-8111-111111111111")
 				require.NoError(t, err)
-				cfg := &config.Config{TestMode: posture, SecretBackend: config.SecretBackendSnapshot}
+				cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: posture, SecretBackend: config.SecretBackendSnapshot}
 				rt := &app.Runtime{Config: cfg, ManifestSecrets: store}
 				id := merchant.ID(uuid.New())
 				matching := "sk_live_first"

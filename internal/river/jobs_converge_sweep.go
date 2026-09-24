@@ -67,7 +67,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	if clock == nil {
 		clock = clockwork.NewRealClock()
 	}
-	engine := converge.NewConvergeEngine(w.DB)
+	engine := converge.NewConvergeEngine(w.DB, clock)
 	engine.Now = func() time.Time { return clock.Now().UTC() }
 	if w.Alerts != nil {
 		// #787: nil-check before assigning to the interface field — a nil

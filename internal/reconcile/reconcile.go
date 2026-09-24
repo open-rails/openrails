@@ -114,6 +114,9 @@ type RemoteSubscription struct {
 	// timestamps, nil when unknown.
 	NextBillingAt *time.Time `json:"next_billing_at,omitempty"`
 	LastBilledAt  *time.Time `json:"last_billed_at,omitempty"`
+	// PeriodStart is the provider's own current period start when it states
+	// one (Stripe); a renewal adopts it rather than assuming the prior end.
+	PeriodStart *time.Time `json:"period_start,omitempty"`
 	// AmountCents is the recurring charge amount in integer cents of Currency.
 	// Zero when the provider does not denominate in fiat (Solana on-chain
 	// amounts are mint base units and live in Raw instead).

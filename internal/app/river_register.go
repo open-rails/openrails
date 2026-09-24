@@ -266,6 +266,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add solana gas alert worker: %w", err)
 	}
+	// Jobs orphaned by a dead process (their liveness beat stopped) return to
+	// work; River's rescuer skips OpenRails' timeout-free jobs.
+	if err := addTrackedWorker(r, workers, &riverjobs.JobRescueWorker{River: r.riverTableAccess}); err != nil {
+		return fmt.Errorf("add job rescue worker: %w", err)
+	}
 	// Solana ledger reconciliation (#258): cross-checks confirmed on-chain pulls
 	// against openrails.payments and raises operator repair alerts on drift.
 	if err := addTrackedWorker(r, workers, &riverjobs.SolanaReconcileWorker{
@@ -438,16 +443,20 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error) {
 	var jobs []*river.PeriodicJob
 
-	// Every 4 hours: run Dunning worker to process past_due subscriptions
+	// The due pass admits engine renewals at their paid-period boundary and
+	// runs retries whose next_retry_at has passed. Engine access is bounded by
+	// the paid period, so the pass cadence is the longest a paying member can
+	// wait at the boundary; it runs on start so a restart never adds a lag.
+	// An idle pass is one indexed work-queue read.
 	jobs = append(jobs, r.healthPeriodic(
-		4*time.Hour,
+		riverjobs.DuePassInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.DunningArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.DuePassInterval},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Every 4 hours: Provider Refresh scheduler (#574/#719) — fans out one
@@ -468,6 +477,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 
 	// Webhook retry job removed - webhooks are now processed synchronously only.
 	// Payment rails (CCBill, NMI) will retry failed webhooks from their end.
+
+	// Every minute and on start: return OpenRails jobs whose process died.
+	jobs = append(jobs, r.healthPeriodic(
+		time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.JobRescueArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
+	))
 
 	// Hourly: plan-migration re-drive (#816). Period granularity is days, so
 	// hourly can never miss a subscription's final pre-effective period.

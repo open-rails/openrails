@@ -381,6 +381,31 @@ func (c *NMIClient) ListCustomersPage(ctx context.Context, cursor string, perPag
 	return page, nil
 }
 
+// GetCustomer reads one vault customer by id (GET /v5/customers/{id}). The
+// list endpoint's id parameter is not an exact filter at NMI, so every
+// per-vault lookup uses this read; found=false means NMI has no such vault.
+func (c *NMIClient) GetCustomer(ctx context.Context, id string) (V5Customer, bool, error) {
+	var customer V5Customer
+	if err := c.checkConfiguration(); err != nil {
+		return customer, false, err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return customer, false, errors.New("customer vault ID is required")
+	}
+	err := c.sendV5Request(ctx, http.MethodGet, "/customers/"+url.PathEscape(id), nil, &customer)
+	if errors.Is(err, ErrV5NotFound) {
+		return customer, false, nil
+	}
+	if err != nil {
+		return customer, false, err
+	}
+	if strings.TrimSpace(customer.ID) != id {
+		return customer, false, fmt.Errorf("nmi customer read returned %q for %q", customer.ID, id)
+	}
+	return customer, true, nil
+}
+
 // --- subscriptions ---
 
 // V5Subscription is the slice of the v5 subscription resource openrails reads.

@@ -162,7 +162,11 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 	// any drift this lifecycle transition implies (lapsed grace windows, a stalled
 	// dunning schedule, grant effects to retract) is reconciled immediately rather
 	// than waiting for the next sweep. Best-effort — the sweep is the backstop.
-	convergeCustomerInline(ctx, w.DB, sub.MerchantID, sub.CustomerID, KindSubscriptionCancel)
+	var clock clockwork.Clock
+	if w.SubscriptionLifecycleService != nil {
+		clock = w.SubscriptionLifecycleService.Clock()
+	}
+	convergeCustomerInline(ctx, w.DB, sub.MerchantID, sub.CustomerID, KindSubscriptionCancel, clock)
 	return nil
 }
 

@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	vaultapi "github.com/hashicorp/vault/api"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -54,7 +56,8 @@ type Options struct {
 	// Use billingauth.NewIntegration with the host verifier and explicit mappings.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// Config is built programmatically by the host; embedded construction never
-	// runs config.Load, so TestMode (sandbox or live) must be set explicitly. Rate-limit and captcha defaults are seeded when left nil
+	// runs config.Load, so TestMode (sandbox or live) and ProviderWriteMode
+	// (full, limited or readonly) must be set explicitly. Rate-limit and captcha defaults are seeded when left nil
 	// unless Config.RateLimitsDisabled.
 	Config *config.Config
 	// PGXPool is the host-supplied database handle. Leave nil to open one from
@@ -81,6 +84,10 @@ type Options struct {
 	// endpoints against a fake wire. It exempts nothing from sandbox posture.
 	// Refused with a live posture.
 	NMITransport http.RoundTripper
+	// Clock is the test seam for engine time: renewal due dates, retry
+	// schedules and entitlement windows read it. River scheduling and webhook
+	// signature tolerance stay on wall time. Refused with a live posture.
+	Clock clockwork.Clock
 	// UserDirectory and UsernameResolver are optional host identity adapters.
 	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
 	// opt in explicitly when they need notification email or CCBill username
@@ -155,6 +162,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.NMITransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
 		return nil, fmt.Errorf("openrails embed: Options.NMITransport is a test seam and is refused with config.TestMode=live")
 	}
+	if opts.Clock != nil && opts.Config.TestMode == config.CredentialPostureLive {
+		return nil, fmt.Errorf("openrails embed: Options.Clock is a test seam and is refused with config.TestMode=live")
+	}
 	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
 		HostRiver:        opts.River.host,
 		PGXPool:          opts.PGXPool,
@@ -165,6 +175,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		UsernameResolver: opts.UsernameResolver,
 		StripeTransport:  opts.StripeTransport,
 		NMITransport:     opts.NMITransport,
+		Clock:            opts.Clock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
@@ -243,6 +254,15 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 	case config.CredentialPostureSandbox, config.CredentialPostureLive:
 	default:
 		return fmt.Errorf("openrails embed: config.TestMode is required; set config.CredentialPostureSandbox or config.CredentialPostureLive explicitly")
+	}
+	// Unset would run fail-closed readonly: renewals, retries and refunds
+	// would silently never reach a provider. The host states it.
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
+	case config.ProviderWriteModeFull, config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly:
+	case "":
+		return fmt.Errorf("openrails embed: config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
+	default:
+		return fmt.Errorf("openrails embed: config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
 	}
 	if !cfg.RateLimitsDisabled {
 		defaults := config.GetDefaultBillingConfig()

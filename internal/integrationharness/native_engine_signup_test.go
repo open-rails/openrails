@@ -5,6 +5,7 @@ package integrationharness
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,7 +113,9 @@ func TestNativeEngineSignupSelfHTTPAndDueWorker(t *testing.T) {
 	}
 	checkAccess(true)
 	clock.Advance(720*time.Hour + time.Second)
-	checkAccess(false) // Paid access expires even before any worker runs.
+	checkAccess(true) // The renewal allowance holds access until the renewal decides.
+	clock.Advance(subscriptions.EngineRenewalGrace)
+	checkAccess(false) // With no renewal outcome, access still ends: bounded by paid time plus the allowance.
 	worker := riverjobs.DunningWorker{DB: rt.DB, Config: rt.Config, Clock: clock, NMIResolver: rt.CollectionResolver, EngineCollections: rt.MoneyService}
 	require.NoError(t, worker.Work(t.Context(), &river.Job[riverjobs.DunningArgs]{}))
 	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), owned.MerchantID), func(ctx context.Context) error { _, err := rt.IntentRunner().RunExecuteOnce(ctx); return err }))

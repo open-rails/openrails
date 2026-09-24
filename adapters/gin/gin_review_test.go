@@ -19,7 +19,7 @@ import (
 
 func TestGinReviewFullInventoryMountsNatively(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})

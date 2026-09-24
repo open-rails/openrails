@@ -123,16 +123,13 @@ func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomer
 
 	billingID := strings.TrimSpace(data.BillingID)
 	if billingID == "" {
-		page, err := c.ListCustomersPage(ctx, "", 1, vaultID)
+		customer, found, err := c.GetCustomer(ctx, vaultID)
 		if err != nil {
 			return fmt.Errorf("failed to update customer vault: lookup: %w", err)
 		}
 		var primary *V5CustomerBilling
-		for i := range page.Customers {
-			if strings.TrimSpace(page.Customers[i].ID) == vaultID {
-				primary = page.Customers[i].PrimaryBilling()
-				break
-			}
+		if found {
+			primary = customer.PrimaryBilling()
 		}
 		if primary == nil {
 			return fmt.Errorf("failed to update customer vault: customer %s has no billing record at NMI", vaultID)

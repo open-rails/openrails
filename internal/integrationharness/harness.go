@@ -334,7 +334,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string, configure ...func(*config.Config)) *Surface {
 	h.t.Helper()
 
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
 	for _, apply := range configure {
 		apply(cfg)
 	}

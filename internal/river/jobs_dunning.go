@@ -2,6 +2,7 @@ package riverjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -31,6 +32,10 @@ import (
 const (
 	QueueBilling = "billing"
 	KindDunning  = "openrails.dunning"
+
+	// DuePassInterval is the due pass cadence: the bound on how long an
+	// engine renewal waits past its paid-period boundary.
+	DuePassInterval = time.Minute
 
 	// dunningMerchantBatch caps how many merchants one pass fans out to. The
 	// work queue is indexed on the due-dunning predicate, so this bounds a pass
@@ -233,14 +238,17 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			for _, sub := range dueSubscriptions {
 				progress.Mark(mctx, "dunning subscription "+sub.ID.String())
 				outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
-				if processErr != nil {
-					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, processErr))
+				// One subscription's refusal never fails the pass: it becomes a
+				// standing operator finding, and the pass (every minute) tries
+				// it again with everything else.
+				if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
+					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
 				}
 				// #511 Phase E: re-converge this customer inline after the dunning
 				// transition (past_due / grace / terminal cancel / renewal) — already
 				// on the merchant-scoped connection, so call Converge directly. Best-
 				// effort: a convergence error must not fail the dunning run.
-				if _, cerr := converge.AfterMutation(mctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID); cerr != nil {
+				if _, cerr := converge.AfterMutation(mctx, w.DB, merchant.ID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
 					log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
 						Warn("Dunning: inline converge failed; the sweep will reconcile")
 				}
@@ -274,6 +282,28 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	}).Info("Dunning: run completed")
 
 	return workErr
+}
+
+// FindingDuePassRefused is a subscription the due pass could not process.
+const FindingDuePassRefused = "life.due_pass.refused"
+
+// recordSubscriptionOutcome raises or resolves the subscription's standing
+// due-pass finding. Only a failure to record it is an error of the pass.
+func (w *DunningWorker) recordSubscriptionOutcome(ctx context.Context, sub *models.Subscription, processErr error) error {
+	q := w.DB.Gen(ctx)
+	if processErr == nil {
+		_, err := q.ResolveStandingFinding(ctx, gen.ResolveStandingFindingParams{MerchantID: sub.MerchantID, FindingType: FindingDuePassRefused, SubjectKey: sub.ID.String()})
+		return err
+	}
+	log.WithContext(ctx).WithError(processErr).WithField("subscription_id", sub.ID).
+		Error("Dunning: subscription refused; recorded for review, the pass continues")
+	evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "collection_policy": sub.CollectionPolicy, "rail": sub.Rail, "status": sub.Status, "error": processErr.Error()})
+	action := fmt.Sprintf("the scheduled due pass could not renew or retry subscription %s (%s). It retries every pass; until the cause is fixed this member is neither charged nor extended: %s", sub.ID, sub.CollectionPolicy, processErr.Error())
+	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: sub.MerchantID, FindingType: FindingDuePassRefused, SubjectKey: sub.ID.String(),
+		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
+	})
+	return err
 }
 
 // processSubscription attempts a dunning rebill for a single subscription.

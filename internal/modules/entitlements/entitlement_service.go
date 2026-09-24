@@ -487,6 +487,11 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			}
 			err = pgx.ErrNoRows
 		}
+		// A revoked grace allowance (a cancelled engine renewal that was then
+		// resumed) is re-granted, never replayed as its revoked self.
+		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceGrace {
+			err = pgx.ErrNoRows
+		}
 		if err == nil && (previous.EndAt == nil || p.Duration != nil ||
 			(p.EndAt != nil && !p.EndAt.After(*previous.EndAt))) {
 			created = models.EntitlementFromGen(previous)

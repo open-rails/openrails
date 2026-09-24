@@ -26,7 +26,7 @@ func TestCatalogApplyDumpRoundTrip(t *testing.T) {
 	merchantSlug := "catalog-roundtrip-" + strings.ReplaceAll(merchantID.String()[:8], "-", "")
 	_, err = pool.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, merchantSlug)
 	require.NoError(t, err)
-	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{Schema: config.DefaultSchema}}
 	manifest := []byte(`schema_version: 1
 application_id: roundtrip-initial
 expected_revision: 0

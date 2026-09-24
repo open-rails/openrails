@@ -79,6 +79,15 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 		if err != nil {
 			return nil, err
 		}
+		if !probe.SuccessFound {
+			bySchedule, err := p.Client.ProbeSalesBySubscriptionID(ctx, subj.RailSubscriptionID, since)
+			if err != nil {
+				return nil, err
+			}
+			if bySchedule.SuccessFound || (!probe.DeclineFound && bySchedule.DeclineFound) {
+				probe = bySchedule
+			}
+		}
 		snap.Transactions = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
 	}
 
@@ -189,6 +198,10 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 		end := rec.CurrentPeriodEnd
 		sub.NextBillingAt = &end
 	}
+	if !rec.CurrentPeriodStart.IsZero() {
+		start := rec.CurrentPeriodStart
+		sub.PeriodStart = &start
+	}
 	snap.Subscriptions = []RemoteSubscription{sub}
 	// The latest PAID invoice is charge evidence; it bills at the period start
 	// it opens — the deterministic timestamp Stripe exposes here.
@@ -209,7 +222,7 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	// backfilled failed attempt and the eventual success never collide. Only
 	// recorded when Stripe gives the invoice's own created time (#651: no
 	// fabricated instants).
-	if !rec.LatestInvoicePaid && rec.LatestInvoiceAmountDue > 0 &&
+	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 &&
 		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
 		snap.Transactions = append(snap.Transactions, RemoteTransaction{
 			TransactionID:  "failed:" + rec.LatestInvoiceTransactionID,

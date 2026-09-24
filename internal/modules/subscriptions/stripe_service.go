@@ -555,6 +555,45 @@ func (s *StripeService) CancelSubscription(ctx context.Context, subscriptionID s
 	return nil
 }
 
+// EndSubscription cancels a Stripe subscription now (DELETE), stopping any
+// retry of its open invoice. A subscription Stripe no longer has is already
+// ended.
+func (s *StripeService) EndSubscription(ctx context.Context, subscriptionID string) error {
+	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	if err != nil {
+		return err
+	}
+	subscriptionID = strings.TrimSpace(subscriptionID)
+	if subscriptionID == "" {
+		return errors.New("subscription_id is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, "https://api.stripe.com/v1/subscriptions/"+url.PathEscape(subscriptionID), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	resp, err := s.StripeClients.Client(s.Config, 0).Do(req)
+	if err != nil {
+		return fmt.Errorf("stripe subscription end failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read stripe subscription end response: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode >= 400 {
+		msg := ParseStripeAPIError(body)
+		if msg == "" {
+			msg = fmt.Sprintf("stripe subscription end failed (%d)", resp.StatusCode)
+		}
+		return errors.New(msg)
+	}
+	return nil
+}
+
 func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID string) error {
 	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {

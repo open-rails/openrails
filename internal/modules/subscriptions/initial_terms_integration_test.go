@@ -92,11 +92,18 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 			} else {
 				require.Zero(t, count)
 			}
-			require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE source_id=$1 AND entitlement=$2`, terms.SubscriptionID, f.ent).Scan(&count))
+			require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE source_id=$1 AND entitlement=$2 AND source_type='subscription'`, terms.SubscriptionID, f.ent).Scan(&count))
 			if mode == "pending" {
 				require.Zero(t, count)
 			} else {
 				require.Equal(t, 1, count)
+			}
+			var allowance int
+			require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE source_id=$1 AND entitlement=$2 AND source_type='grace'`, terms.SubscriptionID, f.ent).Scan(&allowance))
+			if mode == "engine" {
+				require.Equal(t, 1, allowance, "an engine period carries its renewal allowance")
+			} else {
+				require.Zero(t, allowance)
 			}
 			if mode == "pending" {
 				paid := terms

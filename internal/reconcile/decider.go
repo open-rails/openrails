@@ -198,6 +198,8 @@ type Decision struct {
 	// NewPeriodEnd is the provider-confirmed next period end
 	// (TransitionRenew / TransitionAdoptPeriodEnd).
 	NewPeriodEnd *time.Time
+	// NewPeriodStart is the provider-stated start of that period, when known.
+	NewPeriodStart *time.Time
 	// GraceEndsAt dates the dunning grace window (TransitionPastDue): the
 	// missed period end + PeriodGrace — one rule for every plane.
 	GraceEndsAt time.Time
@@ -463,7 +465,11 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 	// 1) A VERIFIED successful renewal charge → the provider billed the new
 	//    period. The only renewal-shaped outcome (#367: renew only off a real charge).
 	if renewTxn != nil && !rosterDead {
-		return with(Decision{Kind: TransitionRenew, NewPeriodEnd: remoteNextEnd(remoteSub), Reason: "verified_renewal_charge"})
+		d := Decision{Kind: TransitionRenew, NewPeriodEnd: remoteNextEnd(remoteSub), Reason: "verified_renewal_charge"}
+		if remoteSub != nil {
+			d.NewPeriodStart = remoteSub.PeriodStart
+		}
+		return with(d)
 	}
 	// 2) Roster alive with a FUTURE boundary but no charge → adopt the provider's
 	//    clock (#367: period adoption alone never grants access). Active with a
@@ -471,7 +477,7 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 	//    none, the row waits until the provider moves.
 	if remoteSub != nil && remoteSub.Status == SubscriptionStatusActive {
 		if next := remoteSub.NextBillingAt; next != nil && next.After(now) {
-			return with(Decision{Kind: TransitionAdoptPeriodEnd, NewPeriodEnd: next, Reason: "roster_alive_future_boundary"})
+			return with(Decision{Kind: TransitionAdoptPeriodEnd, NewPeriodEnd: next, NewPeriodStart: remoteSub.PeriodStart, Reason: "roster_alive_future_boundary"})
 		}
 	}
 	// remoteGone (#679): the provider-side sub is confirmed gone — roster says
@@ -622,7 +628,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 
 	case TransitionPastDue:
 		if sub.Status == models.StatusUnknown {
-			return true, lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, d.GraceEndsAt)
+			return true, lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, nil, d.GraceEndsAt)
 		}
 		if sub.Status != models.StatusActive {
 			return false, nil
@@ -660,7 +666,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if grace.IsZero() {
 			grace = now
 		}
-		return true, lc.ResolveUnknownSubscription(ctx, database, sub, res, d.NewPeriodEnd, grace)
+		return true, lc.ResolveUnknownSubscription(ctx, database, sub, res, d.NewPeriodStart, d.NewPeriodEnd, grace)
 
 	default:
 		return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)

@@ -223,15 +223,15 @@ func TestProbeTestMode(t *testing.T) {
 }
 
 // TestUpdateCustomerVault_ResolvesBillingID: the live gateway requires
-// billing[].id on customer PATCH, so the update reads the customer first and
-// targets the priority-1 billing entry.
+// billing[].id on customer PATCH, so the update reads the customer first (by
+// its own resource: the list's id parameter is not an exact filter at NMI)
+// and targets the priority-1 billing entry.
 func TestUpdateCustomerVault_ResolvesBillingID(t *testing.T) {
 	var patchBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/customers":
-			require.Equal(t, "vault-9", r.URL.Query().Get("id"))
-			_, _ = w.Write([]byte(`{"customers":[{"object":"customer","id":"vault-9","billing":[{"object":"billing","id":"B77","priority":1}]}],"next_cursor":null,"has_more":false}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/customers/vault-9":
+			_, _ = w.Write([]byte(`{"object":"customer","id":"vault-9","billing":[{"object":"billing","id":"B77","priority":1}]}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/customers/vault-9":
 			raw, _ := io.ReadAll(r.Body)
 			patchBody = string(raw)

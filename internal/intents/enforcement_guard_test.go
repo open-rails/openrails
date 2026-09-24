@@ -97,10 +97,12 @@ var providerWriteSurface = map[string]string{
 	"GetSubscription":              "read",
 	"GetWebhookSecret":             "read",
 	"ListCustomersPage":            "read",
+	"GetCustomer":                  "read",
 	"ListRecurringPlans":           "read",
 	"ListSubscriptionsPage":        "read",
 	"ProbeCredentials":             "read", // #812: bounded transaction-search probe; creates nothing
 	"ProbeSalesByOrderID":          "read",
+	"ProbeSalesBySubscriptionID":   "read",
 	"ProbeTestMode":                "read",
 	"SearchTransactions":           "read",
 }

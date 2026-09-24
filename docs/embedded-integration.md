@@ -90,7 +90,7 @@ to boot unless you declare posture explicitly (#745):
 | Field | Required | Meaning |
 |---|---|---|
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
-| `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
+| `ProviderWriteMode` | yes | `full`, `limited` (no system-initiated writes: renewals and retries wait) or `readonly` (no provider writes). Unset is rejected: it would silently stop renewals. |
 | `SecretBackend` | defaults to `snapshot` | Immutable host credentials, live Vault, or encrypted database custody; independent of metadata and HTTP exposure. |
 | `PublicBillingBaseURL` | when generating callbacks or links | External billing mount base, excluding `/v1`; distinct from issuer, DPoP origin and dashboard. |
 | `AllowCatalogUpdates` | false | Enables ordinary product, price, catalog and metering writes and their routes, independently of provider credentials. Trusted local operator application remains available when false. |

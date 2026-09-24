@@ -77,7 +77,6 @@ internal/modules/webhooks/ledger_repair_alert.go|now = time.Now()|business_time_
 internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/reconcile/appliers.go|return time.Now().UTC()|business_time_boundary|Explicit default local-writer clock boundary; owning engine clock takes precedence|1
-internal/reconcile/converge/converge.go|clock := clockwork.NewRealClock()|business_time_boundary|Explicit converge-engine construction boundary; each run synchronizes lifecycle and credit services to its owning clock|1
 internal/reconcile/destructive_run_converge.go|now := time.Now().UTC()|db_audit_timestamp|Before-image capture and reversal audit timestamps use the actual operation time|2
 internal/reconcile/destructive_run_converge.go|MerchantID: mid, ID: runID, Status: status, Now: time.Now().UTC(), Affected: payload,|db_audit_timestamp|Destructive-run completion audit timestamp|1
 internal/reconcile/engine.go|return time.Now().UTC()|business_time_boundary|Explicit reconcile-engine default clock boundary; supplied engine clock takes precedence|1

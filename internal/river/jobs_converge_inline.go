@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -22,13 +23,13 @@ import (
 // Use this from a worker whose merchant context is NOT already pinned. Inside a
 // block already running under RunInMerchantConn, call converge.AfterMutation
 // directly to avoid re-acquiring the connection.
-func convergeCustomerInline(ctx context.Context, dbi *db.DB, merchantID, customer uuid.UUID, worker string) {
+func convergeCustomerInline(ctx context.Context, dbi *db.DB, merchantID, customer uuid.UUID, worker string, clock clockwork.Clock) {
 	if dbi == nil || merchantID == uuid.Nil || customer == uuid.Nil {
 		return
 	}
 	mctx := merchant.WithID(ctx, merchant.ID(merchantID))
 	if err := dbi.RunInMerchantConn(mctx, func(cctx context.Context) error {
-		_, e := converge.AfterMutation(cctx, dbi, merchant.ID(merchantID), customer)
+		_, e := converge.AfterMutation(cctx, dbi, merchant.ID(merchantID), customer, clock)
 		return e
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{

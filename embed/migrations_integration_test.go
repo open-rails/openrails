@@ -169,7 +169,7 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			runtimeURL.Path = "/" + database
 			runtimeURL.User = url.UserPassword(runtimeUser, "runtime_test")
 			runtimeSchema := opts.Schema
-			rt, err := New(ctx, Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: runtimeURL.String(), Schema: runtimeSchema}}, PGXPool: runtimePool, River: opts.River})
+			rt, err := New(ctx, Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: runtimeURL.String(), Schema: runtimeSchema}}, PGXPool: runtimePool, River: opts.River})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 			require.False(t, binderCalled, "New must leave composition open")

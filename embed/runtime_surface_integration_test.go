@@ -30,7 +30,7 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	declaration := embed.PSPDeclaration{Key: "legacy", Rail: "ccbill", AccountID: fmt.Sprintf("9%d", time.Now().UnixNano()%1e9)}
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: fmt.Sprintf("runtime-surface-%d", time.Now().UnixNano()), PSPs: []embed.PSPDeclaration{declaration, declaration}},
-		Config:   &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
+		Config:   &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
 		PGXPool:  pool,
 		River:    embed.RiverFromHost(),
 	})
@@ -43,6 +43,6 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	_, err = rt.CheckJobProgress(ctx)
 	require.NoError(t, err)
 
-	_, err = embed.New(ctx, embed.Options{Config: &config.Config{}, HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}})
+	_, err = embed.New(ctx, embed.Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}})
 	require.ErrorContains(t, err, "requires its own authenticator", "the self surface never mounts without authentication")
 }

@@ -71,12 +71,25 @@ type SaleProbeResult struct {
 // unknown-cohort prober uses it to ask "was THIS period charged?" without
 // matching the signup-time sale that shares the subscription's order reference.
 func (c *NMIClient) ProbeSalesByOrderID(ctx context.Context, orderID string, since time.Time) (SaleProbeResult, error) {
-	var result SaleProbeResult
 	if strings.TrimSpace(orderID) == "" {
-		return result, errors.New("orderID is required")
+		return SaleProbeResult{}, errors.New("orderID is required")
 	}
+	return c.probeSales(ctx, QueryFilter{OrderID: orderID}, orderID, since)
+}
 
-	filter := QueryFilter{OrderID: orderID}
+// ProbeSalesBySubscriptionID is ProbeSalesByOrderID for the sales NMI's
+// recurring engine made for one schedule. A schedule created outside
+// OpenRails (an imported legacy book) carries its own order reference, so
+// only the schedule id finds its renewals.
+func (c *NMIClient) ProbeSalesBySubscriptionID(ctx context.Context, subscriptionID string, since time.Time) (SaleProbeResult, error) {
+	if strings.TrimSpace(subscriptionID) == "" {
+		return SaleProbeResult{}, errors.New("subscriptionID is required")
+	}
+	return c.probeSales(ctx, QueryFilter{SubscriptionID: subscriptionID}, "", since)
+}
+
+func (c *NMIClient) probeSales(ctx context.Context, filter QueryFilter, orderID string, since time.Time) (SaleProbeResult, error) {
+	var result SaleProbeResult
 	if !since.IsZero() {
 		filter.StartDate = since.UTC().Format(queryAPITimeFormat)
 	}
@@ -95,7 +108,7 @@ func (c *NMIClient) ProbeSalesByOrderID(ctx context.Context, orderID string, sin
 
 	var latestDecline time.Time
 	for _, txn := range parsed.Transactions {
-		if strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
+		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
 			continue
 		}
 		for _, action := range txn.Actions {

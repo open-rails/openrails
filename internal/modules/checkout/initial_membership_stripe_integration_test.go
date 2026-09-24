@@ -400,7 +400,13 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				require.NoError(t, intents.ValidateInitialMembershipTerminal(op))
 				method, err := fx.db.Gen(fx.ctx).GetPaymentMethodByID(fx.ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: terms.PaymentMethodID})
 				require.NoError(t, err)
-				require.Equal(t, "pi_initial", method.StoredCredentialRecurringRef)
+				// A card saved by off-session setup is anchored to that consent
+				// (write-once); a card first used by the enrollment to its PI.
+				anchor := "pi_initial"
+				if strings.HasPrefix(mode, "setup") {
+					anchor = "seti_setup"
+				}
+				require.Equal(t, anchor, method.StoredCredentialRecurringRef)
 				sub, err := fx.svc.SubscriptionService.GetByID(fx.ctx, terms.SubscriptionID)
 				require.NoError(t, err)
 				require.Equal(t, models.CollectionPolicyEngine, sub.CollectionPolicy)

@@ -196,7 +196,7 @@ func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
 			method, err = fx.db.Gen(fx.ctx).GetPaymentMethodByID(fx.ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: terms.PaymentMethodID})
 			require.NoError(t, err)
 			var access, events int
-			require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.entitlements WHERE customer_id=$1 AND entitlement='initial_engine_access' AND revoked_at IS NULL`, terms.CustomerID).Scan(&access))
+			require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.entitlements WHERE customer_id=$1 AND entitlement='initial_engine_access' AND revoked_at IS NULL AND source_type='subscription'`, terms.CustomerID).Scan(&access))
 			require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.host_outbox WHERE payment_id=$1`, terms.PaymentID).Scan(&events))
 			if mode == "declined" {
 				require.Zero(t, access)

@@ -203,7 +203,7 @@ func TestCatalogCLIRuntimeRefusesUnavailableCredentialPlane(t *testing.T) {
 	require.NoError(t, err)
 	vault := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 	t.Cleanup(vault.Close)
-	cfg := &config.Config{DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: vault.URL, AuthMethod: "token", Token: "fixture-token"}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: vault.URL, AuthMethod: "token", Token: "fixture-token"}}
 	_, _, _, err = catalogRuntime(t.Context(), CatalogApplyOptions{Config: cfg, PGXPool: pool, Merchant: slug})
 	require.ErrorContains(t, err, "credential plane unavailable")
 	cfg.SecretBackend = config.SecretBackendSnapshot

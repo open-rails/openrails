@@ -692,7 +692,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				"window_end":      window.EndAt,
 			}).Info("Granted subscription entitlement")
 		}
-
+		if len(entNames) > 0 {
+			if err := pushEngineRenewalGrace(ctx, entitlementService, subscription, entNames, periodEndsAt); err != nil {
+				return nil, nil, err
+			}
+		}
 	}
 
 	if params.InitialPaymentReversal == "" {
@@ -1268,8 +1272,14 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("resume membership: update subscription: %w", err)
 		}
-		if err := s.newLifecycleEntitlementService(txdb).ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
+		entSvc := s.newLifecycleEntitlementService(txdb)
+		if err := entSvc.ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
 			return fmt.Errorf("resume membership: reopen subscription access: %w", err)
+		}
+		if subscription.CurrentPeriodEndsAt != nil {
+			if err := pushEngineRenewalGrace(ctx, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodEndsAt); err != nil {
+				return fmt.Errorf("resume membership: %w", err)
+			}
 		}
 		resumed = subscription
 		return nil
@@ -1787,7 +1797,7 @@ const (
 // a re-run of the same pull lands the same state once). newPeriodEnd is the
 // provider's confirmed period end (used by ResolveRenewed); graceEndsAt dates the
 // dunning grace window (ResolvePastDue), normally the missed period end.
-func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
+func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodStart, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
 		if sub.Status != models.StatusUnknown {
 			return nil // idempotent
@@ -1799,11 +1809,15 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 		case ResolveRenewed:
 			sub.Status = models.StatusActive
 			if newPeriodEnd != nil {
-				// New period starts at the prior period end (or now if unknown), ends at
-				// the provider-confirmed end. The renewal payment is backfilled by #634.
+				// New period starts where the provider says it does, else at the
+				// prior period end (or now if unknown), and ends at the
+				// provider-confirmed end. The renewal payment is backfilled by #634.
 				start := now
 				if sub.CurrentPeriodEndsAt != nil {
 					start = *sub.CurrentPeriodEndsAt
+				}
+				if newPeriodStart != nil && newPeriodStart.Before(*newPeriodEnd) {
+					start = newPeriodStart.UTC()
 				}
 				if newPeriodEnd.After(start) {
 					sub.CurrentPeriodStartsAt = &start
@@ -1817,12 +1831,17 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			}
 			return nil
 		case ResolveAdopted:
-			// Period END only — start untouched, no entitlement windows written
-			// (adoption alone never grants access; a real charge renews).
+			// The provider's period: its end, and its start when stated. No
+			// entitlement windows are written (adoption alone never grants
+			// access; a real charge renews).
 			sub.Status = models.StatusActive
 			if newPeriodEnd != nil {
 				end := *newPeriodEnd
 				sub.CurrentPeriodEndsAt = &end
+				if newPeriodStart != nil && newPeriodStart.Before(end) {
+					start := newPeriodStart.UTC()
+					sub.CurrentPeriodStartsAt = &start
+				}
 			}
 			sub.ClearRetrySchedule()
 			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
@@ -2085,6 +2104,9 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 }
 
 // FailMembership marks a subscription as failed due to payment issues.
+// FindingTerminalHeld is a terminal decline whose cancellation was refused.
+const FindingTerminalHeld = "life.terminal_outcome.held"
+
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id is required")
@@ -2182,8 +2204,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 		// parkUnknown is ApplyLocalUnknown's shape applied inside this tx: the
 		// row leaves the dunning queue without losing the customer's access.
+		// awaitingStatus is where a stopped subscription waits. An engine
+		// obligation is ours to decide: it waits past_due for the customer's
+		// new card (or the operator), never in the provider-verification
+		// cohort, which has nothing to probe for it.
+		awaitingStatus := models.StatusUnknown
+		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+			awaitingStatus = models.StatusPastDue
+		}
+		heldTerminal := ""
 		parkUnknown := func(why string) {
-			subscription.Status = models.StatusUnknown
+			heldTerminal = why
+			subscription.Status = awaitingStatus
 			subscription.GraceEndsAt = nil
 			subscription.NextRetryAt = nil
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -2208,7 +2240,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"user_id":         subscription.CustomerID,
 				"failure_code":    normalize.FromPtr(params.FailureCode),
 			}).Warn("or#870 bucket 2: payment method needs the customer's attention; charging STOPS, access and the stored card are untouched")
-			subscription.Status = models.StatusUnknown
+			subscription.Status = awaitingStatus
 			subscription.GraceEndsAt = nil
 			subscription.NextRetryAt = nil
 			needsPaymentMethodUpdate = true
@@ -2366,6 +2398,23 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"subscription_id": subscription.ID,
 			}).Error("Failed to update subscription during failure flow")
 			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		// A terminal outcome the operator's switch (or a missing certainty
+		// leg) refused is a standing finding: the member is neither charged
+		// nor cancelled until someone decides.
+		if heldTerminal != "" {
+			evidence, _ := json.Marshal(map[string]any{"subscription_id": subscription.ID, "collection_policy": subscription.CollectionPolicy, "status": subscription.Status, "refusal": heldTerminal, "failure_code": normalize.FromPtr(params.FailureCode)})
+			action := fmt.Sprintf("subscription %s reached a terminal decline but cancellation was refused (%s); it waits %s with no further charges. Arm the destructive-action switch to let terminal outcomes apply, or resolve it by hand", subscription.ID, heldTerminal, subscription.Status)
+			if _, err := db.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: subscription.MerchantID, FindingType: FindingTerminalHeld, SubjectKey: subscription.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence}); err != nil {
+				return fmt.Errorf("record held terminal outcome for %s: %w", subscription.ID, err)
+			}
+		}
+		// Engine access is paid time plus the renewal allowance; a decided
+		// decline ends the allowance now.
+		if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCancelled && entSvc != nil {
+			if err := entSvc.RevokeSourcesForSubscriptionAsOf(ctx, subscription.CustomerID.String(), subscription.ID, now, models.EntitlementRevokeDunning, models.EntitlementSourceGrace); err != nil {
+				return fmt.Errorf("end engine renewal grace for %s: %w", subscription.ID, err)
+			}
 		}
 
 		// Terminal cancellation with a remote NMI schedule: enqueue the

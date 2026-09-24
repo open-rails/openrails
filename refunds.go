@@ -23,7 +23,11 @@ var (
 // mandatory: a retry with the same key returns the same refund and never
 // refunds twice; the same key with different terms is ErrIdempotencyKeyReused.
 // RevokeAccess also ends the entitlements and product access that the payment
-// granted, in the same transaction that records the refund.
+// granted, in the same transaction that records the refund. For a membership
+// payment it ends the membership's current access, and an engine-owned
+// membership is cancelled so it does not renew; without it the membership
+// continues. The provider's notification of an OpenRails refund never
+// changes this decision.
 type RefundPaymentParams struct {
 	Amount         int64  `json:"amount,omitempty,string"`
 	Full           bool   `json:"full,omitempty"`

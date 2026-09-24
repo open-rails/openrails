@@ -2022,3 +2022,31 @@ func (q *Queries) UpdateSubscriptionAt(ctx context.Context, arg UpdateSubscripti
 	}
 	return result.RowsAffected(), nil
 }
+
+const wakeEngineSubscriptionsForPaymentMethod = `-- name: WakeEngineSubscriptionsForPaymentMethod :execrows
+UPDATE openrails.subscriptions SET
+    next_retry_at = $1::timestamptz,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid
+  AND payment_method_id = $3::uuid
+  AND collection_policy = 'engine'
+  AND status = 'past_due'
+  AND deleted_at IS NULL
+  AND (next_retry_at IS NULL OR next_retry_at > $1::timestamptz)
+`
+
+type WakeEngineSubscriptionsForPaymentMethodParams struct {
+	Now             time.Time
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// A replaced card retries its delinquent engine memberships at the next due
+// pass instead of waiting out the old card's schedule.
+func (q *Queries) WakeEngineSubscriptionsForPaymentMethod(ctx context.Context, arg WakeEngineSubscriptionsForPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, wakeEngineSubscriptionsForPaymentMethod, arg.Now, arg.MerchantID, arg.PaymentMethodID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

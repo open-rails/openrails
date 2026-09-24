@@ -2,7 +2,7 @@ package hosttools
 
 import (
 	"context"
-	"time"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -16,6 +16,8 @@ type ConvergeMerchantOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
 	MerchantID merchant.ID
+	// Clock is the runtime's clock; nil reads wall time.
+	Clock clockwork.Clock
 }
 
 // ConvergeMerchantResult summarizes one merchant-wide convergence pass.
@@ -54,8 +56,7 @@ func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (Conver
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
 		return res, err
 	}
-	engine := converge.NewConvergeEngine(database)
-	engine.Now = func() time.Time { return time.Now().UTC() }
+	engine := converge.NewConvergeEngine(database, opts.Clock)
 
 	mctx := merchant.WithID(ctx, merchantID)
 	err = database.RunInMerchantConn(mctx, func(ctx context.Context) error {

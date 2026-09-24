@@ -12,7 +12,7 @@ import (
 // Provider posture is explicit; secure runtime defaults need no environment label.
 func TestApplyEmbeddedDefaultsWithoutEnvironmentLabel(t *testing.T) {
 	for _, posture := range []config.CredentialPosture{config.CredentialPostureLive, config.CredentialPostureSandbox} {
-		cfg := &config.Config{TestMode: posture}
+		cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: posture}
 		require.NoError(t, applyEmbeddedDefaults(cfg))
 		require.False(t, cfg.RateLimitsDisabled)
 		require.NotNil(t, cfg.RateLimits)
@@ -20,21 +20,21 @@ func TestApplyEmbeddedDefaultsWithoutEnvironmentLabel(t *testing.T) {
 }
 
 func TestApplyEmbeddedDefaultsRequiresExplicitTestMode(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	err := applyEmbeddedDefaults(cfg)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "config.TestMode is required")
 
 	// A second zero-value configuration must also refuse to guess.
-	cfg = &config.Config{}
+	cfg = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	require.ErrorContains(t, applyEmbeddedDefaults(cfg), "config.TestMode is required")
 }
 
 func TestApplyEmbeddedDefaultsAcceptsExplicitPosture(t *testing.T) {
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 
-	cfg = &config.Config{TestMode: config.CredentialPostureLive}
+	cfg = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureLive}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 }
 
@@ -42,7 +42,7 @@ func TestApplyEmbeddedDefaultsAcceptsExplicitPosture(t *testing.T) {
 // defaults config.Load applies — the embedded HTTP surface must not silently
 // ship unthrottled.
 func TestApplyEmbeddedDefaultsSeedsRateLimitsWhenNil(t *testing.T) {
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 
 	require.NotNil(t, cfg.RateLimits, "embedded construction must seed curated rate-limit defaults")
@@ -53,13 +53,14 @@ func TestApplyEmbeddedDefaultsSeedsRateLimitsWhenNil(t *testing.T) {
 
 func TestApplyEmbeddedDefaultsLeavesHostRateLimitsAlone(t *testing.T) {
 	custom := &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, RateLimits: custom}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, RateLimits: custom}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 	require.Same(t, custom, cfg.RateLimits, "a host-supplied RateLimits must not be overwritten")
 }
 
 func TestApplyEmbeddedDefaultsExplicitDisableYieldsPassthrough(t *testing.T) {
 	cfg := &config.Config{
+		ProviderWriteMode:  config.ProviderWriteModeReadOnly,
 		TestMode:           config.CredentialPostureSandbox,
 		RateLimitsDisabled: true,
 	}
@@ -76,24 +77,24 @@ func TestNewRejectsMissingConfig(t *testing.T) {
 }
 
 func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
-	cfg := &config.Config{} // no TestMode or database
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly} // no TestMode or database
 	_, err := New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.TestMode is required")
 
-	cfg = &config.Config{}
+	cfg = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 	_, err = New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.TestMode is required")
 }
 
 // Omitting River selects a managed fleet and reaches normal posture validation.
 func TestNewDefaultsRiverOwnership(t *testing.T) {
-	_, err := New(context.Background(), Options{Config: &config.Config{}})
+	_, err := New(context.Background(), Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}})
 	require.ErrorContains(t, err, "config.TestMode is required")
-	_, err = New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost()})
+	_, err = New(context.Background(), Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, River: RiverFromHost()})
 	require.ErrorContains(t, err, "config.TestMode is required")
 }
 
 func TestHostRiverRejectsAutomaticStartupBeforeBinding(t *testing.T) {
-	_, err := New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost(), RunWorkers: true})
+	_, err := New(context.Background(), Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, River: RiverFromHost(), RunWorkers: true})
 	require.ErrorContains(t, err, "managed-only")
 }

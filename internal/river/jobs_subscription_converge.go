@@ -181,7 +181,7 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		// Inline convergence pass (#511 Phase E): project entitlement windows /
 		// grant effects the transition implies. Best-effort — the sweep backstops.
 		if customerID != uuid.Nil {
-			if _, aerr := converge.AfterMutation(cctx, w.DB, merchant.ID(args.MerchantID), customerID); aerr != nil {
+			if _, aerr := converge.AfterMutation(cctx, w.DB, merchant.ID(args.MerchantID), customerID, w.Clock); aerr != nil {
 				log.WithContext(cctx).WithError(aerr).WithFields(log.Fields{
 					"merchant_id": args.MerchantID, "customer_id": customerID,
 				}).Warn("subscription converge: inline converge after transition failed; the sweep will reconcile")

@@ -22,7 +22,8 @@ import (
 
 // StripeEnginePaymentParams is the immutable accepted operation, not browser input.
 // Initial requires customer-present recurring consent. Later payments require the
-// previously qualified initial PaymentIntent in the instrument's recurring anchor.
+// card's qualified recurring consent as its anchor: the initial PaymentIntent,
+// or the off-session SetupIntent that saved a replacement card.
 type StripeEnginePaymentParams struct {
 	CustomerInitiated bool // explicit customer retry of an existing recurring agreement
 	// OneTime is a customer-present purchase on a saved card: on-session, no
@@ -86,7 +87,7 @@ func (p StripeEnginePaymentParams) validate() error {
 	if err := moneyutil.ValidateCurrency(p.Currency); err != nil {
 		return err
 	}
-	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") {
+	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "seti_") {
 		return errors.New("Stripe engine payment lacks a qualified recurring agreement")
 	}
 	return nil
@@ -194,6 +195,7 @@ type stripeEngineIntent struct {
 	LatestCharge       json.RawMessage   `json:"latest_charge"`
 	Metadata           map[string]string `json:"metadata"`
 	ClientSecret       string            `json:"client_secret"`
+	CancellationReason string            `json:"cancellation_reason"`
 	LastPaymentError   *struct {
 		Code          string          `json:"code"`
 		DeclineCode   string          `json:"decline_code"`
@@ -335,6 +337,9 @@ func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentP
 				r.DeclineCode = pi.LastPaymentError.Code
 			}
 		}
+		if r.DeclineCode == "" && pi.CancellationReason == "abandoned" {
+			r.DeclineCode = "authentication_required"
+		}
 	case "succeeded":
 		if pi.AmountReceived != int64(p.AmountMinor) {
 			return r, errors.New("Stripe received amount differs from accepted amount")
@@ -458,6 +463,30 @@ func (s *StripeService) FinalizeEngineDecline(ctx context.Context, p StripeEngin
 		canceled.DeclineCode = result.FailureCode
 	}
 	return canceled, nil
+}
+
+// CancelAbandonedEnginePayment closes the SAME payment after its issuer
+// authentication window lapsed, so a challenge the payer never finished can
+// no longer charge them and the accepted operation can resolve. It reads
+// first and cancels only a payment still awaiting authentication; a payer
+// who completed meanwhile reads back succeeded.
+func (s *StripeService) CancelAbandonedEnginePayment(ctx context.Context, p StripeEnginePaymentParams, reference string) (StripeEnginePaymentResult, error) {
+	scoped, err := s.engineScoped(p)
+	if err != nil {
+		return StripeEnginePaymentResult{}, err
+	}
+	result, found, err := scoped.ReadEnginePayment(ctx, p, reference)
+	if err != nil {
+		return result, err
+	}
+	if !found || result.State != StripeEngineAuthenticationRequired {
+		return result, nil
+	}
+	if _, err := scoped.stripePostForm(ctx, "/v1/payment_intents/"+url.PathEscape(result.PaymentIntentID)+"/cancel", url.Values{"cancellation_reason": {"abandoned"}}, "engine:"+p.OperationID.String()+":abandon"); err != nil {
+		return StripeEnginePaymentResult{}, errors.New("Stripe abandoned-authentication cancel requires same-payment readback")
+	}
+	closed, _, err := scoped.ReadEnginePayment(ctx, p, result.PaymentIntentID)
+	return closed, err
 }
 
 // ReversalKind preserves the original capture while withholding fresh access.
