@@ -109,6 +109,11 @@ type world struct {
 	server *httptest.Server
 	client map[topology]*openrails.Client
 	psp    map[string]string
+
+	// replica is set on one process of a multi-replica fleet
+	// (replicas_harness_test.go): its own connections, River identity and
+	// provider transports over the shared database and providers.
+	replica *replicaEnv
 }
 
 func dsn(t testing.TB) string {
@@ -121,9 +126,18 @@ func dsn(t testing.TB) string {
 
 func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 	t.Helper()
+	w := prepareWorld(t, 12, configure...)
+	w.start()
+	return w
+}
+
+// prepareWorld creates the merchant's schema and shared test doubles without
+// starting a runtime.
+func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config)) *world {
+	t.Helper()
 	poolConfig, err := pgxpool.ParseConfig(dsn(t))
 	require.NoError(t, err)
-	poolConfig.MaxConns = 12
+	poolConfig.MaxConns = maxConns
 	queries := &queryLog{}
 	poolConfig.ConnConfig.Tracer = queries
 	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
@@ -152,7 +166,6 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 	})
 	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{Schema: w.schema, River: embed.RiverFromHost(), RuntimePool: pool}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, w.schema))
-	w.start()
 	return w
 }
 
@@ -176,11 +189,21 @@ func (w *world) start() {
 		},
 	})
 	require.NoError(t, err)
+	pool, dbURL := w.pool, w.dsn
+	stripe, nmi := http.RoundTripper(w.stripe), http.RoundTripper(w.nmi)
+	riverConfig := &river.Config{
+		Schema: w.schema, Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}},
+		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
+	}
+	if w.replica != nil {
+		pool, dbURL, stripe, nmi = w.replica.connect(w)
+		w.replica.configureRiver(riverConfig)
+	}
 	cfg := &config.Config{
 		TestMode:            config.CredentialPostureSandbox,
 		ProviderWriteMode:   config.ProviderWriteModeFull,
 		AllowCatalogUpdates: true,
-		DB:                  &config.DBConfig{URL: w.dsn, Schema: w.schema},
+		DB:                  &config.DBConfig{URL: dbURL, Schema: w.schema},
 		// The test server's loopback peer is the site's reverse proxy.
 		TrustedProxies: []string{"127.0.0.1/32"},
 	}
@@ -196,18 +219,15 @@ func (w *world) start() {
 			"ccbill": {"ccbill": {AccountID: ccbillAcct}},
 		}}},
 		Config:          cfg,
-		PGXPool:         w.pool,
+		PGXPool:         pool,
 		River:           embed.RiverFromHost(),
-		StripeTransport: w.stripe,
-		NMITransport:    w.nmi,
+		StripeTransport: stripe,
+		NMITransport:    nmi,
 		Clock:           w.clock,
 	})
 	require.NoError(t, err)
 	w.rt = rt
-	jobs, err := riverkit.New(t.Context(), w.pool, &river.Config{
-		Schema: w.schema, Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}},
-		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
-	}, rt.RiverJobs())
+	jobs, err := riverkit.New(t.Context(), pool, riverConfig, rt.RiverJobs())
 	require.NoError(t, err)
 	require.NoError(t, jobs.Start(context.WithoutCancel(t.Context())))
 	w.jobs = jobs
@@ -249,6 +269,9 @@ func (w *world) stop() {
 	if w.rt != nil {
 		_ = w.rt.Close(context.Background())
 		w.rt = nil
+	}
+	if w.replica != nil {
+		w.replica.disconnect()
 	}
 }
 
