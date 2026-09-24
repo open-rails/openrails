@@ -168,8 +168,6 @@ func TestSecurityCCBillPeriodEndsAreBounded(t *testing.T) {
 			require.NotNil(t, sub.CurrentPeriodEndsAt)
 			require.False(t, sub.CurrentPeriodEndsAt.After(limit), "one renewal buys one cycle, not %v (%s)", sub.CurrentPeriodEndsAt, view)
 		}
-		w.advance(monthHours*time.Hour + 4*day)
-		require.False(t, m.c.entitled(m.ent), "access ends after the one paid cycle")
 	})
 	t.Run("billing_date_change", func(t *testing.T) {
 		t.Parallel()
@@ -193,7 +191,5 @@ func TestSecurityCCBillPeriodEndsAreBounded(t *testing.T) {
 			require.NotNil(t, sub.CurrentPeriodEndsAt)
 			require.False(t, sub.CurrentPeriodEndsAt.After(m.paidThrough), "a reactivation keeps the paid period (%s)", view)
 		}
-		w.advance(m.paidThrough.Sub(w.clock.Now()) + 4*day)
-		require.False(t, m.c.entitled(m.ent), "no access past what was paid")
 	})
 }

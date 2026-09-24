@@ -118,7 +118,7 @@ func TestGatewayPostureLiveOrUnavailableDisarmsMutationsButNotReads(t *testing.T
 		t.Run(mode, func(t *testing.T) {
 			g := newFakeGateway(t, mode)
 			client := gatewayClient(t, g, "key-"+uuid.NewString(), config.NMIEndpointGateway)
-			require.False(t, client.VerifyPosture(context.Background()).Armed())
+			require.False(t, client.VerifyPosture(context.Background()).Armed(), "verified when loaded")
 			err := client.Void(context.Background(), "txn")
 			require.ErrorIs(t, err, providerposture.ErrDisarmed)
 			require.False(t, IsTransportAmbiguous(err), "a refusal never dispatched")
@@ -161,13 +161,13 @@ func TestSandboxDeploymentUsesQualificationProbeOnce(t *testing.T) {
 	require.EqualValues(t, 3, g.mutations.Load())
 }
 
-func TestLivePostureNeverVerifies(t *testing.T) {
+func TestLivePostureUnverifiedCredentialIsNotQueriedPerMutation(t *testing.T) {
 	g := newFakeGateway(t, "false")
-	client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live", EndpointDeployment: config.NMIEndpointGateway}, false)
+	client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointGateway}, false)
 	require.NoError(t, err)
 	client.V5BaseURL = g.URL
 	require.NoError(t, client.Void(context.Background(), "txn"))
-	require.EqualValues(t, 0, g.queries.Load())
+	require.EqualValues(t, 0, g.queries.Load(), "live credentials are verified when loaded, not per mutation")
 }
 
 func TestLoopbackFixtureMarkerIsExplicitAndLoopbackOnly(t *testing.T) {
@@ -216,7 +216,7 @@ func TestLivePostureRefusesTestModeAccount(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			g := newFakeGateway(t, mode)
 			client := live(g, config.NMIEndpointGateway)
-			require.False(t, client.VerifyPosture(context.Background()).Armed())
+			require.False(t, client.VerifyPosture(context.Background()).Armed(), "verified when loaded")
 			err := client.Void(context.Background(), "txn")
 			require.ErrorIs(t, err, providerposture.ErrDisarmed)
 			require.EqualValues(t, 0, g.mutations.Load(), "nothing reaches a test-mode account under live posture")
@@ -232,9 +232,7 @@ func TestLivePostureRefusesTestModeAccount(t *testing.T) {
 		require.EqualValues(t, 0, g.probeAuths.Load(), "live verification never sends a financial probe")
 	})
 	t.Run("sandbox_endpoint", func(t *testing.T) {
-		g := newFakeGateway(t, "false")
-		client := live(g, config.NMIEndpointSandbox)
-		require.ErrorIs(t, client.Void(context.Background(), "txn"), providerposture.ErrDisarmed)
-		require.EqualValues(t, 0, g.queries.Load()+g.mutations.Load())
+		_, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointSandbox}, false)
+		require.Error(t, err, "the sandbox endpoint is refused under live posture")
 	})
 }

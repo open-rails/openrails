@@ -99,8 +99,10 @@ func (c *NMIClient) requireArmed(ctx context.Context, target string) error {
 		return nil
 	}
 	if !c.TestMode {
-		if c.LoopbackFixture {
-			return fmt.Errorf("%w: loopback fixture under live posture", providerposture.ErrDisarmed)
+		// Live credentials are verified when loaded (startup, create and
+		// rotation); a verified credential stays gated by its verdict.
+		if _, seen := providerposture.Process().Lookup(c.PostureKey()); !seen || c.LoopbackFixture {
+			return nil
 		}
 		return providerposture.Process().Require(ctx, c.PostureKey(), c.CheckLivePosture)
 	}

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -51,7 +50,7 @@ func refuseBlockedCardAttempt(r *httprequest.Request, customerID string) bool {
 }
 
 func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
-	r.SetHeader("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+	r.SetHeader("Retry-After", strconv.FormatInt(int64((wait+time.Second-1)/time.Second), 10))
 	r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, "card_attempts_blocked",
 		"Too many declined card attempts. Try again later."))
 }

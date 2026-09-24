@@ -66,7 +66,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 	}{
 		// 2 keys: security_key, webhook_signing_secret. A custodian's own key is
 		// not a rail credential (or#880) — it lives on the custodian.
-		{models.RailNMI, false, true, true, true, 2, true, false, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682; or#896: no first phase, owns the vault
+		{models.RailNMI, false, true, true, true, 3, true, false, true, false, true, CancelModeDestructive},      // remoteCustomer=false per #682; or#896: no first phase, owns the vault
 		{models.RailCCBill, false, false, false, true, 3, true, true, false, true, false, CancelModeDestructive}, // #696: DataLink SMS cancel, no resume
 		// 4 keys: secret_key, webhook_signing_secret, _thin, _previous (#856 rollover overlap).
 		{models.RailStripe, true, true, false, true, 4, false, false, false, true, false, CancelModeReversible},

@@ -788,8 +788,8 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 				"quote_expired_at":    pending.ExpiresAt.UTC().Format(time.RFC3339),
 				"landed_at":           purchasedAt.UTC().Format(time.RFC3339),
 				"token":               pending.Token,
-				"token_amount":        pending.TokenAmount,
-				"fiat_amount":         pending.Amount,
+				"token_amount":        fmt.Sprint(pending.TokenAmount),
+				"fiat_amount":         strconv.FormatInt(pending.Amount, 10),
 				"currency":            pending.Currency,
 			},
 		}); err != nil {

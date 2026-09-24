@@ -32,3 +32,16 @@ func CheckTestModeArm(ctx context.Context, client *NMIClient) error {
 		return fmt.Errorf("NMI sandbox qualification failed; refusing to arm: %w", status.Err)
 	}
 }
+
+// CheckLiveArm verifies a live deployment's credential now and refuses an
+// account that is not proven live (SEC-33).
+func CheckLiveArm(ctx context.Context, client *NMIClient) error {
+	status := providerposture.Process().Verify(ctx, client.PostureKey(), client.CheckLivePosture)
+	if status.Armed() {
+		return nil
+	}
+	if status.Verdict == providerposture.Simulated {
+		return status.Err
+	}
+	return fmt.Errorf("NMI live qualification failed; refusing to arm: %w", status.Err)
+}

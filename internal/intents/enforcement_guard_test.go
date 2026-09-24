@@ -74,6 +74,8 @@ var providerWriteSurface = map[string]string{
 	// Sandbox posture verification: query reads, or the dedicated sandbox's
 	// simulated-only qualification probe; never live money.
 	"CheckPosture":                 "read",
+	"CheckLivePosture":             "read",
+	"PostureCheck":                 "read",
 	"VerifyPosture":                "read",
 	"PostureKey":                   "read",
 	"RequireArmedFor":              "read",

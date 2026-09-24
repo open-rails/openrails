@@ -38,7 +38,7 @@ var ErrPaymentProviderCredentialsRejected = apperr.New(http.StatusBadRequest, "p
 // providerCredentialError types a provider-side credential rejection; any
 // other probe outcome (transport, indeterminate) stays an internal failure.
 func providerCredentialError(err error) error {
-	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) || errors.Is(err, nmi.ErrTestModeUnderLivePosture) || errors.Is(err, nmi.ErrSandboxEndpointUnderLive) {
 		return fmt.Errorf("%w: %v", ErrPaymentProviderCredentialsRejected, err)
 	}
 	return err
@@ -919,9 +919,10 @@ func unmarshalProviderEvidence(raw []byte) pspEvidence {
 // refuseLiveNMIUnderTestMode requires a fresh simulated result before arming
 // sandbox NMI credentials. Live or indeterminate responses refuse the arm.
 func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID, rail, environment, accountID string, credentials map[string]string) error {
-	if rail != string(models.RailNMI) || s.providerEnvironment != "test" {
+	if rail != string(models.RailNMI) {
 		return nil
 	}
+	sandbox := s.providerEnvironment == "test"
 	name, err := PSPSecretName(rail, environment, accountID, "security_key")
 	if err != nil {
 		return err
@@ -945,14 +946,19 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 	if err != nil {
 		return err
 	}
-	client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, true)
+	client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, sandbox)
 	if err != nil {
-		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
+		return fmt.Errorf("construct NMI posture qualification client: %w", err)
 	}
 	if s.nmiProbeV5BaseURL != "" {
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}
-	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
+	check := nmi.CheckTestModeArm
+	if !sandbox {
+		// SEC-33: a live deployment refuses an NMI account left in test mode.
+		check = nmi.CheckLiveArm
+	}
+	if err := check(ctx, client); err != nil {
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
 	}
 	return nil
