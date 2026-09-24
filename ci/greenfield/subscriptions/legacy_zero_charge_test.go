@@ -244,6 +244,15 @@ func TestLegacyNMICoexistsWithEngine(t *testing.T) {
 					}
 				}
 			}
+			if enginePaid != 4 {
+				for _, p := range w.payments(tp, e.c.id) {
+					t.Logf("payment %s tx=%s status=%s sub=%v amount=%d at=%s", p.ID, p.TransactionID, p.Status, p.SubscriptionID, p.Amount, p.CreatedAt)
+				}
+				for _, sale := range w.nmi.ledger("") {
+					t.Logf("nmi sale %+v", sale)
+				}
+				t.Logf("engine sub %s legacy sub %s engine vault %s legacy vault %s", e.sub, l.sub, engineVault, l.railCust)
+			}
 			require.Equal(t, 4, enginePaid)
 			require.GreaterOrEqual(t, legacyPaid, 4, "every notified NMI renewal is mirrored")
 			require.Empty(t, w.openFindings(duplicateCharge), "no duplicate across ownership modes")

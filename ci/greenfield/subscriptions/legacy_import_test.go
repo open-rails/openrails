@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/riverqueue/river/rivertype"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/embed"
 )
 
 // bookTier is one catalog price of a legacy NMI book, linked to the NMI plan
@@ -134,14 +135,8 @@ func (refreshMerchant) Kind() string { return "openrails.provider_refresh_mercha
 // transaction windows and the unknown-cohort probe) and waits for it.
 func (w *world) pull() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, nil)
+	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: embed.QueueBilling})
 	require.NoError(w.t, err)
-	if res.Job.State == rivertype.JobStateScheduled {
-		// The scheduler's staggered refresh for this merchant absorbed the
-		// insert (one in-flight refresh per merchant); run it now.
-		_, err = w.jobs.JobRetry(w.t.Context(), res.Job.ID)
-		require.NoError(w.t, err)
-	}
 	w.waitJob(res.Job.ID)
 }
 
