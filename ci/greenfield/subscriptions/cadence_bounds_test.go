@@ -16,40 +16,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
-// cadences is every billing period the engine must handle without borrowing
-// a month: hourly, daily, weekly, 30-day, quarterly and yearly.
-var cadences = []int{1, 24, 7 * 24, monthHours, 90 * 24, 365 * 24}
-
 // graceFor is the documented renewal allowance (docs/operations.md): unpaid
 // access past a period is min(24h, max(5m, period/10)).
 func graceFor(hours int) time.Duration {
 	period := time.Duration(hours) * time.Hour
 	return min(24*time.Hour, max(5*time.Minute, period/10))
-}
-
-// membershipEvery creates an auto-renew product and price billed every hours.
-func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int) *openrails.Price {
-	w.t.Helper()
-	client := w.client[embedded]
-	product, err := client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
-	require.NoError(w.t, err)
-	price, err := client.Prices.Create(w.t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
-	require.NoError(w.t, err)
-	return price
-}
-
-func enrollEvery(t *testing.T, w *world, rail string, hours int) *engineCase {
-	t.Helper()
-	price := w.membershipEvery("content:members", 9_990_000, hours)
-	e := &engineCase{w: w, rail: rail, tp: embedded, price: price.ID, amount: 999, ent: "content:members", started: w.clock.Now()}
-	e.c = w.newCustomer()
-	e.method = e.c.saveCard(rail, visa)
-	e.sub = e.c.subscribe(e.tp, rail, price.ID, e.ent, e.method)
-	sub := w.subscription(e.tp, e.sub)
-	require.Equal(t, "engine", sub.CollectionPolicy)
-	require.Equal(t, time.Duration(hours)*time.Hour, sub.CurrentPeriodEndsAt.Sub(*sub.CurrentPeriodStartsAt), "the period is the price's cadence")
-	require.True(t, e.c.entitled(e.ent))
-	return e
 }
 
 func forEachCadence(t *testing.T, run func(t *testing.T, hours int)) {
@@ -74,7 +45,7 @@ func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 		require.Less(t, window, period, "the dunning window ends inside one cycle")
 
 		w := newWorld(t)
-		e := enrollEvery(t, w, "nmi", hours)
+		e := enrollEvery(t, w, "nmi", embedded, hours)
 		end := e.periodEnd()
 		w.cfg = func(c *config.Config) { c.EngineAdmissionHold = true }
 		w.restart()
@@ -95,7 +66,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 	forEachCadence(t, func(t *testing.T, hours int) {
 		grace := graceFor(hours)
 		w := newWorld(t)
-		e := enrollEvery(t, w, "stripe", hours)
+		e := enrollEvery(t, w, "stripe", embedded, hours)
 		e.setDecline(visa.Last4, "auth", "")
 		end := e.periodEnd()
 		e.toPeriodEnd()
@@ -123,7 +94,7 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 	forEachCadence(t, func(t *testing.T, hours int) {
 		w := newWorld(t)
 		w.armDestructive()
-		e := enrollEvery(t, w, "nmi", hours)
+		e := enrollEvery(t, w, "nmi", embedded, hours)
 		e.setDecline(visa.Last4, "insufficient_funds", "202")
 		e.toPeriodEnd()
 		first := w.clock.Now()
