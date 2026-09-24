@@ -112,7 +112,7 @@ catalog.
       "flow": "tokenize",
       "config": { "public_api_key": "<public Basis Theory application key>" } },
     { "key": "stripe", "rail": "stripe", "custodian": "psp", "display_name": "Stripe",
-      "flow": "redirect", "config": { "publishable_key": "pk_test_..." } },
+      "flow": "elements", "checkout": true, "config": { "publishable_key": "pk_test_..." } },
     { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "Credit Card", "flow": "redirect" },
     { "key": "solana", "rail": "solana", "custodian": "psp", "display_name": "Solana", "flow": "wallet" }
   ]
@@ -123,9 +123,14 @@ catalog.
   absent. Switch on `flow`, not on a hard-coded list of rails:
   - `tokenize` — load `config.tokenization_url`, tokenize with `config.tokenization_key`,
     POST the resulting `payment_token`.
-  - `redirect` — nothing needed in the browser; POST checkout and follow the `url`.
-    Stripe also serves its `publishable_key` (when declared) for in-page card setup
-    and payment authentication.
+  - `elements` — Stripe with a declared `publishable_key`: save the card in the page
+    (`POST /v1/me/payment-methods/stripe-setup`, Stripe.js `confirmSetup`, then
+    `.../confirm`), then POST checkout with its `payment_method_id`.
+  - `redirect` — nothing needed in the browser; POST checkout and follow the `url`
+    (CCBill; Stripe without a publishable key).
+- `checkout` is true for PSPs that take new purchases and new cards under the
+  merchant's checkout routing (a catch-all `checkout_routing` rule naming one PSP
+  makes it the only checkout PSP). Other armed PSPs stay listed for existing cards.
   - `wallet` — the buyer's wallet signs; chain/token detail comes from
     `GET /v1/solana/config` and `GET /v1/solana/tokens`.
 - `key` is the value to send as checkout's `payment.rail`.
@@ -218,6 +223,19 @@ The response's `next_action` tells the frontend what to do next:
 3. A provider webhook finalizes the payment server-side. Poll
    `GET /v1/me/checkout/:id` until `status: "succeeded"` (then `payment_id` /
    `subscription_id` are set), and refresh `/v1/me/status`.
+
+**Saved-card flow** (`flow: "elements"` — Stripe; also any saved NMI card):
+1. POST the session with `payment_method_id`. The card is charged in place (customer
+   present); nothing redirects.
+2. `status: "succeeded"` — done. `status: "requires_action"` with `operation.id` — run
+   the provider challenge (3-D Secure): `GET /v1/me/payment-operations/:op/authentication`
+   gives the client secret for Stripe.js; then `POST .../authentication/confirm`, which
+   verifies with the provider. `status: "processing"` — poll `GET /v1/me/checkout/:id`;
+   never start another attempt.
+3. A definite decline is a `402 card_declined` whose `metadata.failure`
+   (`{reason, message, field}`) is safe to show the buyer; `field` names the card field
+   to correct. Fraud-related declines always read `generic_decline`. Retry with another
+   card under a new idempotency key.
 
 **Tokenized-vault flow** (`flow: "tokenize"` — NMI-backed rails, e.g. `mobius`):
 1. Load the rail's tokenization script and render its hosted card fields — script URL

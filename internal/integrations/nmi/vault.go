@@ -42,6 +42,8 @@ type CreateCustomerVaultResponse struct {
 	// inside the vault). Recorded verbatim (#682: safe to capture now that the
 	// rebill-driver mode has its own column and no longer keys off this).
 	BillingID string
+	// Card is the gateway's masked display data for the stored card.
+	Card V5BillingCardData
 }
 
 func (d *CreateCustomerVaultData) v5Billing(requireToken bool) (*v5CustomerBillingRequest, error) {
@@ -95,6 +97,7 @@ func (c *NMIClient) CreateCustomerVault(ctx context.Context, data CreateCustomer
 	resp := &CreateCustomerVaultResponse{CustomerVaultID: customer.ID}
 	if billing := customer.PrimaryBilling(); billing != nil {
 		resp.BillingID = strings.TrimSpace(billing.ID)
+		resp.Card = billing.PaymentDetails
 	}
 	return resp, nil
 }

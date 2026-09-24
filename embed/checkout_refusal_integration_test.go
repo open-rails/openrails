@@ -46,7 +46,7 @@ func newFakeNMICheckoutGateway(t *testing.T) *fakeNMICheckoutGateway {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/customers") {
 			n := f.vaults.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"object":"customer","id":"vault_%d","billing":[{"id":"bill_%d","priority":1}]}`, n, n)
+			fmt.Fprintf(w, `{"object":"customer","id":"vault_%d","billing":[{"id":"bill_%d","priority":1,"payment_details":{"card_number":"4xxxxxxxxxxx1111","card_exp":"1130","card_type":"visa"}}]}`, n, n)
 			return
 		}
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
@@ -187,6 +187,18 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 			}
 			session, err := client.CreateCheckoutSession(ctx, request)
 			out[s.name] = observeRefusal(t, name+" "+s.name, session, err)
+			if s.name == "approved" {
+				// The saved card shows the gateway's masked card, not browser claims.
+				methods, err := client.ListPaymentMethods(ctx, customer.String(), openrails.PageOptions{})
+				require.NoError(t, err)
+				require.Len(t, methods.Data, 1)
+				card := methods.Data[0].Card
+				require.NotNil(t, card)
+				require.Equal(t, "1111", *card.Last4)
+				require.Equal(t, "visa", *card.Brand)
+				require.Equal(t, 11, *card.ExpMonth)
+				require.Equal(t, 2030, *card.ExpYear)
+			}
 			if s.name == "gateway_unknown" {
 				submissions, vaults := gateway.sales.Load(), gateway.vaults.Load()
 				replay, replayErr := client.CreateCheckoutSession(ctx, request)
@@ -204,9 +216,9 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 		Status: 402, Type: "card_error", Code: "card_declined", DeclineReason: "insufficient_funds", FailureCode: "insufficient_funds",
 		Refused: true, CardDeclined: true,
 	}, want["insufficient_funds"])
-	require.Equal(t, refusalObservation{
-		Status: 409, Type: "invalid_request_error", Code: "resource_conflict",
-	}, want["gateway_unknown"])
+	// An uncertain outcome answers with the accepted operation's state, never
+	// a refusal: the buyer must wait for its verification, not pay again.
+	require.Equal(t, refusalObservation{OK: true, Code: "processing"}, want["gateway_unknown"])
 	require.Equal(t, refusalObservation{
 		Status: 402, Type: "card_error", Code: "payment_method_stale", Refused: true, Stale: true,
 	}, want["stale_saved_card"])

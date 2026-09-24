@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"strings"
 	"time"
 	"unicode"
@@ -137,6 +138,11 @@ type PaymentMethodError struct {
 	Err            error
 	LocalizationID string
 	Message        string
+	// Rail is the provider vocabulary LocalizationID belongs to ("" = nmi).
+	Rail string
+	// Failure is the customer-facing decline, when the refusal's full
+	// provider evidence (AVS/CVV, decline codes) was available.
+	Failure *openrails.PaymentFailure
 }
 
 func (e *PaymentMethodError) Error() string {
@@ -278,9 +284,9 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),
-		LastFour:             stringPtrOrNil(sanitizeLastFour(req.LastFour)),
-		ExpiryDate:           stringPtrOrNil(sanitizeExpiryDate(req.ExpiryDate)),
-		CardType:             stringPtrOrNil(sanitizeCardType(req.CardType)),
+		LastFour:             stringPtrOrNil(firstNonEmpty(sanitizeLastFour(nmiResponse.Card.CardNumber), sanitizeLastFour(req.LastFour))),
+		ExpiryDate:           stringPtrOrNil(firstNonEmpty(nmiCardExpiry(nmiResponse.Card.CardExp), sanitizeExpiryDate(req.ExpiryDate))),
+		CardType:             stringPtrOrNil(firstNonEmpty(sanitizeCardType(nmiResponse.Card.CardType), sanitizeCardType(req.CardType))),
 		Metadata:             metadata,
 	}
 	if pspID != nil {
@@ -475,6 +481,24 @@ func sanitizeExpiryDate(value string) string {
 		}
 	}
 	return value
+}
+
+// nmiCardExpiry normalizes the gateway's MMYY expiry to MM/YY.
+func nmiCardExpiry(value string) string {
+	value = sanitizeExpiryDate(value)
+	if len(value) == 4 && !strings.ContainsAny(value, "/-") {
+		return value[:2] + "/" + value[2:]
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func stringPtrOrNil(value string) *string {

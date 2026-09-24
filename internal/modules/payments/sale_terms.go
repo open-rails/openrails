@@ -15,7 +15,13 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
+// TypeNMISale is the one-time card sale on a saved PSP-held card. Despite the
+// historical name it serves every card rail that charges a saved method
+// directly (NMI vault sale, Stripe engine PaymentIntent).
 const TypeNMISale = "nmi_sale"
+
+// saleRails are the rails whose one-time sale charges a saved PSP card.
+var saleRails = map[string]bool{"nmi": true, "stripe": true}
 
 // NMISalePayload is the accepted one-time purchase, including the instrument
 // and benefits. Recovery never reloads a current catalog or extends these
@@ -51,7 +57,7 @@ func DecodeNMISalePayload(in gen.OpenrailsRailIntent) (NMISalePayload, error) {
 		return p, err
 	}
 	customer, err := uuid.Parse(p.UserID)
-	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || in.Rail != "nmi" || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() || p.Entitlements == nil {
+	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() || p.Entitlements == nil {
 		return p, errors.New("sale operation contradicts its accepted purchase")
 	}
 	for _, instant := range []time.Time{p.AcceptedAt, p.EntitlementStart, p.OwnershipStart} {
@@ -77,7 +83,7 @@ func DecodeNMISalePayload(in gen.OpenrailsRailIntent) (NMISalePayload, error) {
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err
 	}
-	if p.Instrument.CustodianHeld() || p.Provider != "nmi" || p.Instrument.RailCustomerRef == "" {
+	if p.Instrument.CustodianHeld() || p.Provider != in.Rail || p.Instrument.RailCustomerRef == "" || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" {
 		return p, errors.New("sale instrument contradicts its accepted purchase")
 	}
 	if p.AccessDurationHours != nil && *p.AccessDurationHours <= 0 || p.OwnershipEnd != nil && !p.OwnershipEnd.After(p.OwnershipStart) || p.EntitlementStart.Before(p.AcceptedAt) || !p.OwnershipStart.Equal(p.AcceptedAt) {

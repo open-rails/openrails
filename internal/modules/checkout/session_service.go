@@ -749,6 +749,11 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		if !errors.Is(err, ErrCheckoutSessionPending) {
 			_ = s.markInitializationFailed(ctx, session, err)
 		}
+		// An accepted card operation that awaits authentication or is still
+		// unresolved answers with its state; a definite decline stays a 402.
+		if response, found, readErr := s.acceptedOperationSessionResponse(ctx, session); readErr == nil && found && response.Status != string(models.CheckoutSessionStatusFailed) {
+			return response, nil
+		}
 		return nil, err
 	}
 
@@ -798,6 +803,9 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		if err := s.initializeSession(ctx, existing, payment, successURL, cancelURL, user); err != nil {
 			if !errors.Is(err, ErrCheckoutSessionPending) {
 				_ = s.markInitializationFailed(ctx, existing, err)
+			}
+			if response, found, readErr := s.acceptedOperationSessionResponse(ctx, existing); readErr == nil && found && response.Status != string(models.CheckoutSessionStatusFailed) {
+				return response, nil
 			}
 			return nil, err
 		}
@@ -991,12 +999,18 @@ func (s *CheckoutSessionService) initialMembershipSessionResponse(ctx context.Co
 	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusUnknownNeedsVerify:
 		// This response-only state is not a second persisted operation status.
 		projection.Status = models.CheckoutSessionStatus("processing")
+		if authenticationRequired(operation) {
+			projection.Status = models.CheckoutSessionStatusRequiresAction
+		}
 	default:
 		return nil, true, fmt.Errorf("unrecognized initial membership operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
 	response.Operation = &openrails.PaymentOperation{ID: operation.ID, Status: operation.Status}
 	response.NextAction = nil
+	if operation.Status == intents.StatusFailedTerminal {
+		response.Failure = operationFailure(operation)
+	}
 	return response, true, nil
 }
 

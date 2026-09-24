@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -27,6 +28,10 @@ const (
 	// FlowWallet: the buyer's wallet signs. Chain/token detail comes from
 	// /solana/config + /solana/tokens.
 	FlowWallet = "wallet"
+	// FlowElements: the browser saves the card in the PSP's own embedded
+	// fields, then checkout charges that saved card; any authentication runs
+	// in the page. No card data reaches the host.
+	FlowElements = "elements"
 )
 
 // publicSetting is ONE psps.settings key that is public by nature and may
@@ -50,6 +55,10 @@ type publicSetting struct {
 type railPublicProfile struct {
 	Flow     string
 	Settings []publicSetting
+	// EmbeddedFlow replaces Flow once the public setting EmbeddedSetting is
+	// declared: the browser can then drive the PSP's own embedded fields.
+	EmbeddedFlow    string
+	EmbeddedSetting string
 }
 
 // publicRailProfiles is THE WHITELIST. It is the only path by which anything
@@ -73,10 +82,9 @@ var publicRailProfiles = map[string]railPublicProfile{
 			{Setting: "tokenization_url", Field: "tokenization_url", Default: DefaultNMICollectJSURL},
 		},
 	},
-	// Hosted-redirect rails: OpenRails builds the checkout URL server-side.
-	// Stripe's publishable key is public by design; the browser needs it only
-	// for in-page card setup and payment authentication.
-	string(models.RailStripe): {Flow: FlowRedirect, Settings: []publicSetting{
+	// Stripe: embedded Elements once its publishable key (public by design) is
+	// declared; hosted Checkout redirect without one.
+	string(models.RailStripe): {Flow: FlowRedirect, EmbeddedFlow: FlowElements, EmbeddedSetting: "publishable_key", Settings: []publicSetting{
 		{Setting: "publishable_key", Field: "publishable_key"},
 	}},
 	string(models.RailCCBill): {Flow: FlowRedirect},
@@ -175,6 +183,9 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 		}
 		out.Config[want.Field] = value
 	}
+	if profile.EmbeddedFlow != "" && publicSettingValue(scope.Settings, profile.EmbeddedSetting) != "" {
+		out.Flow = profile.EmbeddedFlow
+	}
 	return out, "", true
 }
 
@@ -250,5 +261,34 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 		}
 		out = append(out, cfg)
 	}
+	selectors, err := s.checkoutSelectors(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Checkout = selectors == nil || selectors[out[i].Key] || selectors[out[i].Rail]
+	}
 	return out, nil
+}
+
+// checkoutSelectors is every PSP key or rail the merchant's checkout routing
+// can pick; nil means no policy, so every armed PSP takes new checkouts.
+func (s *Service) checkoutSelectors(ctx context.Context, id merchant.ID) (map[string]bool, error) {
+	if s.database == nil {
+		return nil, nil
+	}
+	conf, found, err := merchantconfig.NewStore(s.database).Get(merchant.WithID(ctx, id))
+	if err != nil {
+		return nil, fmt.Errorf("load checkout routing policy: %w", err)
+	}
+	if !found || len(conf.CheckoutRouting) == 0 {
+		return nil, nil
+	}
+	selectors := map[string]bool{}
+	for _, rule := range conf.CheckoutRouting {
+		for _, selector := range rule.Prefer {
+			selectors[strings.ToLower(strings.TrimSpace(selector))] = true
+		}
+	}
+	return selectors, nil
 }

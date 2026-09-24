@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -53,8 +54,12 @@ type CheckoutNMISaleService struct {
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
 	// state (#788) — the ONLY client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
-	// Intents executes the durable write-ahead sale intent (#674). Every NMI
-	// charge in this flow goes through it — there is no direct RunSale here.
+	// Config gates provider writes (execution mode) for Stripe sales.
+	Config *config.Config
+	// StripeEngines arms the accepted Stripe account for saved-card sales.
+	StripeEngines intents.StripeEngineServiceResolver
+	// Intents executes the durable write-ahead sale intent (#674). Every card
+	// charge in this flow goes through it — there is no direct provider call here.
 	Intents intentExecutor
 }
 
@@ -113,8 +118,8 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	}
 
 	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if _, err := s.nmiClient(ctx, target.PSP); err != nil {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
+	if err := s.requireArmed(ctx, target); err != nil {
+		return nil, err
 	}
 
 	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
@@ -268,6 +273,27 @@ func saleResponse(cached checkoutSaleIdempotencyResult, message string) *Checkou
 		resp.PaymentID = &id
 	}
 	return resp
+}
+
+func (s *CheckoutNMISaleService) requireArmed(ctx context.Context, target railTarget) error {
+	if target.Rail != string(models.RailStripe) {
+		if _, err := s.nmiClient(ctx, target.PSP); err != nil {
+			return fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
+		}
+		return nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if s.StripeEngines == nil || target.Scope == nil {
+		return errors.New("Stripe card sales are not configured")
+	}
+	psp := target.Scope.ID
+	if _, found, err := s.StripeEngines.ResolveStripeEngineService(ctx, mid.UUID(), &psp); err != nil || !found {
+		return fmt.Errorf("Stripe provider '%s' is not configured", target.PSP)
+	}
+	return nil
 }
 
 func (s *CheckoutNMISaleService) nmiClient(ctx context.Context, provider string) (*nmi.NMIClient, error) {

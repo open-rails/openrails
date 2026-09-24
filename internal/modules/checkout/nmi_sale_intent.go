@@ -71,13 +71,22 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 			return intents.Ambiguous("invalid canonical sale progress")
 		}
 	}
-	if progress["sale_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+	if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+		return h.Verify(ctx, current)
+	}
+	if progress["sale_submitted"] == true {
+		if current.Rail == string(models.RailStripe) {
+			return h.recoverStripeSale(ctx, current)
+		}
 		return h.Verify(ctx, current)
 	}
 	in = current
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
+	}
+	if in.Rail == string(models.RailStripe) {
+		return h.executeStripeSale(ctx, in, p)
 	}
 	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 	if err != nil || client == nil {
@@ -90,25 +99,8 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 	if client.ReadOnly {
 		return intents.Parked("nmi client is read-only")
 	}
-	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		method, err := h.database().NewWithPgxTx(tx).Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
-		if err != nil {
-			return err
-		}
-		if method.CustomerID.String() != p.UserID || method.ParkReason != "" {
-			return errors.New("sale method changed before submission")
-		}
-		return p.Instrument.Matches(method, charge.AgreementUnscheduled)
-	})
-	if err != nil {
-		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true}))
-	}
-	submitted, err := intents.NewStore(h.database()).RecordProgressIfAbsent(ctx, in.ID, "sale_submitted", true)
-	if err != nil {
-		return intents.Ambiguous("cannot retain sale submission fence: " + err.Error())
-	}
-	if !submitted {
-		return h.Verify(ctx, in)
+	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {
+		return outcome
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
 	if err != nil {
@@ -127,7 +119,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 		evidence := map[string]any{"request_refused": true}
 		reason := "provider refused the sale request"
 		if errors.As(callErr, &refusal) {
-			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID}
+			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse}
 			reason = "sale declined"
 		}
 		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
@@ -139,6 +131,45 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 		return intents.Ambiguous("sale response has no transaction candidate")
 	}
 	return h.collect(ctx, in, client, response.TransactionID)
+}
+
+// fenceSale re-checks the accepted instrument and takes the write-once
+// submission fence. Only the fence winner may send money.
+func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.OpenrailsRailIntent, p payments.NMISalePayload) (intents.Outcome, bool) {
+	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		method, err := h.database().NewWithPgxTx(tx).Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if method.CustomerID.String() != p.UserID || method.ParkReason != "" {
+			return errors.New("sale method changed before submission")
+		}
+		return p.Instrument.Matches(method, charge.AgreementUnscheduled)
+	})
+	if err != nil {
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true})), false
+	}
+	submitted, err := intents.NewStore(h.database()).RecordProgressIfAbsent(ctx, in.ID, "sale_submitted", true)
+	if err != nil {
+		return intents.Ambiguous("cannot retain sale submission fence: " + err.Error()), false
+	}
+	if !submitted {
+		return h.Verify(ctx, in), false
+	}
+	return intents.Outcome{}, true
+}
+
+func (h *NMISaleIntentHandler) executeStripeSale(ctx context.Context, in gen.OpenrailsRailIntent, p payments.NMISalePayload) intents.Outcome {
+	if h.Sale.Config == nil || h.Sale.Config.IsProviderReadOnly() {
+		return intents.Parked("Stripe sale writes unavailable")
+	}
+	if _, err := h.stripeService(ctx, in); err != nil {
+		return intents.Parked(err.Error())
+	}
+	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {
+		return outcome
+	}
+	return h.submitStripeSale(ctx, in)
 }
 
 func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
@@ -172,6 +203,9 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailI
 		// through its write gates; verification itself never sends money.
 		return intents.Retryable("accepted sale has not been submitted")
 	}
+	if current.Rail == string(models.RailStripe) {
+		return h.verifyStripeSale(ctx, current)
+	}
 	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *current.PspID), nmiIntentClientName(p.PSP, current.Rail))
 	if err != nil || client == nil {
 		return intents.Ambiguous("accepted NMI account cannot be read")
@@ -204,6 +238,9 @@ func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRail
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return intents.Outcome{}, err
+	}
+	if in.Rail == string(models.RailStripe) {
+		return h.resolveStripeSale(ctx, in, resolution.ProviderReference)
 	}
 	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 	if err != nil {
@@ -292,12 +329,14 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 			if p.E2ERunID != "" {
 				metadata["e2e_run_id"] = p.E2ERunID
 			}
-			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Rail: "nmi", TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID)
+			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID)
 			if err != nil {
 				return err
 			}
-			if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "unscheduled", Ref: receipt.TransactionID()}); err != nil {
-				return err
+			if in.Rail != string(models.RailStripe) {
+				if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "unscheduled", Ref: receipt.TransactionID()}); err != nil {
+					return err
+				}
 			}
 			evidence["transaction_id"], evidence["payment_id"] = receipt.TransactionID(), result.PaymentID.String()
 			if result.DelayedStart != nil {
@@ -309,9 +348,12 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 			}
 			if evidence["declined"] == true {
 				code, _ := evidence["localization_id"].(string)
-				reason := payments.NormalizeFailureReason("nmi", code)
+				if code == "" {
+					code, _ = evidence["decline_code"].(string)
+				}
+				reason := payments.NormalizeFailureReason(in.Rail, code)
 				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
-				_, err := purchase.PaymentService.CreateIfNotExists(ctx, &models.Payment{ID: p.PaymentID, CustomerID: customer, PriceID: p.PriceID, Rail: "nmi", TransactionID: "nmi_sale_declined:" + in.ID.String(), Amount: p.Amount, ListAmount: p.ListAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.AcceptedAt, CreatedAt: now})
+				_, err := purchase.PaymentService.CreateIfNotExists(ctx, &models.Payment{ID: p.PaymentID, CustomerID: customer, PriceID: p.PriceID, Rail: models.Rail(in.Rail), TransactionID: in.Rail + "_sale_declined:" + in.ID.String(), Amount: p.Amount, ListAmount: p.ListAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.AcceptedAt, CreatedAt: now})
 				if err != nil {
 					return err
 				}

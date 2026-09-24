@@ -2,10 +2,12 @@ package checkout
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -14,7 +16,7 @@ import (
 // acceptedOperationSessionResponse reads existing financial authority, never
 // current catalog state, provider state, or a token-bearing creation request.
 func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Context, session *models.CheckoutSession) (*CheckoutSessionResponse, bool, error) {
-	if session.Rail != models.RailNMI || session.Mode != models.CheckoutSessionModeOneOff || s.db == nil {
+	if (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.Mode != models.CheckoutSessionModeOneOff || s.db == nil {
 		return s.initialMembershipSessionResponse(ctx, session)
 	}
 	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey("checkout_native_session:"+session.ID.String()))
@@ -57,11 +59,26 @@ func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Co
 		projection.Status = models.CheckoutSessionStatusCanceled
 	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusUnknownNeedsVerify:
 		projection.Status = models.CheckoutSessionStatus("processing")
+		if authenticationRequired(operation) {
+			projection.Status = models.CheckoutSessionStatusRequiresAction
+		}
 	default:
 		return nil, true, fmt.Errorf("unrecognized sale operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
 	response.Operation = &openrails.PaymentOperation{ID: operation.ID, Status: operation.Status}
 	response.NextAction = nil
+	if operation.Status == intents.StatusFailedTerminal {
+		response.Failure = operationFailure(operation)
+	}
 	return response, true, nil
+}
+
+// authenticationRequired reports a card payment waiting on the customer's
+// provider challenge (3-D Secure); the browser completes it in the page.
+func authenticationRequired(operation gen.OpenrailsRailIntent) bool {
+	var evidence struct {
+		AuthenticationRequired bool `json:"authentication_required"`
+	}
+	return json.Unmarshal(operation.ResultEvidence, &evidence) == nil && evidence.AuthenticationRequired
 }

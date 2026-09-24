@@ -95,6 +95,7 @@ type CheckoutSessionMembershipQuote struct {
 
 type CheckoutSessionResponse struct {
 	Operation       *openrails.PaymentOperation       `json:"operation,omitempty"`
+	Failure         *openrails.PaymentFailure         `json:"failure,omitempty"`
 	MembershipQuote *CheckoutSessionMembershipQuote   `json:"membership_quote,omitempty"`
 	Capture         *openrails.CustodianCaptureAction `json:"capture,omitempty"`
 	PaymentMethodID *openrails.PaymentMethodID        `json:"payment_method_id,omitempty"`

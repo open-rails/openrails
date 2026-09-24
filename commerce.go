@@ -52,8 +52,14 @@ type CheckoutPSPConfig struct {
 	// Custodian holds the card: "psp", or the third party whose page tokenizes it.
 	Custodian   string `json:"custodian"`
 	DisplayName string `json:"display_name"`
-	// Flow is how a browser drives this PSP: tokenize, redirect or wallet.
+	// Flow is how a browser drives this PSP: tokenize, elements, redirect or
+	// wallet. elements: the page saves the card with the PSP's own fields and
+	// checkout charges the saved card, with authentication in the page.
 	Flow string `json:"flow"`
+	// Checkout is true when new purchases and newly entered cards use this PSP
+	// under the merchant's checkout routing. Other armed PSPs stay listed so
+	// their existing cards and agreements keep working.
+	Checkout bool `json:"checkout"`
 	// Config holds whitelisted public values, such as a tokenization key.
 	Config map[string]string `json:"config,omitempty"`
 }
@@ -167,6 +173,11 @@ type CheckoutSession struct {
 	CreatedAt       time.Time               `json:"created_at"`
 	Metadata        map[string]string       `json:"metadata"`
 	RailData        map[string]any          `json:"rail_data"` // Rail-specific response data
+	// Operation is the accepted card payment; with Status "requires_action"
+	// the customer completes its provider authentication (3-D Secure) in the page.
+	Operation *PaymentOperation `json:"operation,omitempty"`
+	// Failure explains a definite decline in customer terms.
+	Failure *PaymentFailure `json:"failure,omitempty"`
 }
 
 type ConfirmCheckoutSessionRequest struct {
@@ -217,3 +228,16 @@ type CustodianCaptureAction struct {
 
 func (CustodianCaptureAction) String() string   { return "[private custodian capture action]" }
 func (CustodianCaptureAction) GoString() string { return "[private custodian capture action]" }
+
+// PaymentFailure is the customer-facing reason a card payment was definitely
+// declined. Reason is provider-neutral (incorrect_cvc, incorrect_zip,
+// incorrect_address, incorrect_number, expired_card, invalid_expiry,
+// insufficient_funds, over_limit, card_not_supported, currency_not_supported,
+// processing_error, try_again_later, authentication_required, do_not_honor,
+// generic_decline); fraud-related declines always read generic_decline.
+// Field names the card field to correct: cvc, postal_code, number, expiry or "".
+type PaymentFailure struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+	Field   string `json:"field,omitempty"`
+}

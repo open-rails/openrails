@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -107,6 +108,8 @@ type userPaymentObject struct {
 	Price          *api.PriceObject          `json:"price,omitempty"`
 	Product        *openrails.ProductSummary `json:"product,omitempty"`
 	Card           *paymentCardJSON          `json:"card,omitempty"`
+	// Failure explains a failed charge in customer terms.
+	Failure *openrails.PaymentFailure `json:"failure,omitempty"`
 }
 
 // paymentCardJSON is the card snapshot for a single payment (the card used for
@@ -148,7 +151,20 @@ func PaymentToUserAPI(p *models.Payment, amountRefunded int64) userPaymentObject
 		Price:          payment.Price,
 		Product:        payment.Product,
 		Card:           paymentCardFromModel(p),
+		Failure:        paymentFailure(p, payment.Status),
 	}
+}
+
+func paymentFailure(p *models.Payment, status string) *openrails.PaymentFailure {
+	if status != "failed" {
+		return nil
+	}
+	code := ""
+	if p.FailureCode != nil {
+		code = *p.FailureCode
+	}
+	failure := payments.CustomerDecline(payments.DeclineDetail{Rail: string(p.Rail), Code: code})
+	return &failure
 }
 
 func refundStatusCountsTowardAPIAmount(status string) bool {

@@ -33,6 +33,7 @@ func terminalCheckoutError(intent gen.OpenrailsRailIntent, prefix string) error 
 		LocalizationID string `json:"localization_id"`
 		ResponseCode   int    `json:"response_code"`
 		FailureCode    string `json:"failure_code"`
+		DeclineCode    string `json:"decline_code"`
 		Stale          bool   `json:"payment_method_stale"`
 	}
 	if len(intent.ResultEvidence) > 0 {
@@ -49,7 +50,10 @@ func terminalCheckoutError(intent gen.OpenrailsRailIntent, prefix string) error 
 		if code == "" && evidence.ResponseCode != 0 {
 			code = strconv.Itoa(evidence.ResponseCode)
 		}
-		return &paymentmethods.PaymentMethodError{Err: errors.New(reason), LocalizationID: code, Message: reason}
+		if code == "" {
+			code = strings.TrimSpace(evidence.DeclineCode)
+		}
+		return &paymentmethods.PaymentMethodError{Err: errors.New(reason), LocalizationID: code, Message: reason, Rail: intent.Rail, Failure: operationFailure(intent)}
 	default:
 		return errors.New(reason)
 	}

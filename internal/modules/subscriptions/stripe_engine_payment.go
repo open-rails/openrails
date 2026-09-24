@@ -25,6 +25,9 @@ import (
 // previously qualified initial PaymentIntent in the instrument's recurring anchor.
 type StripeEnginePaymentParams struct {
 	CustomerInitiated bool // explicit customer retry of an existing recurring agreement
+	// OneTime is a customer-present purchase on a saved card: on-session, no
+	// recurring agreement anchor and no future-usage setup.
+	OneTime bool
 
 	MerchantID, PSPID, CustomerID, OperationID uuid.UUID
 	Instrument                                 charge.FrozenInstrument
@@ -53,6 +56,7 @@ type StripeEnginePaymentResult struct {
 
 type StripeEngineReceipt struct {
 	CustomerInitiated   bool            `json:"customer_initiated,omitempty"`
+	OneTime             bool            `json:"one_time,omitempty"`
 	RefundedAmountMinor moneyutil.Cents `json:"refunded_amount_minor,string,omitempty"`
 	Refunded            bool            `json:"refunded,omitempty"`
 	Disputed            bool            `json:"disputed,omitempty"`
@@ -73,13 +77,16 @@ func (p StripeEnginePaymentParams) validate() error {
 	if p.Initial && p.CustomerInitiated {
 		return errors.New("initial enrollment cannot be a customer retry")
 	}
+	if p.OneTime && (p.Initial || p.CustomerInitiated) {
+		return errors.New("one-time purchase cannot be a recurring payment")
+	}
 	if p.MerchantID == uuid.Nil || p.PSPID == uuid.Nil || p.CustomerID == uuid.Nil || p.OperationID == uuid.Nil || p.Instrument.PSPID != p.PSPID || p.Instrument.Custodian != models.CustodianPSP || p.Instrument.CustodianID != nil || !stripeEngineID(p.Instrument.RailCustomerRef, "cus_") || !stripeEngineID(p.Instrument.RailMethodRef, "pm_") || p.AmountMinor <= 0 || p.AmountMinor > 99999999 {
 		return errors.New("incomplete Stripe engine operation binding")
 	}
 	if err := moneyutil.ValidateCurrency(p.Currency); err != nil {
 		return err
 	}
-	if !p.Initial && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") {
+	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") {
 		return errors.New("Stripe engine payment lacks a qualified recurring agreement")
 	}
 	return nil
@@ -111,6 +118,9 @@ func (p StripeEnginePaymentParams) metadata() map[string]string {
 	if p.CustomerInitiated {
 		values["openrails_customer_retry"] = "true"
 	}
+	if p.OneTime {
+		values["openrails_one_time"] = "true"
+	}
 	return values
 }
 
@@ -122,7 +132,7 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	if err != nil {
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}
-	v := url.Values{"amount": {strconv.FormatInt(int64(p.AmountMinor), 10)}, "currency": {strings.ToLower(p.Currency)}, "customer": {p.Instrument.RailCustomerRef}, "payment_method": {p.Instrument.RailMethodRef}, "payment_method_types[]": {"card"}, "confirm": {"true"}, "capture_method": {"automatic"}, "confirmation_method": {"automatic"}, "off_session": {strconv.FormatBool(!p.Initial && !p.CustomerInitiated)}}
+	v := url.Values{"amount": {strconv.FormatInt(int64(p.AmountMinor), 10)}, "currency": {strings.ToLower(p.Currency)}, "customer": {p.Instrument.RailCustomerRef}, "payment_method": {p.Instrument.RailMethodRef}, "payment_method_types[]": {"card"}, "confirm": {"true"}, "capture_method": {"automatic"}, "confirmation_method": {"automatic"}, "off_session": {strconv.FormatBool(!p.Initial && !p.CustomerInitiated && !p.OneTime)}}
 	if p.Initial {
 		v.Set("setup_future_usage", "off_session")
 	}
@@ -362,7 +372,7 @@ func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePayment
 	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured || ch.AmountRefunded < 0 || ch.AmountRefunded > ch.Amount || (ch.Refunded && ch.AmountRefunded != ch.Amount) {
 		return StripeEngineReceipt{}, errors.New("Stripe engine captured charge does not match accepted payment")
 	}
-	return StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, CustomerInitiated: p.CustomerInitiated, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}, nil
+	return StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, CustomerInitiated: p.CustomerInitiated, OneTime: p.OneTime, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}, nil
 }
 func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	if err := p.validate(); err != nil {
@@ -371,7 +381,7 @@ func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	if r.RefundedAmountMinor < 0 || r.RefundedAmountMinor > r.AmountMinor || (r.Refunded && r.RefundedAmountMinor != r.AmountMinor) {
 		return errors.New("Stripe charge reversal facts are inconsistent")
 	}
-	if !stripeEngineID(r.PaymentIntentID, "pi_") || !stripeEngineID(r.ChargeID, "ch_") || r.CustomerRef != p.Instrument.RailCustomerRef || r.MethodRef != p.Instrument.RailMethodRef || r.AmountMinor != p.AmountMinor || r.Currency != p.Currency || r.MerchantID != p.MerchantID || r.PSPID != p.PSPID || r.CustomerID != p.CustomerID || r.OperationID != p.OperationID || r.Initial != p.Initial || r.CustomerInitiated != p.CustomerInitiated {
+	if !stripeEngineID(r.PaymentIntentID, "pi_") || !stripeEngineID(r.ChargeID, "ch_") || r.CustomerRef != p.Instrument.RailCustomerRef || r.MethodRef != p.Instrument.RailMethodRef || r.AmountMinor != p.AmountMinor || r.Currency != p.Currency || r.MerchantID != p.MerchantID || r.PSPID != p.PSPID || r.CustomerID != p.CustomerID || r.OperationID != p.OperationID || r.Initial != p.Initial || r.CustomerInitiated != p.CustomerInitiated || r.OneTime != p.OneTime {
 		return errors.New("Stripe engine receipt differs from accepted operation")
 	}
 	return nil
