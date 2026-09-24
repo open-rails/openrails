@@ -207,7 +207,10 @@ func (pi stripeEngineIntent) matches(p StripeEnginePaymentParams) error {
 	if method == "" && pi.LastPaymentError != nil {
 		method = rawID(pi.LastPaymentError.PaymentMethod)
 	}
-	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || method != p.Instrument.RailMethodRef || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || p.Initial && pi.SetupFutureUsage != "off_session" {
+	// A canceled or unpaid PI can drop its method (Stripe clears it with the
+	// last error on cancel); it moves no money, and a paid PI must name it.
+	methodMismatch := method != p.Instrument.RailMethodRef && (method != "" || pi.Status == "succeeded")
+	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || methodMismatch || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || p.Initial && pi.SetupFutureUsage != "off_session" {
 		return errors.New("Stripe engine payment does not match frozen terms")
 	}
 	for k, v := range p.metadata() {
