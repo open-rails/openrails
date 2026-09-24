@@ -5,7 +5,19 @@ on:
     branches: [ master ]
     tags:
       - 'v*'
+    # Not in the binary, so the image would not change. Tags ignore path filters.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '**/*_test.go'
+      - '**/testdata/**'
   workflow_dispatch:
+
+# Bursts of merges publish the newest master once: one run in flight, older
+# pending runs superseded, running publishes never cancelled.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
 
 # FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 runs the JavaScript-based actions
 # (checkout, docker/login-action, docker/setup-buildx-action) on Node.js 24.
@@ -61,8 +73,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      # Seeds the amd64 layer cache that the x86 publish build reuses.
       - name: Build smoke image
-        run: docker build -t openrails-smoke:${GITHUB_SHA} .
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: openrails-smoke:${{ github.sha }}
+          cache-from: type=gha,scope=openrails-amd64
+          cache-to: type=gha,mode=max,scope=openrails-amd64
 
       - name: Create host runtime login
         run: |
@@ -156,6 +179,7 @@ jobs:
           platforms: linux/amd64
           tags: |
             ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}-x86
+          cache-from: type=gha,scope=openrails-amd64
 
   build-arm64:
     name: Build arm64 image
