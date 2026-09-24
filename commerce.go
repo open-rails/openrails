@@ -5,11 +5,22 @@ import (
 	"time"
 )
 
+// CheckoutRailOption is one way checkout can sell a price now: the PSP is
+// armed and its rail can make this kind of sale (#1078). Driver and
+// PublicConfig are what a browser needs to render it; an empty Driver means no
+// browser flow can execute the option.
 type CheckoutRailOption struct {
+	// Selector is the checkout payment.rail value (the PSP key).
 	Selector string `json:"selector"`
 	PSPID    string `json:"psp_id"`
 	Rail     string `json:"rail"`
-	Mode     string `json:"mode"`
+	// Mode is one_off or subscription.
+	Mode string `json:"mode"`
+	// Driver is collect_js, stripe_elements, redirect or solana_pay.
+	Driver string `json:"driver,omitempty"`
+	// PublicConfig holds browser-safe values: the PSP's public keys, and for
+	// Solana token_symbol, token_name and network.
+	PublicConfig map[string]string `json:"public_config,omitempty"`
 }
 
 // CheckoutConfig lists the merchant's armed PSPs and the public values a

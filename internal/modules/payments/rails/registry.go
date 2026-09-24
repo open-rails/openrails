@@ -118,7 +118,28 @@ type Descriptor struct {
 	// SettingKeys are the rail's scalar non-secret psps.settings keys a host
 	// may declare (tokenizer keys, publishable keys, endpoint selection).
 	SettingKeys []string
+
+	// OneOffSale: checkout can sell a one-time price on this rail.
+	OneOffSale bool
+
+	// NewSubscription is how checkout enrolls a NEW subscription on this rail.
+	// Existing and imported agreements keep working regardless (#1045).
+	NewSubscription NewSubscription
 }
+
+// NewSubscription classifies new-subscription enrollment on a rail (#1078).
+type NewSubscription string
+
+const (
+	// NewSubscriptionNone: the rail never enrolls new subscriptions (CCBill's
+	// retained cohort only).
+	NewSubscriptionNone NewSubscription = ""
+	// NewSubscriptionEngine: OpenRails collects on a saved method it charges.
+	NewSubscriptionEngine NewSubscription = "engine"
+	// NewSubscriptionOnChainPlan: the subscriber signs into the price's
+	// published on-chain plan, which OpenRails then pulls.
+	NewSubscriptionOnChainPlan NewSubscription = "on_chain_plan"
+)
 
 func autoBilledNever(*models.Subscription) bool  { return false }
 func autoBilledAlways(*models.Subscription) bool { return true }
@@ -174,6 +195,8 @@ var descriptors = []Descriptor{
 		// only until webhook_overlap_expires_at (SEC-29).
 		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
 		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "webhook_overlap_expires_at"},
+		true,                  // OneOffSale (direct gateway sale, #1055)
+		NewSubscriptionEngine, // saved vault card charged by OpenRails
 	},
 	{
 		models.RailCCBill,
@@ -190,6 +213,8 @@ var descriptors = []Descriptor{
 		"",                // CancelPortalURL (none since #696; cancels happen on OUR site)
 		[]CredentialKey{{"salt", true, false}, {"datalink_username", true, false}, {"datalink_password", true, false}},
 		nil,
+		false,               // OneOffSale
+		NewSubscriptionNone, // retained cohort only; new sales are refused (#1045, #1070)
 	},
 	{
 		models.RailStripe,
@@ -209,6 +234,8 @@ var descriptors = []Descriptor{
 		// endpoint keep verifying, never past webhook_overlap_expires_at (SEC-29).
 		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
 		[]string{"publishable_key", "webhook_overlap_expires_at"},
+		true,                  // OneOffSale
+		NewSubscriptionEngine, // saved PaymentMethod charged by OpenRails
 	},
 	{
 		models.RailSolana,
@@ -224,7 +251,9 @@ var descriptors = []Descriptor{
 		cancelDestructive,
 		"", // CancelPortalURL
 		[]CredentialKey{{"private_key", false, false}}, // operator-only signer
-		nil, // structured settings (tokens, RPC) are declared programmatically
+		nil,                        // structured settings (tokens, RPC) are declared programmatically
+		true,                       // OneOffSale (Solana Pay transfer)
+		NewSubscriptionOnChainPlan, // subscriber signs the price's on-chain plan
 	},
 }
 
@@ -273,6 +302,32 @@ func SupportsPSPs(rail models.Rail) bool {
 func SupportsCatalogTrial(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.SupportsCatalogTrial
+}
+
+// CanSellNew reports whether checkout can make a NEW sale of this kind on the
+// rail: a one-time purchase, or a new subscription. Trial first phases are
+// sold by no new-subscription path. Unknown rails: false.
+func CanSellNew(rail models.Rail, recurring, trial bool) bool {
+	d, ok := Lookup(rail)
+	if !ok {
+		return false
+	}
+	if !recurring {
+		return d.OneOffSale
+	}
+	return d.NewSubscription != NewSubscriptionNone && !trial
+}
+
+// SellsOnLocalTerms reports whether the rail charges OpenRails' own price
+// terms, so a price needs no provider link to sell on it.
+func SellsOnLocalTerms(rail models.Rail) bool {
+	return NewSubscriptionFor(rail) == NewSubscriptionEngine
+}
+
+// NewSubscriptionFor returns how the rail enrolls new subscriptions.
+func NewSubscriptionFor(rail models.Rail) NewSubscription {
+	d, _ := Lookup(rail)
+	return d.NewSubscription
 }
 
 // SupportsPaymentMethodCRUD reports whether OpenRails owns first-party

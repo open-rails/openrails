@@ -105,12 +105,17 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 	default:
 		return
 	}
-	r.providerPosture.Add(status.Key, check)
+	r.providerPosture.AddPSP(pspID, status.Key, check)
 	if status.Armed() {
 		log.WithContext(ctx).WithFields(fields).Info("provider posture: credentials verified; PSP armed")
 		return
 	}
 	log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: credentials not verified; PSP disarmed")
+}
+
+// PSPPostureDisarmed reports whether pspID failed its posture verification.
+func (r *Runtime) PSPPostureDisarmed(pspID uuid.UUID) bool {
+	return r != nil && r.providerPosture.PSPDisarmed(providerposture.Process(), pspID)
 }
 
 // providerPostureReady fails while any loaded sandbox PSP is disarmed. Due

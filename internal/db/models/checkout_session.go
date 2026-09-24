@@ -120,8 +120,12 @@ const (
 	// this PSP (absent, or pointing at a different remote object than execution).
 	CheckoutRoutingSkipLinkMissing = "link_missing"
 	// CheckoutRoutingSkipModeUnsupported: the rail cannot serve this checkout
-	// mode for this price (CCBill one-off, Stripe paid intro).
+	// mode for this price: the rail registry says it cannot make this kind of
+	// new sale (CCBill new subscriptions, any trial first phase).
 	CheckoutRoutingSkipModeUnsupported = "mode_unsupported"
+	// CheckoutRoutingSkipPostureDisarmed: the PSP's credentials failed their
+	// posture verification, so its mutations are refused.
+	CheckoutRoutingSkipPostureDisarmed = "posture_disarmed"
 	// CheckoutRoutingSkipServiceUnavailable: the runtime service backing the
 	// rail is not wired in this deployment.
 	CheckoutRoutingSkipServiceUnavailable = "service_unavailable"

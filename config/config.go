@@ -244,6 +244,9 @@ type ProviderSandboxConfig struct {
 	// literal-loopback rule. The readonly guard and pinned API version still
 	// apply. Env: PROVIDER_SANDBOX_STRIPE_API_URL.
 	StripeAPIURL string `koanf:"stripe_api_url,omitempty"`
+	// SolanaRPCURL replaces every merchant's Solana RPC endpoint under the same
+	// rule. Env: PROVIDER_SANDBOX_SOLANA_RPC_URL.
+	SolanaRPCURL string `koanf:"solana_rpc_url,omitempty"`
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
@@ -268,6 +271,14 @@ func (cfg *Config) SandboxStripeAPIURL() string {
 	return strings.TrimSpace(cfg.ProviderSandbox.StripeAPIURL)
 }
 
+// SandboxSolanaRPCURL is the configured loopback Solana RPC, or empty.
+func (cfg *Config) SandboxSolanaRPCURL() string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProviderSandbox.SolanaRPCURL)
+}
+
 // ValidateLoopbackGatewayURL accepts only a literal loopback destination: an
 // absolute http(s) URL, no userinfo, whose host is an IP literal that
 // net.IP.IsLoopback classifies. A hostname is never enough (no DNS).
@@ -290,7 +301,7 @@ func ValidateLoopbackGatewayURL(raw string) error {
 }
 
 func validateProviderSandbox(cfg *Config) error {
-	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL()} {
+	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL(), "solana_rpc_url": cfg.SandboxSolanaRPCURL()} {
 		if gateway == "" {
 			continue
 		}

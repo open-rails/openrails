@@ -1,5 +1,13 @@
 # Changelog
 
+## Advertised checkout rails (openrails#1078)
+
+- Breaking: `checkoutRails(offers)` takes OpenRails' checkout options alone.
+  Each option carries the `driver` and `public_config` OpenRails derived from
+  the armed PSP (Solana: `token_symbol`, `token_name`, `network`); the package
+  no longer derives drivers from `psps`. `CheckoutRailOffer` gains `selector`,
+  `driver` and `public_config`.
+
 ## Moved into OpenRails
 
 The package now lives in `open-rails/openrails` under `sdk/billing-ui` and

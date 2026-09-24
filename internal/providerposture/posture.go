@@ -229,6 +229,7 @@ func (r *Registry) Lookup(k Key) (Status, bool) {
 type Tracked struct {
 	mu     sync.Mutex
 	checks map[Key]Check
+	psps   map[uuid.UUID]Key
 }
 
 // Add records k as loaded by this runtime.
@@ -239,6 +240,30 @@ func (t *Tracked) Add(k Key, check Check) {
 		t.checks = map[Key]Check{}
 	}
 	t.checks[k] = check
+}
+
+// AddPSP records k as the verified credential of pspID, replacing any prior.
+func (t *Tracked) AddPSP(pspID uuid.UUID, k Key, check Check) {
+	t.Add(k, check)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.psps == nil {
+		t.psps = map[uuid.UUID]Key{}
+	}
+	t.psps[pspID] = k
+}
+
+// PSPDisarmed reports whether pspID's recorded verdict definitively refuses
+// mutations. Unverified PSPs and transient Unknown verdicts are not disarmed.
+func (t *Tracked) PSPDisarmed(r *Registry, pspID uuid.UUID) bool {
+	t.mu.Lock()
+	k, ok := t.psps[pspID]
+	t.mu.Unlock()
+	if !ok {
+		return false
+	}
+	s, done := r.Lookup(k)
+	return done && s.Verdict != Unknown && !s.Armed()
 }
 
 // Disarmed refreshes due Unknown verdicts and returns every disarmed key.

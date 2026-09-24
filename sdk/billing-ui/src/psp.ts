@@ -25,56 +25,41 @@ export const pspConfigSchema = z.object({
 })
 export type PspConfig = z.infer<typeof pspConfigSchema>
 
-/** One checkout rail OpenRails offers for a price (`ListCheckoutRailOptions`). */
+/**
+ * One way OpenRails can sell a price now (`ListCheckoutRailOptions`): the PSP
+ * is armed and its rail supports the sale. OpenRails decides the browser
+ * `driver` and `public_config`; an offer without a driver cannot run here.
+ */
 export interface CheckoutRailOffer {
+  selector: string
   psp_id: string
   rail: string
   mode: string
+  driver?: string | null
+  public_config?: Record<string, string> | null
 }
 
-const usable = (value?: string) => !!value && !value.startsWith("preview_")
+const drivers = new Set<string>([
+  "collect_js",
+  "stripe_elements",
+  "redirect",
+  "solana_pay",
+])
 
-const stripeKey = (psp: PspConfig) =>
-  psp.rail === "stripe" && !!psp.config?.publishable_key?.startsWith("pk_")
-
-function checkoutDriver(psp: PspConfig): PaymentRailOption["driver"] | null {
-  switch (psp.flow) {
-    case "redirect":
-      return "redirect"
-    case "elements":
-      return psp.custodian === "psp" && stripeKey(psp)
-        ? "stripe_elements"
-        : null
-    case "wallet":
-      return "solana_pay"
-    case "tokenize":
-      return psp.custodian === "psp" &&
-        usable(psp.config?.tokenization_key) &&
-        !!psp.config?.tokenization_url
-        ? "collect_js"
-        : null
-    default:
-      return null
-  }
-}
-
-/** The rails this UI can drive for an offer, keyed by PSP id. */
+/** The rails this UI can drive, exactly as OpenRails advertised them. */
 export function checkoutRails(
-  offers: readonly CheckoutRailOffer[],
-  psps: readonly PspConfig[]
+  offers: readonly CheckoutRailOffer[]
 ): PaymentRailOption[] {
   return offers.flatMap((offer) => {
-    const psp = psps.find((item) => item.psp_id === offer.psp_id)
-    const driver = psp && checkoutDriver(psp)
-    if (!psp || !driver) return []
+    if (!offer.driver || !drivers.has(offer.driver)) return []
     return [
       {
-        id: psp.psp_id,
-        rail: psp.rail,
+        id: offer.psp_id,
+        rail: offer.rail,
         mode: offer.mode === "subscription" ? "subscription" : "one_off",
-        driver,
-        psp_key: psp.key,
-        ...(psp.config ? { public_config: psp.config } : {}),
+        driver: offer.driver as PaymentRailOption["driver"],
+        psp_key: offer.selector,
+        ...(offer.public_config ? { public_config: offer.public_config } : {}),
       },
     ]
   })
@@ -125,10 +110,20 @@ export function savedMethodsFor(
 
 export type CardSetupDriver = "collect_js" | "stripe_elements"
 
+const usable = (value?: string) => !!value && !value.startsWith("preview_")
+
+const stripeKey = (psp: PspConfig) =>
+  psp.rail === "stripe" && !!psp.config?.publishable_key?.startsWith("pk_")
+
 /** How a card is saved with this PSP in the page, or null when it cannot be. */
 export function cardSetupDriver(psp: PspConfig): CardSetupDriver | null {
   if (psp.custodian !== "psp") return null
-  if (checkoutDriver(psp) === "collect_js") return "collect_js"
+  if (
+    psp.flow === "tokenize" &&
+    usable(psp.config?.tokenization_key) &&
+    !!psp.config?.tokenization_url
+  )
+    return "collect_js"
   if (stripeKey(psp)) return "stripe_elements"
   return null
 }

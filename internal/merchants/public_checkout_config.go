@@ -295,3 +295,41 @@ func (s *Service) checkoutSelectors(ctx context.Context, id merchant.ID) (map[st
 	}
 	return selectors, nil
 }
+
+// Browser checkout drivers: how @openrails/billing-ui executes one option.
+const (
+	DriverCollectJS      = "collect_js"
+	DriverStripeElements = "stripe_elements"
+	DriverRedirect       = "redirect"
+	DriverSolanaPay      = "solana_pay"
+)
+
+// CheckoutDriver is the browser driver that can sell through psp in mode, or
+// "" when none can. An engine-collected subscription charges a saved method,
+// so only an in-page card driver can enroll it; a redirect cannot.
+func CheckoutDriver(psp PublicPSPConfig, mode string) string {
+	if psp.Custodian != models.CustodianPSP {
+		return ""
+	}
+	driver := ""
+	switch psp.Flow {
+	case FlowTokenize:
+		if key := psp.Config["tokenization_key"]; key != "" && !strings.HasPrefix(key, "preview_") && psp.Config["tokenization_url"] != "" {
+			driver = DriverCollectJS
+		}
+	case FlowElements:
+		if strings.HasPrefix(psp.Config["publishable_key"], "pk_") {
+			driver = DriverStripeElements
+		}
+	case FlowRedirect:
+		driver = DriverRedirect
+	case FlowWallet:
+		driver = DriverSolanaPay
+	}
+	if mode == string(models.CheckoutSessionModeSubscription) &&
+		rails.NewSubscriptionFor(models.Rail(psp.Rail)) == rails.NewSubscriptionEngine &&
+		driver != DriverCollectJS && driver != DriverStripeElements {
+		return ""
+	}
+	return driver
+}

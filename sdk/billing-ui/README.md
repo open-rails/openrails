@@ -70,8 +70,12 @@ through unchanged; the PSP's `flow` and public `config` pick the browser flow
 (Collect.js, Stripe Elements, redirect, wallet). Hosts never branch on a
 provider:
 
-- `checkoutRails(offers, psps)` and `savedMethodsFor(methods, rails)` build a
+- `checkoutRails(offers)` and `savedMethodsFor(methods, rails)` build a
   `CheckoutSource`'s `rails` and `saved_methods` (most recent card first).
+  `offers` is OpenRails' `ListCheckoutRailOptions` result, passed through: it
+  lists exactly the armed PSPs whose rail can make this sale (Solana when it is
+  configured, never CCBill for a new subscription), each with its `driver` and
+  `public_config`. An offer without a driver is not rendered.
   Card rails (`collect_js`, `stripe_elements`) render one panel: saved cards,
   an inline new card and one Pay/Subscribe button, which is the payer's
   confirmation of the displayed terms. No provider chooser with one rail.

@@ -257,8 +257,11 @@ func (w *world) start() {
 	for _, psp := range config.PSPs {
 		w.psp[psp.Rail] = psp.PSPID
 	}
-	require.NotEmpty(t, w.psp["stripe"], "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.unexpected())
-	require.NotEmpty(t, w.psp["nmi"], "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.unexpected())
+	for _, rail := range []string{"stripe", "nmi"} {
+		if _, declared := psps[rail]; declared {
+			require.NotEmpty(t, w.psp[rail], "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.unexpected())
+		}
+	}
 }
 
 // stop ends this process. River work in flight is cancelled, as in a crash.

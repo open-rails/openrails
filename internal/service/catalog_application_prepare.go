@@ -195,6 +195,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 					names = append(names, key)
 				}
 				sort.Strings(names)
+				declaredRails := make([]string, 0, len(names))
 				for _, key := range names {
 					link := links[key]
 					if supplied, ok := decl.PSPLinks.Value[key]; ok {
@@ -203,6 +204,11 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 					unchanged := same && catalogLinkContains(links[key], link) && (request.Archived || (!current.Archived && !reactivatingProduct))
 					if unchanged {
 						out.links[decl.Key][key] = cloneStringMap(links[key])
+						rail := links[key]["rail"]
+						if rail == "" {
+							rail = key
+						}
+						declaredRails = append(declaredRails, rail)
 						continue
 					}
 					account, found, err := selectCatalogApplicationPSP(accounts, key, link, scoped.catalogProviderEnvironment())
@@ -213,6 +219,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 					if found {
 						rail = account.Rail
 					}
+					declaredRails = append(declaredRails, rail)
 					if (request.TrialUnitAmount != nil || request.TrialDurationHours != nil) && !railreg.SupportsCatalogTrial(models.Rail(rail)) {
 						return nil, fmt.Errorf("%w: PSP %q on rail %s cannot execute trial first-phase terms", ErrTrialUnsupportedOnRail, key, rail)
 					}
@@ -233,6 +240,11 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 					verificationRequest := request
 					verificationRequest.Archived = verificationRequest.Archived || product.Archived
 					out.checks = append(out.checks, catalogReferenceCheck{key: decl.Key, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})
+				}
+				if len(declaredRails) > 0 && !request.Archived && !product.Archived {
+					if err := requireSellablePrice(decl.Key, request, declaredRails, accounts, scoped.catalogProviderEnvironment()); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -349,4 +361,28 @@ func (s *Service) revalidateCatalogApplicationProviders(ctx context.Context, pre
 
 func sameCatalogLinks(a, b map[string]map[string]string) bool {
 	return len(a) == 0 && len(b) == 0 || reflect.DeepEqual(a, b)
+}
+
+// requireSellablePrice refuses an active price that declares PSPs yet no rail
+// can sell new: none of its declared rails supports its kind, and no armed
+// rail sells it on local terms (#1078). Checkout would otherwise be empty.
+func requireSellablePrice(key string, request CreatePriceRequest, declared []string, accounts []gen.OpenrailsPsp, environment string) error {
+	recurring := request.AutoRenew
+	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil
+	for _, rail := range declared {
+		if railreg.CanSellNew(models.Rail(rail), recurring, trial) {
+			return nil
+		}
+	}
+	for _, account := range accounts {
+		rail := models.Rail(account.Rail)
+		if !account.Archived && account.Environment == environment && railreg.SellsOnLocalTerms(rail) && railreg.CanSellNew(rail, recurring, trial) {
+			return nil
+		}
+	}
+	kind := "one-time purchase"
+	if recurring {
+		kind = "new subscription"
+	}
+	return fmt.Errorf("%w: price %q: no declared or armed PSP can sell a %s (declared rails: %s)", ErrPriceNotSellable, key, kind, strings.Join(declared, ", "))
 }

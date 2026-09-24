@@ -83,6 +83,27 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		}
 		reply(w, http.StatusCreated, s)
 	})
+	mux.HandleFunc("GET /__test/checkout/{price}", func(w http.ResponseWriter, r *http.Request) {
+		offer, err := rt.CheckoutOffer(r.Context(), r.PathValue("price"))
+		if err != nil {
+			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		reply(w, http.StatusOK, offer)
+	})
+	mux.HandleFunc("POST /__test/checkout/pay", func(w http.ResponseWriter, r *http.Request) {
+		var in harness.CheckoutPay
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		out, err := rt.Pay(r.Context(), in)
+		if err != nil {
+			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		reply(w, http.StatusOK, out)
+	})
 	if static != "" {
 		mux.Handle("GET /", http.FileServer(http.Dir(static)))
 	}

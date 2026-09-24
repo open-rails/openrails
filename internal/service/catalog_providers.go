@@ -66,6 +66,9 @@ var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (
 // 400 (a declaration the operator must fix), never 500.
 var ErrTrialUnsupportedOnRail = apperr.New(http.StatusBadRequest, "trial_unsupported_on_rail", "trial first phase is not supported on this rail")
 
+// ErrPriceNotSellable refuses an active price no PSP can sell new (#1078).
+var ErrPriceNotSellable = apperr.New(http.StatusBadRequest, "price_not_sellable", "no PSP can sell this price")
+
 // remoteWritesDisabledMessage is the pending_manual_link message used when the
 // operating mode (not a missing capability) deferred the provider write.
 const remoteWritesDisabledMessage = "provider writes disabled (mode=limited/readonly): remote object creation deferred; re-apply once writes are allowed"
@@ -486,7 +489,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 // from the vaulted card (#1055), so neither needs a provider price or plan.
 // Explicit provider links remain for provider-owned legacy cohorts.
 func (s *Service) localEnginePrice(rail string, _ *int) bool {
-	return rail == "stripe" || rail == "nmi"
+	return railreg.SellsOnLocalTerms(models.Rail(rail))
 }
 
 // railAccountRef is one declared merchant account: its rail plus the

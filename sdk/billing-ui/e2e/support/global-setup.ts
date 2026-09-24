@@ -61,7 +61,7 @@ export default async function globalSetup() {
   }
 }
 
-// Bundles the account host page against a fresh package build (dist/).
+// Bundles the account and checkout host pages against a fresh package build (dist/).
 async function buildHostApp() {
   execFileSync("pnpm", ["build"], { cwd: root, stdio: "inherit" })
   await build({
@@ -74,8 +74,11 @@ async function buildHostApp() {
       emptyOutDir: true,
       minify: false,
       rollupOptions: {
-        input: path.join(root, "e2e/openrails/app/main.tsx"),
-        output: { entryFileNames: "account.js" },
+        input: {
+          account: path.join(root, "e2e/openrails/app/main.tsx"),
+          checkout: path.join(root, "e2e/openrails/app/checkout.tsx"),
+        },
+        output: { entryFileNames: "[name].js" },
       },
     },
   })

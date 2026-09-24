@@ -44,43 +44,52 @@ const ccbill: PspConfig = {
 }
 
 describe("PSP flows", () => {
-  it("maps checkout rails from each PSP's flow, never its name", () => {
-    const offers = [
-      nmi,
-      stripe,
-      ccbill,
+  it("renders exactly the rails OpenRails advertised", () => {
+    const rails = checkoutRails([
       {
-        ...nmi,
-        psp_id: "psp_preview",
-        config: {
-          tokenization_key: "preview_x",
-          tokenization_url: "https://x",
-        },
+        selector: "nmi",
+        psp_id: "psp_nmi",
+        rail: "nmi",
+        mode: "subscription",
+        driver: "collect_js",
+        public_config: nmi.config ?? undefined,
       },
-    ].map((psp) => ({ psp_id: psp.psp_id, rail: psp.rail, mode: "one_off" }))
-    const rails = checkoutRails(offers, [
-      nmi,
-      stripe,
-      ccbill,
       {
-        ...nmi,
-        psp_id: "psp_preview",
-        config: {
-          tokenization_key: "preview_x",
-          tokenization_url: "https://x",
-        },
+        selector: "solana",
+        psp_id: "psp_solana",
+        rail: "solana",
+        mode: "subscription",
+        driver: "solana_pay",
+        public_config: { token_symbol: "DUSD", network: "devnet" },
+      },
+      // Armed but not browser-drivable (no publishable key for a subscription).
+      {
+        selector: "stripe",
+        psp_id: "psp_stripe",
+        rail: "stripe",
+        mode: "subscription",
+      },
+      {
+        selector: "x",
+        psp_id: "psp_x",
+        rail: "x",
+        mode: "one_off",
+        driver: "wire",
       },
     ])
-    expect(rails.map((r) => [r.id, r.driver])).toEqual([
-      ["psp_nmi", "collect_js"],
-      ["psp_stripe", "redirect"],
-      ["psp_ccbill", "redirect"],
+    expect(rails.map((r) => [r.id, r.driver, r.mode, r.psp_key])).toEqual([
+      ["psp_nmi", "collect_js", "subscription", "nmi"],
+      ["psp_solana", "solana_pay", "subscription", "solana"],
     ])
+    expect(rails[1].public_config).toEqual({
+      token_symbol: "DUSD",
+      network: "devnet",
+    })
     expect(
       savedMethodsFor(
         [
           { id: "pm_1", psp_id: "psp_nmi", card: { last4: "1111" } },
-          { id: "pm_2", psp_id: "psp_stripe" },
+          { id: "pm_2", psp_id: "psp_solana" },
           { id: "pm_3", psp_id: "psp_nmi", health: { active: false } },
         ],
         rails
@@ -99,10 +108,16 @@ describe("PSP flows", () => {
 
   it("offers Stripe Elements as an in-page card rail and hides non-checkout PSPs", () => {
     const elements = { ...stripe, flow: "elements" }
-    const rails = checkoutRails(
-      [{ psp_id: "psp_stripe", rail: "stripe", mode: "one_off" }],
-      [elements]
-    )
+    const rails = checkoutRails([
+      {
+        selector: "stripe",
+        psp_id: "psp_stripe",
+        rail: "stripe",
+        mode: "one_off",
+        driver: "stripe_elements",
+        public_config: { publishable_key: "pk_test_1" },
+      },
+    ])
     expect(rails).toEqual([
       expect.objectContaining({
         id: "psp_stripe",

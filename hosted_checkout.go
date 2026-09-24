@@ -2,7 +2,6 @@ package openrails
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -54,13 +53,13 @@ type HostedCheckoutLineItem struct {
 }
 
 // HostedCheckoutRail is one payment option the browser can execute. ID is the
-// host's opaque handle for the engine selector; PublicConfig carries only
-// browser-safe values (NMI tokenization key/URL, Solana token symbol).
+// host's opaque handle for the engine selector; Driver and PublicConfig are
+// copied from the CheckoutRailOption OpenRails advertised.
 type HostedCheckoutRail struct {
 	ID           string            `json:"id"`
 	Rail         string            `json:"rail"`
 	Mode         string            `json:"mode"`   // one_off or subscription
-	Driver       string            `json:"driver"` // collect_js, redirect or solana_pay
+	Driver       string            `json:"driver"` // collect_js, stripe_elements, redirect or solana_pay
 	PublicConfig map[string]string `json:"public_config,omitempty"`
 }
 
@@ -119,18 +118,4 @@ func NewHostedCheckoutPlan(product *Product, price *Price) (HostedCheckoutPlan, 
 		PeriodHours:         price.AccessDurationHours,
 		AutomaticallyRenews: price.AutoRenew,
 	}, nil
-}
-
-// HostedCheckoutDriver names the browser driver for a rail kind; false for a
-// rail the browser package cannot execute, which must not be offered.
-func HostedCheckoutDriver(rail string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(rail)) {
-	case "nmi":
-		return "collect_js", true
-	case "stripe", "ccbill":
-		return "redirect", true
-	case "solana":
-		return "solana_pay", true
-	}
-	return "", false
 }
