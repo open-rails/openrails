@@ -62,14 +62,14 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/nmi/customers":
+		case r.Method == http.MethodGet && r.URL.Path == "/nmi/customers/"+nativeVault:
 			require.Equal(t, "native-delete-key", r.Header.Get("Authorization"))
 			if nativeDeleted {
-				fmt.Fprint(w, `{"customers":[],"has_more":false}`)
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"customer not found"}`)
 				return
 			}
-			require.Equal(t, nativeVault, r.URL.Query().Get("id"))
-			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"customers": []any{map[string]any{"object": "customer", "id": nativeVault, "billing": []any{map[string]any{"id": "native-billing", "priority": 1}}}}, "has_more": false}))
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"object": "customer", "id": nativeVault, "billing": []any{map[string]any{"id": "native-billing", "priority": 1}}}))
 		case r.Method == http.MethodDelete && r.URL.Path == "/nmi/customers/"+nativeVault:
 			require.Equal(t, "native-delete-key", r.Header.Get("Authorization"))
 			nativeDeletes++
