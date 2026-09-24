@@ -77,7 +77,7 @@ grace windows for provider cohorts. Deliberate cancellation still ends access at
 end the user expects.
 
 Engine memberships (OpenRails collects them itself) are the exception: access is the paid
-period plus a bounded renewal allowance (`grace`, 24h) that holds access across the
+period plus a bounded renewal allowance (`grace`, min(24h, max(5m, period/10))) that holds access across the
 boundary until the engine's own renewal decides. The renewal supersedes it; a decline or
 cancellation revokes it; if no outcome arrives, access still ends when it lapses.
 

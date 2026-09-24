@@ -98,37 +98,24 @@ type Subscription struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func (s *Subscription) updateCurrentPeriods(billingCycle *time.Duration) {
-	var periodStartsAt, periodEndsAt time.Time
-
+// updateCurrentPeriods starts the next period where the current one ends (or
+// now) and makes it exactly one billing cycle long.
+func (s *Subscription) updateCurrentPeriods(billingCycle time.Duration) {
+	periodStartsAt := time.Now()
 	if s.CurrentPeriodEndsAt != nil && !s.CurrentPeriodEndsAt.IsZero() {
 		periodStartsAt = *s.CurrentPeriodEndsAt
-		if billingCycle != nil {
-			periodEndsAt = periodStartsAt.Add(*billingCycle)
-		} else {
-			periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
-		}
-	} else {
-		periodStartsAt = time.Now()
-		if billingCycle != nil {
-			periodEndsAt = periodStartsAt.Add(*billingCycle)
-		} else {
-			periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
-		}
 	}
-
+	periodEndsAt := periodStartsAt.Add(billingCycle)
 	s.CurrentPeriodStartsAt = &periodStartsAt
 	s.CurrentPeriodEndsAt = &periodEndsAt
 }
 
 func (s *Subscription) ActivateWithPrice(price *Price) error {
 	cycleHours := price.RecurringCycleHours()
-	if cycleHours == nil {
+	if cycleHours == nil || *cycleHours <= 0 {
 		return fmt.Errorf("recurring price billing cycle is required")
 	}
-
-	billingCycle := time.Duration(*cycleHours) * time.Hour
-	s.updateCurrentPeriods(&billingCycle)
+	s.updateCurrentPeriods(time.Duration(*cycleHours) * time.Hour)
 
 	s.EndedAt = nil
 	s.CancelType = nil

@@ -489,18 +489,20 @@ clear):
 
 | Cycle | Retry offsets | Failures to terminal | Derived staleness window |
 |---|---|---|---|
-| < 4 days | none | 1 (first failure is terminal) | 0 |
+| < 4 days | none | 1 (first failure is terminal) | min(24h, cycle/2) |
 | 4–27 days ("weekly") | +1d, +2d | 3 | 3 days |
 | ≥ 28 days ("monthly+", capped) | +2d, +5d, +9d, +13d | 5 | 14 days |
 
-An unknown cycle (one-time price in a `past_due` state that shouldn't exist)
-falls back to the monthly schedule defensively, logged. **Hard declines**
+The window always ends inside one cycle (1h → 30m, 1d → 12h). An unknown
+cycle (≤ 0, e.g. a one-time price behind a membership) is never given a
+schedule: collection refuses to charge, retry or end it and raises
+`life.cadence.unknown` for the operator. **Hard declines**
 (stolen/lost card, do-not-honor, expired card, "stop recurring" codes) are
 terminal immediately regardless of schedule — retrying cannot succeed and
 risks card-network flags; soft declines (insufficient funds, comms errors,
 merchant-config errors) follow the schedule. The staleness window ("never
 charge a months-old failure") derives from the same schedule — last offset +
-24h slack — so it cannot be misconfigured; anything older is cancelled +
+min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is cancelled +
 downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements
 + rail-side delete via the intent ledger's deferred-delete mechanism.
 
@@ -515,13 +517,16 @@ their paid-period boundary and runs retries whose `next_retry_at` has passed.
 A subscription it cannot process raises a standing `life.due_pass.refused`
 finding (resolved automatically once it processes) and never fails the pass.
 
-**Engine outcomes.** A renewal allowance (24h) follows each paid engine period,
-so a member keeps access until the renewal decides; a qualified renewal
+**Engine outcomes.** A renewal allowance of min(24h, max(5m, period/10))
+follows each paid engine period (1h → 6m, 1d → 2h24m, 7d → 16h48m, 30d and
+longer → 24h), so unpaid access never exceeds a tenth of the period and a
+member keeps access until the renewal decides; a qualified renewal
 supersedes it, and a decline or cancellation revokes it. A card-fixable
 decline, or a terminal outcome while the destructive switch is off, leaves the
 membership `past_due` waiting for a new card; a new card retries at the next
 due pass. Issuer authentication a payer never completes is closed after one
-hour for a first payment and after the renewal allowance for a renewal. A
+hour for a first payment and after the renewal period's allowance for a
+renewal. A
 renewal whose submission never reached the provider is re-sent under the same
 reference once the provider's read shows nothing for 5 minutes (at most twice);
 an unreadable provider or spent cap raises `life.submission.unresolved`

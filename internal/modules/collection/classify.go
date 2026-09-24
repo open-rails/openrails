@@ -56,7 +56,9 @@ func (a Action) ScheduleExhausted() bool {
 //
 // failureCode is the code recorded VERBATIM off the rail; nil/empty is bucket
 // 1, because no evidence is not evidence.
-func FailureAction(cycleHours int, rail string, failureCode *string, priorFailures int, firstFailureAt *time.Time, now time.Time) Action {
+// An unknown cycle refuses bucket 1 with ErrUnknownCycle; buckets 2 and 3 do
+// not depend on the cycle.
+func FailureAction(cycleHours int, rail string, failureCode *string, priorFailures int, firstFailureAt *time.Time, now time.Time) (Action, error) {
 	code := ""
 	if failureCode != nil {
 		code = *failureCode
@@ -67,22 +69,26 @@ func FailureAction(cycleHours int, rail string, failureCode *string, priorFailur
 		// Bucket 3 — the issuer withdrew the recurring mandate, or the
 		// instrument is permanently dead. Terminal on the FIRST look: there is
 		// no schedule worth running against an instrument that cannot succeed.
-		return Action{Outcome: decline.Outcome, Terminal: true, Decline: decline}
+		return Action{Outcome: decline.Outcome, Terminal: true, Decline: decline}, nil
 	case DeclineFixPaymentMethod:
 		// Bucket 2 — their card, fixable in a minute. Stop charging NOW, and
 		// terminate NOTHING.
-		return Action{Outcome: decline.Outcome, Decline: decline}
+		return Action{Outcome: decline.Outcome, Decline: decline}, nil
 	}
 
 	// Bucket 1 — ours or transient. Keep the schedule.
+	offsets, err := RetryOffsets(cycleHours)
+	if err != nil {
+		return Action{}, err
+	}
 	failures := priorFailures + 1
-	if failures >= MaxFailures(cycleHours) {
-		return Action{Outcome: DeclineRetry, Terminal: true, Decline: decline}
+	if failures >= len(offsets)+1 {
+		return Action{Outcome: DeclineRetry, Terminal: true, Decline: decline}, nil
 	}
 	first := now
 	if firstFailureAt != nil {
 		first = *firstFailureAt
 	}
-	next := first.Add(RetryOffsets(cycleHours)[failures-1])
-	return Action{Outcome: DeclineRetry, NextAttemptAt: &next, Decline: decline}
+	next := first.Add(offsets[failures-1])
+	return Action{Outcome: DeclineRetry, NextAttemptAt: &next, Decline: decline}, nil
 }

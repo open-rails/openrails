@@ -358,11 +358,15 @@ func (w *DunningWorker) processSubscription(
 			cycleHours = collection.BillingCycleHoursOf(p)
 		}
 	}
-	if cycleHours <= 0 {
-		logEntry.WithField("price_id", sub.PriceID).
-			Warn("Dunning: subscription has no billing cycle (one-time price?); using monthly dunning window")
+	window, err := collection.Window(cycleHours)
+	if err != nil {
+		// Fail closed: no charge on a guessed cadence; the operator decides.
+		logEntry.WithError(err).WithField("price_id", sub.PriceID).Error("Dunning: subscription has no billing cycle; refusing to rebill")
+		if ferr := collection.RecordUnknownCycle(ctx, w.DB.Gen(ctx), sub.MerchantID, sub.ID.String(), "subscription", err); ferr != nil {
+			return dunningOutcomeFailed, errors.Join(err, ferr)
+		}
+		return dunningOutcomeFailed, nil
 	}
-	window := collection.Window(cycleHours)
 	if w.now().UTC().After(periodEnd.Add(window)) {
 		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window), nil
 	}

@@ -10,7 +10,7 @@ import (
 
 // TestRetryOffsets pins the cadence-relative tier table (#359), including the
 // exact tier boundaries. The binding principle: the derived staleness window
-// (last retry offset + one day of slack) must fit inside ONE billing cycle.
+// (last retry offset + min(24h, cycle/2) of slack) must fit inside ONE cycle.
 //
 // #839: the 0-retry tier's window is the SLACK, never zero. A zero window is
 // true by construction the instant a row lapses, so it gave a short-cycle
@@ -28,7 +28,8 @@ func TestRetryOffsets(t *testing.T) {
 		window      time.Duration
 	}{
 		// Anchors.
-		{"daily: no retries, but a full day of slack to attempt the charge", 24, nil, 1, 1 * day},
+		{"hourly: no retries, half an hour to attempt the charge", 1, nil, 1, 30 * time.Minute},
+		{"daily: no retries, half a day to attempt the charge", 24, nil, 1, 12 * time.Hour},
 		{"weekly: retries at +1d, +2d", 7 * 24, weekly, 3, 3 * day},
 		{"monthly: progressive +2d/+5d/+9d/+13d", 30 * 24, monthly, 5, 14 * day},
 		{"yearly: capped at the monthly schedule", 365 * 24, monthly, 5, 14 * day},
@@ -37,24 +38,46 @@ func TestRetryOffsets(t *testing.T) {
 		// still be dunning when the next period is due (window 3d > cycle).
 		{"2d: still no retries", 2 * 24, nil, 1, 1 * day},
 		{"3d: still no retries", 3 * 24, nil, 1, 1 * day},
+		{"95h: the last cycle whose first failure is terminal", 95, nil, 1, 1 * day},
 		{"4d: first cycle with retries (window 3d fits inside the cycle)", 4 * 24, weekly, 3, 3 * day},
 
 		// Boundaries of the monthly tier: the 14d window must fit well inside
 		// the cycle; 28d covers 4-weekly "monthly" billing.
 		{"27d: weekly tier (the monthly 14d window would not fit well)", 27 * 24, weekly, 3, 3 * day},
 		{"28d: monthly tier starts (4-weekly billing)", 28 * 24, monthly, 5, 14 * day},
-
-		// Unknown cycle (one-time price): defensive monthly fallback.
-		{"unknown (0): monthly fallback", 0, monthly, 5, 14 * day},
-		{"unknown (negative): monthly fallback", -1, monthly, 5, 14 * day},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.offsets, RetryOffsets(tc.cycleHours), "offsets")
-			require.Equal(t, tc.maxFailures, MaxFailures(tc.cycleHours), "maxFailures")
-			require.Equal(t, tc.window, Window(tc.cycleHours), "derived window")
+			require.Equal(t, tc.offsets, must(RetryOffsets(tc.cycleHours)), "offsets")
+			require.Equal(t, tc.maxFailures, must(MaxFailures(tc.cycleHours)), "maxFailures")
+			require.Equal(t, tc.window, must(Window(tc.cycleHours)), "derived window")
 		})
 	}
+}
+
+// TestUnknownCycleFailsClosed: a missing cadence never borrows the monthly
+// schedule; every schedule function refuses it with ErrUnknownCycle.
+func TestUnknownCycleFailsClosed(t *testing.T) {
+	code := "insufficient_funds"
+	for _, cycleHours := range []int{0, -1} {
+		_, err := RetryOffsets(cycleHours)
+		require.ErrorIs(t, err, ErrUnknownCycle)
+		var typed *UnknownCycleError
+		require.ErrorAs(t, err, &typed)
+		require.Equal(t, cycleHours, typed.CycleHours)
+		_, err = MaxFailures(cycleHours)
+		require.ErrorIs(t, err, ErrUnknownCycle)
+		_, err = NextRetryIn(cycleHours, 1)
+		require.ErrorIs(t, err, ErrUnknownCycle)
+		_, err = Window(cycleHours)
+		require.ErrorIs(t, err, ErrUnknownCycle)
+		_, err = FailureAction(cycleHours, "nmi", &code, 0, nil, time.Now())
+		require.ErrorIs(t, err, ErrUnknownCycle, "a retryable decline needs the schedule")
+	}
+	stolen := "stolen_card"
+	action, err := FailureAction(0, "nmi", &stolen, 0, nil, time.Now())
+	require.NoError(t, err, "a non-recoverable decline does not depend on the cycle")
+	require.True(t, action.Terminal)
 }
 
 // TestNextRetryIn pins the per-failure gaps: when each retry runs on time,
@@ -64,30 +87,30 @@ func TestNextRetryIn(t *testing.T) {
 	day := 24 * time.Hour
 
 	// Monthly gaps: 2d, 3d, 4d, 4d; the 5th failure is terminal.
-	require.Equal(t, 2*day, NextRetryIn(30*24, 1))
-	require.Equal(t, 3*day, NextRetryIn(30*24, 2))
-	require.Equal(t, 4*day, NextRetryIn(30*24, 3))
-	require.Equal(t, 4*day, NextRetryIn(30*24, 4))
-	require.Equal(t, time.Duration(0), NextRetryIn(30*24, 5), "5th monthly failure is terminal")
+	require.Equal(t, 2*day, must(NextRetryIn(30*24, 1)))
+	require.Equal(t, 3*day, must(NextRetryIn(30*24, 2)))
+	require.Equal(t, 4*day, must(NextRetryIn(30*24, 3)))
+	require.Equal(t, 4*day, must(NextRetryIn(30*24, 4)))
+	require.Equal(t, time.Duration(0), must(NextRetryIn(30*24, 5)), "5th monthly failure is terminal")
 
 	// Weekly gaps: 1d, 1d; the 3rd failure is terminal.
-	require.Equal(t, 1*day, NextRetryIn(7*24, 1))
-	require.Equal(t, 1*day, NextRetryIn(7*24, 2))
-	require.Equal(t, time.Duration(0), NextRetryIn(7*24, 3), "3rd weekly failure is terminal")
+	require.Equal(t, 1*day, must(NextRetryIn(7*24, 1)))
+	require.Equal(t, 1*day, must(NextRetryIn(7*24, 2)))
+	require.Equal(t, time.Duration(0), must(NextRetryIn(7*24, 3)), "3rd weekly failure is terminal")
 
 	// Daily: the first failure is terminal.
-	require.Equal(t, time.Duration(0), NextRetryIn(24, 1))
+	require.Equal(t, time.Duration(0), must(NextRetryIn(24, 1)))
 
 	// Out-of-range failure counts never schedule a retry.
-	require.Equal(t, time.Duration(0), NextRetryIn(30*24, 0))
-	require.Equal(t, time.Duration(0), NextRetryIn(30*24, 99))
+	require.Equal(t, time.Duration(0), must(NextRetryIn(30*24, 0)))
+	require.Equal(t, time.Duration(0), must(NextRetryIn(30*24, 99)))
 }
 
 // TestWindowFitsInsideOneCycle asserts the boundary principle itself across
-// every cycle length that gets retries.
+// every cycle length, hourly upward.
 func TestWindowFitsInsideOneCycle(t *testing.T) {
-	for cycleHours := MinRetryCycleHours; cycleHours <= 400*24; cycleHours += 24 {
-		window := Window(cycleHours)
+	for cycleHours := 1; cycleHours <= 400*24; cycleHours++ {
+		window := must(Window(cycleHours))
 		cycle := time.Duration(cycleHours) * time.Hour
 		require.Less(t, window, cycle,
 			"cycle %dh: derived window %s must stay inside one billing cycle", cycleHours, window)
@@ -225,7 +248,7 @@ func TestFailureAction(t *testing.T) {
 			if rail == "" {
 				rail = "nmi"
 			}
-			action := FailureAction(MonthlyCycleHours, rail, test.code, test.currentFailures, test.firstFailureAt, first)
+			action := must(FailureAction(MonthlyCycleHours, rail, test.code, test.currentFailures, test.firstFailureAt, first))
 			require.Equal(t, test.wantOutcome, action.Outcome, "decline bucket")
 			require.Equal(t, test.wantTerminal, action.Terminal)
 			if test.wantNext == nil {
@@ -258,18 +281,18 @@ func TestFailureActionUsesTheRealCycle(t *testing.T) {
 	first := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	code := "insufficient_funds"
 
-	weekly := FailureAction(CycleHoursBetween(first, first.AddDate(0, 0, 7)), "nmi", &code, 0, &first, first)
+	weekly := must(FailureAction(CycleHoursBetween(first, first.AddDate(0, 0, 7)), "nmi", &code, 0, &first, first))
 	require.NotNil(t, weekly.NextAttemptAt)
 	require.Equal(t, first.Add(24*time.Hour), *weekly.NextAttemptAt,
 		"a weekly statement retries on the weekly offsets (+1d), not the monthly ones (+2d)")
 
-	monthly := FailureAction(CycleHoursBetween(first, first.AddDate(0, 1, 0)), "nmi", &code, 0, &first, first)
+	monthly := must(FailureAction(CycleHoursBetween(first, first.AddDate(0, 1, 0)), "nmi", &code, 0, &first, first))
 	require.NotNil(t, monthly.NextAttemptAt)
 	require.Equal(t, first.Add(2*24*time.Hour), *monthly.NextAttemptAt)
 
 	// A sub-4-day statement period gets no retries at all — the first failure
 	// exhausts the schedule.
-	daily := FailureAction(CycleHoursBetween(first, first.AddDate(0, 0, 1)), "nmi", &code, 0, &first, first)
+	daily := must(FailureAction(CycleHoursBetween(first, first.AddDate(0, 0, 1)), "nmi", &code, 0, &first, first))
 	require.True(t, daily.Terminal)
 	require.True(t, daily.ScheduleExhausted())
 }
@@ -290,25 +313,32 @@ func TestCycleHoursBetween(t *testing.T) {
 func TestScheduleParity(t *testing.T) {
 	code := "insufficient_funds"
 	for _, cycleHours := range []int{MonthlyCycleHours, 30 * 24, 7 * 24, 365 * 24} {
-		offsets := RetryOffsets(cycleHours)
+		offsets := must(RetryOffsets(cycleHours))
 		first := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
 		for failures := 0; failures < len(offsets); failures++ {
-			action := FailureAction(cycleHours, "nmi", &code, failures, &first, first)
+			action := must(FailureAction(cycleHours, "nmi", &code, failures, &first, first))
 			require.NotNil(t, action.NextAttemptAt, "cycle %dh failure %d", cycleHours, failures)
 			require.Equal(t, first.Add(offsets[failures]), *action.NextAttemptAt,
 				"cycle %dh: invoice next-attempt must equal subscription offset %d", cycleHours, failures)
 			// The subscription formulation (gaps) telescopes to the same offsets.
 			var cum time.Duration
 			for f := 1; f <= failures+1; f++ {
-				cum += NextRetryIn(cycleHours, f)
+				cum += must(NextRetryIn(cycleHours, f))
 			}
 			require.Equal(t, offsets[failures], cum,
 				"cycle %dh: cumulative NextRetryIn gaps must telescope to offset %d", cycleHours, failures)
 		}
-		action := FailureAction(cycleHours, "nmi", &code, len(offsets), &first, first)
+		action := must(FailureAction(cycleHours, "nmi", &code, len(offsets), &first, first))
 		require.True(t, action.Terminal, "cycle %dh: exhausting the offsets is terminal on both paths", cycleHours)
-		require.Equal(t, len(offsets)+1, MaxFailures(cycleHours))
+		require.Equal(t, len(offsets)+1, must(MaxFailures(cycleHours)))
 	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 func timePointer(value time.Time) *time.Time { return &value }

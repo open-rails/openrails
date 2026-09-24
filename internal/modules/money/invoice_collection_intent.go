@@ -561,7 +561,10 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 			return err
 		}
 		code := failureCode
-		action = collection.FailureAction(invoiceCycleHours(invoice), rail, &code, int(invoice.CollectionFailureCount), invoice.CollectionFailedAt, now)
+		action, err = collection.FailureAction(invoiceCycleHours(invoice), rail, &code, int(invoice.CollectionFailureCount), invoice.CollectionFailedAt, now)
+		if err != nil {
+			return err
+		}
 		failureReason := payments.NormalizeFailureReason(rail, failureCode)
 		failed, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
@@ -589,6 +592,11 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		}
 		return complete()
 	})
+	if errors.Is(err, collection.ErrUnknownCycle) {
+		if ferr := collection.RecordUnknownCycle(ctx, h.DB.Gen(ctx), intent.MerchantID, p.InvoiceID.String(), "invoice", err); ferr != nil {
+			log.WithContext(ctx).WithError(ferr).WithField("invoice_id", p.InvoiceID).Error("invoice collection: could not record the unknown-cycle finding")
+		}
+	}
 	if err != nil {
 		return intents.AmbiguousWithEvidence("collection refused, but local record failed: "+err.Error(), evidence)
 	}
@@ -660,7 +668,7 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 // invoiceCycleHours is the invoice's own billing cycle for the dunning
 // schedule: the statement window, floored at the shortest retriable cycle (a
 // threshold statement can cover an hour and must not be written off on its
-// first decline). 0 = unknown, handled as monthly by the schedule.
+// first decline). 0 = unknown, which the schedule refuses (ErrUnknownCycle).
 func invoiceCycleHours(invoice *models.Invoice) int {
 	if invoice == nil {
 		return 0

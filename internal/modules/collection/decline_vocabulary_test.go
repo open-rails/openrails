@@ -162,7 +162,7 @@ func TestUnmappedCodesAreDistinguishableFromDecidedRetries(t *testing.T) {
 func TestFailureActionCarriesCoverage(t *testing.T) {
 	now := time.Now()
 	code := "a_code_no_rail_ever_published"
-	a := FailureAction(MonthlyCycleHours, "stripe", &code, 0, nil, now)
+	a := must(FailureAction(MonthlyCycleHours, "stripe", &code, 0, nil, now))
 	if !a.Decline.NeedsMapping() {
 		t.Fatalf("FailureAction dropped the coverage answer: %+v", a.Decline)
 	}
@@ -171,7 +171,7 @@ func TestFailureActionCarriesCoverage(t *testing.T) {
 	}
 
 	known := "insufficient_funds"
-	if b := FailureAction(MonthlyCycleHours, "stripe", &known, 0, nil, now); b.Decline.NeedsMapping() {
+	if b := must(FailureAction(MonthlyCycleHours, "stripe", &known, 0, nil, now)); b.Decline.NeedsMapping() {
 		t.Error("insufficient_funds is a decided retry, not an unmapped code")
 	}
 }
