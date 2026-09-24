@@ -1,5 +1,14 @@
 # Invariants
 
+**Coverage status after the September 2026 harness removal:** this register
+preserves design requirements and historical audit findings. Except where
+explicitly refreshed, its test names, enforcement labels, commands, and source
+line numbers describe the earlier audit; they are not current regression
+evidence. Deleted tests confer no coverage. Use the
+[focused coverage map](greenfield-coverage.md) for the maintained scenarios and
+remaining gaps. Database and application constraints must be assessed separately
+from whether a surviving test exercises them.
+
 Hard constraints this codebase must uphold. Each entry states the rule, where it is
 enforced, how strongly, and how to audit it mechanically.
 
@@ -18,11 +27,11 @@ do not yet enforce.
 | **T** | a repo test fails |
 | **C** | convention only — nothing fails |
 
-**How this register is verified.** Tenant SQL and public API tests run with RLS
-absent, using both owner and ordinary runtime connections. Financial tests exercise
-constraints, transaction semantics and immutable-record triggers. The historical
-audit notes below retain the earlier RLS failure analysis; they do not describe the
-current authorization mechanism. Current work is tracked in #1021.
+**Historical verification.** The former tenant SQL and public API suites used
+both owner and ordinary runtime connections with RLS absent. Financial tests
+exercised constraints, transaction semantics and immutable-record triggers.
+Those broad suites have been removed; the retained RLS failure analysis below
+does not describe current authorization or current test coverage.
 
 **History.** Migration numbers in FIXED notes are history; the fresh baseline
 `internal/migrate/postgres/0001_schema.up.sql` carries every constraint.
@@ -146,7 +155,7 @@ All outbound provider mutations post a durable intent first, then execute.
 | ID-8 | Grant termination happens once; `event='grant' ⟺ supersedes_id IS NULL`. | `:1355,:1306` | **DB** |
 | ID-9 | Invoice period, invoice-item source, usage-event, and finding identities are unique per merchant. | `:1552,:1598,:2915,:2617` | **DB** |
 | ID-10 | Merchant slug unique; `api_host` unique among live merchants. | `:272,:276` | **DB** |
-| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`.** A cross-merchant unique is an existence oracle: under RLS the conflicting row is invisible, so the victim sees only an opaque insert failure. Checked TWICE against ONE shared exemption list — `TestUniqueIndexesAreMerchantScoped` derives the inventory from the migration text (no database, catches a bad migration); `TestGAP10_UniqueIndexesAreMerchantScoped` reads `pg_indexes` on a live DB as `openrails_app` (catches an index that arrived some other way). Both have vacuity guards. | `internal/migrate/postgres/unique_scope_exemptions.go` (the ONE list); guards in `merchant_aware_schema_test.go` and `internal/invariantaudit` | **DB** + **T** |
+| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`, except reviewed identities.** Cross-merchant uniqueness can reveal another merchant's values through conflicts. | `internal/migrate/postgres/unique_scope_exemptions.go` records the reviewed exceptions. The former migration-text and live `pg_indexes` guards were removed with the legacy suite; current index definitions need independent review. | **DB** for existing indexes; automated scope audit is a coverage gap |
 
 ## 7. Fail-closed posture
 
@@ -235,10 +244,10 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 | REC-2 | **Superseding an unfired intent is a forward transition, not a rollback.** `rail_intents` moves `pending`/`failed_retryable` → `superseded`, never deleted, never rewritten once executed. This is how an undo neutralises a queued provider write. | **ENFORCED** — `TestSupersedeIsTheOnlyRailIntentWriteOnAnUndoPath` pins the status predicate and refuses a DELETE on any undo path. |
 | REC-3 | **Class D is invalidated and re-derived, never restored.** | **ENFORCED** — the reverse soft-deletes the windows the run closed and stamps them with it; `Converge` rebuilds them. Entitlement before-images are captured as evidence and deliberately left `restored_at IS NULL`. |
 | REC-4 | **A destructive operation with no way to record its undo does not run.** | **ENFORCED** — an enforce pass planning state transitions with no `DestructiveRunRecorder` errors before writing, and a before-image capture failure skips that transition. |
-| REC-5 | **An undo plans before it applies, and never resurrects a row another run removed.** Dry run is the default; `--apply` needs a typed row count matching the plan; a row a later prune tombstoned belongs to that run's reverse and is skipped and reported. | **ENFORCED** — `undo_run_integration_test.go`. |
+| REC-5 | **An undo plans before it applies, and never resurrects a row another run removed.** Dry run is the default; `--apply` needs a typed row count matching the plan; a row a later prune tombstoned belongs to that run's reverse and is skipped and reported. | Historical implementation claim; `undo_run_integration_test.go` was removed. No focused undo/non-resurrection scenario currently replaces it. |
 | REC-6 | **A reversal is scoped by the run, not by a flag.** The ledger row carries the merchant and (when account-bound) the PSP; every restore predicate is keyed on the run id inside a merchant-scoped connection. | **ENFORCED** — the per-PSP and cross-merchant cases are proven against the real enforce path. |
 | REC-7 | **A kind whose damage no local undo reaches is refused by name**, with what to reach for instead — never half-reversed and marked reversed. | **ENFORCED** — `merchant_delete` is registered unrecoverable; unconverted kinds refuse. |
-| REC-8 | **A rollback is not a complete operation; `rollback → pull → converge` is.** The post-rollback book is definitionally incomplete, so the proven source-domain flags are reset and first-enforce is disarmed — the next pull runs advisory until an operator re-arms it. | **ENFORCED** — steps 1 and 4 of the reversal, asserted in `converge_rollback_integration_test.go`. |
+| REC-8 | **A rollback is not a complete operation; `rollback → pull → converge` is.** The post-rollback book is definitionally incomplete, so the proven source-domain flags are reset and first-enforce is disarmed — the next pull runs advisory until an operator re-arms it. | Historical implementation claim; `converge_rollback_integration_test.go` was removed. No focused rollback/pull/converge scenario currently replaces it. |
 
 **The hole, CLOSED (or#893)**: `psp_id` used to be nullable on every PSP-tagged table, so a
 PSP-scoped predicate silently skipped unattributed rows and the undo could only report that
@@ -290,8 +299,8 @@ GAP-14 are open only in their named residuals; GAP-16 is closed.
 Run these from an explicitly authorized operator connection. These are intentional
 fleet-wide diagnostic scans; ordinary tenant requests must use the scoped APIs.
 With RLS absent, the diagnostics no longer silently return empty results because
-of a missing session merchant. `internal/invariantaudit` exercises the relevant
-query and schema contracts on real PostgreSQL.
+of a missing session merchant. The former `internal/invariantaudit` package
+was removed; these SQL diagnostics are operator checks, not current CI evidence.
 
 Read-only checks that should pass at any time:
 
@@ -328,11 +337,10 @@ SELECT permission_group_id, count(*) FROM billing.merchants
  WHERE permission_group_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1;
 ```
 
-Test gates:
+Historical audit commands (verify that the named tests still exist before
+using them; a successful command matching no tests is not evidence):
 
 ```
-go test -tags integration ./internal/invariantaudit                   # scoped tenant queries, schema and financial invariants
-go test ./internal/migrate/postgres                                         # TEN-4, TEN-12, MONEY-9, ID-11, CUR-5b
 go test ./internal/intents  -run TestProviderWrite                    # IDEM-7 (both halves: surface + call sites)
 go test ./internal/shared/moneyutil -run TestNoFloatsInMoneyPackages  # MONEY-3
 go test ./internal/merchants -run TestNoAdHocSecretPathConstruction   # secret-path builder
