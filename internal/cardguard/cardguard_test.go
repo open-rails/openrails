@@ -21,7 +21,7 @@ func groupsOf(digits, sep string, sizes ...int) string {
 	for _, n := range sizes {
 		parts, digits = append(parts, digits[:n]), digits[n:]
 	}
-	for len(digits) > 4 {
+	for len(sizes) == 0 && len(digits) > 4 {
 		parts, digits = append(parts, digits[:4]), digits[4:]
 	}
 	return strings.Join(append(parts, digits), sep)
