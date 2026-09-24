@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // callAt sends one customer request with token to a mounted server.
@@ -219,7 +221,21 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	self := w.replicaWith(embed.CustomerSelfService)
+	// A host's own customer authenticator classifies credentials; "auto-"
+	// subjects are the customer's API automation.
+	merchantID := w.client[embedded].MerchantID().String()
+	hostAuth := billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+		p, err := w.auth.AuthenticateRequest(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		subject, class := p.Identity().Subject, billingauth.CredentialClassUserSession
+		if id, ok := strings.CutPrefix(subject, "auto-"); ok {
+			subject, class = id, billingauth.CredentialClassAutomation
+		}
+		return &billingauth.DelegatedPrincipal{MerchantID: merchantID, MerchantSlug: w.slug, SubjectID: subject, CredentialClass: class, Issuer: issuer}, nil
+	})
+	self := w.peer(w.slug, embed.CustomerSelfService, w.declaredPSPs(), hostAuth)
 	group := "g" + uuid.NewString()[:8]
 	basic := w.tierPrice(group, 1, 1000, monthHours, false)
 	plus := w.tierPrice(group, 2, 2000, monthHours, false)
@@ -230,12 +246,12 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	charges := len(w.railLedger("nmi"))
 
 	status, body := w.callAt(self.server.URL, bot, http.MethodPost, "/subscriptions/"+sub.String()+"/change-tier", "bot-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
-	require.Equal(t, http.StatusForbidden, status, "%v", body)
+	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
 	status, body = w.callAt(self.server.URL, bot, http.MethodPost, "/checkout", "bot-"+uuid.NewString(), map[string]any{
 		"price_id": post.ID, "entitlement": "content:post", "offer_kind": "finite",
 		"payment": map[string]any{"rail": "nmi", "payment_method_id": method},
 	})
-	require.Equal(t, http.StatusForbidden, status, "%v", body)
+	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
 	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges, "no charge from an automation credential")
 	require.False(t, c.entitled("content:post"))

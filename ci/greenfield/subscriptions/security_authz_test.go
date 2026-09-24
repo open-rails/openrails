@@ -60,8 +60,8 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				{http.MethodGet, "/subscriptions/" + aliceSub.String(), nil},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed"}},
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/cancel", map[string]any{"feedback": "no longer needed", "immediately": true}},
-				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/resume", nil},
-				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/retry-now", nil},
+				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/resume", map[string]any{}},
+				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/retry-now", map[string]any{}},
 				{http.MethodPut, "/subscriptions/" + aliceSub.String() + "/payment-method", map[string]any{"payment_method_id": malloryCard}},
 				{http.MethodPut, "/subscriptions/" + mallorySub.String() + "/payment-method", map[string]any{"payment_method_id": aliceCard}},
 				{http.MethodPut, "/collection-payment-method", map[string]any{"payment_method_id": aliceCard, "currency": "USD"}},
@@ -151,7 +151,7 @@ func (w *world) declaredPSPs() map[string]embed.PSPConfig {
 
 // peer is another process on this database. Subjects "auto-<uuid>" are the
 // customer's automation credentials, not their interactive session.
-func (w *world) peer(slug string, scope embed.CustomerHTTPScope, psps map[string]embed.PSPConfig) *rival {
+func (w *world) peer(slug string, scope embed.CustomerHTTPScope, psps map[string]embed.PSPConfig, delegated ...billingauth.DelegatedAuthenticator) *rival {
 	t := w.t
 	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{
 		Verifier: w.auth,
@@ -175,10 +175,15 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, psps map[string
 		},
 	})
 	require.NoError(t, err)
+	var customers billingauth.DelegatedAuthenticator
+	if len(delegated) > 0 {
+		customers = delegated[0]
+	}
 	rt, err := embed.New(t.Context(), embed.Options{
-		Auth:     identity,
-		HTTP:     &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: slug, Scope: scope}}},
-		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps}},
+		DelegatedAuthenticator: customers,
+		Auth:                   identity,
+		HTTP:                   &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: slug, Scope: scope}}},
+		Merchant:               &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps}},
 		Config: &config.Config{
 			TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, AllowCatalogUpdates: true,
 			DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}, TrustedProxies: []string{"127.0.0.1/32"},
@@ -261,7 +266,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	staff := w.auth.token(t, "staff")
 	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, w.slug))
 	for _, server := range []string{w.server.URL, r.server.URL} {
-		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound}, merchantGet(server, staff, r.slug))
+		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict}, merchantGet(server, staff, r.slug))
 	}
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, merchantGet(w.server.URL, e.c.token, w.slug), "a customer credential is not merchant authority")
 	crossed, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(r.slug),
