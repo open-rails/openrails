@@ -1,4 +1,4 @@
--- parent: 6 sha256:c0bef9e0b3e2d935d328b09020333086fb91dcf4e310157fa8ecb86dc0c1e722
+-- parent: 7 sha256:8e127c1cc29693dbf48010c888d9873759b0a38b85caf1d69bcaa8922864a88f
 -- A product's tier group can be assigned or changed while it has live
 -- subscriptions (#1076): the change propagates to their denormalized
 -- tier_group in the same statement, so the one-live-membership-per-group
