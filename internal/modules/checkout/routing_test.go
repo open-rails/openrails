@@ -3,6 +3,7 @@ package checkout
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"strings"
 	"testing"
 
@@ -220,12 +221,18 @@ func TestRouteDefaultPolicy(t *testing.T) {
 
 // A named PSP is used as named with no fallback, but must still be armed.
 func TestRouteExplicitSelector(t *testing.T) {
-	decision, err := routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription, Selector: " CCBill "})
+	decision, err := routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription, Selector: " Stripe "})
 	require.NoError(t, err)
 	require.Equal(t, models.CheckoutRoutingPolicyExplicit, decision.Policy)
-	require.Equal(t, "ccbill", decision.Selected())
+	require.Equal(t, "stripe", decision.Selected())
 	require.Empty(t, decision.Reason().Fallbacks)
 	require.Empty(t, decision.Reason().Skipped)
+
+	// #1078: a named PSP still has to be able to make the sale.
+	decision, err = routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutSessionModeSubscription, Selector: "ccbill"})
+	require.ErrorIs(t, err, ErrNoRoutableProcessor)
+	require.Empty(t, decision.Selected())
+	require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, decision.Candidates[0].Skip)
 
 	declared := merchants.PSPScope{ID: uuid.New(), Rail: "stripe", Environment: "live", AccountID: "acct_declared", Key: "stripe-declared"}
 	decision, err = routingService(armedAll(), declared).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Selector: "stripe-declared"})
@@ -328,6 +335,9 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 	free.Amount = 0
 	oneOff := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD"}
 	solanaLinked := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD", PSPLinks: map[string]map[string]string{"solana": {models.RailKeyRail: "solana"}}}
+	solanaPlan := recurringPrice()
+	solanaPlan.PSPLinks = map[string]map[string]string{"solana": {models.RailKeyRail: "solana", "plan_id": "7", "amount_base_units": "1000000", "period_hours": "720", "mint_symbol": "USDC"}}
+	recurringReady := &CheckoutSessionService{solanaPrepareSubscribe: &recurring.PrepareSubscribeService{}, solanaEnroll: &recurring.EnrollService{}}
 	const S, O = models.CheckoutSessionModeSubscription, models.CheckoutSessionModeOneOff
 
 	for _, tc := range []struct {
@@ -343,7 +353,8 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 		{"stripe missing key", "stripe", sub, &config.PSPConfig{}, S, models.CheckoutRoutingSkipCredentialsMissing},
 		{"nmi blank key", "nmi", sub, &config.PSPConfig{NMI: &config.NMIRailConfig{SecurityKey: "  "}}, S, models.CheckoutRoutingSkipCredentialsMissing},
 		{"ccbill new enrollment", "ccbill", sub, &config.PSPConfig{CCBill: &config.CCBillRailConfig{}}, S, models.CheckoutRoutingSkipModeUnsupported},
-		{"solana new enrollment", "solana", sub, solanaCfg, S, models.CheckoutRoutingSkipModeUnsupported},
+		{"solana subscription without a published plan", "solana", sub, solanaCfg, S, models.CheckoutRoutingSkipLinkMissing},
+		{"solana plan without recurring services", "solana", solanaPlan, solanaCfg, S, models.CheckoutRoutingSkipServiceUnavailable},
 		{"trial terms", "stripe", trial, stripeCfg, S, models.CheckoutRoutingSkipModeUnsupported},
 		{"no cycle", "stripe", noCycle, stripeCfg, S, models.CheckoutRoutingSkipModeUnsupported},
 		{"zero amount", "nmi", free, nmiCfg, S, models.CheckoutRoutingSkipModeUnsupported},
@@ -362,6 +373,9 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+	// #1078: Solana subscribes new members to the price's on-chain plan.
+	require.Empty(t, recurringReady.checkoutRailSkipReason(solanaPlan, railTarget{PSP: "solana", Rail: "solana"}, solanaCfg, S))
+	require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, recurringReady.checkoutRailSkipReason(trial, railTarget{PSP: "solana", Rail: "solana"}, solanaCfg, S))
 }
 
 // A price link belongs to one provider account: never substituted from a
