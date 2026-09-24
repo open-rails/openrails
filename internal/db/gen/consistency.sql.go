@@ -13,32 +13,59 @@ import (
 )
 
 const conDuplicateChargesSamePeriod = `-- name: ConDuplicateChargesSamePeriod :many
-WITH payment_products AS (
-    SELECT purch.id, purch.customer_id, purch.amount, purch.purchased_at, price.product_id, prod.key AS product_key
+WITH charges AS (
+    SELECT purch.id, purch.customer_id, purch.subscription_id, purch.price_id, purch.amount, purch.purchased_at,
+           price.product_id, prod.key AS product_key,
+           purch.metadata->>'period_start' AS period_start,
+           LEAST(price.access_duration_hours, COALESCE(price.trial_duration_hours, price.access_duration_hours)) AS cycle_hours
     FROM openrails.payments purch
     JOIN openrails.prices price ON purch.price_id = price.id
     JOIN openrails.products prod ON price.product_id = prod.id
     WHERE purch.merchant_id = $1::uuid AND price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND purch.deleted_at IS NULL
+      AND purch.subscription_id IS NOT NULL
+      AND purch.status = 'completed'
+      AND purch.money_movement = 'rail'
       AND purch.amount > 0
       AND purch.refunded_payment_id IS NULL
-      AND purch.status <> 'refunded'
       AND NOT EXISTS (
           SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
       )
       AND ($2::uuid IS NULL OR purch.customer_id = $2::uuid)
+),
+unstamped AS (
+    SELECT c.id, c.customer_id, c.subscription_id, c.price_id, c.amount, c.purchased_at, c.product_id, c.product_key, c.period_start, c.cycle_hours, LAG(c.id) OVER w AS prev_id, LAG(c.purchased_at) OVER w AS prev_at
+    FROM charges c
+    WHERE c.period_start IS NULL
+    WINDOW w AS (PARTITION BY c.subscription_id, c.price_id ORDER BY c.purchased_at, c.id)
+),
+groups AS (
+    SELECT subscription_id, period_start AS period_key, id, customer_id, product_id, product_key, amount, purchased_at
+    FROM charges
+    WHERE period_start IS NOT NULL
+      AND (subscription_id, period_start) IN (
+          SELECT subscription_id, period_start FROM charges WHERE period_start IS NOT NULL
+          GROUP BY subscription_id, period_start HAVING COUNT(*) > 1)
+    UNION ALL
+    SELECT u.subscription_id, to_char(p.purchased_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), x.id, x.customer_id, x.product_id, x.product_key, x.amount, x.purchased_at
+    FROM unstamped u
+    JOIN charges p ON p.id = u.prev_id
+    JOIN charges x ON x.id IN (u.id, u.prev_id)
+    WHERE u.cycle_hours IS NOT NULL AND u.cycle_hours > 0
+      AND u.purchased_at - u.prev_at < make_interval(secs => u.cycle_hours * 1800)
 )
 SELECT
-    customer_id::text AS user_id,
-    product_id,
-    product_key,
+    subscription_id,
+    period_key::text AS period_key,
+    MIN(customer_id::text)::text AS user_id,
+    MIN(product_id::text)::uuid AS product_id,
+    MIN(product_key)::text AS product_key,
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
     SUM(amount)::bigint AS total_amount,
     MIN(purchased_at)::timestamptz AS first_date,
     MAX(purchased_at)::timestamptz AS last_date
-FROM payment_products
-GROUP BY customer_id, product_id, product_key, DATE_TRUNC('month', purchased_at)
-HAVING COUNT(*) > 1
+FROM groups
+GROUP BY subscription_id, period_key
 `
 
 type ConDuplicateChargesSamePeriodParams struct {
@@ -47,20 +74,25 @@ type ConDuplicateChargesSamePeriodParams struct {
 }
 
 type ConDuplicateChargesSamePeriodRow struct {
-	UserID      string
-	ProductID   uuid.UUID
-	ProductKey  string
-	Count       int32
-	PaymentIds  []uuid.UUID
-	TotalAmount int64
-	FirstDate   time.Time
-	LastDate    time.Time
+	SubscriptionID *uuid.UUID
+	PeriodKey      string
+	UserID         string
+	ProductID      uuid.UUID
+	ProductKey     string
+	Count          int32
+	PaymentIds     []uuid.UUID
+	TotalAmount    int64
+	FirstDate      time.Time
+	LastDate       time.Time
 }
 
-// More than one settled, non-refunded charge for the same customer/product/month.
-// Refunds net out both ways (#690): a status='refunded' original AND an
-// original with a linked refund row (the admin path) stop counting, so an
-// approved refund self-confirms on the next sweep instead of reopening.
+// More than one captured charge for ONE subscription period. A charge carries
+// the period it paid for (metadata period_start); charges without it (older
+// rows, other writers) are judged by the subscription's cadence: two at one
+// price within half its shortest cycle (billing or trial) of each other; a
+// price change (upgrade, reprice) starts a new coverage. Distinct periods,
+// however close, are never a duplicate. One-time purchases are
+// consistency.duplicate.ownership's domain. Refunds net out both ways (#690).
 func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDuplicateChargesSamePeriodParams) ([]ConDuplicateChargesSamePeriodRow, error) {
 	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -71,6 +103,8 @@ func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDupl
 	for rows.Next() {
 		var i ConDuplicateChargesSamePeriodRow
 		if err := rows.Scan(
+			&i.SubscriptionID,
+			&i.PeriodKey,
 			&i.UserID,
 			&i.ProductID,
 			&i.ProductKey,
@@ -300,4 +334,36 @@ func (q *Queries) ConOrphanEntitlementSubscriptionSource(ctx context.Context, ar
 		return nil, err
 	}
 	return items, nil
+}
+
+const resolveVanishedFindings = `-- name: ResolveVanishedFindings :execrows
+UPDATE openrails.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
+ WHERE merchant_id = $1::uuid
+   AND finding_type = $2::text
+   AND subject_key LIKE $3::text || '%'
+   AND NOT (subject_key = ANY($4::text[]))
+   AND status IN ('reconcile_required', 'requires_review')
+`
+
+type ResolveVanishedFindingsParams struct {
+	MerchantID    uuid.UUID
+	FindingType   string
+	SubjectPrefix string
+	KeepSubjects  []string
+}
+
+// Open findings of one type under a subject prefix that the latest full scan
+// no longer reports close themselves.
+func (q *Queries) ResolveVanishedFindings(ctx context.Context, arg ResolveVanishedFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveVanishedFindings,
+		arg.MerchantID,
+		arg.FindingType,
+		arg.SubjectPrefix,
+		arg.KeepSubjects,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

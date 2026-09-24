@@ -755,7 +755,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			ListAmount:               price.Amount,
 			Currency:                 currency,
 			Status:                   payments.PaymentStatusCompletedValue,
-			Metadata:                 params.PaymentMetadata,
+			Metadata:                 withPaidPeriod(params.PaymentMetadata, periodStartsAt),
 			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
 			MoneyMovement:            models.MoneyMovementRail, // or#827: the signup charge settled at the rail.
@@ -1096,7 +1096,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				ListAmount:               amount,
 				Currency:                 currency,
 				Status:                   payments.PaymentStatusCompletedValue,
-				Metadata:                 params.PaymentMetadata,
+				Metadata:                 withPaidPeriod(params.PaymentMetadata, renewalPeriodStart(params, subscription, now)),
 				EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
 				AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
 				MoneyMovement:            models.MoneyMovementRail, // or#827: the rebill settled at the rail.

@@ -63,16 +63,23 @@ func (e *engineCase) setDecline(last4, stripeCode, nmiCode string) {
 // the returned subscription.
 func enroll(t *testing.T, w *world, rail string, tp topology) *engineCase {
 	t.Helper()
-	price := w.membership("content:members", 9_990_000)
+	return enrollEvery(t, w, rail, tp, monthHours)
+}
+
+// enrollEvery is enroll on a membership renewing every hours.
+func enrollEvery(t *testing.T, w *world, rail string, tp topology, hours int) *engineCase {
+	t.Helper()
+	price := w.membershipEvery("content:members", 9_990_000, hours)
 	e := &engineCase{w: w, rail: rail, tp: tp, price: price.ID, amount: 999, ent: "content:members", started: w.clock.Now()}
 	e.c = w.newCustomer()
+	before := len(e.providerLedger())
 	e.method = e.c.saveCard(rail, visa)
 	e.sub = e.c.subscribe(tp, rail, price.ID, e.ent, e.method)
 	sub := w.subscription(tp, e.sub)
 	require.Equal(t, "engine", sub.CollectionPolicy)
 	require.Empty(t, sub.RailSubscriptionID)
 	require.Equal(t, "active", sub.Status)
-	require.Len(t, e.providerLedger(), 1, "one initial charge")
+	require.Len(t, e.providerLedger(), before+1, "one initial charge")
 	require.True(t, e.c.entitled(e.ent))
 	return e
 }

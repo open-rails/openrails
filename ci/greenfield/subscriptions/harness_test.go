@@ -129,7 +129,7 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 		slug:   "subs-" + uuid.NewString()[:8],
 		// Engine time starts in the past so every accepted operation is
 		// already due on River's wall clock; tests advance it explicitly.
-		clock:  clockwork.NewFakeClockAt(time.Now().UTC().Add(-240 * 24 * time.Hour).Truncate(time.Second)),
+		clock:  clockwork.NewFakeClockAt(time.Now().UTC().Add(-4 * 365 * 24 * time.Hour).Truncate(time.Second)),
 		stripe: newStripeFake(),
 		nmi:    newNMIFake(),
 		auth:   &verifier{secret: []byte("greenfield-subscriptions-" + uuid.NewString())},
@@ -594,10 +594,15 @@ func (c *customer) entitled(entitlement string) bool {
 // membership creates a monthly auto-renew product and price.
 func (w *world) membership(entitlement string, unitAmount int64) *openrails.Price {
 	w.t.Helper()
+	return w.membershipEvery(entitlement, unitAmount, monthHours)
+}
+
+// membershipEvery is an engine membership renewing every hours.
+func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int) *openrails.Price {
+	w.t.Helper()
 	client := w.client[embedded]
 	product, err := client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
 	require.NoError(w.t, err)
-	hours := monthHours
 	price, err := client.Prices.Create(w.t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
