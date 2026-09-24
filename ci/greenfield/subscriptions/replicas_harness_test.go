@@ -40,9 +40,8 @@ import (
 
 const replicaHeader = "X-Greenfield-Replica"
 
-// Two fleets at a time keeps the suite inside PostgreSQL's default
-// connection limit next to the other parallel worlds.
-var fleetSlots = make(chan struct{}, 2)
+// Three fleets at a time bounds connections (CI's PostgreSQL allows 300).
+var fleetSlots = make(chan struct{}, 3)
 
 type fleet struct {
 	t        *testing.T
@@ -615,20 +614,20 @@ func (fk *nmiFake) approvedLocked(vault string) int {
 	return n
 }
 
-// collection is one engine renewal operation as stored.
-type collection struct {
+// renewalOp is one engine renewal operation as stored.
+type renewalOp struct {
 	PeriodEnd string
 	Attempt   string
 	Status    string
 	Evidence  string
 }
 
-func (f *fleet) collections(e *engineCase) []collection {
+func (f *fleet) collections(e *engineCase) []renewalOp {
 	f.t.Helper()
 	rows, err := f.base.pool.Query(f.t.Context(), f.q(`SELECT coalesce(payload->>'previous_period_end', ''), coalesce(payload->>'attempt', ''), status, coalesce(result_evidence::text, '')
 		FROM openrails.rail_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' ORDER BY created_at, id`), subUUID(e.sub))
 	require.NoError(f.t, err)
-	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[collection])
+	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[renewalOp])
 	require.NoError(f.t, err)
 	return out
 }
