@@ -1797,7 +1797,7 @@ const (
 // a re-run of the same pull lands the same state once). newPeriodEnd is the
 // provider's confirmed period end (used by ResolveRenewed); graceEndsAt dates the
 // dunning grace window (ResolvePastDue), normally the missed period end.
-func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
+func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodStart, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
 		if sub.Status != models.StatusUnknown {
 			return nil // idempotent
@@ -1809,11 +1809,15 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 		case ResolveRenewed:
 			sub.Status = models.StatusActive
 			if newPeriodEnd != nil {
-				// New period starts at the prior period end (or now if unknown), ends at
-				// the provider-confirmed end. The renewal payment is backfilled by #634.
+				// New period starts where the provider says it does, else at the
+				// prior period end (or now if unknown), and ends at the
+				// provider-confirmed end. The renewal payment is backfilled by #634.
 				start := now
 				if sub.CurrentPeriodEndsAt != nil {
 					start = *sub.CurrentPeriodEndsAt
+				}
+				if newPeriodStart != nil && newPeriodStart.Before(*newPeriodEnd) {
+					start = newPeriodStart.UTC()
 				}
 				if newPeriodEnd.After(start) {
 					sub.CurrentPeriodStartsAt = &start
@@ -1827,12 +1831,17 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			}
 			return nil
 		case ResolveAdopted:
-			// Period END only — start untouched, no entitlement windows written
-			// (adoption alone never grants access; a real charge renews).
+			// The provider's period: its end, and its start when stated. No
+			// entitlement windows are written (adoption alone never grants
+			// access; a real charge renews).
 			sub.Status = models.StatusActive
 			if newPeriodEnd != nil {
 				end := *newPeriodEnd
 				sub.CurrentPeriodEndsAt = &end
+				if newPeriodStart != nil && newPeriodStart.Before(end) {
+					start := newPeriodStart.UTC()
+					sub.CurrentPeriodStartsAt = &start
+				}
 			}
 			sub.ClearRetrySchedule()
 			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {

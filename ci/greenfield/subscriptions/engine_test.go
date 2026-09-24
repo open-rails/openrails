@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/riverqueue/river"
 )
@@ -87,7 +88,10 @@ func (e *engineCase) toPeriodEnd() {
 func forEach(t *testing.T, run func(t *testing.T, rail string, tp topology)) {
 	for _, rail := range rails {
 		for _, tp := range []topology{embedded, remote} {
-			t.Run(fmt.Sprintf("%s/%s", rail, tp), func(t *testing.T) { run(t, rail, tp) })
+			t.Run(fmt.Sprintf("%s/%s", rail, tp), func(t *testing.T) {
+				t.Parallel()
+				run(t, rail, tp)
+			})
 		}
 	}
 }
@@ -96,6 +100,7 @@ func forEach(t *testing.T, run func(t *testing.T, rail string, tp topology)) {
 // executes (never parks); each period charges exactly once, extends the
 // period and keeps access continuous; local payments equal provider charges.
 func TestEngineHappyRenewals(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
 		e := enroll(t, w, rail, tp)
@@ -114,18 +119,87 @@ func TestEngineHappyRenewals(t *testing.T) {
 			require.Equal(t, period, e.providerAttempts())
 			paid := completed(w.payments(tp, e.c.id))
 			require.Len(t, paid, period, "local payments match provider charges")
+			e.requireLedgerAgreement(paid)
 		}
 		require.Empty(t, w.stripe.unexpected())
 		require.Empty(t, w.nmi.unexpected())
 	})
 }
 
+// requireLedgerAgreement: every local payment is a provider charge of the
+// same amount, and every provider charge is a local payment (no orphan, no
+// duplicate).
+func (e *engineCase) requireLedgerAgreement(local []openrails.Payment) {
+	t := e.w.t
+	t.Helper()
+	provider := map[string]int64{}
+	for _, entry := range e.providerLedger() {
+		provider[entry.ID] = entry.Amount
+		if entry.Charge != "" {
+			provider[entry.Charge] = entry.Amount
+		}
+	}
+	seen := map[string]bool{}
+	for _, p := range local {
+		cents, ok := provider[p.TransactionID]
+		require.True(t, ok, "local payment %s has a provider charge", p.TransactionID)
+		require.Equal(t, cents*10_000, p.Amount, "amounts agree")
+		require.False(t, seen[p.TransactionID], "no duplicate local payment")
+		seen[p.TransactionID] = true
+	}
+	require.Len(t, seen, len(e.providerLedger()), "no provider charge without a local payment")
+}
+
+// Scenario 0: what each provider-write posture does with a due renewal. Only
+// full executes it; the embedded default (unset) is fail-closed readonly, as
+// documented on config.ProviderWriteMode, and never charges.
+func TestEngineRenewalPostures(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		apply func(*config.Config)
+		renew bool
+	}{
+		{"full", func(*config.Config) {}, true},
+		{"unset_default", func(c *config.Config) { c.ProviderWriteMode = "" }, false},
+		{"readonly", func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeReadOnly }, false},
+		{"limited", func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeLimited }, false},
+		{"engine_admission_hold", func(c *config.Config) { c.EngineAdmissionHold = true }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			e := enroll(t, w, "stripe", embedded)
+			end := e.periodEnd()
+			w.cfg = tc.apply
+			w.restart()
+			e.toPeriodEnd()
+			w.runRenewals()
+			require.Equal(t, tc.renew, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
+			if !tc.renew {
+				require.Equal(t, 1, e.providerAttempts(), "no charge outside mode=full")
+				// Switching to full picks the held renewal up; nothing was lost.
+				w.cfg = nil
+				w.restart()
+				w.advance(10 * time.Minute) // past the park re-check interval
+				w.runRenewals()
+				w.wake()
+				require.True(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
+				require.Len(t, e.providerLedger(), 2, "exactly one renewal charge once allowed")
+			}
+		})
+	}
+}
+
 // Scenario 0: nothing but the runtime's own schedule renews a due membership.
 // A process that starts after the boundary renews at once (the due pass runs
 // on start); it never waits for a multi-hour dunning tick.
 func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
+	t.Parallel()
 	for _, rail := range rails {
 		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, embedded)
 			end := e.periodEnd()
@@ -150,6 +224,7 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 // a non-recoverable decline terminates at once. Engine access is bounded by
 // the paid period, so a declined renewal has no grace window.
 func TestEngineDeclinePolicy(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, stripe, nmi string
 		armed             bool
@@ -165,6 +240,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 	for _, rail := range rails {
 		for _, tc := range cases {
 			t.Run(rail+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
 				w := newWorld(t)
 				if tc.armed {
 					w.armDestructive()
@@ -254,8 +330,10 @@ const (
 // recovers the same period; a card changed mid-cycle is the one the next
 // renewal charges. The old card is never charged again.
 func TestEngineCardReplacement(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		t.Run("during_dunning", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			e.setDecline(visa.Last4, "insufficient_funds", "202")
@@ -274,6 +352,7 @@ func TestEngineCardReplacement(t *testing.T) {
 			require.True(t, e.c.entitled(e.ent))
 		})
 		t.Run("mid_cycle", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(10 * day)
@@ -290,8 +369,10 @@ func TestEngineCardReplacement(t *testing.T) {
 // Scenario 5: cancelling keeps access to the end of the paid period and
 // never renews; resuming before the end renews as if never cancelled.
 func TestEngineCancelAndResume(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		t.Run("cancel_at_period_end", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(5 * day)
@@ -307,6 +388,7 @@ func TestEngineCancelAndResume(t *testing.T) {
 			require.Equal(t, 1, e.providerAttempts(), "a cancelled membership is never charged")
 		})
 		t.Run("resume_before_end", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(5 * day)
@@ -332,9 +414,11 @@ func TestEngineCancelAndResume(t *testing.T) {
 // portable Client (the demo passes RevokeAccess=false). Whatever state the
 // membership is in, the cancel succeeds, is idempotent, and nothing renews.
 func TestEngineAccountDeletionCancels(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"active", "past_due"} {
 		forEach(t, func(t *testing.T, rail string, tp topology) {
 			t.Run(state, func(t *testing.T) {
+				t.Parallel()
 				w := newWorld(t)
 				e := enroll(t, w, rail, tp)
 				if state == "past_due" {
@@ -361,6 +445,7 @@ func TestEngineAccountDeletionCancels(t *testing.T) {
 // Scenario 7: a price version bump grandfathers existing members at their
 // accepted terms; new members buy, and renew at, the new price.
 func TestEngineRepricing(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
 		old := enroll(t, w, rail, tp)
@@ -403,9 +488,11 @@ func TestEngineRepricing(t *testing.T) {
 // refunds touches one-time purchases only (documented on ArchiveProduct):
 // subscription payments are neither listed nor refunded.
 func TestEngineRenewalRefunds(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		for _, revoke := range []bool{false, true} {
 			t.Run(fmt.Sprintf("revoke_access=%t", revoke), func(t *testing.T) {
+				t.Parallel()
 				w := newWorld(t)
 				e := enroll(t, w, rail, tp)
 				e.toPeriodEnd()
@@ -452,6 +539,7 @@ func TestEngineRenewalRefunds(t *testing.T) {
 			})
 		}
 		t.Run("archive_with_refund", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			price, err := w.client[tp].Prices.Retrieve(t.Context(), e.price)
@@ -475,8 +563,10 @@ func TestEngineRenewalRefunds(t *testing.T) {
 // A declined first payment resolves promptly as a refusal: no membership, no
 // charge, and the buyer can enroll again with another card.
 func TestEngineInitialDeclineResolves(t *testing.T) {
+	t.Parallel()
 	for _, rail := range rails {
 		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
@@ -508,6 +598,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 // must not hold the product hostage: once the checkout lapses the engine
 // closes the payment, and the buyer can enroll again.
 func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
 	c := w.newCustomer()
@@ -537,6 +628,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 // while the member may authenticate; if they never do, the engine closes the
 // payment, the membership waits past_due for a card, and a new card recovers.
 func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "stripe", embedded)
 	e.setDecline(visa.Last4, "auth", "")
@@ -558,7 +650,9 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 // operation as not executed and the next attempt, under a new order, charges
 // exactly once; nothing waits on a verification that can never succeed.
 func TestEngineNMIDuplicateRefusal(t *testing.T) {
+	t.Parallel()
 	t.Run("renewal", func(t *testing.T) {
+		t.Parallel()
 		w := newWorld(t)
 		e := enroll(t, w, "nmi", embedded)
 		end := e.periodEnd()
@@ -574,6 +668,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		require.Len(t, completed(w.payments(embedded, e.c.id)), 2)
 	})
 	t.Run("enrollment", func(t *testing.T) {
+		t.Parallel()
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000)
 		c := w.newCustomer()
@@ -602,6 +697,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 // unresolved for an operator rather than being re-sent blind (documented:
 // absence of evidence never authorizes a second financial submission).
 func TestEngineCrashDurability(t *testing.T) {
+	t.Parallel()
 	submit := map[string]func(*http.Request) bool{
 		"stripe": func(r *http.Request) bool { return r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" },
 		"nmi":    func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/transact.php") },
@@ -631,6 +727,7 @@ func TestEngineCrashDurability(t *testing.T) {
 				continue // identical wire point to lost_before_provider on Stripe
 			}
 			t.Run(rail+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
 				w := newWorld(t)
 				e := enroll(t, w, rail, embedded)
 				end := e.periodEnd()
@@ -684,6 +781,7 @@ func TestEngineCrashDurability(t *testing.T) {
 // standing operator finding. (The broken row is the soak's shape: a paid
 // period end moved without a matching accepted agreement.)
 func TestEngineDuePassIsolatesRefusals(t *testing.T) {
+	t.Parallel()
 	w := newWorld(t)
 	healthy := enroll(t, w, "stripe", embedded)
 	broken := enroll(t, w, "nmi", embedded)

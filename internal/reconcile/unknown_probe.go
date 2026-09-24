@@ -198,6 +198,10 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 		end := rec.CurrentPeriodEnd
 		sub.NextBillingAt = &end
 	}
+	if !rec.CurrentPeriodStart.IsZero() {
+		start := rec.CurrentPeriodStart
+		sub.PeriodStart = &start
+	}
 	snap.Subscriptions = []RemoteSubscription{sub}
 	// The latest PAID invoice is charge evidence; it bills at the period start
 	// it opens — the deterministic timestamp Stripe exposes here.

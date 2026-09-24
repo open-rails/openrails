@@ -73,8 +73,13 @@ webhook pipe therefore cannot gate a paying user: access simply continues while
 reconciliation converges the subscription against provider truth. This replaced the older
 appended-grace-window mechanism (#368, deleted by #691) — `grace` remains in the source
 vocabulary for historical rows and as a pacing marker in convergence, but no code appends
-grace windows today. Deliberate cancellation still ends access at the period end the user
-expects.
+grace windows for provider cohorts. Deliberate cancellation still ends access at the period
+end the user expects.
+
+Engine memberships (OpenRails collects them itself) are the exception: access is the paid
+period plus a bounded renewal allowance (`grace`, 24h) that holds access across the
+boundary until the engine's own renewal decides. The renewal supersedes it; a decline or
+cancellation revokes it; if no outcome arrives, access still ends when it lapses.
 
 Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day (`23:59:59Z`) to
 avoid access gaps from ambiguity.

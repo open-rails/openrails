@@ -504,9 +504,24 @@ charge a months-old failure") derives from the same schedule — last offset +
 downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements
 + rail-side delete via the intent ledger's deferred-delete mechanism.
 
-(Stripe-billed subscriptions use Stripe's own dunning; this section governs
-NMI-backed manual dunning. Ours is sparser than Stripe's 8-retry default
-because each NMI decline costs a per-transaction fee.)
+This schedule governs every subscription OpenRails collects itself: engine
+memberships on Stripe and NMI, and NMI `provider_dunning` rebills.
+Provider-owned Stripe subscriptions use Stripe's own dunning. Ours is sparser
+than Stripe's 8-retry default because each NMI decline costs a per-transaction
+fee.
+
+**The due pass** runs every minute and on start: it admits engine renewals at
+their paid-period boundary and runs retries whose `next_retry_at` has passed.
+A subscription it cannot process raises a standing `life.due_pass.refused`
+finding (resolved automatically once it processes) and never fails the pass.
+
+**Engine outcomes.** A renewal allowance (24h) follows each paid engine period,
+so a member keeps access until the renewal decides; a qualified renewal
+supersedes it, and a decline or cancellation revokes it. A card-fixable
+decline, or a terminal outcome while the destructive switch is off, leaves the
+membership `past_due` waiting for a new card; a new card retries at the next
+due pass. Issuer authentication a payer never completes is closed after one
+hour for a first payment and after the renewal allowance for a renewal.
 
 ## Provider Refresh (#574) and the unknown cohort (#632/#664/#665)
 

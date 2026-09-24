@@ -119,7 +119,10 @@ func dsn(t testing.TB) string {
 
 func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 	t.Helper()
-	pool, err := pgxpool.New(t.Context(), dsn(t))
+	poolConfig, err := pgxpool.ParseConfig(dsn(t))
+	require.NoError(t, err)
+	poolConfig.MaxConns = 12
+	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
 	require.NoError(t, err)
 	w := &world{
 		t: t, pool: pool, dsn: dsn(t),

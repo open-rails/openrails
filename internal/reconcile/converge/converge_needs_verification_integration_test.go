@@ -335,13 +335,13 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// Unreachable → stays unknown.
 		id := mkUnknown(ctx)
-		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolveUnreachable, nil, time.Now()))
+		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolveUnreachable, nil, nil, time.Now()))
 		require.Equal(t, models.StatusUnknown, get(ctx, id).Status)
 
 		// Renewed → active, period advanced to the provider's new end.
 		id = mkUnknown(ctx)
 		newEnd := time.Now().UTC().Add(30 * 24 * time.Hour)
-		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolveRenewed, &newEnd, time.Now()))
+		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolveRenewed, nil, &newEnd, time.Now()))
 		got := get(ctx, id)
 		require.Equal(t, models.StatusActive, got.Status)
 		require.NotNil(t, got.CurrentPeriodEndsAt)
@@ -349,12 +349,12 @@ func TestResolveUnknownSubscription_Branches(t *testing.T) {
 
 		// PastDue → past_due with a grace window.
 		id = mkUnknown(ctx)
-		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolvePastDue, nil, periodEnd.Add(48*time.Hour)))
+		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolvePastDue, nil, nil, periodEnd.Add(48*time.Hour)))
 		require.Equal(t, models.StatusPastDue, get(ctx, id).Status)
 
 		// Cancelled → cancelled.
 		id = mkUnknown(ctx)
-		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolveCancelled, nil, time.Now()))
+		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, get(ctx, id), subscriptions.ResolveCancelled, nil, nil, time.Now()))
 		require.Equal(t, models.StatusCancelled, get(ctx, id).Status)
 		return nil
 	}))

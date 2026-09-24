@@ -50,10 +50,10 @@ func newFakeNMICardUpdateGateway(t *testing.T, vaultID, billingID string, oldCar
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/customers":
+		case r.Method == http.MethodGet && r.URL.Path == "/customers/"+gateway.vaultID:
 			gateway.getCalls.Add(1)
 			card := gateway.card.Load().(nmiCard)
-			fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1,"payment_details":{"card_number":"************%s","card_exp":"%s","card_type":"%s"}}]}],"next_cursor":null,"has_more":false}`,
+			fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1,"payment_details":{"card_number":"************%s","card_exp":"%s","card_type":"%s"}}]}`,
 				gateway.vaultID, gateway.billingID, card.LastFour, strings.ReplaceAll(card.ExpiryDate, "/", ""), card.CardType)
 		case r.Method == http.MethodPatch && r.URL.Path == "/customers/"+gateway.vaultID:
 			gateway.patchCalls.Add(1)

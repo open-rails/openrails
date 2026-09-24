@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -232,6 +233,20 @@ func (s *AdminSubscriptionService) requireLockedSubscription(ctx context.Context
 // DeletionScheduledAt marker stays set until the intent's own verify-then-
 // execute leg confirms the NMI subscription is gone), and an ambiguous
 // provider outcome parks for verification instead of lying.
+func rebillInFlight(ctx context.Context, d *db.DB, sub *models.Subscription) (bool, error) {
+	rows, err := d.Gen(ctx).ListRebillTermOwners(ctx, gen.ListRebillTermOwnersParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		switch row.Status {
+		case "pending", "in_flight", "unknown_needs_verify", "failed_retryable":
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // providerCancellable is every state in which a provider schedule may still
 // bill: the merchant (or a host's account-deletion callback) can always stop it.
 func providerCancellable(status models.SubscriptionStatus) bool {
@@ -316,6 +331,15 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		}
 		if !providerCancellable(subscription.Status) {
 			return ErrSubscriptionNotActive
+		}
+		// A delinquent member whose OpenRails rebill is in flight is settled
+		// first: the cancel waits for the money to resolve, never races it.
+		if subscription.Status != models.StatusActive {
+			if moving, err := rebillInFlight(ctx, txdb, subscription); err != nil {
+				return err
+			} else if moving {
+				return ErrSubscriptionNotActive
+			}
 		}
 		if subscription.PspID != observedPSP || subscription.Rail != observedRail || subscription.RailSubscriptionID != observedReference {
 			return apperr.Conflictf("subscription provider binding changed before cancellation")

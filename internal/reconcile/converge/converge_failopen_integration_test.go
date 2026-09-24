@@ -116,7 +116,7 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 		require.NoError(t, err)
 		m, err := models.SubscriptionFromGen(row)
 		require.NoError(t, err)
-		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, m, subscriptions.ResolveRenewed, &newEnd, time.Now().UTC()))
+		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, m, subscriptions.ResolveRenewed, nil, &newEnd, time.Now().UTC()))
 		var status string
 		var periodEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, sub).Scan(&status, &periodEnd))

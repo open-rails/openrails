@@ -361,7 +361,7 @@ func TestSubscriptionAccess_RenewalAndRecovery(t *testing.T) {
 	require.Equal(t, models.StatusUnknown, f.loadSub(t, sub.ID).Status)
 	standing()
 	newEnd := time.Now().UTC().Add(120 * 24 * time.Hour).Truncate(time.Second)
-	require.NoError(t, f.lifecycle.ResolveUnknownSubscription(ctx, f.dbi, f.loadSub(t, sub.ID), ResolveRenewed, &newEnd, time.Now().UTC()))
+	require.NoError(t, f.lifecycle.ResolveUnknownSubscription(ctx, f.dbi, f.loadSub(t, sub.ID), ResolveRenewed, nil, &newEnd, time.Now().UTC()))
 	resolved := f.loadSub(t, sub.ID)
 	require.Equal(t, models.StatusActive, resolved.Status)
 	require.NotNil(t, resolved.CurrentPeriodEndsAt)
@@ -542,7 +542,7 @@ func TestFailOpen_ResolveCancelledRemoteAlive(t *testing.T) {
 	sub, _ := f.create(t, models.RailNMI)
 	require.NoError(t, f.lifecycle.ApplyLocalUnknown(ctx, f.dbi, f.loadSub(t, sub.ID)))
 
-	require.NoError(t, f.lifecycle.ResolveUnknownSubscription(ctx, f.dbi, f.loadSub(t, sub.ID), ResolveCancelledRemoteAlive, nil, time.Now().UTC()))
+	require.NoError(t, f.lifecycle.ResolveUnknownSubscription(ctx, f.dbi, f.loadSub(t, sub.ID), ResolveCancelledRemoteAlive, nil, nil, time.Now().UTC()))
 
 	terminal := f.loadSub(t, sub.ID)
 	require.Equal(t, models.StatusCancelled, terminal.Status)

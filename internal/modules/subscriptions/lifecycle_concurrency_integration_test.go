@@ -167,7 +167,7 @@ func TestStaleLifecycleSnapshotPreservesChargeback(t *testing.T) {
 				err = lifecycle.ApplyLocalPastDue(ctx, database, snapshot, now.Add(24*time.Hour))
 			case "resolve_unknown":
 				paidEnd := now.Add(60 * 24 * time.Hour)
-				err = lifecycle.ResolveUnknownSubscription(ctx, database, snapshot, ResolveRenewed, &paidEnd, time.Time{})
+				err = lifecycle.ResolveUnknownSubscription(ctx, database, snapshot, ResolveRenewed, nil, &paidEnd, time.Time{})
 			case "late_retryable_failure":
 				err = lifecycle.FailMembership(ctx, &FailMembershipParams{SubscriptionID: &subID, Rail: models.RailSolana})
 			case "late_card_failure":

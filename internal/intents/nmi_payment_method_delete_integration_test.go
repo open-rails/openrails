@@ -52,18 +52,18 @@ func newFakeNMIVaultGateway(t *testing.T, vaultID, billingID string) (*fakeNMIVa
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers"):
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers/"):
 			f.listCalls.Add(1)
-			if f.present.Load() && r.URL.Query().Get("id") == f.vaultID {
+			if f.present.Load() && r.URL.Path == "/customers/"+f.vaultID {
 				if f.extraBilling {
-					fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1},{"id":"external-entry","priority":2}]}],"next_cursor":null,"has_more":false}`, f.vaultID, f.billingID)
+					fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1},{"id":"external-entry","priority":2}]}`, f.vaultID, f.billingID)
 					return
 				}
-				fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1}]}],"next_cursor":null,"has_more":false}`,
-					f.vaultID, f.billingID)
+				fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1}]}`, f.vaultID, f.billingID)
 				return
 			}
-			fmt.Fprint(w, `{"customers":[],"next_cursor":null,"has_more":false}`)
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"customer not found"}`)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/billing/"):
 			f.entryDeleteCalls.Add(1)
 			if f.deleteMode.Load().(string) == "ambiguous500" {

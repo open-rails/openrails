@@ -379,7 +379,7 @@ func (f *stripeFake) setDecline(last4, decline string) {
 // ledger is the provider's view of money moved for a customer: succeeded
 // charges and their refunded amounts.
 type ledgerEntry struct {
-	ID, Method string
+	ID, Charge, Method string
 	Amount     int64
 	Refunded   int64
 }
@@ -394,7 +394,7 @@ func (f *stripeFake) ledger(stripeCustomer string) []ledgerEntry {
 			continue
 		}
 		ch := f.charges[pi["latest_charge"].(string)]
-		out = append(out, ledgerEntry{ID: pi["id"].(string), Method: pi["payment_method"].(string), Amount: ch["amount"].(int64), Refunded: ch["amount_refunded"].(int64)})
+		out = append(out, ledgerEntry{ID: pi["id"].(string), Charge: ch["id"].(string), Method: fmt.Sprint(pi["payment_method"]), Amount: ch["amount"].(int64), Refunded: ch["amount_refunded"].(int64)})
 	}
 	return out
 }

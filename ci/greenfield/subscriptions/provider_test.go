@@ -100,6 +100,7 @@ func (l *legacy) engineCharges() int {
 // out of order and late move the local period and payments exactly once;
 // OpenRails never charges on its own; entitlement stays continuous.
 func TestProviderOwnedRenewals(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
 		l := importLegacy(t, w, rail, tp)
@@ -184,8 +185,10 @@ func (w *world) converge() {
 // provider; a provider-side cancel or failed payment is mirrored locally;
 // the host's account-deletion cancel works whatever state the mirror is in.
 func TestProviderOwnedLifecycle(t *testing.T) {
+	t.Parallel()
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		t.Run("cancel_via_openrails", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
 			l := importLegacy(t, w, rail, tp)
@@ -203,6 +206,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			require.True(t, l.c.entitled(l.ent), "the paid period is kept")
 		})
 		t.Run("provider_cancel", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
 			l := importLegacy(t, w, rail, tp)
@@ -212,6 +216,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			require.Equal(t, "cancelled", sub.Status, "the provider's own cancellation is mirrored")
 		})
 		t.Run("provider_payment_failed", func(t *testing.T) {
+			t.Parallel()
 			w := newWorld(t)
 			l := importLegacy(t, w, rail, tp)
 			w.converge()
