@@ -9,6 +9,24 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
+func TestFutureProviderScheduleDoesNotEraseDeclinedRenewal(t *testing.T) {
+	end := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	next := end.Add(30 * 24 * time.Hour)
+	snapshot := &RemoteSnapshot{
+		Provider:      ProviderNMI,
+		Subscriptions: []RemoteSubscription{{RailSubscriptionID: "schedule", Status: SubscriptionStatusActive, NextBillingAt: &next}},
+		Transactions:  []RemoteTransaction{{SubscriptionID: "schedule", Type: TransactionTypeDecline, OccurredAt: end, DeclineCode: "202"}},
+	}
+	got := decideFromSnapshot("schedule", end, snapshot, end.Add(time.Hour), 30*24*time.Hour)
+	if got.Kind != TransitionPastDue || got.NewPeriodEnd != nil {
+		t.Fatalf("next scheduled date is not payment evidence: %+v", got)
+	}
+	snapshot.Transactions = nil
+	if got := decideFromSnapshot("schedule", end, snapshot, end.Add(time.Hour), 30*24*time.Hour); got.Kind != TransitionAdoptPeriodEnd {
+		t.Fatalf("schedule adoption without a declined renewal changed: %+v", got)
+	}
+}
+
 func TestLifecycleDecisionApplierClockOwnership(t *testing.T) {
 	now := time.Date(2041, time.March, 4, 5, 6, 7, 0, time.UTC)
 	applier := NewDecisionApplier(nil, nil, clockwork.NewFakeClockAt(now))

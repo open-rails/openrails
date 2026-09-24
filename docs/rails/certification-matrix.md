@@ -1,12 +1,19 @@
 # Rail certification matrix
 
-What each payment rail actually does, and how well we know it.
+The required merge gate uses deterministic provider transports in the focused
+`ci/greenfield` contracts. It does not claim that a fake provider response is a
+real PSP qualification.
 
-A cell's status answers one question: **what evidence do we have that this flow
-works on this rail?** Not "did someone write the code" — code is necessary and
-never sufficient. Providers' documentation is wrong often enough that an
-unverified wire is a guess, so this document distinguishes guesses from
-observations and refuses to round the former up.
+| Evidence | Scope | Required gate |
+|---|---|---|
+| Greenfield NMI | Provider-owned import and engine/provider subscription lifecycle | Required PR contract |
+| Greenfield Stripe | Hosted checkout, signed webhooks, and engine/provider subscription lifecycle | Required PR contract |
+| Live NMI/Stripe/CCBill/Solana | Real provider or chain behavior | Explicit operator qualification outside merge CI |
+
+A sandbox or live provider result qualifies only the exact operation exercised.
+It must name the account posture, request shape, response evidence, and date.
+The greenfield suite remains the source of deterministic regression coverage;
+provider qualification remains a separate operational activity.
 
 ## Statuses
 
@@ -14,7 +21,7 @@ observations and refuses to round the former up.
 |---|---|---|
 | `live-verified` | The wire was exercised against the provider's **real** gateway — production account, real money or real account state. | A dated probe record or a test run naming the account posture. Covers only the exact operation probed. |
 | `sandbox-verified` | The wire was exercised against the provider's **sandbox / test-mode / devnet** endpoint by a named automated test. | Test function name + the CI lane that runs it + its cadence. |
-| `modeled` | Code is complete and covered by hermetic tests (fake HTTP, recorded fixtures), but **no real provider response has ever confirmed the shape**. | Nothing beyond source. This is the default for anything not verified. |
+| `modeled` | The adapter models the operation, but current provider verification is absent. Hermetic regression coverage must be checked separately. | Nothing beyond source. This is the default for anything not verified. |
 | `limited` | Works, with a named restriction that changes what a customer can do. The restriction is a fact of the rail or a deliberate design choice — not a code gap. | The caveat must name the restriction. Verification level appears in the evidence line. |
 | `unsupported` | The flow does not execute on this rail. Marked **(guarded)** when a request is refused with an error, **(silent)** when the input is accepted and ignored. | — |
 
@@ -32,39 +39,27 @@ declare something the rail will quietly drop. Those cells are called out below.
   nothing about its siblings. A verified `cancelSubscription` does not certify
   `refundTransaction` on the same endpoint.
 
-## Verification lanes
+## Historical capability and evidence inventory
 
-Everything in the `sandbox-verified` and `live-verified` columns comes from one
-of these. Nothing else in the repo touches a real provider.
+The inventory below preserves the implementation restrictions and provider
+observations recorded before the September 2026 test-harness removal. It is
+historical context, not a current certification or regression-coverage claim.
+All former sandbox statuses have been demoted to `modeled`: the weekly NMI and
+Stripe lanes, daily Solana devnet lane, and broad integration suite are gone.
+Test names, schedules, source line numbers, and command examples in this
+inventory describe that earlier snapshot and are not runnable instructions.
+The dated CCBill manual cancellation result covers only the wire operation
+probed at that date. Recheck current adapters before relying on any listed
+capability; engine-owned subscription behavior has evolved since this snapshot.
+Current deterministic coverage is listed above and in
+[greenfield-ci.md](../greenfield-ci.md).
 
-| Lane | Workflow | Cadence | Reaches |
-|---|---|---|---|
-| NMI sandbox | `.github/workflows/live-gated-integration.yaml` job `nmi-sandbox` | weekly, Mon 06:00 UTC | real NMI sandbox gateway |
-| Live invoice collection | same file, job `live-invoice-collection` | weekly | Stripe test mode + NMI sandbox |
-| Stripe Model-B upgrade | same file, job `stripe-model-b` | weekly | Stripe test mode |
-| Solana devnet | `.github/workflows/solana-devnet-integration.yaml` job `devnet-service-layer` | daily 07:00 UTC | Solana devnet, real USDC |
-| Solana sustained rebill | same file, job `devnet-multirebill` | on demand (~3h) | Solana devnet, real USDC |
-| Hermetic integration | `.github/workflows/ci.yaml` | every PR | Postgres + Redis testcontainers, fake provider HTTP |
-
-Each live-gated test `t.Skip`s when its credential secret is absent, so a green
-run is not by itself proof the lane executed. Several provider-reaching tests
-exist outside these lanes (the Stripe catalog `TestLive*` pair, the Solana
-devnet tier-change and failure-path tests, `TestSolanaDevnetMoneyMovementProof`)
-— no workflow runs them, so they back no cell. The Stripe pair is at least no
-longer invisible: or#896 put both behind the `stripelive` build tag (the
-convention `internal/modules/catalog`'s live Stripe tests already used), so they
-are compiled only when a lane asks for them instead of riding a default
-`go test ./...` held back by an env check.
-
-**CCBill has no automated lane.** Every CCBill cell below is either hermetic or
-rests on a single dated manual probe.
-
-## Checkout and enrollment
+### Checkout and enrollment
 
 | Flow | NMI | CCBill | Stripe | Solana |
 |---|---|---|---|---|
-| One-off purchase | `sandbox-verified` | `unsupported` (guarded) — rail is subscription-only | `modeled` | `modeled` |
-| Subscription enrollment | `sandbox-verified` | `modeled` | `modeled` | `sandbox-verified` (devnet) |
+| One-off purchase | `modeled` | `unsupported` (guarded) — rail is subscription-only | `modeled` | `modeled` |
+| Subscription enrollment | `modeled` | `modeled` | `modeled` | `modeled` (devnet) |
 | Free trial (zero-amount first phase) | `unsupported` (guarded) | `limited` — validated inbound, never originated | `modeled` | `unsupported` (guarded) |
 | Paid introductory first phase | `unsupported` (guarded) | `limited` — validated inbound, never originated | `unsupported` (guarded) | `unsupported` (guarded) |
 
@@ -78,13 +73,13 @@ rests on a single dated manual probe.
 - **Enrollment, Solana** — `init_subscription_authority` + `subscribe`, period 1 pulled atomically. last-verified: daily / env: devnet / how: `TestDevnetLifecycle/FastPlan`.
 - **Trials** — the catalog's first-phase (`Price.GetTrial`) has exactly two readers: Stripe checkout and CCBill webhook amount validation. NMI and Solana enrolment never read it, so a trial declared against either is now **refused at catalog push** (or#896): `resolveProviders` consults the rail registry's `SupportsCatalogTrial` and fails the price create with an error naming the limitation, so the price never reaches the DB (`internal/service/catalog_providers.go`; `TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase`). It used to be accepted and dropped, and the subscriber was charged the full amount immediately. Stripe refuses a *paid* intro explicitly (`service.go:1211`); a zero-amount trial becomes `subscription_data[trial_end]`. CCBill trial terms live in the FlexForm — OpenRails only validates the billed amount against the catalog trial.
 
-## Billing lifecycle
+### Billing lifecycle
 
 | Flow | NMI | CCBill | Stripe | Solana |
 |---|---|---|---|---|
 | Rebill / recurring charge | `modeled` | `modeled` | `limited` — provider-driven, ingest only | `modeled` |
 | Dunning / retry | `modeled` | `limited` — provider owns cadence | `unsupported` (by design) | `modeled` |
-| Cancel — user | `sandbox-verified` | `live-verified` | `modeled` | `limited` — dedicated endpoints only (guarded elsewhere) |
+| Cancel — user | `modeled` | `live-verified` | `modeled` | `limited` — dedicated endpoints only (guarded elsewhere) |
 | Cancel — merchant/admin | `modeled` — durable intent, verify-not-decline | `live-verified` (wire, 2026-07-03) — same intent as the user cancel | `modeled` | `unsupported` (guarded) |
 | Cancel — provider-initiated | `modeled` | `modeled` | `modeled` | `modeled` |
 | Tier change — upgrade | `modeled` | `modeled` | `modeled` | `modeled` |
@@ -105,7 +100,7 @@ rests on a single dated manual probe.
 - **Tier change** — NMI: immediate proration charge + new subscription, downgrade deferred to period end. CCBill: upgrade is an `originalSubscriptionId` FlexForm redirect, downgrade refused (`service.go:2229`). Stripe: Model-B anchor reset with `always_invoice`; **carries an explicit `TODO(#268)` saying the live invoice amount must be verified on a real Stripe test upgrade** — the `stripe-model-b` lane exists for exactly this. Solana: a single atomic on-chain transaction via the dedicated `solana-tier-change` endpoints.
 - **Bulk plan migration** — CCBill and Solana are classified `capabilityUserAction` (`plan_migration.go:183`): the rail cannot be repriced server-side, so rows land `blocked` and are surfaced rather than automated.
 
-## Money reversal
+### Money reversal
 
 | Flow | NMI | CCBill | Stripe | Solana |
 |---|---|---|---|---|
@@ -119,15 +114,15 @@ rests on a single dated manual probe.
 - **Chargeback, NMI** — `limited` for two reasons: it is the only NMI handler that trusts the webhook payload rather than re-fetching, and NMI's read APIs do not expose chargebacks at all (`internal/reconcile/nmi.go:60` declares `Chargebacks: false`). **A missed `chargeback.batch.complete` delivery is unrecoverable** — no backfill path exists. An unparseable batch body is logged and swallowed.
 - **Chargeback, CCBill** — ingested from webhooks *and* recoverable from the DataLink chargeback export, so unlike NMI a missed delivery is repairable.
 
-## Payment instruments
+### Payment instruments
 
 | Flow | NMI | CCBill | Stripe | Solana |
 |---|---|---|---|---|
-| Add / vault a payment method | `sandbox-verified` | `unsupported` (guarded) — provider owns the vault | `unsupported` (guarded) — portal-delegated | `unsupported` (guarded) — wallet, not an instrument |
+| Add / vault a payment method | `modeled` | `unsupported` (guarded) — provider owns the vault | `unsupported` (guarded) — portal-delegated | `unsupported` (guarded) — wallet, not an instrument |
 | Update / delete a payment method | `modeled` | `unsupported` (guarded) | `unsupported` (guarded) — portal-delegated | n/a |
 | Swap a subscription's payment source | `modeled` | `unsupported` (guarded) | `unsupported` | n/a |
 | Account Updater | `unsupported` — events logged, no action | `unsupported` — invisible to us | `unsupported` — nothing consumed | n/a |
-| Charge a saved method (arrears settlement) | `sandbox-verified` | `unsupported` — no adapter | `sandbox-verified` | `unsupported` — no adapter |
+| Charge a saved method (arrears settlement) | `modeled` | `unsupported` — no adapter | `modeled` | `unsupported` — no adapter |
 
 - **Vaulting, NMI** — Collect.js tokenization → customer vault. last-verified: weekly / env: sandbox / how: `TestLiveCollectJSTokenVaultCreate`. `TestLiveSandboxStoredCredentialCITThenMIT` is scheduled but test presence or a skipped run is not evidence. Note the lifecycle E2E vaults **directly at NMI**, so the OpenRails payment-method API surface is not itself live-exercised.
 - **Payment methods, Stripe** — `unsupported` (guarded): there is no first-party CRUD, and since or#896 the refusal is honest. `RailPaymentMethodService` is NMI-only (`rails.SupportsPaymentMethodCRUD`), and a Stripe/CCBill/Solana request now fails with *"payment methods are not managed by OpenRails on this rail"* plus where the instrument actually lives, instead of the old **`PSP 'stripe' is not configured`** — which read as a misconfiguration. Mutation is delegated to Stripe's Billing Portal (`stripe_portal.go:23`), and `payment_method.attached` is recorded passively. Pinned by `TestCreatePaymentMethodUnsupportedRailIsHonest`.
@@ -135,15 +130,15 @@ rests on a single dated manual probe.
 - **Charge saved method** — gated by `SupportsChargeSavedMethod` in the rail registry: NMI and Stripe only. last-verified: weekly / env: sandbox + Stripe test mode / how: `TestChargeOutstanding_NMISandbox_CollectsRealCharge`, `TestLiveNMIInvoiceCollectionAgainstSandbox`, `TestLiveStripeInvoiceCollectionAgainstTestAccount`. CCBill and Solana have no collection adapter, so invoice collection does not exist on those rails.
 - **Fiat balances** — funded by manual deposits and source-specific grants (`POST /v1/merchant/credits/deposit`), rail-agnostic; no rail sells a balance top-up product.
 
-## Catalog and reconciliation
+### Catalog and reconciliation
 
 | Flow | NMI | CCBill | Stripe | Solana |
 |---|---|---|---|---|
 | Product push | `unsupported` — no product concept | `unsupported` — manual | `modeled` | n/a |
-| Price / plan push | `modeled` | `unsupported` — manual link only | `modeled` | `sandbox-verified` (devnet) |
+| Price / plan push | `modeled` | `unsupported` — manual link only | `modeled` | `modeled` (devnet) |
 | Catalog update propagation | `unsupported` — no-op | `unsupported` — no-op | `modeled` | `unsupported` — plan is immutable |
 | Catalog drift detection (pull) | `modeled` | `unsupported` — structurally impossible | `modeled` | `modeled` |
-| Inbound event ingestion | `sandbox-verified` | `modeled` | `modeled` | `modeled` — polling, not webhooks |
+| Inbound event ingestion | `modeled` | `modeled` | `modeled` | `modeled` — polling, not webhooks |
 | Provider reconciliation pull | `modeled` | `modeled` — column mapping unverified | `modeled` | `modeled` |
 | Settlement / payout ingestion | `unsupported` | `unsupported` | `unsupported` | n/a |
 

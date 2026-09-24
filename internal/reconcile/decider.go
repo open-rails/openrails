@@ -243,7 +243,7 @@ type Decision struct {
 // Law, in evidence order:
 //  1. Provider snapshot (when present and the row has a provider handle)
 //     decides conclusively: verified renewal charge → renew; roster alive with
-//     future boundary → adopt end; declared failure → past_due within the
+//     future boundary without a decline → adopt end; declared failure → past_due within the
 //     window, cancel beyond; roster dead / absent-from-exhaustive → cancel.
 //  2. First-party evidence (the #664 LIFE law): a lapsed active row with
 //     ownership evidence (payment opened period, or watermark newer than the
@@ -472,10 +472,11 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 		return with(d)
 	}
 	// 2) Roster alive with a FUTURE boundary but no charge → adopt the provider's
-	//    clock (#367: period adoption alone never grants access). Active with a
-	//    stale/absent boundary falls through to the failure evidence below; with
-	//    none, the row waits until the provider moves.
-	if remoteSub != nil && remoteSub.Status == SubscriptionStatusActive {
+	//    clock (#367: period adoption alone never grants access). A future
+	//    scheduled date cannot overrule a verified decline: NMI moves to the
+	//    next regular date even when the current charge fails. Leave that
+	//    unpaid period eligible for the failure handling below.
+	if declineTxn == nil && remoteSub != nil && remoteSub.Status == SubscriptionStatusActive {
 		if next := remoteSub.NextBillingAt; next != nil && next.After(now) {
 			return with(Decision{Kind: TransitionAdoptPeriodEnd, NewPeriodEnd: next, NewPeriodStart: remoteSub.PeriodStart, Reason: "roster_alive_future_boundary"})
 		}

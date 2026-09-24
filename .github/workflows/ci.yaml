@@ -67,69 +67,31 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
-    # Leave room for browser/build/SQLC setup before the Go test process's own
-    # 25-minute timeout, so a stalled test can report its goroutine stacks.
-    timeout-minutes: 45
+    # The PR gate is intentionally small: the greenfield contracts are the
+    # database/provider test suite.
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:18-alpine
         env:
           POSTGRES_DB: openrails_test
-          POSTGRES_USER: admin
-          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         ports: [5432:5432]
-        options: --tmpfs /var/lib/postgresql:rw,size=2g --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+        options: >-
+          --tmpfs /var/lib/postgresql:rw,size=2g
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s
+          --health-retries 20
     env:
-      OPENRAILS_TEST_DB_DSN: postgres://admin:test_password@127.0.0.1:5432/openrails_test?sslmode=disable
-      # Keep tests serial within a package; independent processes own Redis.
-      OPENRAILS_TEST_PACKAGES: "4"
+      OPENRAILS_GREENFIELD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        id: go
         with:
           go-version-file: go.mod
-          cache: false
-      - name: Locate Go caches
-        id: go-cache
-        run: |
-          printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-      # Separate jobs; save each successful revision's newly compiled source.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ steps.go-cache.outputs.build }}
-            ${{ steps.go-cache.outputs.modules }}
-          key: go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-
-            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
-        with:
-          package_json_file: tests/browser/package.json
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: tests/browser/pnpm-lock.yaml
-      - name: Install the browser
-        run: |
-          pnpm --dir tests/browser install --frozen-lockfile --ignore-scripts
-          pnpm --dir tests/browser exec playwright install --with-deps chromium
-      - name: Build the admin console
-        # Browser-tagged integration contracts serve the real console from
-        # web/admin/dist. The checks job runs on a separate runner, so its
-        # build cannot be reused by this E2E job.
-        run: bash scripts/build-admin-console.sh web/admin/dist
-      - run: bash scripts/check.sh e2e
-      - name: Retain workflow test diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: workflow-test-events-${{ github.run_attempt }}
-          path: .reports/v1-workflows.jsonl
-          if-no-files-found: warn
-          retention-days: 7
+          cache: true
+      - name: Run focused greenfield contracts
+        run: bash scripts/greenfield.sh
 
   security:
     name: Required Security

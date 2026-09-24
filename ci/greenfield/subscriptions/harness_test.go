@@ -109,10 +109,8 @@ type world struct {
 }
 
 func dsn(t testing.TB) string {
-	for _, key := range []string{"OPENRAILS_GREENFIELD_DSN", "OPENRAILS_TEST_DB_DSN"} {
-		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-			return v
-		}
+	if v := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN")); v != "" {
+		return v
 	}
 	t.Fatal("OPENRAILS_GREENFIELD_DSN must point at a disposable PostgreSQL database")
 	return ""
@@ -250,8 +248,8 @@ func (w *world) restart() { w.stop(); w.start() }
 
 // kill ends the process as SIGKILL does: nothing it was doing gets recorded.
 // The running jobs and in-flight operations are captured at the instant of
-// death, the process stops, and those rows are put back exactly as the dead
-// process left them (its beat long stopped) before a new process starts.
+// death, the process stops, and those rows are put back as the dead process
+// left them, aged past OpenRails' five-minute silence threshold, before restart.
 func (w *world) kill() {
 	w.t.Helper()
 	ctx := w.t.Context()

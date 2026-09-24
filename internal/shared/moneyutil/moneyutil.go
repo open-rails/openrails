@@ -121,13 +121,13 @@ func roundHalfAwayFromZero(value *big.Rat) (int64, error) {
 		quotient.Add(quotient, big.NewInt(1))
 	}
 
+	// Check the signed result: abs(MinInt64) is one larger than MaxInt64,
+	// but it is a valid amount once the negative sign is restored.
+	if sign < 0 {
+		quotient.Neg(quotient)
+	}
 	if !quotient.IsInt64() {
 		return 0, fmt.Errorf("amount is out of int64 range")
 	}
-
-	rounded := quotient.Int64()
-	if sign < 0 {
-		rounded = -rounded
-	}
-	return rounded, nil
+	return quotient.Int64(), nil
 }

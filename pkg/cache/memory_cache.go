@@ -13,13 +13,18 @@ type memoryCacheItem struct {
 }
 
 type MemoryCache struct {
-	mu    sync.RWMutex
-	items map[string]*memoryCacheItem
+	mu        sync.RWMutex
+	items     map[string]*memoryCacheItem
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewMemoryCache() *MemoryCache {
 	mc := &MemoryCache{
 		items: make(map[string]*memoryCacheItem),
+		stop:  make(chan struct{}),
+		done:  make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -82,24 +87,33 @@ func (c *MemoryCache) Clear(ctx context.Context) error {
 }
 
 func (c *MemoryCache) Close() error {
-	// Nothing to close for in-memory cache
+	if c == nil || c.stop == nil {
+		return nil
+	}
+	c.closeOnce.Do(func() { close(c.stop) })
+	<-c.done
 	return nil
 }
 
 // cleanupExpired runs periodically to remove expired items
 func (c *MemoryCache) cleanupExpired() {
 	ticker := time.NewTicker(1 * time.Minute)
+	defer close(c.done)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		now := time.Now()
+	for {
+		select {
+		case <-c.stop:
+			return
+		case now := <-ticker.C:
 
-		c.mu.Lock()
-		for key, item := range c.items {
-			if !item.expiration.IsZero() && now.After(item.expiration) {
-				delete(c.items, key)
+			c.mu.Lock()
+			for key, item := range c.items {
+				if !item.expiration.IsZero() && now.After(item.expiration) {
+					delete(c.items, key)
+				}
 			}
+			c.mu.Unlock()
 		}
-		c.mu.Unlock()
 	}
 }

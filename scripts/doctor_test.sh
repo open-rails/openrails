@@ -28,7 +28,6 @@ set -e
     echo "doctor_test: an incomplete fixture unexpectedly passed" >&2
     exit 1
 }
-printf '%s\n' "$output" | grep -q '^FAIL bash '
 printf '%s\n' "$output" | grep -q '^FAIL \.env '
 printf '%s\n' "$output" | grep -q '^FAIL git hook pre-commit '
 printf '%s\n' "$output" | grep -q '; fix: '

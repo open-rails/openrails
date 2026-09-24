@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -758,17 +759,30 @@ func TestEngineCrashDurability(t *testing.T) {
 				}
 				_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
 				require.NoError(t, err)
+				promoteCtx, stopPromoting := context.WithCancel(t.Context())
+				promoterDone := make(chan struct{})
 				go func() {
-					for range 200 {
-						w.settleQuiet()
-						time.Sleep(20 * time.Millisecond)
+					defer close(promoterDone)
+					ticker := time.NewTicker(20 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-promoteCtx.Done():
+							return
+						case <-ticker.C:
+							w.settleQuiet()
+						}
 					}
 				}()
+				defer func() { stopPromoting(); <-promoterDone }()
 				select {
 				case <-g.arrived:
 				case <-time.After(20 * time.Second):
 					t.Fatal("the renewal never reached the provider")
 				}
+				// Join the helper before stop replaces the fleet pointer.
+				stopPromoting()
+				<-promoterDone
 				if tc.hard {
 					w.kill() // nothing the dying process was doing is recorded
 				} else {

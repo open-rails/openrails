@@ -146,10 +146,11 @@ verdict disarms the PSP: every NMI mutation is refused with
 `psp_posture` until a retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
-only into Collect.js fields — the E2E harness (`task e2e-nmi-live`) drives the
-full flow: browser tokenization, vault save, one-off sale, subscription
-enrollment, signed webhooks, remote query, cancel. Sandboxes generally cannot
-advance time; for rebill testing create a 1-day plan and wait.
+only into Collect.js fields. The former live E2E harness has been removed;
+browser tokenization, vault save, sales, enrollment, signed webhooks, remote
+query, and cancellation require separately scoped provider qualification.
+Sandboxes generally cannot advance time; deterministic greenfield transports
+prove local scheduling behavior without waiting for a provider billing period.
 
 ### Quirks worth knowing
 

@@ -138,7 +138,7 @@ func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvide
 	return client, nil
 }
 
-func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
+func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (_ *Runtime, buildErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -235,6 +235,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if buildErr != nil {
+			serviceInstances.IdempotencyService.Close()
+			serviceInstances.webhookIdempotencyService.Close()
+		}
+	}()
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -328,6 +334,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
 		DeduplicationService:         serviceInstances.DeduplicationService,
 		IdempotencyService:           serviceInstances.IdempotencyService,
+		webhookIdempotencyService:    serviceInstances.webhookIdempotencyService,
 
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
@@ -656,6 +663,7 @@ type servicesInstances struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
 	IdempotencyService           *replaycache.Store
+	webhookIdempotencyService    *replaycache.Store
 
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
@@ -843,6 +851,8 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
 	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database, clock)
 	if err != nil {
+		idempotencyService.Close()
+		webhookIdempotencyService.Close()
 		return nil, err
 	}
 	webhookDispatcher := &webhooks.WebhookDispatcher{
@@ -941,6 +951,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
 		IdempotencyService:           idempotencyService,
+		webhookIdempotencyService:    webhookIdempotencyService,
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
 		CheckoutSessionService:       checkoutSessionService,

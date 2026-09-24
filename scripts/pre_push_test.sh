@@ -22,7 +22,7 @@ chmod +x "$fixture/bin/go" "$fixture/bin/task" "$fixture/scripts/check_business_
 )
 
 [ "$(sed -n '1p' "$log")" = "go build ./..." ]
-[ "$(sed -n '2p' "$log")" = "go vet -tags integration ./..." ]
+[ "$(sed -n '2p' "$log")" = "go vet ./..." ]
 [ "$(sed -n '3p' "$log")" = "business-time" ]
 [ "$(sed -n '4p' "$log")" = "task sqlc-generate-check" ]
 [ "$(wc -l <"$log" | tr -d '[:space:]')" = "4" ]

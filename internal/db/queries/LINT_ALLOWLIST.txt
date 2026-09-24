@@ -13,7 +13,6 @@
 PERMANENT internal/db/db_pgx.go            # MerchantTx GUC + tx plumbing
 PERMANENT internal/db/schema_rewrite.go    # execution-time schema rewriting wrapper
 PERMANENT internal/db/merchant_scope.go    # reads the app.merchant_id GUC (current_setting)
-PERMANENT internal/integrationharness/harness.go  # sets the app.merchant_id GUC (set_config)
 PERMANENT internal/http/handlers/admin_payments.go  # pg_advisory_xact_lock only
 PERMANENT internal/migrate/migrator.go     # owned schema bootstrap and migration coordination
 PERMANENT internal/migrate/runtime_access.go # caller identity preflight and exact runtime ACL provisioning

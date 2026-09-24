@@ -3,7 +3,7 @@
 Docs for people hacking on OpenRails itself. Audience-facing docs (integrators,
 operators, merchants) live one level up in `docs/`.
 
-- [testing.md](testing.md) — test doctrine, integration suite, business time / test clocks, e2e harnesses
+- [testing.md](testing.md) — greenfield contracts, ordinary checks, business time / test clocks
 - [local-webhooks.md](local-webhooks.md) — deterministic public webhook URLs for local dev (cloudflared)
 
 ## Task targets
@@ -18,16 +18,17 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 | `task docker-up` / `task docker-down` | Start/stop the local compose stack (openrails + Postgres + Garnet) |
 | `task docker-reset` | Recreate the stack from empty — deletes the Postgres volume, then re-migrates ([why you'd need this](#migrations)) |
 | `task docker-logs` | Tail the openrails container |
-| `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` is the CI staleness gate |
-| `task test` | Business-time guardrail + unit tests (`-race`) + core integration tier |
-| `task test-integration-core` / `task test-integration-all` | Integration tests against the compose stack (see testing.md) |
+| `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` includes the local staleness gate |
+| `task test` | Source guardrails + unit tests (`-race`) + focused greenfield contracts (requires `OPENRAILS_GREENFIELD_DSN`) |
+| `task ci-local` | Run the same compact checks and greenfield contracts as CI |
 | `task admin-build` | Build the admin console SPA into `cmd/openrails/consoleassets/dist` (gitignored) |
 | `task build-console-binary` | Binary with the console embedded (`-tags console_assets`) |
 | `task fmt` / `task clean` | `go fmt` + `goimports` / remove build artifacts |
 
-E2E helpers (`tunnel-webhooks`, `verify-webhook-tunnel`, `mint-jwt`,
-`e2e-nmi-live`, `nmi-query`, `e2e-dump-local`, `docker-up-e2e-sandbox`) are
-covered in [testing.md](testing.md) and [local-webhooks.md](local-webhooks.md).
+Local provider-development helpers (`tunnel-webhooks`, `verify-webhook-tunnel`,
+`mint-jwt`, `nmi-query`, `e2e-dump-local`, `docker-up-e2e-sandbox`) remain
+available for explicitly scoped operator work. See
+[local-webhooks.md](local-webhooks.md); these helpers are not merge gates.
 
 ## Database roles in local dev
 
@@ -62,7 +63,7 @@ SQL is hand-written in `internal/db/queries/*.sql` and compiled to
 
 Both `generate` (database-backed analyzer) and `vet` (the `sqlc/db-prepare`
 rule PREPAREs every query) need a live Postgres whose schema matches
-`migrations/`, via `SQLC_DATABASE_URL`. `task sqlc` resolves it:
+`internal/migrate/postgres/`, via `SQLC_DATABASE_URL`. `task sqlc` resolves it:
 
 - If `SQLC_DATABASE_URL` is set, it is used as-is.
 - Otherwise `scripts/sqlc-vet-db.sh` drops/creates a throwaway vet DB
@@ -75,8 +76,9 @@ rule PREPAREs every query) need a live Postgres whose schema matches
   SQL directly. AuthKit tables and migrations are outside this query catalog.
 
 So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
-commit the regenerated `internal/db/gen`. CI runs `task sqlc-check` and fails
-if generated code is stale.
+commit the regenerated `internal/db/gen`. Run `task sqlc-check` locally to
+check generated code, query plans, and SQL discipline; the compact CI workflow
+does not currently run that task.
 
 ## Migrations
 
@@ -94,7 +96,7 @@ Recreating one:
 |---|---|
 | Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
 | A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
-| A hand-rolled test pool | Provision a new disposable database. The integration suite already creates a fresh per-run database. Never clear another library's shared ledger rows. |
+| A hand-rolled test pool | Provision a new disposable database. The greenfield suite creates a fresh schema per test. Never clear another library's shared ledger rows. |
 | An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then run `task db-reset-embedded DSN='…'`. It is plan-only by default and prints the exact `host:port/database` allow-list entry and confirmation token. To apply, set that entry in `OPENRAILS_RESET_TARGETS` and rerun with `CONFIRM='…'`; the schema drop and exact OpenRails/Postgres/schema ledger delete commit together. Restart the host so it re-applies the chain. |
 
 You will not have to notice this yourself: the engine REFUSES to start when the
@@ -112,7 +114,7 @@ both of migratekit's checks reported success.
 - `cmd/openrails/` — the binary: server + CLI (catalog/merchant-config/bootstrap apply, reconcile)
 - `pkg/` — importable packages (api, billingauth, catalog, merchant, adminconsole, query, …)
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/`, `controlplane/`
-- `migrations/` — bootstrap + postgres baseline and increments
-- `tests/` — cross-cutting integration + live-sandbox e2e tests
+- `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
+- `ci/greenfield/` — focused public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
 - `scripts/` — Task-target implementations
 - `web/admin/` — admin console SPA source

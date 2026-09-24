@@ -1,5 +1,14 @@
 # Invariants
 
+**Coverage status after the September 2026 harness removal:** this register
+preserves design requirements and historical audit findings. Except where
+explicitly refreshed, its test names, enforcement labels, commands, and source
+line numbers describe the earlier audit; they are not current regression
+evidence. Deleted tests confer no coverage. Use the
+[focused coverage map](greenfield-coverage.md) for the maintained scenarios and
+remaining gaps. Database and application constraints must be assessed separately
+from whether a surviving test exercises them.
+
 Hard constraints this codebase must uphold. Each entry states the rule, where it is
 enforced, how strongly, and how to audit it mechanically.
 
@@ -18,11 +27,11 @@ do not yet enforce.
 | **T** | a repo test fails |
 | **C** | convention only — nothing fails |
 
-**How this register is verified.** Tenant SQL and public API tests run with RLS
-absent, using both owner and ordinary runtime connections. Financial tests exercise
-constraints, transaction semantics and immutable-record triggers. The historical
-audit notes below retain the earlier RLS failure analysis; they do not describe the
-current authorization mechanism. Current work is tracked in #1021.
+**Historical verification.** The former tenant SQL and public API suites used
+both owner and ordinary runtime connections with RLS absent. Financial tests
+exercised constraints, transaction semantics and immutable-record triggers.
+Those broad suites have been removed; the retained RLS failure analysis below
+does not describe current authorization or current test coverage.
 
 **History.** Migration numbers in FIXED notes are history; the fresh baseline
 `internal/migrate/postgres/0001_schema.up.sql` carries every constraint.
@@ -47,7 +56,7 @@ millicents. Cents and decimal major units exist only at rail boundaries.
 | MONEY-4 | Micros→cents is exact-or-error on the exact path; the ceil path never under-charges. | `moneyutil.go:60-72` | APP | `moneyutil_test.go` |
 | MONEY-5 | The single internal→rail converter is `moneyutil.NativeToRailMinor` (ceil) / `NativeToRailMinorExact` (errors on a sub-minor remainder); both error on an unregistered currency. Callers cannot guess a scale — there is no currency-blind converter left to call. | `internal/shared/moneyutil/currency.go` | **S** — the alternatives are deleted, not deprecated | `grep -rn "MicrosToCents" --include=*.go` → no hits; `go test ./internal/shared/moneyutil` |
 | MONEY-6 | Decimal strings parse via exact rational (`big.Rat`), half-away-from-zero, with an int64-overflow error. | `moneyutil.go:28-41,112-141` | APP | rounding is pinned by `internal/modules/webhooks/nmi_test.go:156-183`; the overflow branch has no test. The register's old grep tested none of the three properties |
-| MONEY-7 | Every provider money boundary ships a **wire-pinning test**: known micros in ⇒ exact integer on the wire. | `internal/shared/moneyutil/wire_pinning_registry_test.go` (AST registry) + the pinning tests it names | **T** for *accounted-for*, **weak-T** for *pinned* | `go test ./internal/shared/moneyutil -run TestEveryMoneyBoundaryIsPinnedOrDeferred`. or#865 replaced `grep -rln "wire pinning"` (no expected value — it listed what WAS pinned and stayed silent about what was not). A money boundary is now defined mechanically (a file calling `NativeToRailMinor`/`NativeToRailMinorExact`/`centsJSONAmount`) and every one must be registered as pinned **or** explicitly deferred with a reason; a new one fails CI, and a registry entry that stops being a boundary also fails. Honest limit: the guard checks that the question was ASKED, not that each pinning test is good, and 11 boundaries are currently *deferred*, not pinned. Solana Pay's live formatter is outside the converter definition — §10 GAP-15 |
+| MONEY-7 | Provider-boundary money coverage is partial. The focused contract pins exact parsing and currency conversion; it does not enumerate or pin every provider wire call site. | `ci/greenfield/money_test.go` | **T** for the cases asserted | `go test -tags greenfield ./ci/greenfield -run TestExactIntegerMoneyBoundaries` covers rounding, overflow, unknown currencies, USD sub-cent rejection, and JPY scaling. The former AST boundary registry was removed with the legacy suite. Provider request formatting, call-site completeness, and Solana Pay formatter coverage remain separate gaps; see GAP-15. |
 | MONEY-8 | `ledger_transfers.amount > 0`; `allow_debit_negative_up_to >= 0`. | `ledger_transfers_amount_positive`, `ledger_transfers_debit_floor_nonnegative` | **DB** | `SELECT count(*) FROM billing.ledger_transfers WHERE amount<=0;` → 0 |
 | MONEY-9 | `payments.amount` deliberately has **no** non-negative CHECK — refunds are negative rows — and a test forbids adding one. | `internal/migrate/postgres/amount_checks_test.go` (`assertNoPaymentsAmountCheck`) | **T** | `go test ./internal/migrate/postgres -run TestAmountValueChecks`. or#865: previously matched two literal constraint names in the baseline only, so the same CHECK added in a **later migration** or under Postgres' **generated** name passed silently — the two ways it would actually break. Now every migration file is scanned and the match is on the predicate as well as the name, anchored so `invoice_payments_amount_positive_chk` (a different table, legitimately positive-only) is not a false positive. Both holes proven to fail. Still static text, not a live `pg_constraint` query |
 | MONEY-10 | Amount CHECKs hold across prices, grants, invoices, invoice items/payments, usage events, credit limits, rating watermarks. | `0001_schema.up.sql` (the `*_amount_*` CHECKs) | **DB** | `SELECT conname FROM pg_constraint WHERE contype='c' AND connamespace='billing'::regnamespace;` |
@@ -146,7 +155,7 @@ All outbound provider mutations post a durable intent first, then execute.
 | ID-8 | Grant termination happens once; `event='grant' ⟺ supersedes_id IS NULL`. | `:1355,:1306` | **DB** |
 | ID-9 | Invoice period, invoice-item source, usage-event, and finding identities are unique per merchant. | `:1552,:1598,:2915,:2617` | **DB** |
 | ID-10 | Merchant slug unique; `api_host` unique among live merchants. | `:272,:276` | **DB** |
-| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`.** A cross-merchant unique is an existence oracle: under RLS the conflicting row is invisible, so the victim sees only an opaque insert failure. Checked TWICE against ONE shared exemption list — `TestUniqueIndexesAreMerchantScoped` derives the inventory from the migration text (no database, catches a bad migration); `TestGAP10_UniqueIndexesAreMerchantScoped` reads `pg_indexes` on a live DB as `openrails_app` (catches an index that arrived some other way). Both have vacuity guards. | `internal/migrate/postgres/unique_scope_exemptions.go` (the ONE list); guards in `merchant_aware_schema_test.go` and `internal/invariantaudit` | **DB** + **T** |
+| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`, except reviewed identities.** Cross-merchant uniqueness can reveal another merchant's values through conflicts. | `internal/migrate/postgres/unique_scope_exemptions.go` records the reviewed exceptions. The former migration-text and live `pg_indexes` guards were removed with the legacy suite; current index definitions need independent review. | **DB** for existing indexes; automated scope audit is a coverage gap |
 
 ## 7. Fail-closed posture
 
@@ -235,10 +244,10 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 | REC-2 | **Superseding an unfired intent is a forward transition, not a rollback.** `rail_intents` moves `pending`/`failed_retryable` → `superseded`, never deleted, never rewritten once executed. This is how an undo neutralises a queued provider write. | **ENFORCED** — `TestSupersedeIsTheOnlyRailIntentWriteOnAnUndoPath` pins the status predicate and refuses a DELETE on any undo path. |
 | REC-3 | **Class D is invalidated and re-derived, never restored.** | **ENFORCED** — the reverse soft-deletes the windows the run closed and stamps them with it; `Converge` rebuilds them. Entitlement before-images are captured as evidence and deliberately left `restored_at IS NULL`. |
 | REC-4 | **A destructive operation with no way to record its undo does not run.** | **ENFORCED** — an enforce pass planning state transitions with no `DestructiveRunRecorder` errors before writing, and a before-image capture failure skips that transition. |
-| REC-5 | **An undo plans before it applies, and never resurrects a row another run removed.** Dry run is the default; `--apply` needs a typed row count matching the plan; a row a later prune tombstoned belongs to that run's reverse and is skipped and reported. | **ENFORCED** — `undo_run_integration_test.go`. |
+| REC-5 | **An undo plans before it applies, and never resurrects a row another run removed.** Dry run is the default; `--apply` needs a typed row count matching the plan; a row a later prune tombstoned belongs to that run's reverse and is skipped and reported. | Historical implementation claim; `undo_run_integration_test.go` was removed. No focused undo/non-resurrection scenario currently replaces it. |
 | REC-6 | **A reversal is scoped by the run, not by a flag.** The ledger row carries the merchant and (when account-bound) the PSP; every restore predicate is keyed on the run id inside a merchant-scoped connection. | **ENFORCED** — the per-PSP and cross-merchant cases are proven against the real enforce path. |
 | REC-7 | **A kind whose damage no local undo reaches is refused by name**, with what to reach for instead — never half-reversed and marked reversed. | **ENFORCED** — `merchant_delete` is registered unrecoverable; unconverted kinds refuse. |
-| REC-8 | **A rollback is not a complete operation; `rollback → pull → converge` is.** The post-rollback book is definitionally incomplete, so the proven source-domain flags are reset and first-enforce is disarmed — the next pull runs advisory until an operator re-arms it. | **ENFORCED** — steps 1 and 4 of the reversal, asserted in `converge_rollback_integration_test.go`. |
+| REC-8 | **A rollback is not a complete operation; `rollback → pull → converge` is.** The post-rollback book is definitionally incomplete, so the proven source-domain flags are reset and first-enforce is disarmed — the next pull runs advisory until an operator re-arms it. | Historical implementation claim; `converge_rollback_integration_test.go` was removed. No focused rollback/pull/converge scenario currently replaces it. |
 
 **The hole, CLOSED (or#893)**: `psp_id` used to be nullable on every PSP-tagged table, so a
 PSP-scoped predicate silently skipped unattributed rows and the undo could only report that
@@ -290,8 +299,8 @@ GAP-14 are open only in their named residuals; GAP-16 is closed.
 Run these from an explicitly authorized operator connection. These are intentional
 fleet-wide diagnostic scans; ordinary tenant requests must use the scoped APIs.
 With RLS absent, the diagnostics no longer silently return empty results because
-of a missing session merchant. `internal/invariantaudit` exercises the relevant
-query and schema contracts on real PostgreSQL.
+of a missing session merchant. The former `internal/invariantaudit` package
+was removed; these SQL diagnostics are operator checks, not current CI evidence.
 
 Read-only checks that should pass at any time:
 
@@ -328,11 +337,10 @@ SELECT permission_group_id, count(*) FROM billing.merchants
  WHERE permission_group_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1;
 ```
 
-Test gates:
+Historical audit commands (verify that the named tests still exist before
+using them; a successful command matching no tests is not evidence):
 
 ```
-go test -tags integration ./internal/invariantaudit                   # scoped tenant queries, schema and financial invariants
-go test ./internal/migrate/postgres                                         # TEN-4, TEN-12, MONEY-9, ID-11, CUR-5b
 go test ./internal/intents  -run TestProviderWrite                    # IDEM-7 (both halves: surface + call sites)
 go test ./internal/shared/moneyutil -run TestNoFloatsInMoneyPackages  # MONEY-3
 go test ./internal/merchants -run TestNoAdHocSecretPathConstruction   # secret-path builder
@@ -342,7 +350,7 @@ go test ./internal/http/handlers -run TestStripeRelatedObjectURLIsAlwaysAPath   
 go test ./internal/integrations/stripeapi                             # IDEM-8/FC-11 (choke point + readonly + version pin)
 go test ./internal/http/middleware -run TestEnabledCaptchaAlwaysHasVerifier           # FC-13
 go test ./internal/intents  -run TestGateExecution                    # IDEM-9 (origin + nil mode)
-go test ./internal/shared/moneyutil -run TestEveryMoneyBoundaryIsPinnedOrDeferred     # MONEY-7
+go test -tags greenfield ./ci/greenfield -run TestExactIntegerMoneyBoundaries # MONEY-7 (conversion cases only)
 go test ./internal/integrations/nmi -run 'TestStalledGateway|TestPerRequestDeadline'  # NMI ctx + deadlines (or#866)
 go test .                   -run 'TestRootPackageStaysLight|TestCorePackagesStayFrameworkNeutral'
 ```

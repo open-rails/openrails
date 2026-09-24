@@ -65,7 +65,7 @@ payment establishes an unscheduled agreement; later merchant invoice collection
 uses that agreement. Recurring subscription enrollment is outside this cut.
 
 `TestHyperSwitchInvoiceClientWorkflow` is the ordinary standalone HTTP Client
-gate in `compatibility/workflows.tsv`. The separately selected
+focused greenfield contract gate. The separately selected
 `TestHyperSwitchActualBrowserInvoice` (tags `integration browser hyperswitch`)
 uses `OPENRAILS_HYPERSWITCH_FIXTURE` and the pinned local vendor SDK/router. It
 covers default volatile refusal, explicit persistent Save card with no financial

@@ -55,7 +55,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	for i, method := range book.PaymentMethods {
 		if err := scan(fmt.Sprintf("payment_methods[%d]", i),
 			method.Rail, method.PSP.Key, method.RailCustomerRef, method.RailMethodRef,
-			method.InitialTransactionID, method.LastFour, method.CardType, method.ExpiryDate,
+			method.InitialTransactionID, method.RecurringTransactionID, method.LastFour, method.CardType, method.ExpiryDate,
 		); err != nil {
 			return err
 		}

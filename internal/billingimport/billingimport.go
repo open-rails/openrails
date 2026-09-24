@@ -146,6 +146,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer.IsZero() {
 				return apperr.Invalidf("declared payment method requires rail, rail_customer_ref and customer")
 			}
+			if pm.RecurringTransactionID != "" && (!strings.EqualFold(pm.Rail, "nmi") || strings.TrimSpace(pm.RecurringTransactionID) != pm.RecurringTransactionID) {
+				return apperr.Invalidf("recurring_transaction_id requires NMI and an unpadded transaction reference")
+			}
 			pmPSP, err := psps.resolve(pm.PSP, pm.Rail, fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
 			if err != nil {
 				return err
@@ -197,6 +200,21 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return apperr.Conflictf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
 			} else if !strings.EqualFold(existingRail, pm.Rail) {
 				return apperr.Conflictf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
+			}
+			if pm.RecurringTransactionID != "" {
+				_, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+					MerchantID: merchantID.UUID(), ID: id, Agreement: "recurring", Ref: pm.RecurringTransactionID,
+				})
+				if err != nil {
+					return fmt.Errorf("import recurring agreement: %w", err)
+				}
+				stored, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID.UUID(), ID: id})
+				if err != nil {
+					return err
+				}
+				if stored.StoredCredentialRecurringRef != pm.RecurringTransactionID {
+					return apperr.Conflictf("payment method already has a different recurring agreement")
+				}
 			}
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}

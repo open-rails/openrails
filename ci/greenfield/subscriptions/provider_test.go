@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed/operator"
 )
 
@@ -30,7 +31,7 @@ type legacy struct {
 
 // importLegacy creates a provider subscription at the fake provider and
 // lands it through ImportBilling, the documented legacy-book entry point.
-func importLegacy(t *testing.T, w *world, rail string, tp topology) *legacy {
+func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ...func(*openrails.DeclaredBilling)) *legacy {
 	t.Helper()
 	l := &legacy{w: w, rail: rail, tp: tp, ent: "content:legacy", c: w.newCustomer()}
 	client := w.client[tp]
@@ -69,6 +70,22 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology) *legacy {
 			PaymentMethod: &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.billingOf(vault)}}}
 		book.Transactions = []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.legacySale(vault, "9.99", start), Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
 	}
+	book.Subscriptions[0].CollectionPolicy = "provider"
+	for _, apply := range configure {
+		apply(&book)
+	}
+	policy := book.Subscriptions[0].CollectionPolicy
+	if rail == "nmi" {
+		book.PaymentMethods[0].InitialTransactionID = book.Transactions[0].TransactionID
+		if policy == "provider_dunning" {
+			book.PaymentMethods[0].RecurringTransactionID = book.Transactions[0].TransactionID
+		}
+		if book.Subscriptions[0].Dunning != nil {
+			w.nmi.mu.Lock()
+			w.nmi.schedules[l.railSub].NextBilling = book.Subscriptions[0].PaidThrough.Add(monthHours * time.Hour)
+			w.nmi.mu.Unlock()
+		}
+	}
 	result, err := client.ImportBilling(t.Context(), book)
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
@@ -78,9 +95,30 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology) *legacy {
 	require.Len(t, subs.Data, 1)
 	l.sub = subs.Data[0].ID
 	sub := subs.Data[0]
-	require.Equal(t, "active", sub.Status)
+	status := "active"
+	if d := book.Subscriptions[0].Dunning; d != nil {
+		status = "past_due"
+		require.NotNil(t, sub.RetryAttempts)
+		require.Equal(t, d.Retries, *sub.RetryAttempts)
+		require.NotNil(t, sub.GraceEndsAt)
+	}
+	require.Equal(t, status, sub.Status)
 	require.Equal(t, l.railSub, sub.RailSubscriptionID)
-	require.NotEqual(t, "engine", sub.CollectionPolicy)
+	require.Equal(t, policy, sub.CollectionPolicy)
+	require.NotNil(t, sub.PaymentMethodID)
+	charges := l.engineCharges()
+	replay, err := client.ImportBilling(t.Context(), book)
+	require.NoError(t, err)
+	require.Equal(t, []string{book.Subscriptions[0].SourceID}, replay.Skipped)
+	require.Equal(t, charges, l.engineCharges(), "import replay never charges")
+	if policy == "provider_dunning" {
+		conflict := book
+		conflict.PaymentMethods = append([]openrails.DeclaredPaymentMethod(nil), book.PaymentMethods...)
+		conflict.PaymentMethods[0].RecurringTransactionID = "another-recurring-agreement"
+		_, err := client.ImportBilling(t.Context(), conflict)
+		require.Error(t, err, "reimport cannot replace an accepted recurring agreement")
+		require.Equal(t, charges, l.engineCharges())
+	}
 	return l
 }
 
@@ -165,7 +203,7 @@ func (l *legacy) providerRenewal(paid bool) obj {
 	}
 	sale, _ := l.w.nmi.providerRenew(l.railSub, paid)
 	if !paid {
-		return nmiEvent("transaction.sale.failure", obj{"transaction_id": "declined-" + uuid.NewString()[:8], "transaction_type": "cc", "condition": "failed", "amount": "9.99", "currency": "USD", "customer_vault_id": l.railCust,
+		return nmiEvent("transaction.sale.failure", obj{"transaction_id": sale.TransactionID, "transaction_type": "cc", "condition": "failed", "amount": "9.99", "currency": "USD", "customer_vault_id": l.railCust,
 			"subscription": obj{"subscription_id": l.railSub}, "action": obj{"action_type": "sale", "amount": "9.99", "success": "0", "response_code": "202"}})
 	}
 	return nmiEvent("transaction.sale.success", obj{"transaction_id": sale.TransactionID, "transaction_type": "cc", "condition": "pendingsettlement", "amount": sale.Amount, "currency": "USD", "order_id": sale.OrderID, "customer_vault_id": sale.Vault,
@@ -268,4 +306,81 @@ func (l *legacy) providerCancelNotice() obj {
 	}
 	l.w.nmi.providerCancel(l.railSub)
 	return nmiEvent("recurring.subscription.delete", obj{"subscription_id": l.railSub})
+}
+
+// NMI owns the schedule, while OpenRails owns recovery of a failed scheduled
+// charge. NMI's next billing date advances even though the failed period is
+// unpaid; the signed webhook causes OpenRails to fetch that provider truth.
+func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
+	t.Parallel()
+	for _, tp := range []topology{embedded, remote} {
+		t.Run(string(tp), func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
+				book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+			})
+			w.converge()
+			// Hold provider writes while observing the failed period. The due
+			// pass runs autonomously and may otherwise recover it before readback.
+			w.cfg = func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+			w.restart()
+			end := l.periodEnd()
+			w.advance(end.Sub(w.clock.Now()) + time.Hour)
+			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
+			sub := w.subscription(tp, l.sub)
+			require.Equal(t, "past_due", sub.Status)
+			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a future schedule date cannot grant an unpaid period")
+			require.NotNil(t, sub.NextRetryAt, "OpenRails schedules recovery after the provider decline")
+			require.Zero(t, w.nmi.saleAttempts(), "read-only posture holds automatic recovery")
+			w.cfg = nil
+			w.restart()
+			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+			w.runRenewals()
+			sub = w.subscription(tp, l.sub)
+			require.Equal(t, "active", sub.Status)
+			require.Equal(t, "provider_dunning", sub.CollectionPolicy)
+			require.Equal(t, l.railSub, sub.RailSubscriptionID)
+			require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)))
+			require.Nil(t, sub.NextRetryAt)
+			require.Equal(t, 1, w.nmi.saleAttempts(), "one automatic recovery charge")
+			require.Len(t, w.nmi.ledger(""), 2, "initial and recovered periods each charged once")
+			paid := completed(w.payments(tp, l.c.id))
+			require.Len(t, paid, 2)
+			recovery := w.nmi.lastSale()
+			require.Equal(t, "9.99", recovery.Amount)
+			require.Equal(t, "merchant", recovery.InitiatedBy)
+			require.Equal(t, "used", recovery.Indicator)
+			require.NotEmpty(t, recovery.Initial, "recovery reuses the imported recurring agreement")
+			require.NotEqual(t, "another-recurring-agreement", recovery.Initial, "refused reimport did not replace the mandate")
+			require.Equal(t, w.nmi.ledger("")[0].ID, recovery.Initial)
+			matched := false
+			for _, payment := range paid {
+				if payment.TransactionID == recovery.TransactionID {
+					require.EqualValues(t, 9_990_000, payment.Amount)
+					require.Equal(t, "USD", payment.Currency)
+					matched = true
+				}
+			}
+			require.True(t, matched, "the recovery provider charge is recorded locally")
+			require.True(t, w.nmi.scheduleLive(l.railSub), "NMI still owns the next scheduled charge")
+			require.True(t, l.c.entitled(l.ent))
+			w.runRenewals()
+			require.Equal(t, 1, w.nmi.saleAttempts(), "a repeated due pass cannot recharge the recovered period")
+			require.Empty(t, w.nmi.unexpected())
+		})
+	}
+}
+
+// Import preserves the source recovery history as well as ownership. It
+// must not submit a fresh charge when restoring or replaying this book.
+func TestNMIProviderDunningImportRetainsRetryHistory(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	importLegacy(t, w, "nmi", remote, func(book *openrails.DeclaredBilling) {
+		last := w.clock.Now().Add(-2 * time.Hour)
+		book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+		book.Subscriptions[0].Dunning = &openrails.DunningEvidence{Retries: 2, LastRetryAt: &last, ScheduleLive: true}
+	})
+	require.Zero(t, w.nmi.saleAttempts())
 }
