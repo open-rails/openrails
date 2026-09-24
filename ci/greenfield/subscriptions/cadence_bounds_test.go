@@ -147,8 +147,8 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 }
 
 // A membership whose price has lost its cadence is never dunned on a guessed
-// month: the failed renewal is refused with an operator finding and no retry
-// is scheduled.
+// month: the due pass refuses to rebill it, raises an operator finding and
+// schedules, charges and ends nothing.
 func TestUnknownCadenceFailsClosed(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -157,13 +157,18 @@ func TestUnknownCadenceFailsClosed(t *testing.T) {
 	w.converge()
 	priceID, err := openrails.ParsePriceID(l.price.ID)
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE id = $1`, uuid.UUID(priceID))
+	schema := pgx.Identifier{w.schema}.Sanitize()
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE id = $1`, uuid.UUID(priceID))
 	require.NoError(t, err)
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
-	w.deliver("nmi", l.providerRenewal(false))
+	// Mid-dunning when the cadence went missing: a retry is due now.
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now())
+	require.NoError(t, err)
+	charges := l.engineCharges()
+	w.runRenewals()
 	sub := w.subscription(embedded, l.sub)
-	require.Nil(t, sub.NextRetryAt, "no retry on a guessed schedule")
+	require.Equal(t, "past_due", sub.Status)
 	require.Nil(t, sub.CancelledAt, "nothing ends on a guessed schedule")
-	require.NotEqual(t, "past_due", sub.Status)
+	require.Equal(t, charges, l.engineCharges(), "nothing is charged on a guessed schedule")
 	require.Contains(t, w.openFindings(collection.FindingUnknownCycle), uuid.UUID(l.sub).String(), "the operator is told")
 }
