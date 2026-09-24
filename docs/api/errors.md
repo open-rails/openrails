@@ -52,6 +52,19 @@ account. The same code answers whether the mismatch is seen at the HTTP
 pre-check or by the durable intent, which re-verifies it under the method's row
 lock before any provider call.
 
+Repointing an NMI-billed subscription to another card in the same NMI vault is
+`409 payment_method_same_vault`: NMI schedules bill a vault, not one of its
+cards, so the change would do nothing at NMI. Vault the new card separately.
+
+NMI-billed (legacy) subscriptions: a cancel while the merchant's destructive
+switch is off is `409 provider_cancel_held` (nothing changed; NMI keeps billing
+until an operator arms the switch); a tier change is `409
+tier_change_requires_engine_billing`. Engine takeovers answer
+`engine_takeover_ineligible`, `engine_takeover_no_recurring_agreement`,
+`engine_takeover_boundary_too_close`, `engine_takeover_in_flight`,
+`engine_takeover_committed`, `engine_takeover_conflict` (409) and
+`engine_takeover_not_found` (404).
+
 A method moved into third-party custody is refused with `409
 payment_method_not_psp_vaulted` on the same route, even when its PSP id still
 matches. Its retained PSP vault reference is historical correlation, not a

@@ -307,6 +307,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		&intents.NMIProviderCutover{DB: r.DB, Resolver: r.CollectionResolver, Clock: clock},
+		&intents.NMIEngineTakeover{DB: r.DB, Resolver: r.CollectionResolver, Clock: clock},
 		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.CollectionResolver, clock), // #674: payment-method swap
 		ccbillCancel,
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),

@@ -236,8 +236,12 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	// #679 volume breaker: destructive types park (stay pending) while the
 	// merchant is over its rolling execution budget or an operator finding is
 	// open. Fails closed — a breaker error parks rather than executing unexamined.
+	attemptLogged := false
 	if r.Breaker != nil && IsDestructiveIntentType(intent.IntentType) {
-		held, reason, err := r.Breaker.Check(ctx, intent, now)
+		held, reason, err := r.Breaker.Check(ctx, intent, now, func(ctx context.Context, d *db.DB) error {
+			attemptLogged = true
+			return NewStore(d).LogExternalMutation(ctx, r.mutationLogParams(intent, MutationLogPhaseAttempting, "", nil))
+		})
 		if err != nil {
 			r.park(ctx, logEntry, stats, intent.ID, now, "destructive-volume breaker check failed: "+err.Error())
 			return
@@ -248,9 +252,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 		}
 	}
 
-	if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
-		r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
-		return
+	if !attemptLogged {
+		if err := r.logExternalMutation(ctx, intent, MutationLogPhaseAttempting, "", nil); err != nil {
+			r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
+			return
+		}
 	}
 	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
 	defer stopBeat() // A panic must not keep an abandoned claim alive.
@@ -580,7 +586,6 @@ func (r *Runner) supersede(ctx context.Context, logEntry *log.Entry, stats *Stat
 }
 
 func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
-	intentID := intent.ID
 	logger := r.Logger
 	if logger == nil {
 		if fallback, ok := r.Store.(MutationLogger); ok {
@@ -590,7 +595,12 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 	if logger == nil {
 		return nil
 	}
-	return logger.LogExternalMutation(ctx, MutationLogParams{
+	return logger.LogExternalMutation(ctx, r.mutationLogParams(intent, phase, reason, evidence))
+}
+
+func (r *Runner) mutationLogParams(intent gen.OpenrailsRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) MutationLogParams {
+	intentID := intent.ID
+	return MutationLogParams{
 		MerchantID:       intent.MerchantID,
 		Provider:         intent.Rail,
 		PspID:            derefUUID(intent.PspID),
@@ -602,7 +612,7 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 		Phase:            phase,
 		Reason:           reason,
 		Evidence:         mutationLogEvidence(intent, evidence),
-	})
+	}
 }
 
 func mutationLogPhase(outcome Outcome) MutationLogPhase {

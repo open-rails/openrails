@@ -93,9 +93,12 @@ type LocalPaymentMethod struct {
 	CustomerID      uuid.UUID
 	Rail            string
 	RailCustomerRef string
-	LastFour        string
-	CardType        string
-	ExpiryDate      string
+	// RailMethodRef names one card within a multi-card vault (NMI billing
+	// id); empty when the rail has one instrument per customer ref.
+	RailMethodRef string
+	LastFour      string
+	CardType      string
+	ExpiryDate    string
 }
 
 // LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
@@ -248,6 +251,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			CustomerID:      row.CustomerID,
 			Rail:            row.Rail,
 			RailCustomerRef: row.RailCustomerRef,
+			RailMethodRef:   row.RailMethodRef,
 		}
 		if row.LastFour != nil {
 			pm.LastFour = *row.LastFour

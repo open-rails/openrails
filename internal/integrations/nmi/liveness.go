@@ -45,6 +45,10 @@ const queryAPITimeFormat = "20060102150405"
 // charged (the no-double-charge invariant), regardless of interleaved
 // declines.
 type SaleProbeResult struct {
+	// Sales is every sale action on/after the probe's since, successes and
+	// declines, in report order: a schedule billed several times since (a
+	// daily cadence, a missed notice) mirrors each charge once.
+	Sales []SaleAction
 	// SuccessFound + SuccessTransactionID: a successful sale exists.
 	// SuccessAt/SuccessAmount/SuccessCurrency carry that action's verbatim
 	// evidence (zero/empty when the report omitted or garbled them).
@@ -106,6 +110,7 @@ func (c *NMIClient) probeSales(ctx context.Context, filter QueryFilter, orderID 
 		return result, fmt.Errorf("transaction query error_response: %s", msg)
 	}
 
+	result.Sales = saleActions(parsed, orderID, since)
 	var latestDecline time.Time
 	for _, txn := range parsed.Transactions {
 		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
@@ -148,6 +153,44 @@ func (c *NMIClient) probeSales(ctx context.Context, filter QueryFilter, orderID 
 		}
 	}
 	return result, nil
+}
+
+// SaleAction is one sale action from a transaction report.
+type SaleAction struct {
+	TransactionID string
+	Success       bool
+	At            time.Time // zero when the report garbled the date
+	Amount        string
+	Currency      string
+	ResponseCode  string
+	ResponseText  string
+}
+
+func saleActions(parsed saleQueryResponse, orderID string, since time.Time) []SaleAction {
+	var out []SaleAction
+	for _, txn := range parsed.Transactions {
+		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
+			continue
+		}
+		for _, action := range txn.Actions {
+			if strings.ToLower(strings.TrimSpace(action.ActionType)) != "sale" {
+				continue
+			}
+			at, err := time.ParseInLocation(queryAPITimeFormat, strings.TrimSpace(action.Date), time.UTC)
+			if err != nil {
+				at = time.Time{}
+			}
+			if !since.IsZero() && !at.IsZero() && at.Before(since.UTC()) {
+				continue
+			}
+			out = append(out, SaleAction{
+				TransactionID: strings.TrimSpace(txn.TransactionID), Success: strings.TrimSpace(action.Success) == "1", At: at,
+				Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency),
+				ResponseCode: strings.TrimSpace(action.ResponseCode), ResponseText: strings.TrimSpace(action.ResponseText),
+			})
+		}
+	}
+	return out
 }
 
 // FindSuccessfulSaleByOrderID reports the first successful sale carrying the

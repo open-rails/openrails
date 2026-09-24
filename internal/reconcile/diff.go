@@ -104,6 +104,7 @@ type remoteIndex struct {
 	subByPSID               map[string]*RemoteSubscription
 	subsByCust              map[string][]*RemoteSubscription
 	remoteByRailCustomerRef map[string]*RemotePaymentMethod
+	remoteByMethod          map[string]*RemotePaymentMethod
 	liveSubByPSID           map[string]bool
 }
 
@@ -120,6 +121,7 @@ func buildRemoteIndex(snap *RemoteSnapshot) *remoteIndex {
 		subByPSID:               map[string]*RemoteSubscription{},
 		subsByCust:              map[string][]*RemoteSubscription{},
 		remoteByRailCustomerRef: map[string]*RemotePaymentMethod{},
+		remoteByMethod:          map[string]*RemotePaymentMethod{},
 		liveSubByPSID:           map[string]bool{},
 	}
 	for i := range snap.Subscriptions {
@@ -142,8 +144,15 @@ func buildRemoteIndex(snap *RemoteSnapshot) *remoteIndex {
 	}
 	for i := range snap.PaymentMethods {
 		v := &snap.PaymentMethods[i]
-		if v.RailCustomerRef != "" {
+		if v.RailCustomerRef == "" {
+			continue
+		}
+		// The first entry of a vault is its primary card.
+		if _, seen := idx.remoteByRailCustomerRef[v.RailCustomerRef]; !seen {
 			idx.remoteByRailCustomerRef[v.RailCustomerRef] = v
+		}
+		if v.RailMethodRef != "" {
+			idx.remoteByMethod[v.RailCustomerRef+"\x1f"+v.RailMethodRef] = v
 		}
 	}
 	return idx
@@ -473,6 +482,9 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 
 		// Matched pair: status comparison.
 		findings = append(findings, compareStatuses(provider, snap, localSub, r, now, opts)...)
+		if f := compareScheduleTerms(provider, idx, localSub, r); f != nil {
+			findings = append(findings, *f)
+		}
 	}
 
 	// Local -> remote: absence-based PS-2 (NMI: the recurring report only
@@ -864,6 +876,75 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 		}
 	}
 	return nil
+}
+
+// compareScheduleTerms reports a matched, live NMI schedule that no longer
+// bills what the local subscription records: another amount, another plan,
+// another vault, or paused at the provider. The provider owns that schedule,
+// so the finding asks for review and nothing is changed automatically.
+func compareScheduleTerms(provider Provider, idx *localIndex, s *LocalSubscription, r *RemoteSubscription) *Finding {
+	if provider != ProviderNMI || !s.IsLive() || (!remoteLive(r.Status) && !r.Paused) {
+		return nil
+	}
+	drift := map[string]any{}
+	var price *LocalPrice
+	if s.PriceID != nil {
+		for i := range idx.prices {
+			if idx.prices[i].ID == *s.PriceID {
+				price = &idx.prices[i]
+			}
+		}
+	}
+	if price != nil {
+		if r.AmountCents > 0 {
+			if cents, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount); err == nil && int64(cents) != r.AmountCents {
+				drift["amount_cents"] = map[string]any{"local": strconv.FormatInt(int64(cents), 10), "remote": strconv.FormatInt(r.AmountCents, 10)}
+			}
+		}
+		if r.PlanID != "" {
+			linked := false
+			for _, name := range localRailNames(provider) {
+				for _, cfg := range models.PSPLinksOnRail(price.PSPLinks, models.Rail(name)) {
+					linked = linked || strings.TrimSpace(cfg["plan_id"]) == r.PlanID
+				}
+			}
+			if !linked {
+				drift["plan_id"] = map[string]any{"remote": r.PlanID}
+			}
+		}
+	}
+	if s.PaymentMethodID != nil && r.CustomerID != "" {
+		if pm := idx.pmByID[*s.PaymentMethodID]; pm != nil && pm.RailCustomerRef != r.CustomerID {
+			drift["customer_vault_id"] = map[string]any{"local": pm.RailCustomerRef, "remote": r.CustomerID}
+		}
+	}
+	if r.Paused {
+		drift["paused"] = true
+	}
+	if len(drift) == 0 {
+		return nil
+	}
+	remote := remoteSubEvidence(r)
+	remote["drift"] = drift
+	return &Finding{
+		Provider:          provider,
+		Type:              FindingProviderScheduleDrift,
+		SubjectKey:        s.ID.String(),
+		Severity:          SeverityHigh,
+		Status:            FindingStatusRequiresReview,
+		LocalEvidence:     localSubEvidence(s),
+		RemoteEvidence:    remote,
+		RecommendedAction: "the provider-owned schedule changed at the provider (" + strings.Join(driftFields(drift), ", ") + "); confirm the change with the customer and correct the catalog or the schedule — OpenRails never edits a provider-owned schedule on its own",
+	}
+}
+
+func driftFields(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // diffDuplicates covers PS-8: one subject carrying multiple live
@@ -1297,6 +1378,10 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 			continue
 		}
 		remote, ok := ridx.remoteByRailCustomerRef[pm.RailCustomerRef]
+		if ok && pm.RailMethodRef != "" && remote.RailMethodRef != "" {
+			// A multi-card vault: compare this card, not the vault's primary.
+			remote, ok = ridx.remoteByMethod[pm.RailCustomerRef+"\x1f"+pm.RailMethodRef]
+		}
 		if !ok {
 			if !traits.paymentMethodsExhaustive {
 				continue // partial vault listing: absence proves nothing

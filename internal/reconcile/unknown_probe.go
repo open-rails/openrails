@@ -30,6 +30,9 @@ type ProbeSubject struct {
 	// PeriodEnd bounds the charge probe; nil (legacy import with no local
 	// period evidence) skips the charge lookup — the roster read alone answers.
 	PeriodEnd *time.Time
+	// PeriodStart, when known, bounds the renewal alignment slack to half
+	// the period (AlignmentSlack).
+	PeriodStart *time.Time
 	// ObservedAt is the owning reconcile clock at the provider-read boundary.
 	// A zero value preserves the standalone prober's physical-clock default.
 	ObservedAt time.Time
@@ -74,7 +77,7 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 	}
 
 	if subj.PeriodEnd != nil {
-		since := subj.PeriodEnd.UTC().Add(-renewalAlignmentSlack)
+		since := subj.PeriodEnd.UTC().Add(-AlignmentSlack(subj.PeriodStart, subj.PeriodEnd))
 		probe, err := p.Client.ProbeSalesByOrderID(ctx, subj.LocalID.String(), since)
 		if err != nil {
 			return nil, err
@@ -125,6 +128,21 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since ti
 		return at
 	}
 	var out []RemoteTransaction
+	if len(probe.Sales) > 0 {
+		for _, sale := range probe.Sales {
+			if sale.TransactionID == "" {
+				continue
+			}
+			amount, _ := parseAmountCents(sale.Amount)
+			t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
+				AmountCents: amount, Currency: sale.Currency, OccurredAt: floored(sale.At)}
+			if !sale.Success {
+				t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.ResponseText, sale.ResponseCode
+			}
+			out = append(out, t)
+		}
+		return out
+	}
 	if probe.SuccessFound && probe.SuccessTransactionID != "" {
 		amount, _ := parseAmountCents(probe.SuccessAmount)
 		out = append(out, RemoteTransaction{

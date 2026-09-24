@@ -36,6 +36,7 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 		Rail:               string(sub.Rail),
 		HasPaymentMethod:   sub.PaymentMethodID != nil,
 		RailSubscriptionID: sub.RailSubscriptionID,
+		PeriodStart:        sub.CurrentPeriodStartsAt,
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
 		GraceEndsAt:        sub.GraceEndsAt,
 		NextRetryScheduled: sub.NextRetryAt != nil,

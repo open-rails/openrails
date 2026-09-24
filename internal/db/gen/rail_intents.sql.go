@@ -596,6 +596,11 @@ WHERE merchant_id = $1::uuid
         (executed_at IS NOT NULL AND executed_at >= $3::timestamptz)
         OR (status IN ('unknown_needs_verify', 'failed_retryable', 'failed_terminal')
             AND updated_at >= $3::timestamptz)
+        -- admitted by the breaker and executing now
+        OR (status = 'in_flight' AND EXISTS (
+              SELECT 1 FROM openrails.rail_mutation_logs l
+              WHERE l.merchant_id = rail_intents.merchant_id AND l.rail_intent_id = rail_intents.id
+                AND l.phase = 'attempting' AND l.attempt = rail_intents.attempts))
       )
 `
 
@@ -1570,7 +1575,10 @@ WHERE merchant_id=$1::uuid AND status='succeeded'
         AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz)
     OR (intent_type='subscription_collection'
         AND subscription_id=$2::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz))
+        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz)
+    OR (intent_type='nmi_engine_takeover'
+        AND payload->'agreement'->>'subscription_id'=$2::uuid::text
+        AND (payload->'agreement'->>'period_end')::timestamptz=$3::timestamptz))
 ORDER BY id LIMIT 2
 `
 
@@ -2743,4 +2751,15 @@ func (q *Queries) SupersedeRailIntentsBySubject(ctx context.Context, arg Superse
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const lockDestructiveBreaker = `-- name: LockDestructiveBreaker :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.destructive_breaker:' || $1::uuid::text, 0))
+`
+
+// Serializes one merchant's breaker admissions; an admission records its
+// attempt before the lock is released, so the next check counts it.
+func (q *Queries) LockDestructiveBreaker(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockDestructiveBreaker, merchantID)
+	return err
 }

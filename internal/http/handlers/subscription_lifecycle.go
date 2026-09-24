@@ -99,6 +99,14 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
+	// A provider-billed schedule that cannot be deleted (destructive actions
+	// disarmed) is refused now, with its operator finding, instead of queueing
+	// a cancel the provider would ignore.
+	if _, err := subscriptions.RequireProviderCancelArmed(r.Request.Context(), r.State.SubscriptionService.Database(), sub, false); err != nil {
+		writeRefusal(r, err, "failed to cancel subscription")
+		return
+	}
+
 	// #696: CCBill cancels queue like every other rail — the worker's user
 	// cancel path records the local runway cancel + durable remote-cancel intent.
 	_, err = r.State.RiverProducer.Insert(r.Request.Context(), riverjobs.CancelSubscriptionArgs{

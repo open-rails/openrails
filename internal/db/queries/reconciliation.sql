@@ -342,7 +342,7 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
 -- rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
 -- the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
 -- for HashiCorp Vault, and the column already carries the right name.
-SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
+SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
@@ -630,7 +630,7 @@ ORDER BY created_at;
 -- evidence) are resolvable only here — via the roster/per-sub probe — so they
 -- must never starve behind a large dated cohort under the LIMIT.
 -- name: ListUnknownSubscriptions :many
-SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
+SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL

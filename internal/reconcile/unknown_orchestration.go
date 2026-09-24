@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -190,16 +191,22 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 				Status:             string(models.StatusUnknown),
 				Rail:               rail,
 				RailSubscriptionID: r.RailSubscriptionID,
+				PeriodStart:        r.CurrentPeriodStartsAt,
 				PeriodEnd:          r.CurrentPeriodEndsAt,
 			}
 			decision := Decide(state, EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, opts.DunningWindow)
-			if decision.Kind == TransitionNone && prober != nil && r.RailSubscriptionID != "" {
+			// NMI's bulk transaction report names no schedule, so the bulk
+			// snapshot can adopt a boundary but never prove its renewal
+			// charge; any non-terminal NMI answer is confirmed by the
+			// per-subscription probe, which reads charges by schedule id.
+			needsProbe := decision.Kind == TransitionNone || (provider == ProviderNMI && decision.Kind == TransitionAdoptPeriodEnd)
+			if needsProbe && prober != nil && r.RailSubscriptionID != "" {
 				// #665: the bulk window couldn't decide this row — ONE targeted
 				// per-sub probe, fed to the SAME decider. A probe failure keeps
 				// the row unknown (retried next pass).
 				res.Probed++
 				if psnap, perr := prober.ProbeSubscription(ctx, ProbeSubject{
-					LocalID: r.ID, RailSubscriptionID: r.RailSubscriptionID, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
+					LocalID: r.ID, RailSubscriptionID: r.RailSubscriptionID, PeriodStart: r.CurrentPeriodStartsAt, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
 				}); perr != nil {
 					log.WithContext(ctx).WithError(perr).WithFields(log.Fields{
 						"subscription_id": r.ID, "rail": rail,
@@ -296,6 +303,16 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		if t.TransactionID == "" || t.OccurredAt.Before(floor) {
 			continue
 		}
+		if !chargeAttempt(t.Type) {
+			// Refunds and chargebacks move money OUT of the merchant: they are
+			// never a charge row. The refund plane records pulled refunds
+			// against their sale; one that arrives here without its sale is
+			// surfaced for review instead of inflating revenue.
+			if t.Type == TransactionTypeRefund || t.Type == TransactionTypeChargeback {
+				recordUnlinkedReversalFinding(ctx, q, sub, t)
+			}
+			continue
+		}
 		status := "completed"
 		if !t.Success {
 			status = "failed"
@@ -386,6 +403,28 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		inserted += int(n)
 	}
 	return inserted, nil
+}
+
+// chargeAttempt reports whether a mirrored transaction is a charge attempt
+// (a sale, or its decline) — the only kinds a payment row records.
+func chargeAttempt(t TransactionType) bool {
+	return t == "" || t == TransactionTypeSale || t == TransactionTypeDecline
+}
+
+// recordUnlinkedReversalFinding surfaces a refund or chargeback the mirror
+// could not attach to its original sale. Best-effort, like every finding.
+func recordUnlinkedReversalFinding(ctx context.Context, q *gen.Queries, sub *models.Subscription, t RemoteTransaction) {
+	action := fmt.Sprintf("a %s of %d cents (transaction %s) was reported for subscription %s without its original sale; record it against the sale it reverses", t.Type, t.AmountCents, t.TransactionID, openrails.SubscriptionID(sub.ID).String())
+	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID:        sub.MerchantID,
+		FindingType:       string(FindingReversalUnlinked),
+		SubjectKey:        string(sub.Rail) + ":" + t.TransactionID,
+		Severity:          string(SeverityHigh),
+		Status:            string(FindingStatusRequiresReview),
+		RecommendedAction: &action,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("transaction_id", t.TransactionID).Error("reconcile backfill: could not persist the unlinked reversal finding")
+	}
 }
 
 // evidenceStaleAction is the operator prose for a floored cancel.

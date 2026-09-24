@@ -306,7 +306,7 @@ func AdminCancelSubscription(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess); err != nil {
+	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess, req.AccountDeletion); err != nil {
 		writeRefusal(r, err, "failed to cancel subscription")
 		return
 	}

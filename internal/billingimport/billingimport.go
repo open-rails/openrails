@@ -288,6 +288,8 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				}
 				if ok {
 					f.PaymentMethodID = &id
+				} else {
+					f.PaymentMethodUnresolved = true
 				}
 			}
 			facts = append(facts, f)

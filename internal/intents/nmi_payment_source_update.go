@@ -516,6 +516,13 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 		}
 	}
 
+	// NMI bills a vault's primary card: another billing entry of the same
+	// vault cannot become the subscription's source (the swap would be a
+	// no-op at NMI reported as success).
+	if oldPMID != nil && *oldPMID != target.ID && oldRailCustomerRef == newRailCustomerRef {
+		return PaymentSourceUpdateOutcome{}, subscriptions.ErrPaymentMethodSameVault
+	}
+
 	subID := sub.ID
 	priorSwaps, err := t.DB.Gen(ctx).CountRailIntents(ctx, gen.CountRailIntentsParams{
 		MerchantID:     tid.UUID(),

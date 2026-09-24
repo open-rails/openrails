@@ -72,6 +72,7 @@ jobs:
     timeout-minutes: 15
     env:
       OPENRAILS_GREENFIELD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
+      OPENRAILS_GREENFIELD_SHARDS: "3"
     steps:
       # A step rather than a service: the multi-replica fleets (#1075) need
       # more than the default 100 connections, a server flag services cannot set.
@@ -80,7 +81,7 @@ jobs:
           docker run -d --name greenfield-postgres -p 5432:5432
           --tmpfs /var/lib/postgresql:rw,size=2g
           -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
-          postgres:18-alpine -c max_connections=300
+          postgres:18-alpine -c max_connections=500
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:

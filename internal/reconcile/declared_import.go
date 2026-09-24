@@ -67,7 +67,11 @@ type DeclaredSubscriptionFact struct {
 	DunningRetries     int       // legacy retry count → retry_attempts (forensics)
 	DunningLastRetryAt *time.Time
 	PaymentMethodID    *uuid.UUID
-	Evidence           []byte // verbatim legacy payload → gateway_response at seed
+	// PaymentMethodUnresolved: the fact names an instrument that is neither in
+	// the book nor stored locally. The row is blocked rather than imported
+	// without its card — an orphan must be visible.
+	PaymentMethodUnresolved bool
+	Evidence                []byte // verbatim legacy payload → gateway_response at seed
 }
 
 // DeclaredOutcome is one fact's import outcome.
@@ -218,6 +222,10 @@ func ImportDeclaredSubscriptions(
 		}
 		if f.CancelKind != DeclaredCancelNone && f.CancelAt.IsZero() {
 			block("cancel evidence requires its timestamp")
+			continue
+		}
+		if f.PaymentMethodUnresolved {
+			block("payment_method names an instrument that is not declared in this book or stored for this customer")
 			continue
 		}
 

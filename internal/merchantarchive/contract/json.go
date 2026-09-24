@@ -191,6 +191,15 @@ var jsonRules = map[string]jsonRule{
 		"binding": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 	}),
 	"rail_intents.hyperswitch_method_delete.result_evidence": object(map[string]jsonRule{"physically_deleted": booleanValue, "detached": booleanValue, "vendor_method_id": textValue}),
+	// The engine agreement a takeover grants is replayed on restore.
+	"rail_intents.nmi_engine_takeover.payload": object(map[string]jsonRule{
+		"legacy_subscription_id": uuidValue, "legacy_policy": textValue, "rail_subscription_id": textValue, "payment_method_id": uuidValue,
+		"instrument": frozenInstrumentJSON, "legacy_payment_id": uuidValue, "amount_minor": moneyStringValue, "anchor": textValue, "cutoff": textValue,
+		"agreement": acceptedRenewalJSON,
+	}),
+	"rail_intents.nmi_engine_takeover.result_evidence": nullable(object(map[string]jsonRule{
+		"delete_submitted": booleanValue, "not_executed": textValue, "abandoned": booleanValue, "completed": booleanValue, "successor_subscription_id": uuidValue,
+	})),
 	"rail_intents.nmi_provider_cutover.payload": object(map[string]jsonRule{
 		"source_qualification": cutoverQualificationJSON, "target_qualification": cutoverQualificationJSON,
 		"source_credential_fingerprint": sha256Value, "target_credential_fingerprint": sha256Value,

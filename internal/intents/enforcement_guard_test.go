@@ -145,8 +145,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/manual_rebill_preparation.go:prepareProvider":   "manual_rebill intent pre-charge step; immutable provider preconditions and set/readback retry are proven by TestManualRebillPreparesAcceptedPriceOnceBeforeCharging",
 
 	// --- reactive user/admin cancels ------------------------------------
-	"internal/modules/subscriptions/admin_service.go:cancelWithNMI":         "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",
-	"internal/modules/subscriptions/user_service.go:CancelUserSubscription": "reactive user cancel (see admin_service note)",
+	"internal/modules/subscriptions/admin_service.go:cancelWithNMI": "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",
 
 	// --- vault lifecycle -------------------------------------------------
 	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":       "the create half of the vault lifecycle: no durable intent exists until a vault does",
