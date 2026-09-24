@@ -227,6 +227,7 @@ type Runtime struct {
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
 	IdempotencyService           *replaycache.Store
+	webhookIdempotencyService    *replaycache.Store
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
@@ -358,6 +359,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 	}
 	if r.IdempotencyService != nil {
 		r.IdempotencyService.Close()
+	}
+	if r.webhookIdempotencyService != nil {
+		r.webhookIdempotencyService.Close()
 	}
 	if r.RedisClient != nil && r.redisOwned {
 		if err := r.RedisClient.Close(); err != nil {

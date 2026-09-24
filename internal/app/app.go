@@ -35,6 +35,7 @@ type App struct {
 	ConsoleAssets fs.FS
 
 	stopRedisMonitor context.CancelFunc
+	ownedCache       cache.Cache
 	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
 	// created only when the control plane is attached and no pool was injected. It
 	// is attached together with ControlPlane via SetControlPlane and closed here.
@@ -177,11 +178,13 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	}
 
 	var appCache cache.Cache
+	var ownedCache cache.Cache
 	var stop context.CancelFunc
 	if opts != nil && opts.Cache != nil {
 		appCache = opts.Cache
 	} else {
 		memoryCache := cache.NewMemoryCache()
+		ownedCache = memoryCache
 		switchable := cache.NewSwitchableCache(memoryCache)
 		appCache = switchable
 		if runtime.RedisClient != nil {
@@ -195,6 +198,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		Config:           cfg,
 		Runtime:          runtime,
 		Cache:            appCache,
+		ownedCache:       ownedCache,
 		RedisClient:      runtime.RedisClient,
 		stopRedisMonitor: stop,
 	}
@@ -229,10 +233,13 @@ func (a *App) Close(ctx context.Context) error {
 		a.controlPlanePool.Close()
 		a.controlPlanePool = nil
 	}
-	if a.Cache != nil {
-		if err := a.Cache.Close(); err != nil {
+	// Close the owned fallback even if Redis is the current backend.
+	// A cache supplied by the host stays open.
+	if a.ownedCache != nil {
+		if err := a.ownedCache.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close cache: %w", err))
 		}
+		a.ownedCache = nil
 	}
 	if len(errs) == 0 {
 		return nil
