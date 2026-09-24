@@ -7,7 +7,8 @@ card PSP (openrails#1064).
 
 - Stripe Elements checkout rail (`driver: "stripe_elements"`, from a PSP with
   `flow: "elements"`): saved Stripe cards or a new card in the page, 3-D
-  Secure via `authenticatePayment`; no redirect to hosted Checkout.
+  Secure via `authenticatePayment`; no redirect to hosted Checkout. The
+  Payment Element is cards only (no Link bank tab or wallets).
 - One screen: saved cards (brand •••• last4 · MM/YY, most recent first),
   inline "Use a new card", one "Pay $X" / "Subscribe for $X every <period>"
   button with the agreement line. No provider chooser for a single rail.

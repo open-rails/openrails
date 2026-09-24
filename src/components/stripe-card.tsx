@@ -94,7 +94,9 @@ export const StripeCardEntry = React.forwardRef<
           clientSecret: secret,
           appearance: stripeAppearance(host.current),
         })
+        // Cards only: the panel saves a card, so no Link bank or wallets.
         const element = elements.create("payment", {
+          wallets: { link: "never", applePay: "never", googlePay: "never" },
           ...(defaultCountry
             ? {
                 defaultValues: {
