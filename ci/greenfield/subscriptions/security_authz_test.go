@@ -124,7 +124,8 @@ type rival struct {
 }
 
 func (w *world) rival() *rival {
-	return w.peer("rival-"+uuid.NewString()[:8], embed.CustomerBillingManagement, map[string]embed.PSPConfig{
+	// Its own identity provider: merchant A's credentials mean nothing there.
+	return w.peer("rival-"+uuid.NewString()[:8], embed.CustomerBillingManagement, &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]embed.PSPConfig{
 		"stripe": {"stripe": {AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}}},
 		"nmi":    {"nmi": {AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}}},
 	})
@@ -138,7 +139,7 @@ func (w *world) sibling() *rival {
 
 // siblingWith is a sibling publishing the given customer route scope.
 func (w *world) siblingWith(scope embed.CustomerHTTPScope) *rival {
-	return w.peer(w.slug, scope, w.declaredPSPs())
+	return w.peer(w.slug, scope, w.auth, w.declaredPSPs())
 }
 
 func (w *world) declaredPSPs() map[string]embed.PSPConfig {
@@ -151,10 +152,10 @@ func (w *world) declaredPSPs() map[string]embed.PSPConfig {
 
 // peer is another process on this database. Subjects "auto-<uuid>" are the
 // customer's automation credentials, not their interactive session.
-func (w *world) peer(slug string, scope embed.CustomerHTTPScope, psps map[string]embed.PSPConfig, delegated ...billingauth.DelegatedAuthenticator) *rival {
+func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, psps map[string]embed.PSPConfig, delegated ...billingauth.DelegatedAuthenticator) *rival {
 	t := w.t
 	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{
-		Verifier: w.auth,
+		Verifier: v,
 		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
 			subject := p.Identity().Subject
 			if _, err := uuid.Parse(subject); err == nil {

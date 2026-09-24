@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -58,7 +59,11 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != customer || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
+		if method.CustomerID != customer {
+			// Another customer's method is indistinguishable from a missing one.
+			return apperr.New(http.StatusNotFound, "not_found", "payment method not found")
+		}
+		if method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.ChargeVia != "pan_proxy" {
 			return charge.ErrInstrumentChanged
 		}
 		if err := charge.FreezeInstrument(observed).Matches(method, charge.AgreementRecurring); err != nil {

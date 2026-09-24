@@ -5372,7 +5372,7 @@
     "internal/http/handlers/catalog_application.go": "ac9f0800234299b8288bd84fd3db312ddb7b67d3e58f7bdb1d73bca99e3f62e4",
     "internal/http/handlers/catalog_decode.go": "7b9c82dfb71df389a61ce6aee99c95f15e970bdc0e1de4825497ec65987e825e",
     "internal/http/handlers/catalogs.go": "a5e333a2e8daf5c7c2f9f36546715600ffa431f0e59c57aaa9d53cc63fc4d6f3",
-    "internal/http/handlers/change_tier.go": "5ffb90cdd255e1206f47f63187103cb22ad135aac91fde9456e174a7bb7efbc6",
+    "internal/http/handlers/change_tier.go": "b0db30105783ac3d7c88395dcc700cd322b3fe559f4f42191d793be3ebf27a8a",
     "internal/http/handlers/checkout_config.go": "e2d91a53e38c9c5a504a67787c73a0a57c8f0e6975bf7d3277035dae130fd5e6",
     "internal/http/handlers/checkout_session.go": "c5e922070953c9b3b29b0d4fdba5f634c2bd2805165bad7c9b27505a859508f9",
     "internal/http/handlers/currencies.go": "bbd9ca69f19792125a1df03ef1ac5f425637f3ac025cbdab5f574cf7f8f36e9e",

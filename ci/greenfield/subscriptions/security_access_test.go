@@ -235,7 +235,7 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 		}
 		return &billingauth.DelegatedPrincipal{MerchantID: merchantID, MerchantSlug: w.slug, SubjectID: subject, CredentialClass: class, Issuer: issuer}, nil
 	})
-	self := w.peer(w.slug, embed.CustomerSelfService, w.declaredPSPs(), hostAuth)
+	self := w.peer(w.slug, embed.CustomerSelfService, w.auth, w.declaredPSPs(), hostAuth)
 	group := "g" + uuid.NewString()[:8]
 	basic := w.tierPrice(group, 1, 1000, monthHours, false)
 	plus := w.tierPrice(group, 2, 2000, monthHours, false)
@@ -340,7 +340,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 	t.Run("merchant-configured Collect.js origin", func(t *testing.T) {
 		psps := map[string]embed.PSPConfig{"nmi": {"nmi": {AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}}
-		r := w.peer("script-"+uuid.NewString()[:8], embed.CustomerBillingManagement, psps)
+		r := w.peer("script-"+uuid.NewString()[:8], embed.CustomerBillingManagement, w.auth, psps)
 		cfg, err := r.client.GetCheckoutConfig(t.Context())
 		require.NoError(t, err)
 		found := false
