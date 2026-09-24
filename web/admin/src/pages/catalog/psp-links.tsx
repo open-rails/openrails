@@ -53,6 +53,8 @@ const SKIP_LABELS: Record<CheckoutRoutingSkip, string> = {
   link_missing: "This price has not been sent to the provider yet.",
   mode_unsupported:
     "This provider cannot take this kind of payment (one-off or recurring).",
+  posture_disarmed:
+    "The provider's credentials failed their test-mode check, so it is switched off.",
   service_unavailable: "The connection to this provider is not running.",
   resolve_failed: "The provider could not be worked out at the time of asking.",
 }
@@ -66,6 +68,7 @@ const SKIP_HEADLINES: Record<CheckoutRoutingSkip, string> = {
   credentials_missing: "credentials missing",
   link_missing: "not sent to provider",
   mode_unsupported: "cannot take this payment",
+  posture_disarmed: "credentials failed check",
   service_unavailable: "connection not running",
   resolve_failed: "could not be worked out",
 }
