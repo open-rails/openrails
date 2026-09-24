@@ -381,6 +381,8 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 		CreatedAt:       resp.CreatedAt,
 		ExpiresAt:       resp.ExpiresAt,
 		Metadata:        resp.Metadata,
+		Operation:       resp.Operation,
+		Failure:         resp.Failure,
 	}
 	if resp.PaymentID != nil {
 		result.PaymentID = checkoutResponseID(resp.PaymentID)

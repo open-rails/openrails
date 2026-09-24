@@ -449,6 +449,9 @@ func (s *CheckoutService) processOneTimePurchase(
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
 	case target.Rail == "ccbill":
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
+	case target.Rail == "stripe" && strings.TrimSpace(req.PaymentMethodID) != "":
+		// A saved card is charged in the page, exactly like an NMI sale.
+		return s.processNMISale(ctx, req, user, price, product, coverage, target)
 	case target.Rail == "stripe":
 		return s.processStripePayment(ctx, req, user, price, product)
 	default:

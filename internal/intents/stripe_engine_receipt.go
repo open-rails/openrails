@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -44,6 +45,24 @@ func StripeEngineParams(in gen.OpenrailsRailIntent) (subscriptions.StripeEngineP
 		params.AmountMinor = minor
 		params.Currency = p.Terms.Currency
 		params.Initial = true
+	case payments.TypeNMISale:
+		p, err := payments.DecodeNMISalePayload(in)
+		if err != nil {
+			return params, err
+		}
+		customer, err := uuid.Parse(p.UserID)
+		if err != nil {
+			return params, err
+		}
+		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
+		if err != nil {
+			return params, err
+		}
+		params.CustomerID = customer
+		params.Instrument = p.Instrument
+		params.AmountMinor = minor
+		params.Currency = p.Currency
+		params.OneTime = true
 	case subscriptions.TypeSubscriptionCollection:
 		p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
 		if err != nil {

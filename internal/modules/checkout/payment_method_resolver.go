@@ -47,7 +47,7 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 			return "", "", nil, false, fmt.Errorf("invalid payment method: %w", err)
 		}
 
-		if !rails.IsNMI(pm.Rail) {
+		if !rails.IsNMI(pm.Rail) && pm.Rail != models.RailStripe {
 			return "", "", nil, false, fmt.Errorf("%w: payment method is not compatible with card payments", ErrPaymentMethodStale)
 		}
 		if !rails.SameRail(pm.Rail, models.Rail(target.Rail)) {
@@ -57,13 +57,16 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 			return "", "", nil, false, err
 		}
 
-		// NMI-backed only (checked above): vault id = customer-scope handle,
-		// billing id = instrument-scope handle (targets the exact card, #682).
+		// NMI: vault id + billing id (#682). Stripe: customer + PaymentMethod.
 		return pm.RailCustomerRef, pm.RailMethodRef, pm, false, nil
 	}
 
 	if req.PaymentToken == "" {
 		return "", "", nil, false, errors.New("payment_method_id or payment_token is required")
+	}
+	if !rails.IsNMI(models.Rail(target.Rail)) {
+		// Other card PSPs save the card in the page first, then charge it by id.
+		return "", "", nil, false, errors.New("this payment provider requires a saved payment_method_id")
 	}
 	if s.RailPaymentMethodService == nil {
 		return "", "", nil, false, errors.New("payment method service unavailable")

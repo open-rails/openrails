@@ -86,6 +86,10 @@ type CustomerVaultError struct {
 	LocalizationID string
 	Detail         string
 	RawResponse    string
+	// AVSResponse and CVVResponse are the gateway's address/security-code
+	// verification results (classic avsresponse/cvvresponse).
+	AVSResponse string
+	CVVResponse string
 }
 
 func (e *CustomerVaultError) Error() string {
@@ -322,6 +326,8 @@ func newAddSubscriptionError(rawResponse string, output url.Values) error {
 		LocalizationID: nmiLocalizationID(responseCode),
 		Detail:         nmiResponseDetail(responseCode),
 		RawResponse:    rawResponse,
+		AVSResponse:    strings.TrimSpace(output.Get("avsresponse")),
+		CVVResponse:    strings.TrimSpace(output.Get("cvvresponse")),
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
 		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))

@@ -62,7 +62,7 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 			return collectedTerms{}, err
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
-		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
+		return collectedTerms{in.Rail, p.Currency, minor, p.Instrument, p.Instrument.RailCustomerRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
 
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
@@ -176,7 +176,7 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	}
 	p, _ := decodeCollectedTerms(in)
 	if p.Rail == "stripe" {
-		if in.IntentType == subscriptions.TypeInitialMembership || in.IntentType == subscriptions.TypeSubscriptionCollection {
+		if in.IntentType == subscriptions.TypeInitialMembership || in.IntentType == subscriptions.TypeSubscriptionCollection || in.IntentType == payments.TypeNMISale {
 			if r.data.StripeEngine == nil || r.data.Stripe != nil || r.data.NMI != nil {
 				return errors.New("qualified engine receipt has wrong provider family")
 			}

@@ -460,6 +460,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		runtime.CheckoutService.Intents = intentRunner
 		if runtime.CheckoutService.NMISaleService != nil {
 			runtime.CheckoutService.NMISaleService.Intents = intentRunner
+			runtime.CheckoutService.NMISaleService.Config = runtime.Config
+			if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
+				runtime.CheckoutService.NMISaleService.StripeEngines = engines
+			}
 		}
 		if runtime.CheckoutService.CustodianSaleService != nil {
 			runtime.CheckoutService.CustodianSaleService.Intents = intentRunner

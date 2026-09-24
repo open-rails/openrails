@@ -31,3 +31,21 @@ var (
 	ErrPaymentMethodStale      error = newCodedError(CodePaymentMethodStale, ErrPaymentRefused)
 	ErrPaymentProviderRejected error = newCodedError(CodePaymentProviderRejected, ErrInternal)
 )
+
+// PaymentFailureFrom returns the customer-facing decline carried by a
+// card_declined refusal, for hosts that relay it to the buyer.
+func PaymentFailureFrom(err error) (*PaymentFailure, bool) {
+	var status *StatusError
+	if !errors.As(err, &status) || status.Code != CodeCardDeclined {
+		return nil, false
+	}
+	raw, ok := status.Metadata["failure"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	failure := &PaymentFailure{}
+	failure.Reason, _ = raw["reason"].(string)
+	failure.Message, _ = raw["message"].(string)
+	failure.Field, _ = raw["field"].(string)
+	return failure, failure.Reason != ""
+}

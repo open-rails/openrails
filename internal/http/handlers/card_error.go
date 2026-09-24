@@ -16,7 +16,7 @@ import (
 // Classification uses only the provider's verbatim failure code; processor
 // text stays in server-side logs and the caller receives safe actionable copy.
 func writePaymentMethodError(r *httprequest.Request, pmErr *paymentmethods.PaymentMethodError) {
-	r.APIError(paymentRefusalError(strings.TrimSpace(pmErr.LocalizationID)))
+	r.APIError(railPaymentRefusalError(pmErr.Rail, strings.TrimSpace(pmErr.LocalizationID), pmErr.Failure))
 }
 
 // writePaymentMethodStale renders openrails.CodePaymentMethodStale: the saved
@@ -31,8 +31,21 @@ func writePaymentMethodStale(r *httprequest.Request) {
 // card_declined the customer can answer with another card; gateway and
 // merchant-configuration categories are a 502 payment_provider_rejected.
 func paymentRefusalError(failureCode string) *api.APIError {
-	reason := payments.NormalizeFailureReason("nmi", failureCode)
-	metadata := map[string]any{"decline_reason": reason}
+	return railPaymentRefusalError("nmi", failureCode, nil)
+}
+
+// railPaymentRefusalError classifies failureCode in rail's vocabulary; failure
+// overrides the customer-facing decline when richer evidence produced one.
+func railPaymentRefusalError(rail, failureCode string, customer *openrails.PaymentFailure) *api.APIError {
+	if rail == "" {
+		rail = "nmi"
+	}
+	reason := payments.NormalizeFailureReason(rail, failureCode)
+	failure := payments.CustomerDecline(payments.DeclineDetail{Rail: rail, Code: failureCode})
+	if customer != nil {
+		failure = *customer
+	}
+	metadata := map[string]any{"decline_reason": reason, "failure": failure}
 	if failureCode != "" {
 		metadata["failure_code"] = failureCode
 	}
@@ -42,29 +55,6 @@ func paymentRefusalError(failureCode string) *api.APIError {
 			"The payment processor could not complete this payment. Please try again later.").WithMetadata(metadata)
 	default:
 		return api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, openrails.CodeCardDeclined,
-			cardDeclinedMessage(reason)).WithMetadata(metadata)
-	}
-}
-
-func cardDeclinedMessage(reason string) string {
-	switch reason {
-	case payments.FailureInsufficientFunds:
-		return "Your card has insufficient funds."
-	case payments.FailureExpiredCard:
-		return "Your card is expired. Use a different card."
-	case payments.FailureCVVAVS:
-		return "Check your card security code and billing details, then try again."
-	case payments.FailureCardUnsupported:
-		return "This card is not supported. Try a different card."
-	case payments.FailureStopRecurring:
-		return "Your bank stopped this recurring payment. Contact your bank or try a different card."
-	case payments.FailureDuplicateTransaction:
-		return "This payment may be a duplicate. Wait a moment before trying again."
-	case payments.FailureFraudSuspected:
-		return "Your bank declined this payment. Contact your bank or try a different card."
-	case payments.FailureCardDeclined, payments.FailureGenericDecline:
-		return "Your card was declined. Contact your bank or try a different card."
-	default:
-		return "We could not complete this payment. Please try again or use a different card."
+			failure.Message).WithMetadata(metadata)
 	}
 }
