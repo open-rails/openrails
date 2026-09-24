@@ -454,7 +454,7 @@ when ordinary writes are disabled; there is no remote bypass.
 |---|---|---|
 | GET | `/v1/catalog` | Read the verified caller's catalog (`merchant:catalog:read-own`) |
 | PUT | `/v1/catalog` | Ensure the verified caller's catalog (`merchant:catalog:update-own`) |
-| GET | `/v1/catalog/offers` | Active offers in the caller's catalog for an exact entitlement key; required kind, optional preferred_currency, limit and cursor |
+| POST | `/v1/catalog/offers/lookup` | Active offers in the caller's catalog per exact entitlement key: `{ entitlements (max 100), kind, preferred_currency?, page_size? (per key), cursors? }` → `{ key: { data, has_more, next_cursor } }` |
 | GET | `/v1/catalog/products` | List products in the caller's catalog |
 | GET | `/v1/catalog/products/{id}` | Read an owned product |
 | GET | `/v1/catalog/products/by-key/{key}` | Read an owned product by key |
@@ -477,7 +477,7 @@ when ordinary writes are disabled; there is no remote bypass.
 | GET | `/v1/merchant/catalogs/{id}` | Read one merchant catalog (`merchant:catalog:read`) |
 | POST | `/v1/merchant/catalogs` | Ensure a catalog for an explicit `owner_subject` (`merchant:catalog:update`) |
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
-| GET | `/v1/merchant/catalog/offers` | Active offers for an exact entitlement key; required kind (`permanent`, `finite`, `recurring`), optional preferred_currency, limit (max 100) and cursor |
+| POST | `/v1/merchant/catalog/offers/lookup` | Active offers per exact entitlement key: `{ entitlements (max 100), kind (`permanent`, `finite`, `recurring`), preferred_currency?, page_size? (per key, max 100), cursors? ({ key: next_cursor }) }` → `{ key: { data, has_more, next_cursor } }`; every requested key is present |
 | GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |

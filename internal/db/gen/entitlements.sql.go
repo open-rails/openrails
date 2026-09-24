@@ -119,6 +119,45 @@ func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg E
 	return err
 }
 
+const entitlementCoverage = `-- name: EntitlementCoverage :one
+SELECT COALESCE(bool_or(ent.end_at IS NULL), false)::boolean AS indefinite,
+       COALESCE(max(ent.end_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
+FROM openrails.entitlements ent
+WHERE ent.merchant_id = $1::uuid
+  AND ent.customer_id = $2::uuid
+  AND ent.entitlement = ANY($3::text[])
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+  AND ent.start_at <= $4::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
+`
+
+type EntitlementCoverageParams struct {
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	Entitlements []string
+	At           time.Time
+}
+
+type EntitlementCoverageRow struct {
+	Indefinite  bool
+	LatestEndAt time.Time
+}
+
+// Coverage across a product's keys: any indefinite grant, else the latest
+// finite end (zero time when none) among grants active at the given time.
+func (q *Queries) EntitlementCoverage(ctx context.Context, arg EntitlementCoverageParams) (EntitlementCoverageRow, error) {
+	row := q.db.QueryRow(ctx, entitlementCoverage,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Entitlements,
+		arg.At,
+	)
+	var i EntitlementCoverageRow
+	err := row.Scan(&i.Indefinite, &i.LatestEndAt)
+	return i, err
+}
+
 const entitlementExistsActive = `-- name: EntitlementExistsActive :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
@@ -356,57 +395,6 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 		arg.Entitlement,
 		arg.SourceType,
 		arg.SourceID,
-	)
-	var i OpenrailsEntitlement
-	err := row.Scan(
-		&i.ID,
-		&i.Entitlement,
-		&i.StartAt,
-		&i.EndAt,
-		&i.SourceID,
-		&i.SourceType,
-		&i.RevokedAt,
-		&i.RevokeReason,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.Period,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.GrantID,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-	)
-	return i, err
-}
-
-const getLatestFiniteActiveEntitlement = `-- name: GetLatestFiniteActiveEntitlement :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
-WHERE ent.merchant_id = $1
-  AND ent.customer_id = $2
-  AND ent.entitlement = $3
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL
-  AND ent.start_at <= $4::timestamptz
-  AND ent.end_at > $4::timestamptz
-ORDER BY ent.end_at DESC
-LIMIT 1
-`
-
-type GetLatestFiniteActiveEntitlementParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	At          time.Time
-}
-
-func (q *Queries) GetLatestFiniteActiveEntitlement(ctx context.Context, arg GetLatestFiniteActiveEntitlementParams) (OpenrailsEntitlement, error) {
-	row := q.db.QueryRow(ctx, getLatestFiniteActiveEntitlement,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Entitlement,
-		arg.At,
 	)
 	var i OpenrailsEntitlement
 	err := row.Scan(

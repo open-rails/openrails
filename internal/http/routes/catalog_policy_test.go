@@ -3,6 +3,7 @@ package routes
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -25,12 +26,14 @@ func TestCatalogMutationRouteInventory(t *testing.T) {
 			RegisterCatalogRoutes(router.NewMuxRecorded(mux, "/merchant/catalog", rt, record), rt, Options{})
 			RegisterOwnedCatalogRoutes(router.NewMuxRecorded(mux, "/catalog", rt, record), rt, Options{})
 			RegisterCatalogCollectionRoutes(router.NewMuxRecorded(mux, "/merchant/catalogs", rt, record), rt, Options{})
-			for _, route := range []string{"GET /merchant/catalog/revision", "GET /merchant/catalog/products", "GET /merchant/catalog/prices", "GET /merchant/catalog/meters", "GET /catalog", "GET /catalog/products", "GET /merchant/catalogs"} {
+			// Batch reads carry their keys in a POST body but never mutate.
+			reads := []string{"POST /merchant/catalog/offers/lookup", "POST /catalog/offers/lookup"}
+			for _, route := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/products", "GET /merchant/catalog/prices", "GET /merchant/catalog/meters", "GET /catalog", "GET /catalog/products", "GET /merchant/catalogs"}, reads...) {
 				require.Contains(t, inventory, route)
 			}
 			mutations := 0
 			for _, route := range inventory {
-				if !strings.HasPrefix(route, "GET ") && !strings.HasPrefix(route, "HEAD ") && !strings.HasPrefix(route, "OPTIONS ") {
+				if !strings.HasPrefix(route, "GET ") && !strings.HasPrefix(route, "HEAD ") && !strings.HasPrefix(route, "OPTIONS ") && !slices.Contains(reads, route) {
 					mutations++
 					require.True(t, allow, "disabled catalog mutation registered: %s", route)
 				}

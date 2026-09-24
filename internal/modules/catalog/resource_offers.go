@@ -22,11 +22,12 @@ type offerCursor struct {
 	PriceID  uuid.UUID `json:"price_id"`
 }
 
-// ListOffersForEntitlement is a bounded exact reverse catalog lookup. Access is
-// checked separately against retained grants, never against this live catalog.
-func ListOffersForEntitlement(ctx context.Context, database *db.DB, key string, params openrails.OfferListParams) (*openrails.OfferList, error) {
-	if strings.TrimSpace(key) == "" || len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
-		return nil, apperr.Invalidf("invalid entitlement key")
+// ListOffersForEntitlements is a bounded exact reverse catalog lookup: one
+// query returns a page of offers for every requested key. Access is checked
+// separately against retained grants, never against this live catalog.
+func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []string, params openrails.OfferListParams) (map[string]openrails.OfferList, error) {
+	if len(keys) > openrails.MaxEntitlementChecks {
+		return nil, apperr.Invalidf("at most 100 entitlements are allowed")
 	}
 	if params.Kind != openrails.OfferPermanent && params.Kind != openrails.OfferFinite && params.Kind != openrails.OfferRecurring {
 		return nil, apperr.Invalidf("kind must be permanent, finite or recurring")
@@ -45,31 +46,55 @@ func ListOffersForEntitlement(ctx context.Context, database *db.DB, key string, 
 	if err != nil {
 		return nil, err
 	}
-	rawScope, _ := json.Marshal([]any{mid.String(), catalogID, key, params.Kind, preferred})
-	digest := sha256.Sum256(rawScope)
-	scope := hex.EncodeToString(digest[:])
-	var after *uuid.UUID
-	afterCurrency := ""
-	if params.Cursor != "" {
-		if len(params.Cursor) > 1024 {
-			return nil, apperr.Invalidf("invalid cursor")
+	result := make(map[string]openrails.OfferList, len(keys))
+	scopes := make(map[string]string, len(keys))
+	arg := gen.ListOffersForEntitlementsParams{MerchantID: mid.UUID(), CatalogID: catalogID, Kind: string(params.Kind), PreferredCurrency: preferred, PageLimit: int32(params.Limit + 1)}
+	for _, key := range keys {
+		if strings.TrimSpace(key) == "" || len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+			return nil, apperr.Invalidf("invalid entitlement key")
 		}
-		raw, err := base64.RawURLEncoding.DecodeString(params.Cursor)
-		var cursor offerCursor
-		if err != nil || json.Unmarshal(raw, &cursor) != nil || cursor.Scope != scope || cursor.PriceID == uuid.Nil || cursor.Currency == "" {
-			return nil, apperr.Invalidf("cursor does not match this offer query")
+		if _, seen := result[key]; seen {
+			continue
 		}
-		after, afterCurrency = &cursor.PriceID, cursor.Currency
+		result[key] = openrails.OfferList{Data: []openrails.CatalogOffer{}}
+		rawScope, _ := json.Marshal([]any{mid.String(), catalogID, key, params.Kind, preferred})
+		digest := sha256.Sum256(rawScope)
+		scopes[key] = hex.EncodeToString(digest[:])
+		after, afterCurrency := uuid.Nil, ""
+		if raw, ok := params.Cursors[key]; ok {
+			cursor, err := decodeOfferCursor(raw, scopes[key])
+			if err != nil {
+				return nil, err
+			}
+			after, afterCurrency = cursor.PriceID, cursor.Currency
+		}
+		arg.Entitlements = append(arg.Entitlements, key)
+		arg.AfterIds = append(arg.AfterIds, after)
+		arg.AfterCurrencies = append(arg.AfterCurrencies, afterCurrency)
 	}
-	rows, err := database.Gen(ctx).ListOffersForEntitlement(ctx, gen.ListOffersForEntitlementParams{MerchantID: mid.UUID(), CatalogID: catalogID, Entitlement: key, Kind: string(params.Kind), PreferredCurrency: preferred, AfterID: after, AfterCurrency: afterCurrency, PageLimit: int32(params.Limit + 1)})
+	for key := range params.Cursors {
+		if _, ok := result[key]; !ok {
+			return nil, apperr.Invalidf("cursor names an entitlement that was not requested")
+		}
+	}
+	if len(arg.Entitlements) == 0 {
+		return result, nil
+	}
+	rows, err := database.Gen(ctx).ListOffersForEntitlements(ctx, arg)
 	if err != nil {
 		return nil, err
 	}
-	result := &openrails.OfferList{Data: make([]openrails.CatalogOffer, 0, min(len(rows), params.Limit)), HasMore: len(rows) > params.Limit}
-	if result.HasMore {
-		rows = rows[:params.Limit]
-	}
+	last := make(map[string]offerCursor, len(arg.Entitlements))
 	for _, row := range rows {
+		page := result[row.Entitlement]
+		if len(page.Data) == params.Limit {
+			page.HasMore = true
+			raw, _ := json.Marshal(last[row.Entitlement])
+			page.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+			result[row.Entitlement] = page
+			continue
+		}
+		last[row.Entitlement] = offerCursor{Scope: scopes[row.Entitlement], Currency: row.Currency, PriceID: row.PriceID}
 		offer := openrails.CatalogOffer{Kind: params.Kind, ProductID: openrails.ProductID(row.ProductID).String(), ProductKey: row.ProductKey, ProductName: row.ProductName, PriceID: openrails.PriceID(row.PriceID).String(), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency, AutoRenew: row.AutoRenew}
 		if row.AccessDurationHours != nil {
 			value := int(*row.AccessDurationHours)
@@ -80,12 +105,20 @@ func ListOffersForEntitlement(ctx context.Context, database *db.DB, key string, 
 				return nil, err
 			}
 		}
-		result.Data = append(result.Data, offer)
-	}
-	if result.HasMore {
-		last := rows[len(rows)-1]
-		raw, _ := json.Marshal(offerCursor{Scope: scope, Currency: last.Currency, PriceID: last.PriceID})
-		result.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+		page.Data = append(page.Data, offer)
+		result[row.Entitlement] = page
 	}
 	return result, nil
+}
+
+func decodeOfferCursor(raw, scope string) (offerCursor, error) {
+	var cursor offerCursor
+	if len(raw) > 1024 {
+		return cursor, apperr.Invalidf("invalid cursor")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil || json.Unmarshal(decoded, &cursor) != nil || cursor.Scope != scope || cursor.PriceID == uuid.Nil || cursor.Currency == "" {
+		return offerCursor{}, apperr.Invalidf("cursor does not match this offer query")
+	}
+	return cursor, nil
 }

@@ -39,18 +39,19 @@ SELECT EXISTS (
       AND ent.deleted_at IS NULL
 );
 
--- name: GetLatestFiniteActiveEntitlement :one
-SELECT * FROM openrails.entitlements ent
-WHERE ent.merchant_id = $1
-  AND ent.customer_id = $2
-  AND ent.entitlement = $3
+-- Coverage across a product's keys: any indefinite grant, else the latest
+-- finite end (zero time when none) among grants active at the given time.
+-- name: EntitlementCoverage :one
+SELECT COALESCE(bool_or(ent.end_at IS NULL), false)::boolean AS indefinite,
+       COALESCE(max(ent.end_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
+FROM openrails.entitlements ent
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND ent.customer_id = sqlc.arg(customer_id)::uuid
+  AND ent.entitlement = ANY(sqlc.arg(entitlements)::text[])
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL
   AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND ent.end_at > sqlc.arg(at)::timestamptz
-ORDER BY ent.end_at DESC
-LIMIT 1;
+  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz);
 
 -- name: ListActiveEntitlementNames :many
 -- No merchant_id predicate: matches the bun-era user-keyed variant exactly.

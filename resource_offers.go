@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -47,11 +46,22 @@ const (
 	OfferRecurring OfferKind = "recurring"
 )
 
+// OfferListParams applies to every requested key. Limit bounds each key's
+// page; Cursors continues the keys it names from their NextCursor.
 type OfferListParams struct {
 	Kind              OfferKind
 	PreferredCurrency string
 	Limit             int
-	Cursor            string
+	Cursors           map[string]string
+}
+
+// OfferLookupRequest is the wire body of POST {catalog}/offers/lookup.
+type OfferLookupRequest struct {
+	Entitlements      []string          `json:"entitlements"`
+	Kind              OfferKind         `json:"kind"`
+	PreferredCurrency string            `json:"preferred_currency,omitempty"`
+	PageSize          int               `json:"page_size,omitempty"`
+	Cursors           map[string]string `json:"cursors,omitempty"`
 }
 
 // CatalogOffer is an active price and the product benefits it buys. The price
@@ -76,12 +86,18 @@ type OfferList struct {
 	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
-// ListOffersForEntitlement returns one bounded page of active offers granting
-// exactly this opaque resource key. PreferredCurrency ranks matching offers
-// first; alternatives retain their actual native currency and amount.
-func (c *Client) ListOffersForEntitlement(ctx context.Context, entitlement string, params OfferListParams, requestOptions ...RequestOption) (*OfferList, error) {
-	if strings.TrimSpace(entitlement) == "" || len(entitlement) > 256 {
-		return nil, invalidErr("entitlement must be a nonempty key of at most 256 bytes")
+// ListOffersForEntitlements returns one bounded page of active offers per
+// opaque resource key (at most 100 keys) in one request. Every requested key
+// is present in the result. PreferredCurrency ranks matching offers first;
+// alternatives retain their actual native currency and amount.
+func (c *Client) ListOffersForEntitlements(ctx context.Context, entitlements []string, params OfferListParams, requestOptions ...RequestOption) (map[string]OfferList, error) {
+	if len(entitlements) > MaxEntitlementChecks {
+		return nil, invalidErr("at most 100 entitlements are allowed")
+	}
+	for _, key := range entitlements {
+		if strings.TrimSpace(key) == "" || len(key) > 256 {
+			return nil, invalidErr("entitlement must be a nonempty key of at most 256 bytes")
+		}
 	}
 	if params.Kind != OfferPermanent && params.Kind != OfferFinite && params.Kind != OfferRecurring {
 		return nil, invalidErr("kind must be permanent, finite or recurring")
@@ -89,19 +105,10 @@ func (c *Client) ListOffersForEntitlement(ctx context.Context, entitlement strin
 	if params.Limit < 0 || params.Limit > 100 {
 		return nil, invalidErr("limit must be between 1 and 100")
 	}
-	query := url.Values{"entitlement": {entitlement}, "kind": {string(params.Kind)}}
-	if params.PreferredCurrency != "" {
-		query.Set("preferred_currency", params.PreferredCurrency)
+	if len(entitlements) == 0 {
+		return map[string]OfferList{}, nil
 	}
-	if params.Limit > 0 {
-		query.Set("limit", strconv.Itoa(params.Limit))
-	}
-	if params.Cursor != "" {
-		query.Set("cursor", params.Cursor)
-	}
-	var result OfferList
-	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/offers?"+query.Encode(), nil, &result, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	var result map[string]OfferList
+	err := c.do(ctx, http.MethodPost, c.catalogPath()+"/offers/lookup", OfferLookupRequest{entitlements, params.Kind, params.PreferredCurrency, params.Limit, params.Cursors}, &result, requestOptions...)
+	return result, err
 }

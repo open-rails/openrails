@@ -90,14 +90,6 @@ func (s *EntitlementService) IsCustomerEntitled(ctx context.Context, tenantSubje
 	})
 }
 
-func (s *EntitlementService) HasActiveIndefinite(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return false, err
-	}
-	return s.HasActiveIndefiniteByCustomer(ctx, tsid, entitlement, at)
-}
-
 func (s *EntitlementService) HasActiveIndefiniteByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -124,29 +116,25 @@ func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType mode
 	})
 }
 
-func (s *EntitlementService) LatestFiniteWindow(ctx context.Context, userID, entitlement string, at time.Time) (*models.Entitlement, error) {
+// Coverage reports, across keys, whether any grant active at at is
+// indefinite and otherwise the latest end among active finite grants.
+func (s *EntitlementService) Coverage(ctx context.Context, userID string, keys []string, at time.Time) (bool, *time.Time, error) {
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
-		return nil, err
+		return false, nil, err
 	}
-	return s.LatestFiniteWindowByCustomer(ctx, tsid, entitlement, at)
-}
-
-func (s *EntitlementService) LatestFiniteWindowByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (*models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return false, nil, err
 	}
-	row, err := s.db.Gen(ctx).GetLatestFiniteActiveEntitlement(ctx, gen.GetLatestFiniteActiveEntitlementParams{
-		MerchantID:  tid.UUID(),
-		CustomerID:  tenantSubjectID,
-		Entitlement: entitlement,
-		At:          at,
-	})
+	row, err := s.db.Gen(ctx).EntitlementCoverage(ctx, gen.EntitlementCoverageParams{MerchantID: tid.UUID(), CustomerID: tsid, Entitlements: keys, At: at})
 	if err != nil {
-		return nil, err
+		return false, nil, err
 	}
-	return models.EntitlementFromGen(row), nil
+	if row.LatestEndAt.IsZero() {
+		return row.Indefinite, nil, nil
+	}
+	return row.Indefinite, &row.LatestEndAt, nil
 }
 
 // Insert persists a fully-populated entitlement window directly (test/seed

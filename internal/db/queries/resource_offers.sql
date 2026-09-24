@@ -11,25 +11,34 @@ SELECT candidate.entitlement::text AS entitlement, EXISTS (
 FROM unnest(sqlc.arg(entitlements)::text[]) AS candidate(entitlement);
 
 -- Discovery only: all pricing and benefits are revalidated at admission.
--- name: ListOffersForEntitlement :many
-SELECT product.id AS product_id, product.key AS product_key,
- product.display_name AS product_name, product.entitlements_spec,
- price.id AS price_id, price.key AS price_key, price.amount AS unit_amount,
- price.currency, price.access_duration_hours, price.auto_renew
-FROM openrails.products product
-JOIN openrails.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
-WHERE product.merchant_id=sqlc.arg(merchant_id)::uuid
- AND (sqlc.narg(catalog_id)::uuid IS NULL OR product.catalog_id=sqlc.narg(catalog_id)::uuid)
- AND NOT product.archived AND NOT price.archived
- AND product.entitlements_spec ? sqlc.arg(entitlement)::text
- AND ((sqlc.arg(kind)::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>sqlc.arg(entitlement)::text,'0')='0')
-   OR (sqlc.arg(kind)::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
-   OR (sqlc.arg(kind)::text='recurring' AND price.auto_renew))
- AND (sqlc.narg(after_id)::uuid IS NULL OR
-   (price.currency<>sqlc.arg(preferred_currency)::text, price.currency, price.id) >
-   (sqlc.arg(after_currency)::text<>sqlc.arg(preferred_currency)::text, sqlc.arg(after_currency)::text, sqlc.narg(after_id)::uuid))
-ORDER BY price.currency<>sqlc.arg(preferred_currency)::text, price.currency, price.id
-LIMIT sqlc.arg(page_limit)::int;
+-- One page per requested key; uuid.Nil in after_ids starts a key's first page.
+-- name: ListOffersForEntitlements :many
+SELECT wanted.entitlement::text AS entitlement, offer.product_id, offer.product_key,
+ offer.product_name, offer.entitlements_spec, offer.price_id, offer.price_key,
+ offer.unit_amount, offer.currency, offer.access_duration_hours, offer.auto_renew
+FROM unnest(sqlc.arg(entitlements)::text[], sqlc.arg(after_currencies)::text[], sqlc.arg(after_ids)::uuid[])
+ AS wanted(entitlement, after_currency, after_id)
+CROSS JOIN LATERAL (
+ SELECT product.id AS product_id, product.key AS product_key,
+  product.display_name AS product_name, product.entitlements_spec,
+  price.id AS price_id, price.key AS price_key, price.amount AS unit_amount,
+  price.currency, price.access_duration_hours, price.auto_renew
+ FROM openrails.products product
+ JOIN openrails.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
+ WHERE product.merchant_id=sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(catalog_id)::uuid IS NULL OR product.catalog_id=sqlc.narg(catalog_id)::uuid)
+  AND NOT product.archived AND NOT price.archived
+  AND product.entitlements_spec ? wanted.entitlement
+  AND ((sqlc.arg(kind)::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
+    OR (sqlc.arg(kind)::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
+    OR (sqlc.arg(kind)::text='recurring' AND price.auto_renew))
+  AND (wanted.after_id='00000000-0000-0000-0000-000000000000'::uuid OR
+    (price.currency<>sqlc.arg(preferred_currency)::text, price.currency, price.id) >
+    (wanted.after_currency<>sqlc.arg(preferred_currency)::text, wanted.after_currency, wanted.after_id))
+ ORDER BY price.currency<>sqlc.arg(preferred_currency)::text, price.currency, price.id
+ LIMIT sqlc.arg(page_limit)::int
+) offer
+ORDER BY wanted.entitlement, offer.currency<>sqlc.arg(preferred_currency)::text, offer.currency, offer.price_id;
 
 -- A partial bundle remains useful; reject only when every durable benefit is
 -- already owned or reserved by another accepted permanent purchase. Admission

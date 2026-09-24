@@ -21,7 +21,7 @@ func (s *Service) CheckEntitlements(ctx context.Context, customer string, keys [
 	return rt.EntitlementService.CheckMany(ctx, customer, keys, at)
 }
 
-func (s *Service) ListOffersForEntitlement(ctx context.Context, key string, params openrails.OfferListParams) (*openrails.OfferList, error) {
+func (s *Service) ListOffersForEntitlements(ctx context.Context, keys []string, params openrails.OfferListParams) (map[string]openrails.OfferList, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -31,5 +31,5 @@ func (s *Service) ListOffersForEntitlement(ctx context.Context, key string, para
 	if err != nil {
 		return nil, err
 	}
-	return catalog.ListOffersForEntitlement(ctx, rt.DB, key, params)
+	return catalog.ListOffersForEntitlements(ctx, rt.DB, keys, params)
 }

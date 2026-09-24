@@ -91,6 +91,39 @@ func (s *PriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.Price
 	return s.db.PriceFromGen(ctx, row)
 }
 
+// GetWithProductByIDs loads the scoped prices among ids, with their PSP links
+// and Product, in constant queries; absent IDs are omitted from the result.
+func (s *PriceService) GetWithProductByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.Price, error) {
+	out := make(map[uuid.UUID]*models.Price, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	queryMerchant, catalogID, err := queryCatalogScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	prices := make([]*models.Price, 0, len(rows))
+	for _, row := range rows {
+		price, err := models.PriceFromGen(row.OpenrailsPrice)
+		if err != nil {
+			return nil, err
+		}
+		if price.Product, err = models.ProductFromGen(row.OpenrailsProduct); err != nil {
+			return nil, err
+		}
+		prices = append(prices, price)
+		out[price.ID] = price
+	}
+	if err := s.db.LoadPricePSPBindings(ctx, prices, nil); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *PriceService) pricesFromGen(ctx context.Context, rows []gen.OpenrailsPrice) ([]*models.Price, error) {
 	out := make([]*models.Price, 0, len(rows))
 	for _, r := range rows {

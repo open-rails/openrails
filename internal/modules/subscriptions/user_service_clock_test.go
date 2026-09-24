@@ -17,7 +17,7 @@ func TestUserSubscriptionResponseUsesReadTimeForEligibility(t *testing.T) {
 	svc := &UserSubscriptionService{}
 	svc.SetClock(clock)
 	response := &UserSubscriptionResponse{Subscription: &models.Subscription{Rail: models.RailStripe, Status: models.StatusCancelled, CurrentPeriodEndsAt: &end}}
-	svc.enrichSubscriptionResponse(context.Background(), response)
+	require.NoError(t, svc.enrichSubscriptionResponses(context.Background(), []*UserSubscriptionResponse{response}))
 	check := func(want bool) {
 		t.Helper()
 		view := response.View()
@@ -28,6 +28,6 @@ func TestUserSubscriptionResponseUsesReadTimeForEligibility(t *testing.T) {
 	clock.Advance(2 * time.Hour)
 	// The response retains its consistent read snapshot until read again.
 	check(true)
-	svc.enrichSubscriptionResponse(context.Background(), response)
+	require.NoError(t, svc.enrichSubscriptionResponses(context.Background(), []*UserSubscriptionResponse{response}))
 	check(false)
 }

@@ -91,3 +91,16 @@ func (g *ProductAccessGrant) IsActiveAt(t time.Time) bool {
 	}
 	return true
 }
+
+// DistinctProductIDs returns each grant's product once, in first-seen order.
+func DistinctProductIDs(grants []ProductAccessGrant) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(grants))
+	ids := make([]uuid.UUID, 0, len(grants))
+	for _, g := range grants {
+		if !seen[g.ProductID] {
+			seen[g.ProductID] = true
+			ids = append(ids, g.ProductID)
+		}
+	}
+	return ids
+}

@@ -632,7 +632,7 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
 	writeMW := append([]router.Middleware{write}, dbMW...)
-	catalog.Handle(http.MethodGet, "/offers", h(httphandlers.ListOffersForEntitlement), readMW...)
+	readActions.Handle(http.MethodPost, "/offers/lookup", h(httphandlers.ListOffersForEntitlements), readMW...)
 
 	products := catalog.Group("/products")
 	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)

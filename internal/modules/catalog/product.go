@@ -132,6 +132,31 @@ func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pro
 	return models.ProductFromGen(row)
 }
 
+// GetByIDs loads the scoped products among ids in one query; absent IDs are
+// omitted from the result.
+func (s *ProductService) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*models.Product, error) {
+	out := make(map[uuid.UUID]*models.Product, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	queryMerchant, catalogID, err := queryCatalogScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListProductsByIDs(ctx, gen.ListProductsByIDsParams{MerchantID: queryMerchant.UUID(), CatalogID: catalogID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	products, err := productsFromGen(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, product := range products {
+		out[product.ID] = product
+	}
+	return out, nil
+}
+
 func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, error) {
 	queryMerchant, catalogID, queryScopeErr := queryCatalogScope(ctx)
 	if queryScopeErr != nil {

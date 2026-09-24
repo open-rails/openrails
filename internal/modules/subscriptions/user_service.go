@@ -149,7 +149,9 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 	switch {
 	case err == nil:
 		resp := &UserSubscriptionResponse{Subscription: subscription, Access: accessFromSubscription(subscription)}
-		s.enrichSubscriptionResponse(ctx, resp)
+		if err := s.enrichSubscriptionResponses(ctx, []*UserSubscriptionResponse{resp}); err != nil {
+			return nil, err
+		}
 		return resp, nil
 	case db.IsNotFound(err):
 		access, accessErr := s.activeEntitlementAccess(ctx, userID)
@@ -208,7 +210,9 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 		Access:       accessFromSubscription(subscription),
 	}
 
-	s.enrichSubscriptionResponse(ctx, resp)
+	if err := s.enrichSubscriptionResponses(ctx, []*UserSubscriptionResponse{resp}); err != nil {
+		return nil, err
+	}
 
 	return resp, nil
 }
@@ -228,39 +232,47 @@ func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context
 	responses := make([]*UserSubscriptionResponse, len(subscriptions))
 	for i, sub := range subscriptions {
 		responses[i] = &UserSubscriptionResponse{Subscription: sub, Access: accessFromSubscription(sub)}
-		s.enrichSubscriptionResponse(ctx, responses[i])
+	}
+	if err := s.enrichSubscriptionResponses(ctx, responses); err != nil {
+		return nil, 0, err
 	}
 
 	return responses, total, nil
 }
 
-func (s *UserSubscriptionService) enrichSubscriptionResponse(ctx context.Context, resp *UserSubscriptionResponse) {
-	if resp == nil || resp.Subscription == nil {
-		return
+// enrichSubscriptionResponses loads every current and scheduled price, with its
+// product, in one batch.
+func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Context, responses []*UserSubscriptionResponse) error {
+	ids := make([]uuid.UUID, 0, 2*len(responses))
+	for _, resp := range responses {
+		resp.EvaluatedAt = s.now().UTC()
+		if resp.Subscription.PriceID != uuid.Nil {
+			ids = append(ids, resp.Subscription.PriceID)
+		}
+		if resp.Subscription.ScheduledPriceID != nil {
+			ids = append(ids, *resp.Subscription.ScheduledPriceID)
+		}
 	}
-	resp.EvaluatedAt = s.now().UTC()
-	if resp.Subscription.PriceID != uuid.Nil && s.PriceService != nil {
-		if price, err := s.PriceService.GetByID(ctx, resp.Subscription.PriceID); err == nil {
+	if s.PriceService == nil {
+		return nil
+	}
+	prices, err := s.PriceService.GetWithProductByIDs(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("failed to load subscription prices: %w", err)
+	}
+	for _, resp := range responses {
+		if price := prices[resp.Subscription.PriceID]; price != nil {
 			resp.Price = price
-
-			if s.ProductService != nil {
-				if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-					resp.Subscription.Product = product
-				}
+			resp.Subscription.Product = price.Product
+		}
+		if resp.Subscription.ScheduledPriceID != nil {
+			if price := prices[*resp.Subscription.ScheduledPriceID]; price != nil {
+				resp.ScheduledPrice = price
+				resp.ScheduledProduct = price.Product
 			}
 		}
 	}
-	if resp.Subscription.ScheduledPriceID != nil && *resp.Subscription.ScheduledPriceID != uuid.Nil && s.PriceService != nil {
-		if price, err := s.PriceService.GetByID(ctx, *resp.Subscription.ScheduledPriceID); err == nil {
-			resp.ScheduledPrice = price
-
-			if s.ProductService != nil {
-				if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-					resp.ScheduledProduct = product
-				}
-			}
-		}
-	}
+	return nil
 }
 
 // GetUserPayments retrieves one-off purchases for a user

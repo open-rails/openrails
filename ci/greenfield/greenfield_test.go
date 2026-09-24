@@ -131,10 +131,10 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
-	offers, err := client.ListOffersForEntitlement(t.Context(), "content:welcome", openrails.OfferListParams{Kind: openrails.OfferPermanent})
+	offers, err := client.ListOffersForEntitlements(t.Context(), []string{"content:welcome"}, openrails.OfferListParams{Kind: openrails.OfferPermanent})
 	require.NoError(t, err)
-	require.Len(t, offers.Data, 1)
-	require.Equal(t, price.ID, offers.Data[0].PriceID)
+	require.Len(t, offers["content:welcome"].Data, 1)
+	require.Equal(t, price.ID, offers["content:welcome"].Data[0].PriceID)
 }
 
 func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
