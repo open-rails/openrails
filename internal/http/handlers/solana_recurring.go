@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -393,16 +394,20 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		// Model-B prorated first charge (new_full - old_unused) in micros, then
 		// micros -> base units at the token's CONFIGURED decimals (#817), $1 peg
 		// (depeg failsafe inside).
-		firstChargeMicros, _, err := checkout.CalculateModelBUpgradeCharge(
-			checkout.PriceAmountOf(oldPrice),
-			checkout.PriceAmountOf(newPrice),
-			oldSub.CurrentPeriodEndsAt,
-			newPrice.RecurringCycleHours(),
-			nowOrDefault(r),
-		)
+		quote, err := checkout.QuoteModelBUpgrade(checkout.ModelBUpgrade{
+			Old: checkout.PriceAmountOf(oldPrice), New: checkout.PriceAmountOf(newPrice),
+			PeriodStart: oldSub.CurrentPeriodStartsAt, PeriodEnd: oldSub.CurrentPeriodEndsAt,
+			NewCycleHours: newPrice.RecurringCycleHours(),
+		}, nowOrDefault(r))
 		if err != nil {
-			return nil, http.StatusBadRequest, err.Error()
+			status := http.StatusBadRequest
+			var tierErr *checkout.TierChangeError
+			if errors.As(err, &tierErr) {
+				status = tierErr.HTTPStatus
+			}
+			return nil, status, err.Error()
 		}
+		firstChargeMicros := quote.ChargeNow
 		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
 		if err != nil {
 			status, msg := solanaClientError(err, http.StatusInternalServerError)

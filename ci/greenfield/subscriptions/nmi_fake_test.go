@@ -36,6 +36,7 @@ type nmiSale struct {
 // nmiSchedule is a provider-owned recurring plan subscription.
 type nmiSchedule struct {
 	ID, Vault, Plan, Amount string
+	Order, Days             string
 	NextBilling             time.Time
 	Deleted                 bool
 }
@@ -51,6 +52,7 @@ type nmiFake struct {
 	sales     []*nmiSale
 	attempts  []url.Values
 	schedules map[string]*nmiSchedule
+	plans     map[string]obj
 	duplicate int
 	declined  []*nmiSale
 	lose      int
@@ -63,7 +65,7 @@ type nmiFake struct {
 }
 
 func newNMIFake() *nmiFake {
-	return &nmiFake{tokens: map[string]card{}, vaults: map[string]*nmiVault{}, schedules: map[string]*nmiSchedule{}}
+	return &nmiFake{tokens: map[string]card{}, vaults: map[string]*nmiVault{}, schedules: map[string]*nmiSchedule{}, plans: map[string]obj{}}
 }
 
 func (f *nmiFake) next(prefix string) string {
@@ -161,6 +163,14 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "sale":
 		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
 		_, _ = rec.WriteString(f.sale(form))
+	case strings.HasSuffix(p, "/transact.php") && form.Get("recurring") == "add_subscription":
+		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
+		_, _ = rec.WriteString(f.addSubscription(form))
+	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "recurring" && f.schedules[form.Get("subscription_id")] != nil:
+		s := f.schedules[form.Get("subscription_id")]
+		rec.Header().Set("Content-Type", "text/xml")
+		_, _ = fmt.Fprintf(rec, "<nm_response><subscription><subscription_id>%s</subscription_id><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date><plan><plan_id>%s</plan_id></plan></subscription></nm_response>",
+			s.ID, s.Order, s.Order, s.NextBilling.Format("2006-01-02"), s.Plan)
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction" && f.queryDown:
 		rec.WriteHeader(http.StatusServiceUnavailable)
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction":
@@ -271,6 +281,21 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 			actions = append(actions, obj{"id": s.TransactionID + "-r", "type": "refund", "amount": decimalCents(s.RefundedCents), "success": true})
 		}
 		return 200, obj{"object": "transaction", "id": s.TransactionID, "response": response, "response_code": code, "amount": s.Amount, "currency": s.Currency, "customer_vault_id": s.Vault, "actions": actions}
+	case seg[0] == "plans" && len(seg) == 1 && method == http.MethodPost:
+		var plan struct {
+			ID           string          `json:"id"`
+			Name         string          `json:"plan_name"`
+			Amount       json.RawMessage `json:"plan_amount"`
+			DayFrequency int             `json:"day_frequency"`
+		}
+		_ = json.Unmarshal(body, &plan)
+		f.plans[plan.ID] = obj{"object": "plan", "id": plan.ID, "plan_name": plan.Name, "plan_amount": strings.Trim(string(plan.Amount), `"`), "plan_payments": "0", "day_frequency": strconv.Itoa(plan.DayFrequency)}
+		return 200, f.plans[plan.ID]
+	case seg[0] == "plans" && len(seg) == 2 && strings.HasPrefix(seg[1], "gf_plan_"):
+		if plan := f.plans[seg[1]]; plan != nil {
+			return 200, plan
+		}
+		return nmiNotFound()
 	case seg[0] == "plans" && len(seg) == 2 && strings.HasPrefix(seg[1], "legacy_plan_"):
 		// A legacy book's monthly 9.99 plan, created at NMI long ago.
 		return 200, obj{"object": "plan", "id": seg[1], "plan_name": "Legacy", "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}
@@ -298,8 +323,12 @@ func (f *nmiFake) v5(method string, seg []string, body []byte) (int, any) {
 }
 
 func (f *nmiFake) schedule(s *nmiSchedule) obj {
+	days := s.Days
+	if days == "" {
+		days = "30"
+	}
 	return obj{"object": "subscription", "id": s.ID, "customer_vault_id": s.Vault, "delayed_condition": "active", "paused_subscription": false,
-		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_amount": s.Amount, "day_frequency": "30", "plan_payments": "0"}}
+		"next_billing_date": s.NextBilling.Format("2006-01-02"), "plan": obj{"id": s.Plan, "plan_amount": s.Amount, "day_frequency": days, "plan_payments": "0"}}
 }
 
 func decimalCents(cents int64) string {
@@ -364,6 +393,18 @@ func (f *nmiFake) sale(form url.Values) string {
 	}
 	f.sales = append(f.sales, s)
 	return fmt.Sprintf("response=1&responsetext=SUCCESS&authcode=123456&transactionid=%s&orderid=%s&response_code=100", s.TransactionID, s.OrderID)
+}
+
+// addSubscription is a schedule-only Direct Post enrollment on a stored plan.
+func (f *nmiFake) addSubscription(form url.Values) string {
+	plan, v := f.plans[form.Get("plan_id")], f.vaults[form.Get("customer_vault_id")]
+	if plan == nil || v == nil {
+		return "response=3&responsetext=Invalid+plan+or+vault&response_code=300"
+	}
+	next, _ := time.Parse("20060102", form.Get("start_date"))
+	s := &nmiSchedule{ID: f.next("rsub"), Vault: v.ID, Plan: plan["id"].(string), Amount: plan["plan_amount"].(string), Order: form.Get("orderid"), Days: plan["day_frequency"].(string), NextBilling: next}
+	f.schedules[s.ID] = s
+	return fmt.Sprintf("response=1&responsetext=Subscription+added&subscription_id=%s&orderid=%s&response_code=100", s.ID, form.Get("orderid"))
 }
 
 func (f *nmiFake) search(orderID, transactionID, scheduleID string) string {

@@ -42,18 +42,22 @@ func TestModelBCreditDoesNotOverflow(t *testing.T) {
 	}{
 		{"full cycle", oldFull, newFull, 720, newFull - oldFull},
 		{"partial cycle", oldFull, newFull, 540, 15_000_000_000_000_000},
-		{"clamped cycle", oldFull, newFull, 1440, newFull - oldFull},
+		{"period not yet started", oldFull, newFull, 1440, newFull - oldFull},
 		{"no remaining time", oldFull, newFull, 0, newFull},
 		{"largest whole-cent prices", maxWholeCent - 10_000, maxWholeCent, 720, 10_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			end := now.Add(time.Duration(tc.hours) * time.Hour)
-			got, gotCycle, err := checkout.CalculateModelBUpgradeCharge(
-				checkout.PriceAmount{Micros: tc.old, Currency: "USD"},
-				checkout.PriceAmount{Micros: tc.new, Currency: "USD"}, &end, &cycle, now)
+			end := now.Add(time.Duration(min(tc.hours, cycle)) * time.Hour)
+			start := end.Add(-time.Duration(cycle) * time.Hour)
+			if tc.hours > cycle {
+				start = now.Add(time.Hour)
+				end = start.Add(time.Duration(cycle) * time.Hour)
+			}
+			got, err := checkout.QuoteModelBUpgrade(checkout.ModelBUpgrade{
+				Old: checkout.PriceAmount{Micros: tc.old, Currency: "USD"}, New: checkout.PriceAmount{Micros: tc.new, Currency: "USD"},
+				PeriodStart: &start, PeriodEnd: &end, NewCycleHours: &cycle}, now)
 			require.NoError(t, err)
-			require.Equal(t, cycle, gotCycle)
-			require.Equal(t, tc.want, got)
+			require.Equal(t, tc.want, got.ChargeNow)
 		})
 	}
 }

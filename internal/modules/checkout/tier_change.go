@@ -74,6 +74,12 @@ func (e *TierChangeError) Error() string {
 	return e.Message
 }
 
+// Is matches a coded refusal sentinel by its wire code.
+func (e *TierChangeError) Is(target error) bool {
+	other, ok := target.(*TierChangeError)
+	return ok && e.Code != "" && other.Code == e.Code
+}
+
 // tierChangeKeyRequired refuses a tier change without a client
 // Idempotency-Key before anything is admitted or mutated: the key is the only
 // handle a client has to read back a lost response.

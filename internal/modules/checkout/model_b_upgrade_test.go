@@ -1,8 +1,11 @@
 package checkout
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -12,273 +15,124 @@ func intPtr(v int) *int { return &v }
 // usd tags a micro amount with its currency for the Model-B helper (#820).
 func usd(micros int64) PriceAmount { return PriceAmount{Micros: micros, Currency: "USD"} }
 
-// TestCalculateModelBUpgradeCharge pins the live card-billing math for #268.
-// Model B: first_charge = new_full - old_unused, where
-// old_unused = ceilToCent(old_full * hoursRemaining / cycleHours) with integer
-// math (#671: inputs/outputs are MICROS; the credit rounds UP to a whole cent,
-// customer-favored, so whole-cent prices yield a whole-cent charge),
-// hoursRemaining = whole hours left in the current paid period, clamped >= 0.
-func TestCalculateModelBUpgradeCharge(t *testing.T) {
+// quoteAt prices an upgrade from a plan whose current period has length
+// period and `left` remaining at now, to a plan with newCycle hours.
+func quoteAt(old, new PriceAmount, period, left time.Duration, newCycle *int, now time.Time) (ModelBUpgradeQuote, error) {
+	end := now.Add(left)
+	start := end.Add(-period)
+	return QuoteModelBUpgrade(ModelBUpgrade{Old: old, New: new, PeriodStart: &start, PeriodEnd: &end, NewCycleHours: newCycle}, now)
+}
+
+// TestQuoteModelBUpgrade pins #1067: the old plan's credit is measured
+// against its own current period at sub-second precision, whatever the new
+// plan's cadence; money rounds once, up to a whole rail minor unit.
+func TestQuoteModelBUpgrade(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name        string
-		oldFull     int64
-		newFull     int64
-		periodEnd   *time.Time
-		cycleHours  *int
-		expectFirst int64
-		expectCycle int
+	const h = time.Hour
+	for _, tc := range []struct {
+		name            string
+		old, new        int64
+		period, left    time.Duration
+		newCycle        int
+		credit, chargeN int64
 	}{
-		{
-			// Issue example: $20 -> $50, 2 days into a 30-day cycle.
-			// hoursRemaining = 672, old_unused = 20_000_000*672/720 = 18_666_666
-			// -> ceil to cent 18_670_000, first = 50_000_000-18_670_000.
-			name:        "issue example $20->$50 28 days remaining",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(28 * 24 * time.Hour)),
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 31_330_000,
-			expectCycle: 30 * 24,
-		},
-		{
-			// Boundary: 0 hours remaining => no credit => first_charge = new_full.
-			name:        "zero hours remaining charges full new price",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now), // not After(now) => 0 hours
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 50_000_000,
-			expectCycle: 30 * 24,
-		},
-		{
-			// Boundary: full period remaining => first_charge = new_full - old_full.
-			name:        "full period remaining charges difference",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(30 * 24 * time.Hour)),
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 30_000_000, // credit is exactly $20 (whole cents already)
-			expectCycle: 30 * 24,
-		},
-		{
-			// nil periodEnd => 0 hours remaining => full new price.
-			name:        "nil period end charges full new price",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   nil,
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 50_000_000,
-			expectCycle: 30 * 24,
-		},
-		{
-			// periodEnd in the past => 0 hours remaining => full new price.
-			name:        "past period end charges full new price",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(-5 * 24 * time.Hour)),
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 50_000_000,
-			expectCycle: 30 * 24,
-		},
-		{
-			// Default 30-day (720h) cycle when billingCycleHours is nil.
-			name:        "nil cycle hours defaults to 720",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(28 * 24 * time.Hour)),
-			cycleHours:  nil,
-			expectFirst: 31_330_000,
-			expectCycle: 30 * 24,
-		},
-		{
-			// Non-positive cycle hours falls back to default 720.
-			name:        "zero cycle hours defaults to 720",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(28 * 24 * time.Hour)),
-			cycleHours:  intPtr(0),
-			expectFirst: 31_330_000,
-			expectCycle: 30 * 24,
-		},
-		{
-			// Annual cycle: 365 days, half remaining (182 whole days).
-			// old_unused = 100_000_000*4368/8760 = 49_863_013 -> ceil 49_870_000.
-			name:        "annual cycle half remaining",
-			oldFull:     100_000_000,
-			newFull:     300_000_000,
-			periodEnd:   timePtr(now.Add(182 * 24 * time.Hour)),
-			cycleHours:  intPtr(365 * 24),
-			expectFirst: 250_130_000,
-			expectCycle: 365 * 24,
-		},
-		{
-			// Defensive clamp: if new_full < old_full (not a real upgrade),
-			// first_charge clamps to >= 0 rather than going negative.
-			name:        "downgrade-like inputs clamp to zero",
-			oldFull:     50_000_000,
-			newFull:     20_000_000,
-			periodEnd:   timePtr(now.Add(28 * 24 * time.Hour)),
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 0,
-			expectCycle: 30 * 24,
-		},
-		{
-			// hoursRemaining capped at cycleHours: a period end far beyond one
-			// cycle never credits more than a full cycle of old plan.
-			name:        "hours remaining exceeding cycle is capped",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(100 * 24 * time.Hour)),
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 30_000_000, // capped at 30 days => old_unused=20_000_000
-			expectCycle: 30 * 24,
-		},
-		{
-			// Partial hours round down. 28 days + 23h59m => 695 whole hours.
-			// old_unused = 20_000_000*695/720 = 19_305_555 -> ceil 19_310_000.
-			name:        "partial hour rounds down",
-			oldFull:     20_000_000,
-			newFull:     50_000_000,
-			periodEnd:   timePtr(now.Add(28*24*time.Hour + 23*time.Hour + 59*time.Minute)),
-			cycleHours:  intPtr(30 * 24),
-			expectFirst: 30_690_000,
-			expectCycle: 30 * 24,
-		},
+		{"720h $20->$50 with 28d left", 20_000_000, 50_000_000, 720 * h, 672 * h, 720, 18_670_000, 31_330_000},
+		{"no time left charges full price", 20_000_000, 50_000_000, 720 * h, 0, 720, 0, 50_000_000},
+		{"period already ended", 20_000_000, 50_000_000, 720 * h, -5 * 24 * h, 720, 0, 50_000_000},
+		{"full period left", 20_000_000, 50_000_000, 720 * h, 720 * h, 720, 20_000_000, 30_000_000},
+		{"30 minutes left on 1h", 2_000_000, 5_000_000, h, 30 * time.Minute, 1, 1_000_000, 4_000_000},
+		{"12h left on 1d", 10_000_000, 20_000_000, 24 * h, 12 * h, 24, 5_000_000, 15_000_000},
+		{"7d with 84h left to 720h", 5_000_000, 20_000_000, 168 * h, 84 * h, 720, 2_500_000, 17_500_000},
+		{"720h with 360h left to 7d", 10_000_000, 20_000_000, 720 * h, 360 * h, 168, 5_000_000, 15_000_000},
+		{"90d with 45d left to 365d", 30_000_000, 100_000_000, 90 * 24 * h, 45 * 24 * h, 365 * 24, 15_000_000, 85_000_000},
+		{"1h with 60s left to 720h", 3_600_000, 10_000_000, h, time.Minute, 720, 60_000, 9_940_000},
+		{"1d with 90min left (sub-hour)", 24_000_000, 30_000_000, 24 * h, 90 * time.Minute, 24, 1_500_000, 28_500_000},
+		{"one second left rounds up once", 10_000_000, 20_000_000, 720 * h, time.Second, 720, 10_000, 19_990_000},
+		{"half a second left still credits", 10_000_000, 20_000_000, h, 500 * time.Millisecond, 1, 10_000, 19_990_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := quoteAt(usd(tc.old), usd(tc.new), tc.period, tc.left, intPtr(tc.newCycle), now)
+			require.NoError(t, err)
+			require.Equal(t, tc.credit, q.Credit, "credit")
+			require.Equal(t, tc.chargeN, q.ChargeNow, "charge now")
+			require.LessOrEqual(t, q.Credit, tc.old, "credit never exceeds the amount paid")
+			require.Equal(t, now, q.PeriodStart)
+			require.Equal(t, now.Add(time.Duration(tc.newCycle)*h), q.PeriodEnd)
+			_, err = moneyutil.NativeToRailMinorExact("USD", q.ChargeNow)
+			require.NoError(t, err, "whole-cent prices yield a whole-cent charge")
+		})
 	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			first, cycle, err := CalculateModelBUpgradeCharge(usd(tt.oldFull), usd(tt.newFull), tt.periodEnd, tt.cycleHours, now)
-			if err != nil {
-				t.Fatalf("same-currency proration must not error: %v", err)
-			}
-			if first != tt.expectFirst {
-				t.Fatalf("first charge: expected %d, got %d", tt.expectFirst, first)
-			}
-			if cycle != tt.expectCycle {
-				t.Fatalf("cycle hours: expected %d, got %d", tt.expectCycle, cycle)
-			}
-			if first < 0 {
-				t.Fatalf("first charge must never be negative, got %d", first)
-			}
-			// #671 invariant: whole-cent inputs => whole-cent first charge,
-			// exactly chargeable on cent-based rails.
-			if _, err := moneyutil.NativeToRailMinorExact("USD", first); err != nil {
-				t.Fatalf("first charge %d micros is not whole cents: %v", first, err)
-			}
+// The period, not now, bounds the credit: a clock before the period start
+// credits the whole period and never more than was paid.
+func TestQuoteModelBUpgradeCreditNeverExceedsPaid(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	start, end := now.Add(time.Hour), now.Add(2*time.Hour)
+	q, err := QuoteModelBUpgrade(ModelBUpgrade{Old: usd(3_333_333), New: usd(9_000_000), PeriodStart: &start, PeriodEnd: &end, NewCycleHours: intPtr(1)}, now)
+	require.NoError(t, err)
+	require.Equal(t, int64(3_333_333), q.Credit, "a sub-cent price is credited exactly, not rounded above it")
+	require.Equal(t, int64(5_666_667), q.ChargeNow)
+}
+
+func TestQuoteModelBUpgradeRefusals(t *testing.T) {
+	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	start, end := now.Add(-time.Hour), now.Add(time.Hour)
+	for _, tc := range []struct {
+		name  string
+		u     ModelBUpgrade
+		want  error
+		wantC string
+	}{
+		{"nil new cycle", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodStart: &start, PeriodEnd: &end}, ErrTierChangeCycleUnknown, "tier_change_cycle_unknown"},
+		{"zero new cycle", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodStart: &start, PeriodEnd: &end, NewCycleHours: intPtr(0)}, ErrTierChangeCycleUnknown, "tier_change_cycle_unknown"},
+		{"negative new cycle", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodStart: &start, PeriodEnd: &end, NewCycleHours: intPtr(-24)}, ErrTierChangeCycleUnknown, "tier_change_cycle_unknown"},
+		{"nil period start", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodEnd: &end, NewCycleHours: intPtr(1)}, ErrTierChangePeriodUnknown, "tier_change_period_unknown"},
+		{"nil period end", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodStart: &start, NewCycleHours: intPtr(1)}, ErrTierChangePeriodUnknown, "tier_change_period_unknown"},
+		{"empty period", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodStart: &end, PeriodEnd: &end, NewCycleHours: intPtr(1)}, ErrTierChangePeriodUnknown, "tier_change_period_unknown"},
+		{"inverted period", ModelBUpgrade{Old: usd(1), New: usd(2), PeriodStart: &end, PeriodEnd: &start, NewCycleHours: intPtr(1)}, ErrTierChangePeriodUnknown, "tier_change_period_unknown"},
+		{"credit exceeds new price (720h early -> 7d)", ModelBUpgrade{Old: usd(10_000_000), New: usd(5_000_000), PeriodStart: timePtr(now.Add(-20 * time.Hour)), PeriodEnd: timePtr(now.Add(700 * time.Hour)), NewCycleHours: intPtr(168)}, ErrTierChangeCreditExceedsPrice, "tier_change_credit_exceeds_price"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := QuoteModelBUpgrade(tc.u, now)
+			require.ErrorIs(t, err, tc.want)
+			var tierErr *TierChangeError
+			require.True(t, errors.As(err, &tierErr))
+			require.Equal(t, tc.wantC, tierErr.Code)
+			require.Zero(t, q, "no amount may be produced from a refused quote")
 		})
 	}
 }
 
 // TestUpgradeWirePinning pins the LITERAL provider amounts of an NMI Model-B
-// upgrade for a known price (#671): the preview micros, the RunSale proration
-// (cents -> "31.33" on the wire) and the recurring subscription amount
-// (dollars) must all describe the same money. A micros/cents mixup here fails
-// this test, not production.
+// upgrade (#671): the quote's micros become "31.33" on the sale wire.
 func TestUpgradeWirePinning(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	cycle := 30 * 24
+	q, err := quoteAt(usd(20_000_000), usd(50_000_000), 720*time.Hour, 672*time.Hour, intPtr(720), now)
+	require.NoError(t, err)
+	cents, err := moneyutil.NativeToRailMinorExact("USD", q.ChargeNow)
+	require.NoError(t, err)
+	require.Equal(t, "31.33", moneyutil.FormatCentsDecimal(cents))
 
-	// $20 -> $50 with 28 of 30 days left.
-	firstMicros, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_000), timePtr(now.Add(28*24*time.Hour)), &cycle, now)
-	if firstMicros != 31_330_000 {
-		t.Fatalf("preview micros: expected 31_330_000, got %d", firstMicros)
-	}
-
-	// The RunSale seam converts micros -> CENTS exactly (never raw micros).
-	cents, err := moneyutil.NativeToRailMinorExact("USD", firstMicros)
-	if err != nil {
-		t.Fatalf("proration must be whole cents: %v", err)
-	}
-	if cents != 3133 {
-		t.Fatalf("proration cents: expected 3133, got %d", cents)
-	}
-	// nmi.SaleParams.Amount is cents; the client posts FormatCentsDecimal(cents).
-	if wire := moneyutil.FormatCentsDecimal(cents); wire != "31.33" {
-		t.Fatalf("NMI sale wire amount: expected %q, got %q", "31.33", wire)
-	}
-
-	// The recurring enrollment amount is rail MINOR units (#818): create and
-	// upgrade paths share NativeToRailMinorExact, so the same price yields the
-	// same wire value.
-	for micros, want := range map[int64]string{19_990_000: "19.99", 50_000_000: "50.00"} {
-		c, err := moneyutil.NativeToRailMinorExact("USD", micros)
-		if err != nil {
-			t.Fatalf("recurring cents for %d micros: %v", micros, err)
-		}
-		if wire := moneyutil.FormatCentsDecimal(c); wire != want {
-			t.Fatalf("recurring wire amount: expected %q, got %q", want, wire)
-		}
-	}
-
-	// A price not representable in whole cents must ERROR at the sale seam,
-	// never round: 0 hours remaining => first charge = newFull = sub-cent.
-	subCent, _, _ := CalculateModelBUpgradeCharge(usd(20_000_000), usd(50_000_001), timePtr(now), &cycle, now)
-	if _, err := moneyutil.NativeToRailMinorExact("USD", subCent); err == nil {
-		t.Fatalf("sub-cent proration must error, got cents for %d micros", subCent)
-	}
+	// A price not representable in whole cents errors at the sale seam.
+	q, err = quoteAt(usd(20_000_000), usd(50_000_001), 720*time.Hour, 0, intPtr(720), now)
+	require.NoError(t, err)
+	_, err = moneyutil.NativeToRailMinorExact("USD", q.ChargeNow)
+	require.Error(t, err)
 }
 
-func jpy(native int64) PriceAmount { return PriceAmount{Micros: native, Currency: "JPY"} }
-
-// TestModelBUpgradeIsCurrencyScaled pins or#863 at the boundary this issue
-// touched: the Model-B unused-credit rounding is a ceil to a whole RAIL MINOR
-// unit, resolved through the currency registry — not an inline /10_000.
-//
-// JPY is registered scale-4 internal / ZERO-decimal minor, so one whole yen is
-// 10_000 internal units and the credit must land on a multiple of 10_000. The
-// arithmetic matches USD only because both currencies happen to share a native
-// shift of 4; the point is that the code no longer ASSUMES that.
+// TestModelBUpgradeIsCurrencyScaled (or#863): the credit rounds up to a whole
+// rail minor unit of the currency (whole yen for JPY), via the registry.
 func TestModelBUpgradeIsCurrencyScaled(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	cycle := 30 * 24
+	jpy := func(v int64) PriceAmount { return PriceAmount{Micros: v, Currency: "JPY"} }
+	q, err := quoteAt(jpy(20_000_000), jpy(50_000_000), 720*time.Hour, 672*time.Hour, intPtr(720), now)
+	require.NoError(t, err)
+	require.Equal(t, int64(31_330_000), q.ChargeNow)
+	yen, err := moneyutil.NativeToRailMinorExact("JPY", q.ChargeNow)
+	require.NoError(t, err)
+	require.EqualValues(t, 3133, yen)
 
-	// ¥2000 -> ¥5000, 28 of 30 days left. old_unused = ceilToYen(
-	// 20_000_000 * 672 / 720) = ceilToYen(18_666_666) = 18_670_000 (¥1867).
-	first, gotCycle, err := CalculateModelBUpgradeCharge(
-		jpy(20_000_000), jpy(50_000_000), timePtr(now.Add(28*24*time.Hour)), &cycle, now)
-	if err != nil {
-		t.Fatalf("same-currency JPY proration must not error: %v", err)
-	}
-	if gotCycle != cycle {
-		t.Fatalf("cycle hours: expected %d, got %d", cycle, gotCycle)
-	}
-	if first != 31_330_000 {
-		t.Fatalf("JPY first charge: expected 31_330_000 internal units (¥3133), got %d", first)
-	}
-	// The credit is a whole number of YEN, so the charge is chargeable as-is.
-	yen, err := moneyutil.NativeToRailMinorExact("JPY", first)
-	if err != nil {
-		t.Fatalf("JPY first charge must be whole yen: %v", err)
-	}
-	if yen != 3133 {
-		t.Fatalf("JPY wire amount: expected 3133 yen, got %d", yen)
-	}
-
-	// An unregistered currency cannot be prorated at a guessed scale.
-	if _, _, err := CalculateModelBUpgradeCharge(
-		PriceAmount{Micros: 20_000_000, Currency: "XXX"},
-		PriceAmount{Micros: 50_000_000, Currency: "XXX"},
-		timePtr(now.Add(28*24*time.Hour)), &cycle, now); err == nil {
-		t.Fatal("an unregistered currency must not prorate")
-	}
-}
-
-// TestModelBNewPeriodEnd documents the period-reset contract used by the
-// NMI/Stripe upgrade paths: the new period is [now, now+cycleHours].
-func TestModelBNewPeriodEnd(t *testing.T) {
-	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	_, cycle, _ := CalculateModelBUpgradeCharge(
-		usd(20_000_000), usd(50_000_000),
-		timePtr(now.Add(28*24*time.Hour)),
-		intPtr(30*24),
-		now,
-	)
-	gotEnd := now.Add(time.Duration(cycle) * time.Hour)
-	wantEnd := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
-	if !gotEnd.Equal(wantEnd) {
-		t.Fatalf("new period end: expected %v, got %v", wantEnd, gotEnd)
-	}
+	_, err = quoteAt(PriceAmount{Micros: 1, Currency: "XXX"}, PriceAmount{Micros: 2, Currency: "XXX"}, time.Hour, time.Minute, intPtr(1), now)
+	require.Error(t, err, "an unregistered currency must not prorate")
 }

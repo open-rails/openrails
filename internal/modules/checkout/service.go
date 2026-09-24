@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1313,14 +1312,11 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 		return nil, errors.New("upgrade predecessor belongs to another customer")
 	}
 	now := s.now().UTC()
-	cycle := newPrice.RecurringCycleHours()
-	if cycle == nil {
-		cycle = existingSub.Price.RecurringCycleHours()
-	}
-	amount, hours, err := CalculateModelBUpgradeCharge(PriceAmountOf(existingSub.Price), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, cycle, now)
+	quote, err := QuoteModelBUpgrade(modelBUpgradeOf(existingSub, existingSub.Price, newPrice), now)
 	if err != nil {
 		return nil, err
 	}
+	amount := quote.ChargeNow
 	if _, err = moneyutil.NativeToRailMinorExact(newPrice.Currency, amount); err != nil {
 		return nil, err
 	}
@@ -1345,7 +1341,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	if methodRow.CustomerID != customerID || methodRow.PspID != existingSub.PspID || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef != vault || methodRow.RailMethodRef != billing {
 		return nil, errors.New("upgrade instrument does not match accepted customer and provider account")
 	}
-	end := now.Add(time.Duration(hours) * time.Hour)
+	end := quote.PeriodEnd
 	startDate, _ := buildNMIFutureStartDate(end, now)
 	payload := subscriptions.NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, Instrument: charge.FreezeInstrument(methodRow), PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
 	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"},
@@ -1432,109 +1428,6 @@ func (s *CheckoutService) processDowngrade(
 		SubscriptionID: &existingSub.ID,
 		DelayedStart:   existingSub.CurrentPeriodEndsAt,
 	}, nil
-}
-
-// CalculateModelBUpgradeCharge computes the immediate first charge for a
-// "Model B" (reset-period) upgrade.
-//
-// Model B is the UNIVERSAL upgrade policy as of #268: every upgrade resets the
-// billing period. The customer is charged `newFull - oldUnused` NOW for a FRESH
-// full period, and then rebilled `newFull` at `now + cycle`.
-//
-// CURRENCY (#820): `newFull - oldUnused` is only meaningful inside ONE
-// currency — across an FX boundary the subtraction silently invents a rate of
-// 1.0. Both operands therefore arrive as PriceAmount (amount + currency) and a
-// mismatched or absent currency returns ErrTierChangeCrossCurrency with NO
-// amount, matching how reprice and plan migration refuse an FX crossing.
-//
-// UNITS: the amounts and the returned first charge are MICROS. The unused
-// credit is rounded UP to a whole cent (customer-favored), so for whole-cent
-// prices the first charge is a whole number of cents — chargeable on every
-// rail (NMI cents, Stripe cents, Solana base units) with preview == charge.
-//
-//	oldUnused   = ceilToCent(oldFull * hoursRemaining / cycleHours) // integer math
-//	firstCharge = newFull - oldUnused                               // clamped to >= 0
-//
-// where hoursRemaining is the number of WHOLE hours left in the current paid
-// period (0 if the period has already ended or periodEndsAt is nil).
-//
-// Example: $20 -> $50, 2 days into a 30-day cycle => hoursRemaining=672,
-// oldUnused = ceilToCent(20_000_000*672/720) = 18_670_000 micros, firstCharge =
-// 50_000_000-18_670_000 = 31_330_000 micros ($31.33). The new period becomes
-// [now, now+30d] and the next bill is $50.
-//
-// Boundary behavior:
-//   - 0 hours remaining           => firstCharge = newFull
-//   - full period remaining       => firstCharge = newFull - oldFull
-//
-// This helper is intentionally pure (no receiver state) so other rails
-// (e.g. the Solana path in #267) can reuse the exact same math. cycleHours is
-// returned so callers can advance the period end (now + cycleHours).
-func CalculateModelBUpgradeCharge(
-	old PriceAmount,
-	new PriceAmount,
-	periodEndsAt *time.Time,
-	billingCycleHours *int,
-	now time.Time,
-) (firstChargeMicros int64, cycleHours int, err error) {
-	if err := RequireSameCurrency(old, new); err != nil {
-		return 0, 0, err
-	}
-	oldFull, newFull := old.Micros, new.Micros
-
-	// Default to a 30-day (720h) cycle if not specified.
-	cycleHours = 30 * 24
-	if billingCycleHours != nil && *billingCycleHours > 0 {
-		cycleHours = *billingCycleHours
-	}
-
-	// Whole hours remaining in the current paid period.
-	hoursRemaining := 0
-	if periodEndsAt != nil && periodEndsAt.After(now) {
-		hoursRemaining = int(periodEndsAt.Sub(now).Hours())
-		if hoursRemaining < 0 {
-			hoursRemaining = 0
-		}
-	}
-	// Never credit more than a full cycle of unused time.
-	if hoursRemaining > cycleHours {
-		hoursRemaining = cycleHours
-	}
-
-	// Credit for the unused portion of the OLD plan (integer math to avoid
-	// floating-point drift), rounded UP to a whole cent (customer-favored) so
-	// the resulting charge is whole-cent for whole-cent prices.
-	// The product can exceed int64 even though the quotient cannot: remaining
-	// hours are clamped to the positive cycle, so valid nonnegative prices
-	// yield 0 <= oldUnused <= oldFull. Widen before multiplying, keep the
-	// existing integer truncation, and check before narrowing.
-	var unused big.Int
-	unused.Mul(big.NewInt(oldFull), big.NewInt(int64(hoursRemaining)))
-	unused.Quo(&unused, big.NewInt(int64(cycleHours)))
-	if !unused.IsInt64() {
-		return 0, 0, fmt.Errorf("unused subscription value exceeds int64 precision")
-	}
-	oldUnused := unused.Int64()
-	// or#863: ceil to a whole RAIL MINOR unit at this price's own currency
-	// scale, then back to internal units — not an inline /10_000 that assumes
-	// every currency is 2-decimal. RequireSameCurrency above already proved the
-	// currency is registered and shared by both operands.
-	oldUnusedMinor, err := moneyutil.NativeToRailMinor(old.Currency, oldUnused)
-	if err != nil {
-		return 0, 0, err
-	}
-	oldUnused, err = moneyutil.RailMinorToNative(old.Currency, oldUnusedMinor)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	firstChargeMicros = newFull - oldUnused
-	if firstChargeMicros < 0 {
-		// Defensive clamp. For a genuine upgrade newFull > oldFull so this is
-		// only reachable with bad inputs (e.g. a "downgrade" routed here).
-		firstChargeMicros = 0
-	}
-	return firstChargeMicros, cycleHours, nil
 }
 
 // TierChange processes a subscription tier change (upgrade or downgrade).
@@ -1649,7 +1542,7 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 // validation, then derives the money summary from the universal Model B math so
 // the preview and the eventual charge agree:
 //
-//   - upgrade:   charged now = CalculateModelBUpgradeCharge(old, new, ...); the
+//   - upgrade:   charged now = QuoteModelBUpgrade(...).ChargeNow; the
 //     cycle resets, so the next charge (new full price) is now + cycle.
 //   - downgrade: nothing now; the change applies at the current period end, where
 //     the next charge is the new (lower) full price.
@@ -1750,11 +1643,11 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	firstCharge, cycleHours, err := CalculateModelBUpgradeCharge(PriceAmountOf(currentPrice), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+	quote, err := QuoteModelBUpgrade(modelBUpgradeOf(existingSub, currentPrice, newPrice), now)
 	if err != nil {
 		return nil, err
 	}
-	nextDate := now.Add(time.Duration(cycleHours) * time.Hour)
+	firstCharge, nextDate := quote.ChargeNow, quote.PeriodEnd
 	resp.Action = "upgrade"
 	resp.AmountDueNow = firstCharge
 	resp.Effective = "now"
@@ -1918,13 +1811,13 @@ func (s *CheckoutService) processTierChangeStripe(
 		// #268 Model B: Stripe resets the cycle to now and invoices the
 		// proration immediately. The frozen now-amount is the local estimate
 		// (matching the preview); Stripe finalizes the exact proration.
-		estimatedNow, cycleHours, err := CalculateModelBUpgradeCharge(PriceAmountOf(currentPrice), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+		quote, err := QuoteModelBUpgrade(modelBUpgradeOf(existingSub, currentPrice, newPrice), now)
 		if err != nil {
 			return nil, err
 		}
-		payload.AmountDueNow, payload.ProrationBehavior, payload.BillingCycleAnchor = estimatedNow, "always_invoice", "now"
+		payload.AmountDueNow, payload.ProrationBehavior, payload.BillingCycleAnchor = quote.ChargeNow, "always_invoice", "now"
 		payload.PaymentBehavior = stripePaymentBehaviorPaidOrRefused
-		payload.PeriodStart, payload.PeriodEnd = now, now.Add(time.Duration(cycleHours)*time.Hour)
+		payload.PeriodStart, payload.PeriodEnd = quote.PeriodStart, quote.PeriodEnd
 	}
 	return s.enqueueStripeTierChange(ctx, existingSub, payload, tierChangeIdempotencyKey(req.IdempotencyKey))
 }
