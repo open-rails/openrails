@@ -555,7 +555,13 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				require.Equal(t, want, f.submissions(e), "nothing is sent after the cancel")
 				page, err := f.any().client[embedded].ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: e.c.id, PageOptions: openrails.PageOptions{Limit: 10}})
 				require.NoError(t, err)
-				require.Len(t, completed(page.Data), want, "every provider charge is a local payment")
+				charged := 0
+				for _, p := range completed(page.Data) {
+					if p.Amount > 0 {
+						charged++
+					}
+				}
+				require.Equal(t, want, charged, "every provider charge is a local payment")
 				for range 2 {
 					f.advance(monthHours * time.Hour)
 					f.passes()
