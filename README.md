@@ -386,6 +386,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Embedded integration (Go library)](docs/embedded-integration.md) — run the engine in-process: boot, migrations, declaring your merchant, mounting the billing routes on your server, calling the in-process client.
 - [Standalone integration (service)](docs/standalone-integration.md) — deploy OpenRails as its own service: production config, first-run provisioning, API keys, the Go SDK and plain-HTTP integration.
 - [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout flows (redirect, tokenized-vault, Solana), payment methods, tokens, and error handling.
+- [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses delegated tokens.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 - [HTTP API reference](docs/api/endpoints.md) — every route, grouped by caller class.
