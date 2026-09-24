@@ -5475,7 +5475,7 @@
     "internal/operator/profile.go": "084d6f735001ff56c70898a2abc5d967b438b24b99c7e5afe8a7d7fef70ea369",
     "internal/requestauth/cache.go": "5841a63887ec69aee7ca8c0f8de84fb76fee2357cc6dd4c69e1030255bc40bdf",
     "internal/requestauth/hostprincipal.go": "da329e07de292fd17e2a6d7345ead3d766eb9702707a61f7fe62f9a6d357a8a6",
-    "internal/service/customer_payment.go": "3d7cac18225f1f7f1d4e72211b0e51a74cf57f3e01bf985129ac95e60db7e2b8",
+    "internal/service/customer_payment.go": "0d5768e6c7f80b7d5068578ece07c3e1f08465c2e281ec7db10972e657b74bc1",
     "internal/standalonehandlers/merchant_api_keys.go": "3ec8174c3d5351827175de8dc2874c065c29a5f37428963e907ff253fcec7fbf",
     "permissions/permissions.go": "ca1d50aaa04c862ba8c11e6262c59b2efca61993215821df08fa7aa82436c5f0",
     "pkg/api/error.go": "5b0aff40c4ec2d090e617d903f6da1ce29ba82b9ad2bf82e7bd6cc099d51af41",
