@@ -196,6 +196,10 @@ func tierChangeRefused(in gen.OpenrailsRailIntent, providerStatus int, declineCo
 	}
 	switch {
 	case providerStatus == 0:
+	case providerStatus == http.StatusConflict:
+		if declineCode != "" {
+			refusal.Code = declineCode
+		}
 	case providerStatus == http.StatusPaymentRequired:
 		refusal.HTTPStatus = http.StatusPaymentRequired
 		if declineCode != "" {

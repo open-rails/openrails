@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -112,13 +113,19 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 	}
 	response, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: nmidirect.StoredCredentialFor(credential)})
 	if callErr != nil {
-		if nmi.RequiresVerification(callErr) {
+		duplicate := errors.Is(callErr, nmi.ErrDuplicateTransaction)
+		if !duplicate && nmi.RequiresVerification(callErr) {
 			return intents.Ambiguous("sale outcome requires provider verification")
 		}
 		var refusal *nmi.CustomerVaultError
 		evidence := map[string]any{"request_refused": true}
 		reason := "provider refused the sale request"
-		if errors.As(callErr, &refusal) {
+		if duplicate {
+			// NMI's duplicate check refused this unique order unprocessed.
+			evidence["duplicate_refused"] = true
+			evidence["failure_code"] = openrails.CodePaymentDuplicateRefused
+			reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
+		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse}
 			reason = "sale declined"
 		}
@@ -232,19 +239,35 @@ func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRail
 	if resolution.Step != "" {
 		return intents.Outcome{}, intents.RejectResolution("sale has no steps")
 	}
-	if resolution.NotExecuted {
-		return intents.Outcome{}, intents.RejectResolution("post-submission sale nonexecution is not provable from search absence")
-	}
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return intents.Outcome{}, err
 	}
 	if in.Rail == string(models.RailStripe) {
+		if resolution.NotExecuted {
+			return intents.Outcome{}, intents.RejectResolution("post-submission sale nonexecution is not provable from search absence")
+		}
 		return h.resolveStripeSale(ctx, in, resolution.ProviderReference)
 	}
 	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 	if err != nil {
 		return intents.Outcome{}, err
+	}
+	if resolution.NotExecuted {
+		// NMI holding no transaction under the sale's unique order is the
+		// operator's proof that nothing was charged.
+		attempts, err := client.ReadOrderAttempts(ctx, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
+		if err != nil {
+			return intents.Outcome{}, intents.RejectResolution("NMI transaction search is unavailable: %v", err)
+		}
+		if attempts.Transactions != 0 {
+			return intents.Outcome{}, intents.RejectResolution("NMI holds %d transaction(s) under this order; resolve with its receipt", attempts.Transactions)
+		}
+		evidence := map[string]any{"request_refused": true, "resolved_absent": true}
+		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
+			return intents.Outcome{}, err
+		}
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("NMI holds no transaction for this sale; nothing was charged", evidence)), nil
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
 	if err != nil || !found {

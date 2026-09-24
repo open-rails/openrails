@@ -183,6 +183,10 @@ var nmiLocalizationIDs = map[int]string{
 	461: "unsupported_card_type",
 }
 
+// LocalizationIDForResponseCode is the customer-facing decline code NMI's
+// response code maps to ("" when it maps to none).
+func LocalizationIDForResponseCode(code int) string { return nmiLocalizationID(code) }
+
 func nmiLocalizationID(code int) string {
 	return nmiLocalizationIDs[code]
 }

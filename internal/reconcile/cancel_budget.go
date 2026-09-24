@@ -29,6 +29,10 @@ const (
 	// granted in perpetuity off subscriptions that no longer exist. A handful
 	// still makes mass cancellation structurally impossible.
 	DefaultMinCancelAllowance = 3
+	// DefaultTinyBook is the largest live book a pass may cancel entirely. A
+	// merchant with a handful of subscribers whose schedules the provider
+	// ended must converge; above it, no pass cancels the whole book.
+	DefaultTinyBook = 5
 	// DefaultBreakerRatio: a roster reporting less than this share of the local
 	// live book is more likely truncated/broken than true.
 	DefaultBreakerRatio = 0.10
@@ -56,10 +60,11 @@ type CancelBudget struct {
 //
 //	min(Max, max(MinAllowance, floor(localLive * Fraction)))
 //
-// The percentage is the real guard on a big book (5% of 1 000 = 50, capped to
-// 25); MinAllowance keeps a small book from livelocking on a cap that rounds to
-// zero. A nine-subscriber merchant losing all nine still trips it; a
-// two-subscriber merchant with two genuine cancellations still converges.
+// raised to the whole book when it holds at most DefaultTinyBook live
+// subscriptions. The percentage is the real guard on a big book (5% of 1 000
+// = 50, capped to 25); MinAllowance keeps a small book from livelocking on a
+// cap that rounds to zero. A nine-subscriber merchant losing all nine still
+// trips it; a four-subscriber merchant whose four schedules ended converges.
 func (b CancelBudget) Limit(localLive int) int {
 	maxAbs := b.Max
 	if maxAbs <= 0 {
@@ -79,6 +84,9 @@ func (b CancelBudget) Limit(localLive int) int {
 	}
 	if limit > maxAbs {
 		limit = maxAbs
+	}
+	if localLive <= DefaultTinyBook && localLive > limit {
+		limit = localLive
 	}
 	return limit
 }

@@ -60,15 +60,21 @@ type nmiSchedule struct {
 // Query API searches, v5 transaction reads/refunds and v5 recurring
 // subscriptions. Declines follow each vault's current card.
 type nmiFake struct {
-	mu          sync.Mutex
-	seq         int
-	tokens      map[string]card
-	vaults      map[string]*nmiVault
-	sales       []*nmiSale
-	attempts    []url.Values
-	schedules   map[string]*nmiSchedule
-	plans       map[string]obj
-	duplicate   int
+	mu        sync.Mutex
+	seq       int
+	tokens    map[string]card
+	vaults    map[string]*nmiVault
+	sales     []*nmiSale
+	attempts  []url.Values
+	schedules map[string]*nmiSchedule
+	plans     map[string]obj
+	duplicate int
+	// dupWindow models NMI's duplicate check: a sale or verification with the
+	// card and amount of one processed within the window is refused
+	// unprocessed, whatever its order id. Off when zero.
+	dupWindow   time.Duration
+	dupNow      func() time.Time
+	recent      []nmiRecent
 	declined    []*nmiSale
 	lose        int
 	lost        int
@@ -510,6 +516,9 @@ func (f *nmiFake) sale(form url.Values) string {
 		f.duplicate--
 		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654321&response_code=300"
 	}
+	if f.duplicateOf(*charged, form.Get("amount")) {
+		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654322&response_code=300"
+	}
 	amount, currency, scheduleID := form.Get("amount"), strings.ToUpper(form.Get("currency")), ""
 	if form.Get("recurring") == "rebill_subscription" {
 		schedule := f.schedules[form.Get("subscription_id")]
@@ -527,6 +536,7 @@ func (f *nmiFake) sale(form url.Values) string {
 		s.BillingID = v.BillingID
 	}
 	f.sales = append(f.sales, s)
+	f.remember(*charged, form.Get("amount"))
 	return fmt.Sprintf("response=1&responsetext=SUCCESS&authcode=123456&transactionid=%s&orderid=%s&response_code=100", s.TransactionID, s.OrderID)
 }
 
@@ -892,8 +902,14 @@ func (f *nmiFake) validate(form url.Values) string {
 	if !ok {
 		return "response=3&responsetext=Invalid+Billing+Id&response_code=300"
 	}
+	if f.duplicateOf(*c, "0.00") {
+		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654323&response_code=300"
+	}
 	id := f.next("validate")
 	approved := c.Decline == "" || c.Decline == "202" || c.Decline == "203"
+	if approved {
+		f.remember(*c, "0.00")
+	}
 	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, BillingID: form.Get("billing_id"), Card: *c, Approved: approved, Form: form})
 	if !approved {
 		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&response_code=%s", id, c.Decline)
@@ -941,4 +957,36 @@ func (f *nmiFake) customSchedule(id string) {
 	defer f.mu.Unlock()
 	s := f.schedules[id]
 	s.Custom, s.Plan = true, "custom-"+id
+}
+
+type nmiRecent struct {
+	card   card
+	amount string
+	at     time.Time
+}
+
+// duplicateWindow turns on NMI's duplicate check against now's clock.
+func (f *nmiFake) duplicateWindow(now func() time.Time, window time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dupNow, f.dupWindow = now, window
+}
+
+func (f *nmiFake) duplicateOf(c card, amount string) bool {
+	if f.dupWindow <= 0 {
+		return false
+	}
+	now := f.dupNow()
+	for _, r := range f.recent {
+		if r.card.Brand == c.Brand && r.card.Last4 == c.Last4 && r.amount == amount && now.Sub(r.at) < f.dupWindow {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *nmiFake) remember(c card, amount string) {
+	if f.dupWindow > 0 {
+		f.recent = append(f.recent, nmiRecent{card: c, amount: amount, at: f.dupNow()})
+	}
 }

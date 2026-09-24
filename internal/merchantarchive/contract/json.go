@@ -289,6 +289,7 @@ var jsonRules = map[string]jsonRule{
 	"rail_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
 		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
+		"duplicate_refused": booleanValue, "failure_code": textValue, "resolved_absent": booleanValue,
 	})),
 	"rail_intents.initial_membership.payload": object(map[string]jsonRule{
 		"checkout_session_id": uuidValue,

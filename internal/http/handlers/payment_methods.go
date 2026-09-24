@@ -224,6 +224,10 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		}
+		if errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused) {
+			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentDuplicateRefused, err.Error()))
+			return
+		}
 		if providerErr := createPaymentMethodProviderError(err); providerErr != nil {
 			r.APIError(providerErr)
 			return

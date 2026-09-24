@@ -117,6 +117,11 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 		SubscriptionID: p.RailSubscriptionID, OrderID: p.OrderReference, PONumber: p.OrderReference,
 		StoredCredential: nmidirect.StoredCredentialFor(posture),
 	})
+	if errors.Is(err, nmi.ErrDuplicateTransaction) {
+		// NMI's duplicate check refused this unique order unprocessed; the
+		// next due pass attempts the recovery again under a new order.
+		return h.finalizeNotExecuted(ctx, in, p, "NMI refused the recovery charge as a duplicate of an identical recent charge; nothing was charged")
+	}
 	if err != nil {
 		return Ambiguous("rebill submission requires verification: " + err.Error())
 	}

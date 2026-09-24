@@ -200,3 +200,24 @@ doesn't surprise you:
   NMI-billed membership that ends this way also has its NMI schedule deleted
   (held, with a `life.provider_cancel.held` finding, while destructive actions
   are disarmed). Refunds made through OpenRails follow their `revoke_access`.
+
+### Duplicate-transaction refusals
+
+NMI refuses a sale or verification whose card and amount match one it just
+processed (`response=3`, code 300, "Duplicate transaction"), whatever the order
+id. Every OpenRails charge carries a unique order, so this refusal means NOTHING
+was charged: tier-change prorations, one-off sales and card saves answer
+`409 payment_duplicate_refused` (try again in a few minutes), engine renewals
+and recoveries end not executed and the next due pass charges again, and a
+replacement-card verification retries on its own.
+
+OpenRails does not send `dup_seconds`, so NMI's own check stays on. It is the
+gateway's net against a double submit: the lost-submission resend re-sends
+under the same order only after the Query API shows nothing for it, and NMI's
+check still catches a first request the search had not yet indexed.
+
+A submitted charge with no receipt is settled from NMI's record under its
+order: after five minutes with no transaction it ends not executed. If the
+search is unavailable, a `life.tier_change.proration_unresolved` finding names
+`openrails intents resolve --intent <id> --step proration --not-executed`
+(accepted only when NMI holds no transaction for the order) or `--receipt`.
