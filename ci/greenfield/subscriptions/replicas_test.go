@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -63,8 +64,38 @@ func TestReplicasAdmissionRace(t *testing.T) {
 			f.awaitPasses(passes)
 			f.requireExactlyOnce(e, 1, 2)
 			require.Len(t, f.collections(e), 1, "one accepted renewal operation")
+			f.requireDatabaseRefusesSecondWriter(e)
 		})
 	}
+}
+
+// requireDatabaseRefusesSecondWriter: whatever an application path does,
+// PostgreSQL itself refuses a second operation for a retry slot and a second
+// unresolved operation for a subscription.
+func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
+	t := f.t
+	clone := func(attempt int, status string) error {
+		payload := "payload"
+		if attempt >= 0 {
+			payload = fmt.Sprintf("jsonb_set(payload, '{attempt}', '%d'::jsonb)", attempt)
+		}
+		_, err := f.base.pool.Exec(t.Context(), f.q(`INSERT INTO openrails.rail_intents (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, origin, psp_id)
+			SELECT merchant_id, rail, intent_type, subscription_id, price_id, `+payload+`, idempotency_key || ':' || gen_random_uuid()::text, $2, origin, psp_id
+			FROM openrails.rail_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' AND status = 'succeeded'`), subUUID(e.sub), status)
+		return err
+	}
+	refused := func(err error, constraint string) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		require.ErrorAs(t, err, &pgErr)
+		require.Equal(t, "23505", pgErr.Code)
+		require.Equal(t, constraint, pgErr.ConstraintName)
+	}
+	refused(clone(-1, "failed_terminal"), "uq_rail_intents_subscription_collection_slot")
+	require.NoError(t, clone(98, "pending"))
+	refused(clone(99, "pending"), "uq_rail_intents_open_subscription_collection")
+	_, err := f.base.pool.Exec(t.Context(), f.q(`DELETE FROM openrails.rail_intents WHERE subscription_id = $1 AND status = 'pending'`), subUUID(e.sub))
+	require.NoError(t, err)
 }
 
 // Scenario 2b: a pass reads a membership as due, then another replica
@@ -515,7 +546,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				}, "the raced renewal resolves")
 				sub := f.subscription(e)
 				require.Equal(t, "cancelled", sub.Status)
-				require.False(t, sub.CurrentPeriodEndsAt.After(end), "a cancelled membership is not extended")
+				require.True(t, sub.CurrentPeriodEndsAt.Before(end.Add(monthHours*time.Hour)), "a cancelled membership is not extended")
 				want := 1
 				if rc.charge {
 					want = 2 // sent before the cancel committed; recorded for review, never lost

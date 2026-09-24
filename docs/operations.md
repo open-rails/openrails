@@ -130,6 +130,18 @@ success); creates are content-addressed find-or-create. Stripe ops
 additionally send `Idempotency-Key`. Every attempt/outcome is appended to
 `openrails.rail_mutation_logs`.
 
+**Several replicas.** Hosts may run any number of processes against one
+database and River schema. Exactly-once rebilling rests on the database, not
+on process state or timing: admission locks the customer and subscription
+rows; unique indexes allow one unresolved charge operation per subscription
+and one engine operation per (period, attempt) slot; the write-once submission
+fence admits one sender per charge; completion re-reads the operation under the
+same locks. A pass that finds its membership already settled by another replica
+does nothing. Leases and the lost-submission settle delay (5 minutes) use each
+process's clock, so keep replicas NTP-synchronized: skew must stay well under
+the settle delay minus the 25-second provider timeout. `ci/greenfield`'s
+`TestReplicas*` fleets are the proof.
+
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
 deliver webhooks at-least-once and retry from their end; our handlers are
 idempotent for exactly that reason. **There is deliberately no local inbound

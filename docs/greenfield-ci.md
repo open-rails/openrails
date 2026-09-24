@@ -15,7 +15,12 @@ money, browser-safe JSON and recovery of the rescue worker itself after a crash.
 - soft/terminal declines, retry timing and card replacement;
 - cancellation, resumption, account-deletion cancellation and repricing;
 - refunds, authentication abandonment and interrupted-operation recovery;
-- the same subscription operations through embedded and HTTP clients.
+- the same subscription operations through embedded and HTTP clients;
+- multi-replica exactly-once rebilling (`TestReplicas*`): 2–3 embedded
+  replicas over one database, each with its own connections, River client,
+  engine clock and HTTP server. A crash cuts the replica's database link, so it
+  records nothing afterwards. The fleets run in a second `go test` process
+  beside the rest, which is why CI starts PostgreSQL with 300 connections.
 
 See the [feature coverage map](greenfield-coverage.md) for what these tests do
 and do not establish. Test count is not a percentage of functionality covered.
@@ -28,7 +33,7 @@ OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_
 ```
 
 The runner selects both packages with race detection and no test-result cache,
-running at most four lifecycle scenarios concurrently.
+running at most four lifecycle scenarios and three fleets concurrently.
 Each test owns a random schema; migrations use the libraries' public entry
 points. Lifecycle setup and assertions use public clients/HTTP. The crash
 fixture rewinds durable job/intent state to model interrupted execution, and
