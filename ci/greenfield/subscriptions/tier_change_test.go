@@ -276,12 +276,12 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 
 	w.stripe.setDecline(visa.Last4, "auth")
 	key := "challenged-" + uuid.NewString()
-	status, body := c.call(http.MethodPost, "/subscriptions/"+sub.String()+"/change-tier", key, map[string]any{"price_id": to.ID})
-	require.Equal(t, http.StatusOK, status, "%v", body)
-	body = unwrap(body)
-	require.Equal(t, "requires_action", body["status"], "%v", body)
-	require.Equal(t, "payment_authentication", body["next_action"].(map[string]any)["type"])
-	op := body["operation_id"].(string)
+	req := openrails.ChangeTierRequest{PriceID: to.ID}
+	pending, err := w.client[embedded].ChangeTier(t.Context(), sub, key, req)
+	require.NoError(t, err)
+	require.Equal(t, "requires_action", pending.Status, "%+v", pending)
+	require.Equal(t, "payment_authentication", pending.NextAction.Type)
+	op := pending.OperationID
 	require.Equal(t, from.ID, w.subscription(embedded, sub).PriceID)
 	require.False(t, c.entitled(to.ent))
 	require.Len(t, w.stripe.ledger(""), charges)
@@ -292,7 +292,7 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 	c.must(http.MethodPost, "/payment-operations/"+op+"/authentication/confirm", "", nil)
 	w.settle()
 
-	done, err := w.client[remote].ChangeTier(t.Context(), sub, key, openrails.ChangeTierRequest{PriceID: to.ID})
+	done, err := w.client[remote].ChangeTier(t.Context(), sub, key, req)
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", done.Status, "%+v", done)
 	require.Equal(t, int64(1500*10_000), done.AmountDueNow)
