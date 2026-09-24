@@ -23,9 +23,8 @@ checks() {
   fi
   bash scripts/check-embedded-auth-boundary.sh
   go build ./...
-  # The required database/provider workflow is the focused greenfield suite.
-  # Ordinary packages keep their pure unit and contract tests here; there is no
-  # legacy integration-package partition to maintain.
+  # Package tests are guards, contracts and focused regressions; database and
+  # provider behavior is covered by the greenfield suite in End-to-end.
   go test -vet=all -race -count=1 ./...
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
