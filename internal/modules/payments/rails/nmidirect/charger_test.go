@@ -27,6 +27,18 @@ type fakeGateway struct {
 	forms   []url.Values
 }
 
+func (g *fakeGateway) Forms() []url.Values {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]url.Values(nil), g.forms...)
+}
+
+func (g *fakeGateway) Reads() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.reads
+}
+
 func newCharger(t *testing.T, g *fakeGateway) *Charger {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -104,14 +116,14 @@ func TestChargeCapturesAnchorAndReplaysIt(t *testing.T) {
 	res, err := c.Charge(context.Background(), request(charge.InitialOneTime()))
 	require.NoError(t, err)
 	require.Equal(t, charge.Result{TransactionID: "txn-99", TokenType: charge.TokenTypePSPToken, CapturedRef: "txn-99"}, res)
-	require.Equal(t, "customer", g.forms[0].Get("initiated_by"))
-	require.Equal(t, "stored", g.forms[0].Get("stored_credential_indicator"))
+	require.Equal(t, "customer", g.Forms()[0].Get("initiated_by"))
+	require.Equal(t, "stored", g.Forms()[0].Get("stored_credential_indicator"))
 
 	res, err = c.Charge(context.Background(), request(charge.UnscheduledMIT("anchor-1")))
 	require.NoError(t, err)
 	require.Empty(t, res.CapturedRef, "only the initial CIT anchors the sequence")
-	require.Equal(t, "anchor-1", g.forms[1].Get("initial_transaction_id"))
-	require.Equal(t, "merchant", g.forms[1].Get("initiated_by"))
+	require.Equal(t, "anchor-1", g.Forms()[1].Get("initial_transaction_id"))
+	require.Equal(t, "merchant", g.Forms()[1].Get("initiated_by"))
 
 	for name, req := range map[string]charge.Request{
 		"reference-less MIT": request(charge.UnscheduledMIT("")),
@@ -121,7 +133,7 @@ func TestChargeCapturesAnchorAndReplaysIt(t *testing.T) {
 		_, err := c.Charge(context.Background(), req)
 		require.Error(t, err, name)
 	}
-	require.Len(t, g.forms, 2, "invalid requests never reach NMI")
+	require.Len(t, g.Forms(), 2, "invalid requests never reach NMI")
 }
 
 func TestChargeOutcomeClassification(t *testing.T) {
@@ -140,7 +152,7 @@ func TestChargeOutcomeClassification(t *testing.T) {
 	} {
 		g := &fakeGateway{sale: tc.body}
 		res, err := newCharger(t, g).Charge(context.Background(), request(charge.UnscheduledMIT("anchor-1")))
-		require.Len(t, g.forms, 1, tc.body)
+		require.Len(t, g.Forms(), 1, tc.body)
 		if tc.declined {
 			require.NoError(t, err, tc.body)
 			require.True(t, res.Declined)
@@ -174,10 +186,10 @@ func TestRecurringSaleWire(t *testing.T) {
 		res, refusal, err := run(context.Background(), request(tc.ctx))
 		require.NoError(t, err)
 		require.Nil(t, refusal)
-		require.Equal(t, 1, g.reads, "the vault entry is verified before money moves")
+		require.Equal(t, 1, g.Reads(), "the vault entry is verified before money moves")
 		require.Equal(t, "txn", res.TransactionID)
 		require.Equal(t, tc.captured, res.CapturedRef)
-		w := g.forms[0]
+		w := g.Forms()[0]
 		for field, want := range map[string]string{
 			"type": "sale", "recurring": "", "subscription_id": "", "plan_id": "", "billing_method": "recurring",
 			"initiated_by": string(tc.ctx.Initiator), "initial_transaction_id": tc.ctx.PriorRef,
@@ -210,14 +222,14 @@ func TestRecurringInvalidTermsNeverDispatch(t *testing.T) {
 		_, refusal, err := c.ChargeRecurringMIT(context.Background(), req)
 		require.ErrorIs(t, err, charge.ErrNotDispatched, name)
 		require.Nil(t, refusal, name)
-		require.Empty(t, g.forms, name)
+		require.Empty(t, g.Forms(), name)
 	}
 	for _, billing := range []string{`[]`, `[{"id":"other"}]`, `[{"id":"b1"},{"id":"b2"}]`} {
 		g := &fakeGateway{billing: billing}
 		_, _, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.RecurringMIT("anchor")))
 		require.ErrorIs(t, err, charge.ErrNotDispatched, billing)
-		require.Equal(t, 1, g.reads, billing)
-		require.Empty(t, g.forms, "a vault mismatch never sends money: %s", billing)
+		require.Equal(t, 1, g.Reads(), billing)
+		require.Empty(t, g.Forms(), "a vault mismatch never sends money: %s", billing)
 	}
 }
 
@@ -239,7 +251,7 @@ func TestRecurringRefusalVersusUnknown(t *testing.T) {
 	} {
 		g := &fakeGateway{billing: `[{"id":"b1"}]`, sale: tc.response}
 		res, refusal, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.RecurringMIT("anchor")))
-		require.Len(t, g.forms, 1, tc.name)
+		require.Len(t, g.Forms(), 1, tc.name)
 		if tc.hard {
 			require.NoError(t, err, tc.name)
 			require.True(t, res.Declined)

@@ -417,7 +417,12 @@ func TestMinContextSlotRetry(t *testing.T) {
 }
 
 func TestValidateAddressAndSignature(t *testing.T) {
-	sig88 := solanago.Signature{1, 2, 3}.String()
+	var maxSig solanago.Signature
+	for i := range maxSig {
+		maxSig[i] = 0xFF
+	}
+	// Any 64-byte value is a well-formed signature; appending to the max value overflows it.
+	sig88 := maxSig.String()
 	for s, ok := range map[string]bool{
 		"11111111111111111111111111111112":            true,
 		"So11111111111111111111111111111111111111112": true,

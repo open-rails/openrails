@@ -249,7 +249,7 @@ func TestV5WireShapes(t *testing.T) {
 }
 
 func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
-	f := newNMIFake(t, reply(approvedDirect))
+	f := newNMIFake(t, reply(`{"object":"transaction","id":"t","response":"1","response_code":"100"}`))
 	c := f.client(t)
 	ctx := t.Context()
 	sale := func(mut func(*SaleParams)) error {
