@@ -1,5 +1,11 @@
 # Changelog
 
+## One-click card subscriptions (openrails#1085)
+
+- A checkout host relays a card subscription's pay request with OpenRails'
+  `CreateCheckoutSessionRequest.Confirm`; a new Collect.js token subscribes in
+  one call. No package API change.
+
 ## Advertised checkout rails (openrails#1078)
 
 - Breaking: `checkoutRails(offers)` takes OpenRails' checkout options alone.

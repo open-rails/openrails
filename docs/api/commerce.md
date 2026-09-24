@@ -23,6 +23,14 @@ checkout creation. Identical retries recover the existing checkout. Use the
 returned session ID unchanged for subsequent reads and confirmation. Provider
 options report local readiness; they do not execute a payment or probe a gateway.
 An effective-tier read returns null when the customer has no active tier.
+A recurring card price (NMI, Stripe) is a quote until the customer accepts it.
+A host relaying the customer's pay click sets `Confirm`: OpenRails saves an NMI
+`PaymentToken` as the customer's card, accepts the price's terms and charges it
+in that call. A declined card leaves no subscription and no saved card; a retry
+with the same key replays the accepted enrollment. Without `Confirm` the
+signed-in customer accepts at `POST /v1/me/checkout/{id}/confirm`. Stripe cards
+are saved in the page first (`payment_method_id`); Solana subscriptions use the
+price's on-chain plan.
 A provider refusal is a coded 402/502 (see [errors](errors.md#payment-refusals));
 the session is recorded as failed and a new session may be opened with another
 instrument.

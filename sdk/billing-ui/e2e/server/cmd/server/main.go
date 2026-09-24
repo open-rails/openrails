@@ -104,6 +104,14 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		}
 		reply(w, http.StatusOK, out)
 	})
+	mux.HandleFunc("GET /__test/customers/{id}/billing", func(w http.ResponseWriter, r *http.Request) {
+		out, err := rt.CustomerBilling(r.Context(), r.PathValue("id"))
+		if err != nil {
+			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		reply(w, http.StatusOK, out)
+	})
 	if static != "" {
 		mux.Handle("GET /", http.FileServer(http.Dir(static)))
 	}

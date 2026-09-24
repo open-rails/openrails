@@ -2,12 +2,14 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/nmifake"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -19,6 +21,9 @@ type Catalog struct {
 	// Prices sold through the Solana PSP (one-time and on-chain plan).
 	CryptoPassPrice    string `json:"crypto_pass_price_id"`
 	CryptoMonthlyPrice string `json:"crypto_monthly_price_id"`
+	// Prices sold through the armed card PSP.
+	CardOncePrice    string `json:"card_once_price_id"`
+	CardMonthlyPrice string `json:"card_monthly_price_id"`
 }
 
 func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, merchant solanago.PublicKey) (Catalog, error) {
@@ -39,7 +44,56 @@ func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Nod
 	if err != nil {
 		return Catalog{}, err
 	}
-	return Catalog{SubscriptionProduct: sub, SubscriptionPrice: subPrice, OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly}, nil
+	cardOnce, cardMonthly, err := seedCards(ctx, c)
+	if err != nil {
+		return Catalog{}, err
+	}
+	return Catalog{SubscriptionProduct: sub, SubscriptionPrice: subPrice, OneTimeProduct: once, OneTimePrice: oncePrice, CryptoPassPrice: pass, CryptoMonthlyPrice: monthly, CardOncePrice: cardOnce, CardMonthlyPrice: cardMonthly}, nil
+}
+
+// seedCards applies prices only the armed card PSP sells.
+func seedCards(ctx context.Context, c *openrails.Client) (string, string, error) {
+	revision, err := c.Catalog.Revision(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	params, err := openrails.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+application_id: billing-ui-e2e-cards
+expected_revision: %d
+products:
+- key: e2e-card
+  display_name: Card membership
+  prices:
+  - key: e2e-card-once
+    currency: usd
+    unit_amount: 2990000
+    auto_renew: false
+    access_duration_hours: 720
+    psps: [%s]
+  - key: e2e-card-monthly
+    currency: usd
+    unit_amount: 4990000
+    auto_renew: true
+    access_duration_hours: 720
+    psps: [%s]
+  entitlements_spec:
+    e2e-card: null
+`, revision.Revision, CardPSPKey, CardPSPKey)))
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := c.Catalog.Apply(ctx, params); err != nil {
+		return "", "", err
+	}
+	once, err := c.Prices.RetrieveByKey(ctx, "e2e-card-once")
+	if err != nil {
+		return "", "", err
+	}
+	monthly, err := c.Prices.RetrieveByKey(ctx, "e2e-card-monthly")
+	if err != nil {
+		return "", "", err
+	}
+	return once.ID, monthly.ID, nil
 }
 
 // seedCrypto applies Solana-sold prices the way a host's catalog does: a
@@ -218,20 +272,29 @@ type CheckoutPay struct {
 	NameOnCard   string `json:"name_on_card"`
 	Zip          string `json:"zip"`
 	Country      string `json:"country"`
+	// IdempotencyKey is the host's attempt key; a retry reuses it.
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
-// Pay opens the checkout session for the chosen option, as a host's pay
-// endpoint does, and answers billing-ui's PayResult.
+// Pay is a host's pay endpoint: it relays the customer's pay action
+// (Confirm) and answers billing-ui's PayResult.
 func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, error) {
 	if _, err := r.Client.EnsureCustomer(ctx, in.CustomerID); err != nil {
 		return nil, err
 	}
+	key := in.IdempotencyKey
+	if key == "" {
+		key = uuid.NewString()
+	}
 	session, err := r.Client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: in.CustomerID}, PriceID: in.PriceID, IdempotencyKey: uuid.NewString(),
+		Customer: openrails.CheckoutCustomerIdentity{ID: in.CustomerID}, PriceID: in.PriceID, IdempotencyKey: key, Confirm: true,
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.Selector, PSPID: in.PSPID, TokenSymbol: in.TokenSymbol, Flow: "transaction_request",
 			PaymentToken: in.PaymentToken, NameOnCard: in.NameOnCard, Zip: in.Zip, Country: in.Country},
 		SuccessURL: r.BaseURL + "/done", CancelURL: r.BaseURL + "/cancel",
 	})
+	if errors.Is(err, openrails.ErrPaymentRefused) {
+		return map[string]any{"status": "failed", "failure_message": "Your card was declined. Try another card."}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -239,8 +302,31 @@ func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, erro
 	if session.PaymentID != nil {
 		out["payment_id"] = *session.PaymentID
 	}
+	if session.SubscriptionID != nil {
+		out["subscription_id"] = *session.SubscriptionID
+	}
 	if url, ok := session.RailData["solana_pay_url"].(string); ok && url != "" {
 		out["transaction_url"] = url
 	}
 	return out, nil
+}
+
+// CustomerBilling is what the customer holds after checkout.
+type CustomerBilling struct {
+	Subscriptions  []openrails.Subscription  `json:"subscriptions"`
+	PaymentMethods []openrails.PaymentMethod `json:"payment_methods"`
+	Sales          []nmifake.Sale            `json:"sales"`
+	Vaults         int                       `json:"vaults"`
+}
+
+func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (CustomerBilling, error) {
+	subs, err := r.Client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: customerID})
+	if err != nil {
+		return CustomerBilling{}, err
+	}
+	methods, err := r.Client.ListPaymentMethods(ctx, customerID, openrails.PageOptions{Limit: 100})
+	if err != nil {
+		return CustomerBilling{}, err
+	}
+	return CustomerBilling{Subscriptions: subs.Data, PaymentMethods: methods.Data, Sales: r.NMI.Sales(), Vaults: r.NMI.Vaults()}, nil
 }

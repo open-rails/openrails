@@ -12,6 +12,8 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // -------------------------------- Checkout Sessions --------------------------------
@@ -162,6 +164,14 @@ func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer
 	}
 	var resp *checkout.CheckoutSessionResponse
 	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		if req.Confirm && mode == "" {
+			mid, err := merchant.Require(scopedCtx)
+			if err != nil {
+				return err
+			}
+			// The host relays its signed-in customer's pay action (see Confirm).
+			svcReq.Acceptance = &billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: user.ID, Issuer: "openrails:merchant-checkout", Email: strings.TrimSpace(customer.VerifiedEmail)}
+		}
 		var createErr error
 		resp, createErr = checkoutSessions.CreateSession(scopedCtx, svcReq, user)
 		return createErr

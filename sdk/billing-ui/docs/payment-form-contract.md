@@ -88,6 +88,13 @@ Version 0.2.4 requires a checkout host whose pay endpoint accepts
 `name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
 this package.
 
+## Card subscriptions
+
+`Subscribe` is one action. The host's pay endpoint relays `payment_token` (or
+`payment_method_id`) to `CreateCheckoutSession` with `Confirm: true`; OpenRails
+saves a new card, accepts the displayed recurring terms and charges it. A
+decline answers `failed` and keeps no card; the next attempt uses a new key.
+
 ## Solana Pay
 
 The package never assumes which token a Solana option settles in. OpenRails

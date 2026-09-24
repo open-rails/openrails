@@ -1,4 +1,4 @@
-// Host checkout page for checkout.spec.ts: it serves OpenRails' advertised
+// Host checkout page for the checkout specs: it serves OpenRails' advertised
 // options to the packaged Checkout unchanged, with no rail logic of its own.
 import { createRoot } from "react-dom/client"
 
@@ -33,6 +33,8 @@ async function main() {
     rails: checkoutRails(offer.options),
   }
 
+  // One host attempt key per payment; a declined attempt starts a new one.
+  let attempt = crypto.randomUUID()
   const source = {
     getSession: async () => session,
     pay: async (request: PayRequest) => {
@@ -50,10 +52,12 @@ async function main() {
           name_on_card: request.name_on_card,
           zip: request.zip,
           country: request.country,
+          idempotency_key: attempt,
         }),
       })
       const body = await res.json()
       if (!res.ok) throw new Error(body.error ?? "pay failed")
+      if (body.status === "failed") attempt = crypto.randomUUID()
       return body
     },
   }

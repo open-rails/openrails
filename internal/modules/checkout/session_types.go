@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 var (
@@ -66,6 +67,10 @@ type CheckoutSessionCreateRequest struct {
 	// in initializeCheckoutSession; processStripeSubscription/Payment require them.
 	SuccessURL string
 	CancelURL  string
+
+	// Acceptance, when set, is the present payer accepting a recurring price's
+	// quoted terms in this request: the quote is confirmed and charged at once.
+	Acceptance *billingauth.DelegatedPrincipal
 }
 
 type CheckoutSessionConfirmPayment struct {
