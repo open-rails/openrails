@@ -380,8 +380,8 @@ func (f *stripeFake) setDecline(last4, decline string) {
 // charges and their refunded amounts.
 type ledgerEntry struct {
 	ID, Charge, Method string
-	Amount     int64
-	Refunded   int64
+	Amount             int64
+	Refunded           int64
 }
 
 func (f *stripeFake) ledger(stripeCustomer string) []ledgerEntry {
