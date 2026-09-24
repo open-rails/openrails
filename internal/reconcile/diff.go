@@ -235,7 +235,17 @@ func (c *correlator) subForTxn(t *RemoteTransaction) (sub *LocalSubscription, ho
 			continue
 		}
 		if pm, ok := c.local.pmByRailCustomerRef[railCustomerRef]; ok {
-			subs := c.local.bySubject[pm.CustomerID]
+			// Only the subject's subscriptions billing this vault: a customer's
+			// other membership (another vault, or engine-billed) never absorbs
+			// a charge on it.
+			var subs []*LocalSubscription
+			for _, s := range c.local.bySubject[pm.CustomerID] {
+				if s.PaymentMethodID != nil {
+					if billed := c.local.pmByID[*s.PaymentMethodID]; billed != nil && billed.RailCustomerRef == railCustomerRef {
+						subs = append(subs, s)
+					}
+				}
+			}
 			if s, ok := uniqueSub(subs); ok {
 				return s, "vault_id", false
 			}
