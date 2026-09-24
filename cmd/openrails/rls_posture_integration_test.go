@@ -70,8 +70,9 @@ func TestCLICommandsAcceptAppRole(t *testing.T) {
 func TestCLIOpensOwnerConnection(t *testing.T) {
 	superDSN, _ := dbtest.SharedRLSPostgres(t)
 	cfg := &config.Config{
-		TestMode: config.CredentialPostureSandbox,
-		DB:       &config.DBConfig{URL: superDSN},
+		ProviderWriteMode: config.ProviderWriteModeReadOnly,
+		TestMode:          config.CredentialPostureSandbox,
+		DB:                &config.DBConfig{URL: superDSN},
 	}
 	database, err := openCLIDB(context.Background(), cfg)
 	require.NoError(t, err)
@@ -82,6 +83,6 @@ func TestCLIOpensOwnerConnection(t *testing.T) {
 func TestOpenCLIDBRequiresConfig(t *testing.T) {
 	_, err := openCLIDB(context.Background(), nil)
 	require.ErrorContains(t, err, "config not loaded")
-	_, err = openCLIDB(context.Background(), &config.Config{})
+	_, err = openCLIDB(context.Background(), &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly})
 	require.ErrorContains(t, err, "config not loaded")
 }

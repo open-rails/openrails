@@ -43,7 +43,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("91%04d-0000", nano%10_000)
 	securityKey := fmt.Sprintf("sec-key-%d", nano)
 
-	cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	m := embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
@@ -171,7 +171,7 @@ func (f *pullFakeNMI) sawKey(key string) bool {
 func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string, m embed.MerchantConfig) merchant.ID {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
-	cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
 	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, m)
 	require.NoError(t, err)
@@ -223,7 +223,7 @@ func TestPullProviderCLI_ManifestModeArmsFromManifestPlane(t *testing.T) {
 	fake := newPullFakeNMI(t)
 	var out bytes.Buffer
 	require.NoError(t, hosttools.PullProvider(ctx, hosttools.PullProviderOptions{
-		Config:           &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
+		Config:           &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		MerchantID:       id,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),
@@ -266,7 +266,7 @@ func TestPullProviderCLI_ManifestModeMissingSecretRailNotArmed(t *testing.T) {
 	hook := logrustest.NewGlobal()
 	defer hook.Reset()
 	err := hosttools.PullProvider(ctx, hosttools.PullProviderOptions{
-		Config:           &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
+		Config:           &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		MerchantID:       id,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),

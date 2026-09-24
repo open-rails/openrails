@@ -122,8 +122,9 @@ func TestEmbeddedStripeTransportSeam_DrivesCredentialProbeAndLocalCatalog(t *tes
 func TestEmbeddedStripeTransportSeam_RefusedOnLiveCredentials(t *testing.T) {
 	_, err := New(context.Background(), Options{
 		Config: &config.Config{
-			TestMode: config.CredentialPostureLive,
-			DB:       &config.DBConfig{URL: "postgres://unused"},
+			ProviderWriteMode: config.ProviderWriteModeReadOnly,
+			TestMode:          config.CredentialPostureLive,
+			DB:                &config.DBConfig{URL: "postgres://unused"},
 		},
 		River:           RiverManagedByOpenRails(),
 		StripeTransport: hostRewriteTransport{target: "http://127.0.0.1:1"},

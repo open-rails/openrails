@@ -69,7 +69,7 @@ func TestGeneratedStripeCallbackNativeMounts(t *testing.T) {
 				}
 				mux := http.NewServeMux()
 				require.NoError(t, bundle.Mount(mux, prefix))
-				cfg := &config.Config{PublicBillingBaseURL: "https://billing.example.com" + prefix}
+				cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, PublicBillingBaseURL: "https://billing.example.com" + prefix}
 				post := func(accountID, signingSecret, payloadAccount string) int {
 					t.Helper()
 					generated, ok, err := catalog.PublicStripeWebhookURL(cfg, accountID)

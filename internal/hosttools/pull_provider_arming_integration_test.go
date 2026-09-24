@@ -29,6 +29,7 @@ func TestPullProviderRefusesWhenNoCredentialPlaneCanBeBuilt(t *testing.T) {
 	// API mode + Vault declared but unreachable: merchantsecrets.Build fails,
 	// so no rail can be armed for anyone.
 	cfg := &config.Config{
+		ProviderWriteMode:  config.ProviderWriteModeReadOnly,
 		DB:                 &config.DBConfig{URL: dsn},
 		MerchantConfigHTTP: true,
 		SecretBackend:      config.SecretBackendVault,

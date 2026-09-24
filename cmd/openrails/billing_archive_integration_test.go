@@ -50,7 +50,7 @@ func TestBillingArchiveCLILocalHTTPAndBack(t *testing.T) {
 	}
 	setup := func(schema string) deployment {
 		dbtest.ApplyPostgresMigrations(t, superDSN, appDSN, schema)
-		cfg := &config.Config{DB: &config.DBConfig{URL: appDSN, Schema: schema}}
+		cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: appDSN, Schema: schema}}
 		d, err := openCLIDB(t.Context(), cfg)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = d.Close() })

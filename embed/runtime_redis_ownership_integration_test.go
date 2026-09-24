@@ -28,8 +28,9 @@ func TestClose_DoesNotCloseInjectedRedisClient(t *testing.T) {
 	require.NoError(t, rdb.Ping(ctx).Err())
 
 	cfg := &config.Config{
-		TestMode: config.CredentialPostureSandbox,
-		DB:       &config.DBConfig{URL: appDSN},
+		ProviderWriteMode: config.ProviderWriteModeReadOnly,
+		TestMode:          config.CredentialPostureSandbox,
+		DB:                &config.DBConfig{URL: appDSN},
 	}
 	e, err := New(context.Background(), Options{Config: cfg, PGXPool: pool, Redis: rdb, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)

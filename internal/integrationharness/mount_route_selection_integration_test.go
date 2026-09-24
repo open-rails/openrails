@@ -51,8 +51,9 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
-			TestMode: config.CredentialPostureSandbox,
-			DB:       &config.DBConfig{URL: h.DSN},
+			ProviderWriteMode: config.ProviderWriteModeReadOnly,
+			TestMode:          config.CredentialPostureSandbox,
+			DB:                &config.DBConfig{URL: h.DSN},
 		},
 		Redis: h.Redis,
 		River: embed.RiverManagedByOpenRails(),

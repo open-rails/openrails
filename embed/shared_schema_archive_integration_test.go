@@ -101,7 +101,7 @@ func TestSharedPublicManagedRuntimeExecutesBillingJobs(t *testing.T) {
 	dsnURL, err := url.Parse(pool.Config().ConnString())
 	require.NoError(t, err)
 	dsnURL.Path = "/" + pool.Config().ConnConfig.Database
-	cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{Schema: "public", URL: dsnURL.String()}}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{Schema: "public", URL: dsnURL.String()}}
 	runtime, err := embed.New(t.Context(), embed.Options{Config: cfg, PGXPool: pool, River: embed.RiverManagedByOpenRails("public")})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())

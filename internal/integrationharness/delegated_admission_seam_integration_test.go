@@ -54,7 +54,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	h := New(t, ctx)
 	dbtest.EnsureTestMerchant(ctx, t, h.sharedPool())
 
-	cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		TestMode:           config.CredentialPostureSandbox,
 		MerchantConfigHTTP: true,
 		SecretBackend:      config.SecretBackendDB,

@@ -14,7 +14,7 @@ import (
 
 func TestAttachRefusesAlreadyConstructedRiver(t *testing.T) {
 	application := &app.App{Runtime: &app.Runtime{RiverClient: &river.Client[pgx.Tx]{}}}
-	err := Attach(context.Background(), application, &config.Config{}, nil, nil)
+	err := Attach(context.Background(), application, &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, nil, nil)
 	require.ErrorContains(t, err, "attach before River initialization")
 	require.Nil(t, application.ControlPlane, "late attach must fail before building identity resources")
 }

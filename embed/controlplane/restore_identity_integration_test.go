@@ -23,7 +23,8 @@ import (
 func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{
-		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
+		ProviderWriteMode: config.ProviderWriteModeReadOnly,
+		TestMode:          config.CredentialPostureSandbox, MerchantConfigHTTP: true,
 		Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})

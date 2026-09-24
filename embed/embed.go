@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -55,7 +56,8 @@ type Options struct {
 	// Use billingauth.NewIntegration with the host verifier and explicit mappings.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// Config is built programmatically by the host; embedded construction never
-	// runs config.Load, so TestMode (sandbox or live) must be set explicitly. Rate-limit and captcha defaults are seeded when left nil
+	// runs config.Load, so TestMode (sandbox or live) and ProviderWriteMode
+	// (full, limited or readonly) must be set explicitly. Rate-limit and captcha defaults are seeded when left nil
 	// unless Config.RateLimitsDisabled.
 	Config *config.Config
 	// PGXPool is the host-supplied database handle. Leave nil to open one from
@@ -252,6 +254,15 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 	case config.CredentialPostureSandbox, config.CredentialPostureLive:
 	default:
 		return fmt.Errorf("openrails embed: config.TestMode is required; set config.CredentialPostureSandbox or config.CredentialPostureLive explicitly")
+	}
+	// Unset would run fail-closed readonly: renewals, retries and refunds
+	// would silently never reach a provider. The host states it.
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.ProviderWriteMode)); mode {
+	case config.ProviderWriteModeFull, config.ProviderWriteModeLimited, config.ProviderWriteModeReadOnly:
+	case "":
+		return fmt.Errorf("openrails embed: config.ProviderWriteMode is required; set full, limited or readonly explicitly (readonly never charges: renewals, retries and refunds wait)")
+	default:
+		return fmt.Errorf("openrails embed: config.ProviderWriteMode %q is invalid; use full, limited or readonly", cfg.ProviderWriteMode)
 	}
 	if !cfg.RateLimitsDisabled {
 		defaults := config.GetDefaultBillingConfig()

@@ -26,7 +26,7 @@ func reviewRuntime(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator
 	if cfg != nil && (cfg.Checkout || cfg.Catalog || cfg.MerchantAdmin || cfg.MerchantAPI || cfg.MerchantConfig) {
 		auth = rejectingIntegration()
 	}
-	c := &config.Config{MerchantConfigHTTP: true, AllowCatalogUpdates: true}
+	c := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
 	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth}}}
 }
 func reviewReject(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
@@ -157,7 +157,7 @@ func TestConfiguredRoutesReviewInvalidAuthFailsBeforeDatabase(t *testing.T) {
 		{HTTPConfig{MerchantConfig: true}, "management surfaces require"},
 		{HTTPConfig{MerchantAPI: true}, "management surfaces require"},
 	} {
-		_, err := New(context.Background(), Options{Config: &config.Config{}, HTTP: &tc.cfg})
+		_, err := New(context.Background(), Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, HTTP: &tc.cfg})
 		require.ErrorContains(t, err, tc.message)
 	}
 }

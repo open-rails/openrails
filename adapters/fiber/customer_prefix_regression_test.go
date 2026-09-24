@@ -19,7 +19,7 @@ func TestReviewCustomerPrefixMustNotBecomeNativeWildcard(t *testing.T) {
 	reject := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})
-	cfg := &config.Config{SecretBackend: config.SecretBackendDB, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 	for _, prefix := range []string{"/portal/*audience", "/portal/+audience"} {
 		t.Run(prefix, func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestReviewSaaSCustomerPrefixMountsNatively(t *testing.T) {
 		calls++
 		return nil, billingauth.ErrUnauthenticated
 	})
-	cfg := &config.Config{SecretBackend: config.SecretBackendDB, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 	policy := &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject}}}
 	require.NoError(t, embedhttp.ValidateHTTPConfig(policy, nil))

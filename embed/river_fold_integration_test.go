@@ -64,7 +64,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	slug := "river-billing-" + uuid.NewString()[:8]
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug, PSPs: []embed.PSPDeclaration{{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"}}},
-		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			TestMode:           config.CredentialPostureSandbox,
 			DB:                 &config.DBConfig{URL: dsn},
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
@@ -197,8 +197,9 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 	ctx := context.Background()
 	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
-		TestMode: config.CredentialPostureSandbox,
-		DB:       &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
+		ProviderWriteMode: config.ProviderWriteModeReadOnly,
+		TestMode:          config.CredentialPostureSandbox,
+		DB:                &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
@@ -208,7 +209,7 @@ func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 // A host must supply the pool it owns before any fleet can be constructed.
 func TestRiverFromHost_MissingPoolRefuses(t *testing.T) {
 	ctx := t.Context()
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
+	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	_, err = riverhelpers.New(ctx, nil, nil, rt.RiverJobs())

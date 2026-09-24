@@ -26,7 +26,7 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 	host := h.StartEmbeddedHost("USD")
 	// A SaaS process serves several merchants using distinct bound clients.
 	multi, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

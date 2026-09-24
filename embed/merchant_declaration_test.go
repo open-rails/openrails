@@ -17,7 +17,7 @@ func TestMerchantDeclarationRejectedBeforeOpeningResources(t *testing.T) {
 		"missing_account": {Slug: "merchant", PSPs: []PSPDeclaration{{Key: "primary", Rail: "stripe"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			runtime, err := New(context.Background(), Options{Config: &config.Config{}, Merchant: declaration})
+			runtime, err := New(context.Background(), Options{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, Merchant: declaration})
 			require.Nil(t, runtime)
 			require.ErrorContains(t, err, "Merchant.")
 		})

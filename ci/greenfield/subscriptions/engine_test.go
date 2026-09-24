@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -151,8 +152,8 @@ func (e *engineCase) requireLedgerAgreement(local []openrails.Payment) {
 }
 
 // Scenario 0: what each provider-write posture does with a due renewal. Only
-// full executes it; the embedded default (unset) is fail-closed readonly, as
-// documented on config.ProviderWriteMode, and never charges.
+// full executes it; the others hold it without loss. Unset is refused at
+// construction, since it would silently never charge.
 func TestEngineRenewalPostures(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -161,7 +162,6 @@ func TestEngineRenewalPostures(t *testing.T) {
 		renew bool
 	}{
 		{"full", func(*config.Config) {}, true},
-		{"unset_default", func(c *config.Config) { c.ProviderWriteMode = "" }, false},
 		{"readonly", func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeReadOnly }, false},
 		{"limited", func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeLimited }, false},
 		{"engine_admission_hold", func(c *config.Config) { c.EngineAdmissionHold = true }, false},
@@ -190,6 +190,15 @@ func TestEngineRenewalPostures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEmbeddedRequiresWriteMode(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), dsn(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	_, err = embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn(t)}}, PGXPool: pool, River: embed.RiverFromHost()})
+	require.ErrorContains(t, err, "ProviderWriteMode is required")
 }
 
 // Scenario 0: nothing but the runtime's own schedule renews a due membership.
