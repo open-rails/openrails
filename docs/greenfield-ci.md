@@ -5,7 +5,7 @@ intentionally independent of `internal/dbtest`, `internal/integrationharness`,
 Redis, testcontainers, provider credentials, browser automation, and direct
 application-table SQL.
 
-The first slice has seven focused scenarios:
+The first slice has eight focused contracts:
 
 - fresh migration plus replay, product/price creation, and entitlement offer
   selection;
@@ -19,6 +19,9 @@ The first slice has seven focused scenarios:
   dunning state, retry history, and replay behavior;
 - engine-owned NMI admission remains local to OpenRails, creates no NMI
   recurring schedule, and waits for customer confirmation before charging.
+- exact integer money parsing and currency-aware rail conversion, including
+  half-away-from-zero rounding, overflow rejection, USD sub-cent refusal, and
+  zero-decimal JPY scaling.
 
 Each test creates one random OpenRails schema in the PostgreSQL service, applies
 the public `embed.ApplyMigrations` entry point, constructs an embedded runtime,
