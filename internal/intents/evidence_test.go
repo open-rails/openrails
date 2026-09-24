@@ -109,7 +109,7 @@ func TestProviderCutoverLineage(t *testing.T) {
 			Request:             nmiCutoverRequest{ExpectedSourcePSPID: from, ExpectedTargetPSPID: to, TargetPaymentMethodID: uuid.New()},
 			SourceQualification: qualification(from), TargetQualification: qualification(to), SourceCredentialFingerprint: fingerprint, TargetCredentialFingerprint: fingerprint,
 			Amount: 1000000, Currency: "usd", CycleHours: 24, PlanID: "plan", Anchor: anchor}
-		target := nmi.V5Subscription{Object: "subscription", ID: newRef, CustomerVaultID: "vault", DelayedCondition: "active", Amount: "1.00", NextBillingDate: anchor.Format(time.RFC3339),
+		target := nmi.V5Subscription{Object: "subscription", ID: newRef, CustomerVaultID: "vault", DelayedCondition: "active", PausedSubscription: false, Amount: "1.00", NextBillingDate: anchor.Format(time.RFC3339),
 			Plan: &nmi.V5Plan{ID: "plan", PlanAmount: "1.00", PlanPayments: "0", DayFrequency: "1"}}
 		g := nmiCutoverProgress{Decision: &nmiCutoverDecision{Action: "complete"}, CreateSubmitted: true, SourceCanceled: true, SourceAbsentAt: anchor.Add(-time.Hour),
 			SourceReceipt: &nmi.V5Subscription{Object: "subscription", ID: oldRef, CustomerVaultID: "vault", DelayedCondition: "inactive"}, TargetActive: true, Target: &target, ActivatedTarget: &target}
