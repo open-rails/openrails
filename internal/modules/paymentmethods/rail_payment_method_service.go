@@ -272,9 +272,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	// it and renew as merchant-initiated. A refused or unproven verification
 	// leaves nothing saved; a retry verifies a new vault entry.
 	methodID := uuidutil.NewV7()
-	providerStartedAt = time.Now()
 	agreementRef, err := client.EstablishRecurringAgreement(ctx, nmiResponse.CustomerVaultID, nmiResponse.BillingID, "pmv-"+methodID.String())
-	providerDuration += time.Since(providerStartedAt)
 	if err != nil {
 		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		var nmiErr *nmi.CustomerVaultError
@@ -641,8 +639,10 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 	if req.ExpiryDate != nil {
 		expiry = normalizeReplacementExpiry(*req.ExpiryDate)
 	}
-	if lastFour == "" || cardType == "" || expiry == "" {
-		return &PaymentMethodUpdateValidationError{Message: "last_four, card_type, and expiry_date are required from the tokenization response"}
+	// The brand is display metadata; the vault record derives it from the
+	// masked number when the tokenizer omits it.
+	if lastFour == "" || expiry == "" {
+		return &PaymentMethodUpdateValidationError{Message: "last_four and expiry_date are required from the tokenization response"}
 	}
 	req.LastFour = &lastFour
 	req.CardType = &cardType

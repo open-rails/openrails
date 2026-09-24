@@ -84,7 +84,7 @@ func TestPreparePaymentMethodUpdateNormalizesTokenizedMetadata(t *testing.T) {
 func TestPreparePaymentMethodUpdateRequiresVerifiableMetadata(t *testing.T) {
 	token := "token-1"
 	err := preparePaymentMethodUpdate(&UpdatePaymentMethodRequest{PaymentToken: &token})
-	require.EqualError(t, err, "last_four, card_type, and expiry_date are required from the tokenization response")
+	require.EqualError(t, err, "last_four and expiry_date are required from the tokenization response")
 }
 
 type fakePaymentMethodUpdateExecutor struct {

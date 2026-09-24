@@ -120,7 +120,7 @@ func TestLegacyNMIRefreshProviders(t *testing.T) {
 			require.Contains(t, []string{"queued", "already_running"}, res.Status)
 			require.Positive(t, res.JobID)
 			w.waitJob(res.JobID)
-			require.Eventually(t, func() bool { return w.subscription(tp, l.sub).Status == "cancelled" }, 20*time.Second, 50*time.Millisecond,
+			require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).Status == "cancelled" }, 20*time.Second, 250*time.Millisecond,
 				"the NMI-side delete is mirrored by the requested refresh")
 			require.Zero(t, w.nmi.deletesOf(l.railSub), "a schedule NMI ended is never deleted again")
 			require.Zero(t, w.nmi.saleAttempts())

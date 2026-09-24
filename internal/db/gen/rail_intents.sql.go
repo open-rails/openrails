@@ -2763,3 +2763,24 @@ func (q *Queries) LockDestructiveBreaker(ctx context.Context, merchantID uuid.UU
 	_, err := q.db.Exec(ctx, lockDestructiveBreaker, merchantID)
 	return err
 }
+
+const tryLockProviderRefresh = `-- name: TryLockProviderRefresh :one
+SELECT pg_try_advisory_lock(hashtextextended('openrails.provider_refresh:' || $1::uuid::text, 0))::boolean
+`
+
+// Session lock: one provider refresh per merchant across replicas.
+func (q *Queries) TryLockProviderRefresh(ctx context.Context, merchantID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, tryLockProviderRefresh, merchantID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const unlockProviderRefresh = `-- name: UnlockProviderRefresh :exec
+SELECT pg_advisory_unlock(hashtextextended('openrails.provider_refresh:' || $1::uuid::text, 0))
+`
+
+func (q *Queries) UnlockProviderRefresh(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, unlockProviderRefresh, merchantID)
+	return err
+}

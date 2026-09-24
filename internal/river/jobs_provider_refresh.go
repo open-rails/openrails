@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -62,6 +63,10 @@ func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 // ProviderRefreshMerchantArgs is one merchant's refresh job (#719).
 type ProviderRefreshMerchantArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
+	// Requested marks a host-requested refresh: it must observe provider state
+	// from after the request, so it never merges into a scheduled pass that
+	// may already be running.
+	Requested bool `json:"requested,omitempty" river:"unique"`
 }
 
 func (ProviderRefreshMerchantArgs) Kind() string { return KindProviderRefreshMerchant }
@@ -88,7 +93,7 @@ func EnqueueMerchantRefresh(ctx context.Context, client *river.Client[pgx.Tx], m
 	if queue == "" {
 		queue = QueueProviderRefresh
 	}
-	res, err := client.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: merchantID}, &river.InsertOpts{
+	res, err := client.Insert(ctx, ProviderRefreshMerchantArgs{MerchantID: merchantID, Requested: true}, &river.InsertOpts{
 		Queue:      queue,
 		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: providerRefreshUniqueStates},
 	})
@@ -317,6 +322,16 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	logger := log.WithContext(ctx).WithField("worker", KindProviderRefreshMerchant).WithField("merchant_id", mid)
 	stats := providerRefreshStats{Merchants: 1}
 
+	// One refresh per merchant at a time, across every replica.
+	release, held, err := w.lockMerchant(ctx, mid)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return river.JobSnooze(5 * time.Second)
+	}
+	defer release()
+
 	// #699/#788: fetchers + per-sub probers (#665) arm PER MERCHANT inside
 	// the merchant scope from the armed rail state. A rail that cannot arm is
 	// absent for that merchant (its WARN names merchant/rail/secret); the
@@ -330,7 +345,7 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		NMIClients:    w.NMIClients,
 	}
 
-	err := w.refreshMerchant(ctx, mid, builder, &stats, logger)
+	err = w.refreshMerchant(ctx, mid, builder, &stats, logger)
 
 	logger.WithFields(log.Fields{
 		"merchants":        stats.Merchants,
@@ -757,4 +772,28 @@ type providerRefreshProviderResult struct {
 	Changed         bool
 	// Proofs carries the completed pull's coverage for the #665 gate.
 	Proofs reconcile.PullProofs
+}
+
+func (w *ProviderRefreshWorker) lockMerchant(ctx context.Context, mid uuid.UUID) (release func(), held bool, err error) {
+	pool := w.DB.Pool()
+	if pool == nil {
+		return nil, false, fmt.Errorf("provider refresh: pool not configured")
+	}
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	q := gen.New(conn)
+	if held, err = q.TryLockProviderRefresh(ctx, mid); err != nil || !held {
+		conn.Release()
+		return nil, false, err
+	}
+	return func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := q.UnlockProviderRefresh(unlockCtx, mid); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
+		}
+		conn.Release()
+	}, true, nil
 }

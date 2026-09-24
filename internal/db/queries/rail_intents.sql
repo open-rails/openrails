@@ -802,3 +802,10 @@ UPDATE openrails.rail_intents
 SET next_attempt_at = LEAST(next_attempt_at, sqlc.arg(now)::timestamptz), updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status = 'unknown_needs_verify';
+
+-- name: TryLockProviderRefresh :one
+-- Session lock: one provider refresh per merchant across replicas.
+SELECT pg_try_advisory_lock(hashtextextended('openrails.provider_refresh:' || sqlc.arg(merchant_id)::uuid::text, 0))::boolean;
+
+-- name: UnlockProviderRefresh :exec
+SELECT pg_advisory_unlock(hashtextextended('openrails.provider_refresh:' || sqlc.arg(merchant_id)::uuid::text, 0));

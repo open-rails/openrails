@@ -69,10 +69,11 @@ jobs:
     runs-on: ubuntu-latest
     # The PR gate is intentionally small: the greenfield contracts are the
     # database/provider test suite, including the adversarial security cases.
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       OPENRAILS_GREENFIELD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
-      OPENRAILS_GREENFIELD_SHARDS: "3"
+      OPENRAILS_GREENFIELD_SHARDS: "4"
+      OPENRAILS_GREENFIELD_TIMEOUT: 11m
     steps:
       # A step rather than a service: the multi-replica fleets (#1075) need
       # more than the default 100 connections, a server flag services cannot set.

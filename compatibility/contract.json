@@ -1722,7 +1722,7 @@
     "internal/river": [
       "type CancelSubscriptionArgs struct {\n\tMerchantID     uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tUserID         string    `json:\"user_id\" river:\"unique\"`\n\tSubscriptionID uuid.UUID `json:\"subscription_id,omitempty\" river:\"unique\"`\n\tFeedback       string    `json:\"feedback,omitempty\"`\n}",
       "type InvoiceArgs struct {\n\tCollect                   bool  `json:\"collect,omitempty\"`\n\tCollectionThresholdAmount int64 `json:\"collection_threshold_amount,omitempty\"`\n\tUseMonthlyFloor           bool  `json:\"use_monthly_floor,omitempty\"`\n\tFinalizePreviousMonth     bool  `json:\"finalize_previous_month,omitempty\"`\n}",
-      "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n}",
+      "type ProviderRefreshMerchantArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\n\tRequested bool `json:\"requested,omitempty\" river:\"unique\"`\n}",
       "type ResumeSubscriptionArgs struct {\n\tMerchantID     uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tUserID         string    `json:\"user_id\" river:\"unique\"`\n\tSubscriptionID uuid.UUID `json:\"subscription_id,omitempty\" river:\"unique\"`\n}",
       "type SolanaPullPayload struct {\n\tSubscriptionPDA string    `json:\"subscription_pda\"`\n\tRowID           uuid.UUID `json:\"row_id\"`\n\tNextPullAt      time.Time `json:\"next_pull_at\"`\n}",
       "type SubscriptionConvergeArgs struct {\n\tPSPID                 uuid.UUID `json:\"psp_id\" river:\"unique\"`\n\tMerchantID            uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tRail                  string    `json:\"rail\" river:\"unique\"`\n\tSubscriptionReference string    `json:\"subscription_reference\" river:\"unique\"`\n\tEventType             string    `json:\"event_type,omitempty\"`\n\tEventCreated          int64     `json:\"event_created,omitempty\"`\n}"
@@ -4784,6 +4784,7 @@
       "destructive": "github.com/open-rails/openrails/internal/destructive",
       "errors": "errors",
       "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
