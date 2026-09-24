@@ -103,7 +103,9 @@ func TestPaymentActionKeyRefusesCardData(t *testing.T) {
 		} else {
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.Contains(t, rec.Body.String(), "invalid_param")
-			require.NotContains(t, rec.Body.String(), "4111")
+			// The random request id may contain "4111"; assert the card number.
+			require.NotContains(t, rec.Body.String(), "4111111111111111")
+			require.NotContains(t, rec.Body.String(), "4111 1111")
 		}
 	}
 }
