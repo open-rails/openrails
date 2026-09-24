@@ -9,9 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
+	riverkit "github.com/open-rails/helpers/river"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -64,7 +67,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				{http.MethodPost, "/subscriptions/" + aliceSub.String() + "/retry-now", map[string]any{}},
 				{http.MethodPut, "/subscriptions/" + aliceSub.String() + "/payment-method", map[string]any{"payment_method_id": malloryCard}},
 				{http.MethodPut, "/subscriptions/" + mallorySub.String() + "/payment-method", map[string]any{"payment_method_id": aliceCard}},
-				{http.MethodPut, "/collection-payment-method", map[string]any{"payment_method_id": aliceCard, "currency": "USD"}},
+
 				{http.MethodDelete, "/payment-methods/" + aliceCard, nil},
 				{http.MethodGet, "/checkout/" + pending.ID, nil},
 				{http.MethodPost, "/checkout/" + pending.ID + "/confirm", map[string]any{"payment": map[string]string{"rail": rail}}},
@@ -73,6 +76,11 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				status, body := mallory.call(tc.method, tc.path, "idor-"+uuid.NewString(), tc.body)
 				refused(t, status, body, fmt.Sprintf("%s %s %v", tc.method, tc.path, tc.body))
 			}
+			// A foreign card is as ineligible as a missing one.
+			status, body := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": aliceCard, "currency": "USD"})
+			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
+			_, missing := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString(), "currency": "USD"})
+			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
 			if rail == "nmi" {
 				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
 				refused(t, status, body, "replace Alice's card")
@@ -193,6 +201,18 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	// Each process binds its own River producer, as a host replica does.
+	jobs, err := riverkit.New(t.Context(), w.pool, &river.Config{
+		Schema: w.schema, Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 2}},
+		FetchCooldown: 5 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond,
+	}, rt.RiverJobs())
+	require.NoError(t, err)
+	require.NoError(t, jobs.Start(context.WithoutCancel(t.Context())))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = jobs.StopAndCancel(ctx)
+	})
 	bundle, err := openrailshttp.Routes(rt)
 	require.NoError(t, err)
 	mux := http.NewServeMux()
