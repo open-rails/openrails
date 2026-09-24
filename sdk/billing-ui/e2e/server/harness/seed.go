@@ -213,6 +213,11 @@ type CheckoutPay struct {
 	Selector    string `json:"selector"`
 	PSPID       string `json:"psp_id"`
 	TokenSymbol string `json:"token_symbol"`
+	// Card fields from billing-ui's PayRequest.
+	PaymentToken string `json:"payment_token"`
+	NameOnCard   string `json:"name_on_card"`
+	Zip          string `json:"zip"`
+	Country      string `json:"country"`
 }
 
 // Pay opens the checkout session for the chosen option, as a host's pay
@@ -223,13 +228,17 @@ func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, erro
 	}
 	session, err := r.Client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: in.CustomerID}, PriceID: in.PriceID, IdempotencyKey: uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.Selector, PSPID: in.PSPID, TokenSymbol: in.TokenSymbol, Flow: "transaction_request"},
-		SuccessURL:     r.BaseURL + "/done", CancelURL: r.BaseURL + "/cancel",
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.Selector, PSPID: in.PSPID, TokenSymbol: in.TokenSymbol, Flow: "transaction_request",
+			PaymentToken: in.PaymentToken, NameOnCard: in.NameOnCard, Zip: in.Zip, Country: in.Country},
+		SuccessURL: r.BaseURL + "/done", CancelURL: r.BaseURL + "/cancel",
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]any{"status": session.Status}
+	if session.PaymentID != nil {
+		out["payment_id"] = *session.PaymentID
+	}
 	if url, ok := session.RailData["solana_pay_url"].(string); ok && url != "" {
 		out["transaction_url"] = url
 	}

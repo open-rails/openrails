@@ -8,6 +8,7 @@ import {
   checkoutRails,
   type CheckoutRailOffer,
   type CheckoutSession,
+  type PayRequest,
 } from "../../../dist/index.js"
 
 const params = new URLSearchParams(location.hash.slice(1))
@@ -34,7 +35,7 @@ async function main() {
 
   const source = {
     getSession: async () => session,
-    pay: async (request: { option_id: string; token_symbol?: string }) => {
+    pay: async (request: PayRequest) => {
       const option = offer.options.find((o) => o.psp_id === request.option_id)
       const res = await fetch("/__test/checkout/pay", {
         method: "POST",
@@ -45,6 +46,10 @@ async function main() {
           selector: option?.selector,
           psp_id: option?.psp_id,
           token_symbol: request.token_symbol,
+          payment_token: request.payment_token,
+          name_on_card: request.name_on_card,
+          zip: request.zip,
+          country: request.country,
         }),
       })
       const body = await res.json()
