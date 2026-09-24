@@ -7,12 +7,9 @@ package greenfield_test
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,26 +26,6 @@ import (
 type fixture struct {
 	pool   *pgxpool.Pool
 	schema string
-}
-
-// greenfieldStripeTransport is a deterministic provider seam. The checkout
-// admission path still exercises the public provider routing and idempotency
-// contract, but the greenfield suite never contacts Stripe or needs provider
-// credentials. The transport intentionally accepts only the one request a
-// hosted Stripe checkout should issue during session creation.
-type greenfieldStripeTransport struct{ checkoutCalls atomic.Int32 }
-
-func (p *greenfieldStripeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.Method != http.MethodPost || r.URL.Path != "/v1/checkout/sessions" {
-		return nil, fmt.Errorf("unexpected provider request: %s %s", r.Method, r.URL.Path)
-	}
-	p.checkoutCalls.Add(1)
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": {"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"id":"cs_greenfield","url":"https://checkout.greenfield.test/session"}`)),
-		Request:    r,
-	}, nil
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -150,11 +127,15 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{
 		ProductID:  product.ID,
 		Key:        "welcome-usd-" + uuid.NewString()[:8],
-		UnitAmount: 1_000_000,
+		UnitAmount: 9_007_199_254_740_993,
 		Currency:   "USD",
 	})
 	require.NoError(t, err)
 	require.Equal(t, product.ID, price.ProductID)
+	require.EqualValues(t, 9_007_199_254_740_993, price.UnitAmount)
+	stored, err := client.Prices.Retrieve(t.Context(), price.ID)
+	require.NoError(t, err)
+	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
 	offers, err := client.ListOffersForEntitlement(t.Context(), "content:welcome", openrails.OfferListParams{Kind: openrails.OfferPermanent})
 	require.NoError(t, err)
@@ -216,7 +197,7 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 
 func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	f := newFixture(t)
-	provider := &greenfieldStripeTransport{}
+	provider := &stripeCheckoutFake{t: t}
 	_, client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
 
 	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{
@@ -253,6 +234,8 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	replay, err := client.CreateCheckoutSession(t.Context(), request)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, replay.ID)
+	require.NotNil(t, first.Amount)
+	require.EqualValues(t, 1_000_000, *first.Amount)
 	require.Equal(t, first.Amount, replay.Amount)
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "the provider sees one request across an identical replay")
 
@@ -260,6 +243,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	changed.SuccessURL = "https://greenfield.test/changed"
 	_, err = client.CreateCheckoutSession(t.Context(), changed)
 	require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
+	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "conflicting replay must not contact Stripe")
 
 	lookup, err := client.LookupCheckoutSession(t.Context(), request)
 	require.NoError(t, err)

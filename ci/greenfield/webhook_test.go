@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,8 +34,10 @@ import (
 // a deterministic hosted-session id; the test then delivers those facts back
 // through the public webhook route.
 type stripeCheckoutFake struct {
-	mu       sync.Mutex
-	checkout url.Values
+	t             *testing.T
+	checkoutCalls atomic.Int32
+	mu            sync.Mutex
+	checkout      url.Values
 }
 
 func (f *stripeCheckoutFake) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -47,6 +50,17 @@ func (f *stripeCheckoutFake) RoundTrip(r *http.Request) (*http.Response, error) 
 		if err := r.ParseForm(); err != nil {
 			return nil, fmt.Errorf("parse fake checkout form: %w", err)
 		}
+		f.checkoutCalls.Add(1)
+		// Check actual outgoing money, not a fixed success-shaped response.
+		for key, want := range map[string]string{
+			"mode": "payment", "line_items[0][price_data][currency]": "usd",
+			"line_items[0][price_data][unit_amount]": "100", "line_items[0][quantity]": "1",
+		} {
+			if got := r.PostForm.Get(key); got != want {
+				f.t.Errorf("Stripe form %s = %q, want %q", key, got, want)
+				return nil, fmt.Errorf("invalid Stripe checkout %s", key)
+			}
+		}
 		f.mu.Lock()
 		f.checkout = make(url.Values, len(r.PostForm))
 		for key, values := range r.PostForm {
@@ -55,6 +69,7 @@ func (f *stripeCheckoutFake) RoundTrip(r *http.Request) (*http.Response, error) 
 		f.mu.Unlock()
 		return jsonResponse(`{"id":"cs_greenfield_webhook","url":"https://checkout.stripe.test/greenfield"}`), nil
 	default:
+		f.t.Errorf("unexpected fake Stripe request: %s %s", r.Method, r.URL.Path)
 		return nil, fmt.Errorf("unexpected fake Stripe request: %s %s", r.Method, r.URL.Path)
 	}
 }
@@ -89,7 +104,7 @@ func stripeWebhookBody(t *testing.T, eventID, eventType, providerSessionID, chec
 	return body
 }
 
-func postSignedStripeWebhook(t *testing.T, handler http.Handler, account, secret string, eventID string, payload []byte, at time.Time) (int, string) {
+func postSignedStripeWebhook(t *testing.T, handler http.Handler, account, secret string, payload []byte, at time.Time) (int, string) {
 	t.Helper()
 	timestamp := strconv.FormatInt(at.Unix(), 10)
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -110,7 +125,7 @@ func postSignedStripeWebhook(t *testing.T, handler http.Handler, account, secret
 // must remain succeeded and the purchase must remain idempotent.
 func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	f := newFixture(t)
-	fake := &stripeCheckoutFake{}
+	fake := &stripeCheckoutFake{t: t}
 	const secret = "whsec_greenfield_webhook"
 	const account = "acct_greenfield_webhook"
 	slug := "webhook-" + uuid.NewString()[:8]
@@ -177,19 +192,23 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.NoError(t, bundle.Mount(mux))
 	now := time.Now()
 	completed := stripeWebhookBody(t, "evt_greenfield_completed", "checkout.session.completed", providerSessionID, checkoutSessionID, userID, metadataPriceID, now.Unix())
-	status, body := postSignedStripeWebhook(t, mux, account, secret, "evt_greenfield_completed", completed, now)
+	status, body := postSignedStripeWebhook(t, mux, account, secret, completed, now)
+	require.Equal(t, http.StatusOK, status, body)
+	// Exact redelivery exercises the event deduplication key, separately from
+	// the distinct event ID below.
+	status, body = postSignedStripeWebhook(t, mux, account, secret, completed, now)
 	require.Equal(t, http.StatusOK, status, body)
 
 	// A second delivery with a different event id exercises purchase
 	// idempotency independently from the webhook-event deduplication key.
 	replay := stripeWebhookBody(t, "evt_greenfield_replay", "checkout.session.completed", providerSessionID, checkoutSessionID, userID, metadataPriceID, now.Add(time.Second).Unix())
-	status, body = postSignedStripeWebhook(t, mux, account, secret, "evt_greenfield_replay", replay, now.Add(time.Second))
+	status, body = postSignedStripeWebhook(t, mux, account, secret, replay, now.Add(time.Second))
 	require.Equal(t, http.StatusOK, status, body)
 
 	// Stripe may deliver an older expiration after completion. It must not
 	// replace the succeeded terminal state.
 	expired := stripeWebhookBody(t, "evt_greenfield_expired", "checkout.session.expired", providerSessionID, checkoutSessionID, userID, metadataPriceID, now.Add(-time.Minute).Unix())
-	status, body = postSignedStripeWebhook(t, mux, account, secret, "evt_greenfield_expired", expired, now.Add(2*time.Second))
+	status, body = postSignedStripeWebhook(t, mux, account, secret, expired, now.Add(2*time.Second))
 	require.Equal(t, http.StatusOK, status, body)
 
 	got, err := client.GetCheckoutSession(t.Context(), userID, session.ID)
@@ -198,4 +217,11 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	access, err := client.CheckEntitlements(t.Context(), userID, []string{"content:webhook"}, time.Time{})
 	require.NoError(t, err)
 	require.True(t, access["content:webhook"])
+	payments, err := client.ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: userID})
+	require.NoError(t, err)
+	require.Len(t, payments.Data, 1, "event replay must not duplicate the payment")
+	require.EqualValues(t, 1_000_000, payments.Data[0].Amount)
+	require.Equal(t, "USD", payments.Data[0].Currency)
+	require.Equal(t, "pi_greenfield_webhook", payments.Data[0].TransactionID)
+	require.EqualValues(t, 1, fake.checkoutCalls.Load(), "webhook handling must not submit another checkout")
 }
