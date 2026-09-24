@@ -19,7 +19,7 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Engine-owned NMI and Stripe subscriptions | Real customer confirmation and saved card, repeated due renewals, amounts/payments agree with fake provider ledger | Cross-account migrations, unsupported combinations and very long delinquency histories |
 | Engine dunning | Soft, card-fixable and terminal declines; retry timing, card replacement and recovery; destructive-action switch | More provider refusal codes and interrupted retry interleavings |
 | Provider-owned NMI and Stripe schedules | Import/replay, provider renewal and failure notifications, late/duplicate events, cancellation | Account-specific provider discovery and missed-notification backfills |
-| NMI schedule with OpenRails dunning | Separate `provider_dunning` contract is required; plain `provider` mirroring does not prove this | Qualified native rebill, recovery receipt and next-period advance must run in the focused gate |
+| NMI schedule with OpenRails dunning | Explicit `provider_dunning` import, failed scheduled renewal, timed OpenRails rebill, exact receipt/period/access, replay and conflicting recurring-reference refusal | More decline categories and customer/provider races around the next regular charge |
 | Subscription changes | Cancellation/resumption, host account-deletion cancellation, repricing, replacing a card | Full tier-change/proration matrix, trials and bulk plan migration |
 | Refunds | Engine subscription renewal refunds, repeated refund requests and provider notifications | One-time partial refunds, concurrent over-refund refusal, archive-with-refund/review operations |
 | Payment uncertainty and restart | Engine request interruption/restart, late receipts, duplicate refusal and abandoned authentication | Every sale/refund/cutover uncertainty path; no test may infer no charge from a timeout |
@@ -44,3 +44,8 @@ concurrency. Cheap pure tests should cover arithmetic boundaries directly;
 database workflows should assert financial effects and provider request counts.
 Using `int64` alone does not prevent overflow, incorrect scaling or precision
 loss in a browser's JSON decoder.
+
+NMI distinguishes the next regular scheduled payment from a failed-payment
+retry; a future next-charge date alone does not prove payment. The focused
+hybrid case models that distinction from the [NMI recurring guide](https://support.nmi.com/hc/en-gb/articles/33210833988241-Recurring-via-the-Virtual-Terminal-Plans-and-Subscriptions)
+and [subscription recovery guidance](https://support.nmi.com/hc/en-gb/articles/16096543375505-Subscription-Reports).
