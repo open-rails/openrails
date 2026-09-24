@@ -249,7 +249,7 @@ func (w *world) restart() { w.stop(); w.start() }
 // kill ends the process as SIGKILL does: nothing it was doing gets recorded.
 // The running jobs and in-flight operations are captured at the instant of
 // death, the process stops, and those rows are put back as the dead process
-// left them, aged past River's one-hour rescue threshold, before restart.
+// left them, aged past OpenRails' five-minute silence threshold, before restart.
 func (w *world) kill() {
 	w.t.Helper()
 	ctx := w.t.Context()
@@ -279,7 +279,7 @@ func (w *world) kill() {
 	rows.Close()
 	require.NotEmpty(w.t, jobIDs, "a job was running at the kill")
 	w.stop()
-	_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.river_job SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '2 hours' WHERE id = ANY($1)`, jobIDs)
+	_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.river_job SET state = 'running', finalized_at = NULL, attempted_at = now() - interval '10 minutes' WHERE id = ANY($1)`, jobIDs)
 	require.NoError(w.t, err)
 	for _, r := range intents {
 		_, err = w.pool.Exec(ctx, `UPDATE `+schema+`.rail_intents SET status = $2, claimed_until = $3 WHERE id = $1::uuid`, r.id, r.status, r.claimed)

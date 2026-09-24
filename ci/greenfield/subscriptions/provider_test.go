@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed/operator"
 )
 
@@ -320,6 +321,10 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 				book.Subscriptions[0].CollectionPolicy = "provider_dunning"
 			})
 			w.converge()
+			// Hold provider writes while observing the failed period. The due
+			// pass runs autonomously and may otherwise recover it before readback.
+			w.cfg = func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+			w.restart()
 			end := l.periodEnd()
 			w.advance(end.Sub(w.clock.Now()) + time.Hour)
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
@@ -327,7 +332,9 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			require.Equal(t, "past_due", sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a future schedule date cannot grant an unpaid period")
 			require.NotNil(t, sub.NextRetryAt, "OpenRails schedules recovery after the provider decline")
-			require.Zero(t, w.nmi.saleAttempts(), "the failure webhook itself does not charge")
+			require.Zero(t, w.nmi.saleAttempts(), "read-only posture holds automatic recovery")
+			w.cfg = nil
+			w.restart()
 			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 			w.runRenewals()
 			sub = w.subscription(tp, l.sub)
