@@ -32,6 +32,10 @@ const (
 	QueueBilling = "billing"
 	KindDunning  = "openrails.dunning"
 
+	// DuePassInterval is the due pass cadence: the bound on how long an
+	// engine renewal waits past its paid-period boundary.
+	DuePassInterval = time.Minute
+
 	// dunningMerchantBatch caps how many merchants one pass fans out to. The
 	// work queue is indexed on the due-dunning predicate, so this bounds a pass
 	// by ACTIVITY, never by the size of the merchant directory.

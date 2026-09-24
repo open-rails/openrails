@@ -288,6 +288,9 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 	if err := finalize(ctx, latest); err != nil {
 		return Ambiguous("provider card confirmed, but local finalize failed: " + err.Error())
 	}
+	if _, err := h.DB.Gen(ctx).WakeEngineSubscriptionsForPaymentMethod(ctx, gen.WakeEngineSubscriptionsForPaymentMethodParams{MerchantID: intent.MerchantID, PaymentMethodID: latest.ID, Now: h.now()}); err != nil {
+		return Ambiguous("provider card confirmed, but waking its memberships failed: " + err.Error())
+	}
 	return Succeeded(map[string]any{
 		"confirmation":      confirmation,
 		"payment_method_id": latest.ID,
@@ -318,40 +321,33 @@ func (p NMIPaymentMethodUpdatePayload) providerUpdate() nmi.UpdateCustomerVaultD
 }
 
 func readNMIPaymentMethodCard(ctx context.Context, client *nmi.NMIClient, vaultID, billingID string) (nmiCard, bool, error) {
-	page, err := client.ListCustomersPage(ctx, "", 5, vaultID)
-	if err != nil {
+	customer, found, err := client.GetCustomer(ctx, vaultID)
+	if err != nil || !found {
 		return nmiCard{}, false, err
 	}
-	for i := range page.Customers {
-		customer := &page.Customers[i]
-		if strings.TrimSpace(customer.ID) != strings.TrimSpace(vaultID) {
-			continue
-		}
-		var billing *nmi.V5CustomerBilling
-		if ref := strings.TrimSpace(billingID); ref != "" {
-			for j := range customer.Billing {
-				if strings.TrimSpace(customer.Billing[j].ID) == ref {
-					billing = &customer.Billing[j]
-					break
-				}
+	var billing *nmi.V5CustomerBilling
+	if ref := strings.TrimSpace(billingID); ref != "" {
+		for j := range customer.Billing {
+			if strings.TrimSpace(customer.Billing[j].ID) == ref {
+				billing = &customer.Billing[j]
+				break
 			}
-		} else {
-			billing = customer.PrimaryBilling()
 		}
-		if billing == nil {
-			return nmiCard{}, false, nil
-		}
-		card := nmiCard{
-			LastFour:   maskedLastFour(billing.PaymentDetails.CardNumber),
-			CardType:   strings.TrimSpace(billing.PaymentDetails.CardType),
-			ExpiryDate: normalizeNMIExpiry(billing.PaymentDetails.CardExp),
-		}
-		if !card.complete() {
-			return nmiCard{}, false, errors.New("NMI billing entry returned incomplete masked card metadata")
-		}
-		return card, true, nil
+	} else {
+		billing = customer.PrimaryBilling()
 	}
-	return nmiCard{}, false, nil
+	if billing == nil {
+		return nmiCard{}, false, nil
+	}
+	card := nmiCard{
+		LastFour:   maskedLastFour(billing.PaymentDetails.CardNumber),
+		CardType:   strings.TrimSpace(billing.PaymentDetails.CardType),
+		ExpiryDate: normalizeNMIExpiry(billing.PaymentDetails.CardExp),
+	}
+	if !card.complete() {
+		return nmiCard{}, false, errors.New("NMI billing entry returned incomplete masked card metadata")
+	}
+	return card, true, nil
 }
 
 func maskedLastFour(value string) string {

@@ -95,7 +95,13 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		if method.Rail == "stripe" && !stripeEngineID(method.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(method.StoredCredentialRecurringRef, "seti_") {
 			return apperr.Conflictf("replacement Stripe card requires a qualified recurring agreement")
 		}
+		now := s.now()
 		sub.PaymentMethodID = &methodID
-		return NewSubscriptionRepo(d).UpdateAt(ctx, sub, s.now())
+		// A delinquent membership retries on the new card at the next due
+		// pass instead of waiting out the old card's schedule.
+		if sub.Status == models.StatusPastDue {
+			sub.NextRetryAt = &now
+		}
+		return NewSubscriptionRepo(d).UpdateAt(ctx, sub, now)
 	})
 }

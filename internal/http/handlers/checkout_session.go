@@ -316,7 +316,7 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 	case errors.Is(err, checkout.ErrCheckoutSessionValidation):
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 	default:
-		r.InternalError("checkout session request failed", err)
+		writeRefusal(r, err, "checkout session request failed")
 	}
 }
 

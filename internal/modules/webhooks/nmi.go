@@ -952,6 +952,8 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		rail := models.Rail(s.Rail)
 		existingRefund, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, rail, txnID)
 		switch {
+		case lookupErr == nil && existingRefund != nil && refundDecidedByOpenRails(existingRefund):
+			return nil
 		case lookupErr == nil && existingRefund != nil:
 			log.WithContext(ctx).WithFields(log.Fields{
 				"refund_transaction_id": txnID,
@@ -1058,8 +1060,8 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 	rail := models.Rail(s.Rail)
 	var original *models.Payment
 	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, rail, txnID); err == nil && existing != nil {
-		if existing.RefundedPaymentID == nil {
-			return nil // already recorded, not as a reversal — nothing to revoke
+		if existing.RefundedPaymentID == nil || refundDecidedByOpenRails(existing) {
+			return nil // not a reversal, or OpenRails already applied its decision
 		}
 		original, err = s.PaymentService.GetByID(ctx, *existing.RefundedPaymentID)
 		if err != nil {

@@ -150,6 +150,9 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 			return nil
 		}
 		if p.RevokeAccess {
+			if err := r.revokeMembershipAccess(ctx, txDB, p.OriginalPaymentID); err != nil {
+				return err
+			}
 			if err := entitlements.NewEntitlementService(txDB, r.Clock).EndActiveByPayment(ctx, p.OriginalPaymentID, models.EntitlementRevokeRefund); err != nil {
 				return err
 			}
@@ -166,6 +169,31 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 		_, err = svc.CompleteRefundReservation(ctx, p.ReservationID, providerRefundID, metadata)
 		return err
 	})
+}
+
+// revokeMembershipAccess ends the access a refunded membership payment
+// bought. An engine membership is also cancelled: the engine would otherwise
+// renew it and grant access again. A provider-owned schedule is the
+// provider's; its access ends here and CancelSubscription stops its billing.
+func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB, paymentID uuid.UUID) error {
+	original, err := payments.NewPaymentService(d, r.Clock).GetByID(ctx, paymentID)
+	if err != nil {
+		return err
+	}
+	if original.SubscriptionID == nil {
+		return nil
+	}
+	sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *original.SubscriptionID)
+	if err != nil {
+		return err
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue) {
+		reason := "payment refunded with access revoked"
+		lifecycle := subscriptions.NewSubscriptionLifecycleService(d, nil, nil, nil, nil, payments.NewPaymentService(d, r.Clock), r.Clock)
+		_, err := lifecycle.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: true})
+		return err
+	}
+	return entitlements.NewEntitlementService(d, r.Clock).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, r.now(), models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace)
 }
 
 func (r refundReservations) now() time.Time {

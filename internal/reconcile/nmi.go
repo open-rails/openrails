@@ -18,6 +18,7 @@ type nmiQueryClient interface {
 	ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (nmi.SubscriptionPage, error)
 	GetSubscription(ctx context.Context, subscriptionID string) (nmi.V5Subscription, bool, error)
 	ListCustomersPage(ctx context.Context, cursor string, perPage int, id string) (nmi.CustomerPage, error)
+	GetCustomer(ctx context.Context, id string) (nmi.V5Customer, bool, error)
 	SearchTransactions(ctx context.Context, filter nmi.QueryFilter) (string, error)
 }
 
@@ -367,6 +368,16 @@ func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams
 		return nil, nil, err
 	}
 	var customers []nmi.V5Customer
+	if id := strings.TrimSpace(params.CustomerID); id != "" {
+		customer, found, err := f.Client.GetCustomer(ctx, id)
+		if err != nil {
+			return nil, nil, err
+		}
+		if found {
+			customers = append(customers, customer)
+		}
+		return f.paymentMethodsFromCustomers(customers)
+	}
 	cursor := ""
 	seenCursor := map[string]bool{}
 	for {
@@ -385,7 +396,10 @@ func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams
 		seenCursor[next] = true
 		cursor = next
 	}
+	return f.paymentMethodsFromCustomers(customers)
+}
 
+func (f *NMIFetcher) paymentMethodsFromCustomers(customers []nmi.V5Customer) ([]RemotePaymentMethod, map[string]nmiCustomerIdentity, error) {
 	out := make([]RemotePaymentMethod, 0, len(customers))
 	identity := make(map[string]nmiCustomerIdentity, len(customers))
 	for _, c := range customers {

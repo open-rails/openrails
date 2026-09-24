@@ -368,3 +368,16 @@ FOR UPDATE;
 -- name: GetInitialMembershipForArchive :one
 SELECT * FROM openrails.subscriptions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
+
+-- name: WakeEngineSubscriptionsForPaymentMethod :execrows
+-- A replaced card retries its delinquent engine memberships at the next due
+-- pass instead of waiting out the old card's schedule.
+UPDATE openrails.subscriptions SET
+    next_retry_at = sqlc.arg(now)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+  AND collection_policy = 'engine'
+  AND status = 'past_due'
+  AND deleted_at IS NULL
+  AND (next_retry_at IS NULL OR next_retry_at > sqlc.arg(now)::timestamptz);

@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	vaultapi "github.com/hashicorp/vault/api"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -81,6 +82,10 @@ type Options struct {
 	// endpoints against a fake wire. It exempts nothing from sandbox posture.
 	// Refused with a live posture.
 	NMITransport http.RoundTripper
+	// Clock is the test seam for engine time: renewal due dates, retry
+	// schedules and entitlement windows read it. River scheduling and webhook
+	// signature tolerance stay on wall time. Refused with a live posture.
+	Clock clockwork.Clock
 	// UserDirectory and UsernameResolver are optional host identity adapters.
 	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
 	// opt in explicitly when they need notification email or CCBill username
@@ -155,6 +160,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.NMITransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
 		return nil, fmt.Errorf("openrails embed: Options.NMITransport is a test seam and is refused with config.TestMode=live")
 	}
+	if opts.Clock != nil && opts.Config.TestMode == config.CredentialPostureLive {
+		return nil, fmt.Errorf("openrails embed: Options.Clock is a test seam and is refused with config.TestMode=live")
+	}
 	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
 		HostRiver:        opts.River.host,
 		PGXPool:          opts.PGXPool,
@@ -165,6 +173,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		UsernameResolver: opts.UsernameResolver,
 		StripeTransport:  opts.StripeTransport,
 		NMITransport:     opts.NMITransport,
+		Clock:            opts.Clock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

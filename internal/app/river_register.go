@@ -438,16 +438,20 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error) {
 	var jobs []*river.PeriodicJob
 
-	// Every 4 hours: run Dunning worker to process past_due subscriptions
+	// The due pass admits engine renewals at their paid-period boundary and
+	// runs retries whose next_retry_at has passed. Engine access is bounded by
+	// the paid period, so the pass cadence is the longest a paying member can
+	// wait at the boundary; it runs on start so a restart never adds a lag.
+	// An idle pass is one indexed work-queue read.
 	jobs = append(jobs, r.healthPeriodic(
-		4*time.Hour,
+		riverjobs.DuePassInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.DunningArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.DuePassInterval},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: false},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Every 4 hours: Provider Refresh scheduler (#574/#719) — fans out one

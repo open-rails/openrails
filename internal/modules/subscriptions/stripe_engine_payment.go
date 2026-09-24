@@ -22,7 +22,8 @@ import (
 
 // StripeEnginePaymentParams is the immutable accepted operation, not browser input.
 // Initial requires customer-present recurring consent. Later payments require the
-// previously qualified initial PaymentIntent in the instrument's recurring anchor.
+// card's qualified recurring consent as its anchor: the initial PaymentIntent,
+// or the off-session SetupIntent that saved a replacement card.
 type StripeEnginePaymentParams struct {
 	CustomerInitiated bool // explicit customer retry of an existing recurring agreement
 	// OneTime is a customer-present purchase on a saved card: on-session, no
@@ -86,7 +87,7 @@ func (p StripeEnginePaymentParams) validate() error {
 	if err := moneyutil.ValidateCurrency(p.Currency); err != nil {
 		return err
 	}
-	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") {
+	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "seti_") {
 		return errors.New("Stripe engine payment lacks a qualified recurring agreement")
 	}
 	return nil

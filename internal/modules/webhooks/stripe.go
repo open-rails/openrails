@@ -927,7 +927,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 	}
 	var original *models.Payment
 	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, refundID); err == nil && existing != nil {
-		if existing.RefundedPaymentID == nil {
+		if existing.RefundedPaymentID == nil || refundDecidedByOpenRails(existing) {
 			return nil
 		}
 		original, err = s.PaymentService.GetByID(ctx, *existing.RefundedPaymentID)

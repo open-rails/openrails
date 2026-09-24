@@ -45,6 +45,11 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			}
 		}
 	}
+	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
+		if err := pushEngineRenewalGrace(ctx, entitlementsService, sub, entitlementNames(sub.EntitlementsSpecSnapshot), effects.PeriodEnd); err != nil {
+			return nil, err
+		}
+	}
 	if effects.RevokeRemoved {
 		names, err := entitlementsService.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, sub.ID)
 		if err != nil {

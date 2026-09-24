@@ -272,16 +272,11 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 // vaultCustomer reads the id-filtered v5 customer roster: absent means the
 // vault customer is gone at NMI.
 func (h *NMIPaymentMethodDeleteHandler) vaultCustomer(ctx context.Context, client *nmi.NMIClient, vaultID string) (*nmi.V5Customer, bool, error) {
-	page, err := client.ListCustomersPage(ctx, "", 0, vaultID)
-	if err != nil {
+	customer, found, err := client.GetCustomer(ctx, vaultID)
+	if err != nil || !found {
 		return nil, false, err
 	}
-	for i := range page.Customers {
-		if strings.TrimSpace(page.Customers[i].ID) == vaultID {
-			return &page.Customers[i], true, nil
-		}
-	}
-	return nil, false, nil
+	return &customer, true, nil
 }
 
 func billingEntryPresent(customer *nmi.V5Customer, billingID string) bool {
