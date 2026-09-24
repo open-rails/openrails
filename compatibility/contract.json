@@ -4734,6 +4734,7 @@
       "context": "context",
       "fmt": "fmt",
       "json": "encoding/json",
+      "math": "math",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "strings": "strings",
       "time": "time"
@@ -5534,7 +5535,7 @@
     "internal/http/routesurface/provider_routes.go": "701c581ca4b351845111d24bbc972f05af3f779e58271b3e644d7cb43cba6b30",
     "internal/http/server.go": "39e26c4147c6f6fb78618eacbd0166f64383effcd1a5fb56a8da18449d878ece",
     "internal/intents/payment_method_delete_authority.go": "edc67d168ceae15e148a920c5bacf5f3cfcb10c82f549265f61f8e9ff4855e7b",
-    "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
+    "internal/intents/rate_ceiling.go": "09ffa49b9d04589a53703c7982157f2d4a35ebaeb9f8c7d2a18c4e4b3d6f2d1a",
     "internal/merchanttarget/target.go": "033ae1e525633686c41b07a530fe1ec57cf54cb0c5b748ddd2f7389adedbe3b3",
     "internal/migrate/postgres/0001_schema.up.sql": "454ac14c0ba2dee1a8aadb904a3c3f5ad3b5ffd982d83464a8dc0755d107cc81",
     "internal/migrate/postgres/0002_resource_offer_index.up.sql": "c4d6aeb20190583f6f6e7b27f3e63ed117c1331b20dc8f4b203b8fff5bed0f99",
