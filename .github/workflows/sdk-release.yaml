@@ -45,7 +45,7 @@ jobs:
         run: |
           mkdir release
           pnpm pack --pack-destination release
-          ls "release/openrails-billing-ui-${TAG#v}.tgz"
+          tar -tzf "release/openrails-billing-ui-${TAG#v}.tgz" | grep -q '^package/dist/index.js$'
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}

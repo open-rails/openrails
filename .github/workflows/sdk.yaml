@@ -1,5 +1,6 @@
-name: billing-ui
+name: SDK
 
+# The browser SDKs track the Go API surface they speak, so API changes rerun them.
 on:
   pull_request:
     branches: [master]
@@ -9,14 +10,14 @@ on:
       - "**/*.sql"
       - go.mod
       - go.sum
-      - .github/workflows/billing-ui.yaml
+      - .github/workflows/sdk.yaml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: billing-ui-${{ github.ref }}
+  group: sdk-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -24,7 +25,7 @@ env:
 
 jobs:
   billing-ui:
-    name: Billing UI
+    name: billing-ui
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
