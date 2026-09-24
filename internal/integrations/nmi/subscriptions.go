@@ -66,7 +66,7 @@ type QueryFilter struct {
 	// schedule, whatever order reference the schedule carries.
 	SubscriptionID string
 	PageNumber     int
-	ResultLimit int
+	ResultLimit    int
 }
 
 type AddSubscriptionResponse struct {

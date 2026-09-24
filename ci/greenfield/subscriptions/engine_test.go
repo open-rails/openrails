@@ -610,7 +610,9 @@ func TestEngineCrashDurability(t *testing.T) {
 		// Stripe's first provider call is the submission itself; the crash
 		// lands after admission, before the claim reaches the provider.
 		"stripe": func(r *http.Request) bool { return r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents" },
-		"nmi":    func(r *http.Request) bool { return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v5/customers/") },
+		"nmi": func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v5/customers/")
+		},
 	}
 	cases := []struct {
 		name    string
