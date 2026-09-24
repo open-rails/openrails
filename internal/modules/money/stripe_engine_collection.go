@@ -138,6 +138,10 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 		return intents.Ambiguous("submitted Stripe payment requires exact readback; no resend")
 	}
 	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
+		// Cancellation erases the decline at Stripe; retain it first.
+		if err := intents.NewStore(h.DB).RecordProgress(ctx, current.ID, map[string]any{"decline_code": result.FailureCode}); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
 		if _, err := service.FinalizeEngineDecline(ctx, params, result.PaymentIntentID); err != nil {
 			return intents.Ambiguous(err.Error())
 		}

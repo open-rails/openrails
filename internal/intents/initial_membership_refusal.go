@@ -175,6 +175,9 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.Openrails
 	if !found || result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
 		return errors.New("Stripe decline is still executable")
 	}
+	if result.DeclineCode == "" {
+		result.DeclineCode = s.retainedDeclineCode(ctx, in)
+	}
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err

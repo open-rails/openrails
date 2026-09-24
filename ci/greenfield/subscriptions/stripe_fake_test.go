@@ -237,7 +237,9 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		if pi["status"] == "succeeded" {
 			return 400, stripeErr("payment_intent_unexpected_state")
 		}
-		pi["status"] = "canceled"
+		// Stripe clears the card and the decline when it cancels an intent.
+		pi["status"], pi["payment_method"] = "canceled", nil
+		delete(pi, "last_payment_error")
 		if reason := form.Get("cancellation_reason"); reason != "" {
 			pi["cancellation_reason"] = reason
 		}

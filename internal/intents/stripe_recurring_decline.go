@@ -76,6 +76,9 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Openrai
 	if !found || result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
 		return errors.New("Stripe recurring decline is still executable")
 	}
+	if result.DeclineCode == "" {
+		result.DeclineCode = s.retainedDeclineCode(ctx, in)
+	}
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
@@ -93,4 +96,14 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Openrai
 		return errors.New("Stripe recurring refusal custody missing")
 	}
 	return nil
+}
+
+// retainedDeclineCode is the issuer's decline code the execute leg retained
+// before cancelling: Stripe clears it from the cancelled PaymentIntent.
+func (s *Store) retainedDeclineCode(ctx context.Context, in gen.OpenrailsRailIntent) string {
+	current, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return ""
+	}
+	return EvidenceString(current, "decline_code")
 }
