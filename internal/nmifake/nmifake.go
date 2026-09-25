@@ -39,10 +39,15 @@ type Gateway struct {
 }
 
 func New() *Gateway {
-	g := &Gateway{vaults: map[string]*vault{}}
-	g.server = httptest.NewServer(http.HandlerFunc(g.serve))
+	g := NewUnstarted()
+	g.server = httptest.NewServer(g)
 	return g
 }
+
+// NewUnstarted is a gateway the caller serves (the sandbox CLI command).
+func NewUnstarted() *Gateway { return &Gateway{vaults: map[string]*vault{}} }
+
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) { g.serve(w, r) }
 
 func (g *Gateway) URL() string { return g.server.URL }
 func (g *Gateway) Close()      { g.server.Close() }
