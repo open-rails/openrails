@@ -119,7 +119,7 @@ func EngineCollectionDue(sub *models.Subscription, at time.Time, customer bool) 
 		return false
 	}
 	if customer {
-		return sub.Status == models.StatusPastDue && sub.NextRetryAt != nil
+		return (sub.Status == models.StatusPastDue && sub.NextRetryAt != nil) || sub.Status == models.StatusAwaitingMethod
 	}
 	return sub.Status == models.StatusActive || (sub.Status == models.StatusPastDue && sub.NextRetryAt != nil && !sub.NextRetryAt.After(at))
 }

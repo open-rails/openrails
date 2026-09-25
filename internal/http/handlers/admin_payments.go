@@ -178,7 +178,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 		if err != nil && !db.IsNotFound(err) {
 			return fmt.Errorf("load refunded subscription: %w", err)
 		}
-		if err == nil && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusUnknown) {
+		if err == nil && sub.Status.Live() {
 			if _, err := subscriptions.RequireProviderCancelArmed(ctx, r.State.DB, sub, false); err != nil {
 				if errors.Is(err, subscriptions.ErrProviderCancelHeld) {
 					return adminRefundCodedError(http.StatusConflict, openrails.CodeProviderCancelHeld, err.Error())

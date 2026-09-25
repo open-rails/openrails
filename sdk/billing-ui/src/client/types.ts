@@ -29,9 +29,15 @@ export interface Page<T> {
 }
 
 export const subscriptionStatusSchema = z.string()
-/** `pending | active | past_due | cancelled | unknown`; kept open for new values. */
+/** `pending | active | past_due | awaiting_method | unverified | cancelled`; kept open for new values. */
 export type SubscriptionStatus =
-  "pending" | "active" | "past_due" | "cancelled" | "unknown" | (string & {})
+  | "pending"
+  | "active"
+  | "past_due"
+  | "awaiting_method"
+  | "unverified"
+  | "cancelled"
+  | (string & {})
 
 export const subscriptionPriceSchema = z.object({
   id: z.string(),

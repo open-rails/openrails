@@ -2037,6 +2037,17 @@ func (q *Queries) ListStuckRailIntents(ctx context.Context, arg ListStuckRailInt
 	return items, nil
 }
 
+const lockDestructiveBreaker = `-- name: LockDestructiveBreaker :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.destructive_breaker:' || $1::uuid::text, 0))
+`
+
+// Serializes one merchant's breaker admissions; an admission records its
+// attempt before the lock is released, so the next check counts it.
+func (q *Queries) LockDestructiveBreaker(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockDestructiveBreaker, merchantID)
+	return err
+}
+
 const lockRailIntentForCollectionCompletion = `-- name: LockRailIntentForCollectionCompletion :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE id = $1::uuid AND merchant_id = $2::uuid
@@ -2751,17 +2762,6 @@ func (q *Queries) SupersedeRailIntentsBySubject(ctx context.Context, arg Superse
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const lockDestructiveBreaker = `-- name: LockDestructiveBreaker :exec
-SELECT pg_advisory_xact_lock(hashtextextended('openrails.destructive_breaker:' || $1::uuid::text, 0))
-`
-
-// Serializes one merchant's breaker admissions; an admission records its
-// attempt before the lock is released, so the next check counts it.
-func (q *Queries) LockDestructiveBreaker(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, lockDestructiveBreaker, merchantID)
-	return err
 }
 
 const tryLockProviderRefresh = `-- name: TryLockProviderRefresh :one

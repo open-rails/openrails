@@ -68,7 +68,7 @@ JOIN openrails.products accepted ON accepted.merchant_id=s.merchant_id AND accep
 JOIN openrails.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
  AND (s.product_id=accepted.id OR (accepted.tier_group IS NOT NULL AND accepted.tier_group<>'' AND existing.tier_group=accepted.tier_group))
- AND s.status IN ('active','pending','past_due','unknown') AND s.deleted_at IS NULL
+ AND s.status IN ('active','pending','past_due','awaiting_method','unverified') AND s.deleted_at IS NULL
 ORDER BY s.id LIMIT 1
 `
 

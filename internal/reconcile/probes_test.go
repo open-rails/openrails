@@ -18,7 +18,7 @@ import (
 // Probes are snapshot SOURCES: each verdict below is the one decider's answer
 // for an `unknown` row fed that snapshot (the #633 resolution path).
 func decideUnknown(railSub string, periodEnd *time.Time, snap *RemoteSnapshot, now time.Time) Decision {
-	return Decide(SubscriptionState{Status: "unknown", RailSubscriptionID: railSub, PeriodEnd: periodEnd}, EvidenceBundle{Snapshot: snap}, now, 0)
+	return Decide(SubscriptionState{Status: "unverified", RailSubscriptionID: railSub, PeriodEnd: periodEnd}, EvidenceBundle{Snapshot: snap}, now, 0)
 }
 
 func TestNMISubscriptionProber(t *testing.T) {

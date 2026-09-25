@@ -3,7 +3,7 @@
 // decimal strings (docs/money-wire.md).
 
 export type SubscriptionStatus =
-  "pending" | "active" | "past_due" | "cancelled" | "unknown"
+  "pending" | "active" | "past_due" | "awaiting_method" | "unverified" | "cancelled"
 export type Rail = "nmi" | "ccbill" | "solana" | "stripe" | string
 
 // --- Customers (#740 list endpoint) ---

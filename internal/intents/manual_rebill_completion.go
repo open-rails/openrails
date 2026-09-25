@@ -225,7 +225,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 		}
 		// A stale refusal is still forensic evidence, but cannot dunn a later
 		// period or overwrite a recovery observed while this attempt ran.
-		if sub.Status == models.StatusPastDue && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) && failures == p.FailureCount {
+		if (sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) && failures == p.FailureCount {
 			classification := collection.ClassifyDeclineDetail(string(models.RailNMI), code)
 			certainty := ""
 			if classification.Outcome == collection.DeclineNonRecoverable {

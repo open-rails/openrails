@@ -52,7 +52,7 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 	if err != nil {
 		return true, fmt.Errorf("load refunded subscription: %w", err)
 	}
-	live := sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusUnknown
+	live := sub.Status.Live()
 	if live && sub.CollectionPolicy != models.CollectionPolicyEngine && subscriptions.NeedsProviderScheduleDelete(sub) {
 		// The refund already happened at NMI; the membership ends regardless of
 		// the switch, whose state only holds the schedule delete.
@@ -66,7 +66,7 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 			if err != nil {
 				return err
 			}
-			if locked.Status == models.StatusActive || locked.Status == models.StatusPastDue || locked.Status == models.StatusUnknown {
+			if locked.Status.Live() {
 				cancelType := models.CancelTypeMerchant
 				locked.Status, locked.CancelledAt, locked.EndedAt, locked.CancelType, locked.CancelFeedback = models.StatusCancelled, &now, &now, &cancelType, &reason
 				locked.DeletionScheduledAt = &now

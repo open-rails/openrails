@@ -17,6 +17,8 @@ export const ko: BillingUiMessageBundle = {
     cancelled: "해지됨",
     cancel_scheduled: "종료 예정",
     unknown: "알 수 없음",
+    awaiting_method: "카드 업데이트 필요",
+    unverified: "확인 중",
     succeeded: "결제 완료",
     failed: "실패",
     refunded: "환불됨",

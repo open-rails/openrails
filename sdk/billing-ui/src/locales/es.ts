@@ -17,6 +17,8 @@ export const es: BillingUiMessageBundle = {
     cancelled: "Cancelada",
     cancel_scheduled: "Finaliza",
     unknown: "Desconocido",
+    awaiting_method: "Actualiza tu tarjeta",
+    unverified: "Verificando",
     succeeded: "Pagado",
     failed: "Fallido",
     refunded: "Reembolsado",

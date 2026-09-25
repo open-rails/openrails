@@ -61,11 +61,12 @@ func (ns NullOpenrailsPaymentStatus) Value() (driver.Value, error) {
 type OpenrailsSubscriptionStatus string
 
 const (
-	OpenrailsSubscriptionStatusPending   OpenrailsSubscriptionStatus = "pending"
-	OpenrailsSubscriptionStatusActive    OpenrailsSubscriptionStatus = "active"
-	OpenrailsSubscriptionStatusPastDue   OpenrailsSubscriptionStatus = "past_due"
-	OpenrailsSubscriptionStatusCancelled OpenrailsSubscriptionStatus = "cancelled"
-	OpenrailsSubscriptionStatusUnknown   OpenrailsSubscriptionStatus = "unknown"
+	OpenrailsSubscriptionStatusPending        OpenrailsSubscriptionStatus = "pending"
+	OpenrailsSubscriptionStatusActive         OpenrailsSubscriptionStatus = "active"
+	OpenrailsSubscriptionStatusPastDue        OpenrailsSubscriptionStatus = "past_due"
+	OpenrailsSubscriptionStatusAwaitingMethod OpenrailsSubscriptionStatus = "awaiting_method"
+	OpenrailsSubscriptionStatusCancelled      OpenrailsSubscriptionStatus = "cancelled"
+	OpenrailsSubscriptionStatusUnverified     OpenrailsSubscriptionStatus = "unverified"
 )
 
 func (e *OpenrailsSubscriptionStatus) Scan(src interface{}) error {
@@ -940,6 +941,8 @@ type OpenrailsPaymentMethod struct {
 	ParkedAt *time.Time
 	// or#795: when this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.
 	AccountUpdaterCheckedAt *time.Time
+	// The customer's default payment method: exactly one per (merchant, customer) with a usable method (#1084).
+	IsDefault bool
 }
 
 // Pricing tiers for products with rail-specific identifiers

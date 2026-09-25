@@ -168,7 +168,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if sub.Status != models.StatusPastDue {
+	if sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}

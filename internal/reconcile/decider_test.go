@@ -155,7 +155,7 @@ func TestDecideSnapshotLaw(t *testing.T) {
 			}
 			status := c.status
 			if status == "" {
-				status = "unknown"
+				status = "unverified"
 			}
 			sub := SubscriptionState{Status: status, Rail: "nmi", RailSubscriptionID: "rs", PeriodStart: c.start, PeriodEnd: c.end}
 
@@ -234,7 +234,7 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 			want: TransitionCancel, certainty: collection.CertaintyDunningExhausted},
 		{name: "attempts without a policy max are not exhaustion", status: "past_due", end: rel(-30 * oneDay), grace: rel(-time.Hour),
 			charge: ChargeEvidence{RetryAttempts: 5, LastAttemptAt: decideNow}, want: TransitionParkUnknown, reason: "dunning_stalled_past_grace"},
-		{name: "unknown waits for the provider", status: "unknown", end: rel(-30 * oneDay), want: TransitionNone, reason: "awaiting_provider_verification"},
+		{name: "unknown waits for the provider", status: "unverified", end: rel(-30 * oneDay), want: TransitionNone, reason: "awaiting_provider_verification"},
 		{name: "engine cadence belongs to the accepted operation", status: "active", policy: models.CollectionPolicyEngine, end: rel(-100 * oneDay),
 			charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}, want: TransitionNone, reason: "engine_collection_owned"},
 		{name: "engine stalled dunning is not the sweep's to park", status: "past_due", policy: models.CollectionPolicyEngine, end: rel(-100 * oneDay), grace: rel(-time.Hour),
@@ -272,7 +272,7 @@ func TestDecideStaleRosterDateNeverCancels(t *testing.T) {
 		end := rel(-time.Duration(staleDays) * oneDay)
 		snap := &RemoteSnapshot{Provider: ProviderNMI, FetchedAt: decideNow, Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
 			Subscriptions: []RemoteSubscription{*rosterSub(SubscriptionStatusPastDue, end)}}
-		for _, status := range []string{"active", "past_due", "unknown"} {
+		for _, status := range []string{"active", "past_due", "unverified"} {
 			d := Decide(SubscriptionState{Status: status, Rail: "nmi", RailSubscriptionID: "rs", PeriodEnd: end},
 				EvidenceBundle{Snapshot: snap}, decideNow, 0)
 			require.Equal(t, TransitionParkUnknown, d.Kind, "stale %dd / %s: %s", staleDays, status, d.Reason)
@@ -282,7 +282,7 @@ func TestDecideStaleRosterDateNeverCancels(t *testing.T) {
 
 // Properties over the whole input grid: no transition outruns its evidence.
 func TestDecideInvariants(t *testing.T) {
-	liveStatus := map[string]bool{"active": true, "past_due": true, "unknown": true}
+	liveStatus := map[string]bool{"active": true, "past_due": true, "unverified": true}
 	certainties := []string{collection.CertaintyProviderConfirmedDead, collection.CertaintyNonRetryableDecline, collection.CertaintyDunningExhausted}
 	snap := func(p Provider, exhaustive bool, roster *RemoteSubscription, txns ...RemoteTransaction) *RemoteSnapshot {
 		s := &RemoteSnapshot{Provider: p, FetchedAt: decideNow, Transactions: txns, Coverage: SnapshotCoverage{SubscriptionsExhaustive: exhaustive}}
@@ -313,7 +313,7 @@ func TestDecideInvariants(t *testing.T) {
 	}
 	times := []*time.Time{nil, rel(-90 * oneDay), rel(-10 * oneDay), rel(-time.Hour), rel(20 * oneDay)}
 
-	for _, status := range []string{"active", "past_due", "unknown", "pending", "cancelled", "expired", "failed"} {
+	for _, status := range []string{"active", "past_due", "unverified", "pending", "cancelled", "expired", "failed"} {
 		for _, rail := range []string{"nmi", "stripe"} {
 			for _, policy := range []models.CollectionPolicy{models.CollectionPolicyProviderDunning, models.CollectionPolicyEngine} {
 				for _, end := range times {

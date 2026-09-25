@@ -87,7 +87,7 @@ avoid access gaps from ambiguity.
 ## Never infer access from subscription rows
 
 Subscription `status` is provider-lifecycle state, not an access decision: `past_due` and
-`unknown` still project standing access (providers like NMI retry indefinitely and forgive
-gaps; stale data parks as `unknown` rather than losing entitlements to a malfunction).
+`unverified` still project standing access (providers like NMI retry indefinitely and forgive
+gaps; stale data parks as `unverified` rather than losing entitlements to a malfunction).
 Cancellation is last-resort and evidence-driven. All of that doctrine is already folded
 into the timeline — subscriptions *produce* windows; the windows are the answer.

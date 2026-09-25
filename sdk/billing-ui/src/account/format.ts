@@ -93,7 +93,13 @@ export function expiry(card: CardSummary | null | undefined): string | null {
   return `${String(card.exp_month).padStart(2, "0")}/${String(card.exp_year).slice(-2)}`
 }
 
-export const LIVE_STATUSES = new Set(["active", "pending", "past_due"])
+export const LIVE_STATUSES = new Set([
+  "active",
+  "pending",
+  "past_due",
+  "awaiting_method",
+  "unverified",
+])
 
 const future = (at: string | null | undefined) =>
   !!at && new Date(at).getTime() > Date.now()
@@ -118,6 +124,7 @@ const TONE: Record<string, StatusTone> = {
   default: "neutral",
   pending: "warning",
   past_due: "warning",
+  awaiting_method: "warning",
   cancel_scheduled: "warning",
   expiring_soon: "warning",
   needs_attention: "warning",

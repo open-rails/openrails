@@ -1779,7 +1779,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 		if !samePeriodEnd(belief, sub.CurrentPeriodEndsAt) {
 			return nil // the caller decided on a period that has since moved (a renewal landed)
 		}
-		sub.Status = models.StatusUnknown
+		sub.Status = models.StatusUnverified
 		sub.GraceEndsAt = nil
 		sub.NextRetryAt = nil
 		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
@@ -1840,7 +1840,7 @@ const (
 // dunning grace window (ResolvePastDue), normally the missed period end.
 func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodStart, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
-		if sub.Status != models.StatusUnknown {
+		if sub.Status != models.StatusUnverified {
 			return nil // idempotent
 		}
 		now := s.now()
@@ -2268,7 +2268,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// obligation is ours to decide: it waits past_due for the customer's
 		// new card (or the operator), never in the provider-verification
 		// cohort, which has nothing to probe for it.
-		awaitingStatus := models.StatusUnknown
+		awaitingStatus := models.StatusUnverified
 		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 			awaitingStatus = models.StatusPastDue
 		}
@@ -2289,9 +2289,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// or#870 bucket 2 — THEIR card, fixable (expired, bad CVC, do-not-honor,
 		// call issuer...). Retrying cannot succeed and burns attempts against the
 		// issuer, but the customer fixes it in a minute. So: stop charging NOW,
-		// keep the subscription alive and its entitlements intact (an `unknown`
-		// row projects standing access, #691), and notify them to update the
-		// payment method. NOT a terminal outcome — no cancel, no revoke, no
+		// keep the subscription alive and its entitlements intact
+		// (awaiting_method projects standing access), and notify them to update
+		// the payment method; a replaced method resumes dunning. NOT a terminal outcome — no cancel, no revoke, no
 		// certainty leg required, and emphatically no touching of their stored
 		// card. This is where recoverable revenue lives.
 		if params.Decline == collection.DeclineFixPaymentMethod {
@@ -2300,7 +2300,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"user_id":         subscription.CustomerID,
 				"failure_code":    normalize.FromPtr(params.FailureCode),
 			}).Warn("or#870 bucket 2: payment method needs the customer's attention; charging STOPS, access and the stored card are untouched")
-			subscription.Status = awaitingStatus
+			subscription.Status = models.StatusAwaitingMethod
 			subscription.GraceEndsAt = nil
 			subscription.NextRetryAt = nil
 			needsPaymentMethodUpdate = true

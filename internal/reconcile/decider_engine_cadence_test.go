@@ -17,7 +17,7 @@ func TestEngineSubscriptionsNeverReachSnapshotLaw(t *testing.T) {
 		Subscriptions: []RemoteSubscription{{RailSubscriptionID: "", Status: SubscriptionStatusCancelled}}}
 	for _, cadence := range []time.Duration{time.Hour, 24 * time.Hour, 7 * 24 * time.Hour, 720 * time.Hour, 90 * 24 * time.Hour, 365 * 24 * time.Hour} {
 		for _, lapsed := range []time.Duration{time.Minute, cadence / 2, cadence, 3 * cadence} {
-			for _, status := range []string{"active", "unknown"} {
+			for _, status := range []string{"active", "unverified"} {
 				end := now.Add(-lapsed)
 				sub := SubscriptionState{CollectionPolicy: models.CollectionPolicyEngine, Status: status, Rail: "nmi", PeriodEnd: &end}
 				d := Decide(sub, EvidenceBundle{Snapshot: snap, Charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}}, now, 0)

@@ -385,7 +385,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   -- Engine card access is authored only by its atomic accepted-payment writer.
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
-  AND (s.status IN ('active', 'cancelled', 'unknown') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
+  AND (s.status IN ('active', 'cancelled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)

@@ -620,7 +620,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
   AND collection_policy <> 'engine'
-  AND status = 'unknown'
+  AND status = 'unverified'
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
 LIMIT sqlc.arg(max_rows)::int;
@@ -862,7 +862,7 @@ SELECT COUNT(*)::bigint AS pressure_count,
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
-  AND s.status = 'unknown'
+  AND s.status = 'unverified'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < sqlc.arg(now)::timestamptz;
 

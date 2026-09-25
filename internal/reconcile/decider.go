@@ -291,7 +291,7 @@ func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWind
 		dunningWindow = DefaultDunningWindow
 	}
 	switch sub.Status {
-	case string(models.StatusActive), string(models.StatusPastDue), string(models.StatusUnknown):
+	case string(models.StatusActive), string(models.StatusPastDue), string(models.StatusAwaitingMethod), string(models.StatusUnverified):
 	default:
 		return Decision{Kind: TransitionNone, Reason: "terminal_or_pending_status"}
 	}
@@ -710,7 +710,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 
 	case TransitionPastDue:
 		switch {
-		case sub.Status == models.StatusUnknown:
+		case sub.Status == models.StatusUnverified:
 			if err := lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, nil, d.GraceEndsAt); err != nil {
 				return true, err
 			}
@@ -740,7 +740,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		})
 
 	case TransitionRenew, TransitionAdoptPeriodEnd, TransitionCancel:
-		if sub.Status != models.StatusUnknown {
+		if sub.Status != models.StatusUnverified {
 			from := []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue}
 			if d.Kind == TransitionAdoptPeriodEnd {
 				// Adoption never lifts dunning; checked again under the row lock

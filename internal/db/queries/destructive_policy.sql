@@ -62,6 +62,6 @@ ON CONFLICT (merchant_id) DO UPDATE SET
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = sqlc.arg(rail)::text
-  AND status IN ('active', 'past_due', 'unknown')
+  AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND rail_subscription_id <> ''
   AND deleted_at IS NULL;
