@@ -58,7 +58,18 @@ func (l *legacy) requireMirrored(what string) {
 	require.Equal(t, "active", sub.Status, what)
 	require.True(t, l.nmiNext().Equal(*sub.CurrentPeriodEndsAt), "%s: period ends on NMI's next billing date (%s vs %s)", what, l.nmiNext(), sub.CurrentPeriodEndsAt)
 	require.True(t, l.c.entitled(l.ent), "%s: access is continuous", what)
-	require.Zero(t, len(l.w.nmi.Attempts()), "%s: OpenRails never charges", what)
+	require.Zero(t, l.w.attemptsOn(l.railCust), "%s: OpenRails never charges a paid NMI schedule", what)
+}
+
+// attemptsOn counts OpenRails' charge attempts on one NMI vault.
+func (w *world) attemptsOn(vault string) int {
+	n := 0
+	for _, a := range w.nmi.Attempts() {
+		if a.Get("customer_vault_id") == vault {
+			n++
+		}
+	}
+	return n
 }
 
 // NMI's renewals reach the mirror through signed webhooks, delivered once,
@@ -101,7 +112,9 @@ func TestLegacyNMIMirrorWebhooks(t *testing.T) {
 			w.advance(time.Duration(cadence.days) * 6 * time.Hour)
 			require.Equal(t, http.StatusOK, w.deliver("nmi", notices[late]))
 			late.requireMirrored("late")
-			require.Zero(t, len(w.nmi.Attempts()))
+			for _, l := range []*legacy{once, twice, late, cancelled} {
+				require.Zero(t, w.attemptsOn(l.railCust), "only the declined schedule is retried by OpenRails")
+			}
 			require.Zero(t, w.nmi.ScheduleDeletes(cancelled.railSub), "a schedule NMI ended is never deleted again")
 		})
 	}
