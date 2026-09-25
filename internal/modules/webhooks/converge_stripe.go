@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"slices"
 	"strings"
 	"time"
@@ -360,6 +361,9 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			return nil
 		}
 		price := s.paidPriceMove(ctx, sub, rec)
+		if err := s.recordPaidProration(ctx, txdb, sub, rec, price, now); err != nil {
+			return err
+		}
 		if price == nil {
 			return nil
 		}
@@ -398,6 +402,39 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	// Downgrade revoke: entitlements the old product had that the new one lost.
 	if updatedSub != nil && len(oldSpec) > 0 {
 		return s.revokeDowngradedEntitlements(ctx, updatedSub, oldSpec, newSpec)
+	}
+	return nil
+}
+
+// recordPaidProration records a paid mid-period invoice (a portal plan
+// change's proration) as a payment. It moves money, never the paid period.
+func (s *StripeConvergeService) recordPaidProration(ctx context.Context, txdb *db.DB, sub *models.Subscription, rec subscriptions.StripeLivenessRecord, moved *models.Price, now time.Time) error {
+	if !rec.LatestInvoicePaid || !strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") || rec.LatestInvoiceTransactionID == "" || rec.LatestInvoiceAmountPaid <= 0 {
+		return nil
+	}
+	if recorded, err := s.fetchedInvoicePaymentAlreadyRecorded(ctx, rec); err != nil || recorded {
+		return err
+	}
+	priceID := sub.PriceID
+	if moved != nil {
+		priceID = moved.ID
+	}
+	billedAt := rec.LatestInvoiceCreated
+	if billedAt.IsZero() {
+		billedAt = now
+	}
+	amount := int64(moneyutil.CentsToMicros(moneyutil.Cents(rec.LatestInvoiceAmountPaid)))
+	subID, pspID := sub.ID, sub.PspID
+	payment := &models.Payment{
+		ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, PriceID: priceID, SubscriptionID: &subID, Rail: models.RailStripe, PspID: &pspID,
+		TransactionID: rec.LatestInvoiceTransactionID, Amount: amount, ListAmount: amount, Currency: strings.ToUpper(rec.LatestInvoiceCurrency),
+		Status: payments.PaymentStatusCompletedValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: billedAt, CreatedAt: now,
+		// A proration pays a part-period at the new price: its own period key,
+		// never a renewal's.
+		Metadata: map[string]any{"stripe_invoice_id": rec.LatestInvoiceID, "billing_reason": "subscription_update", subscriptions.PaidPeriodKey: billedAt.UTC().Format(time.RFC3339)},
+	}
+	if _, err := payments.NewPaymentService(txdb, s.Clock).CreateIfNotExists(ctx, payment); err != nil {
+		return fmt.Errorf("stripe converge: record paid proration: %w", err)
 	}
 	return nil
 }

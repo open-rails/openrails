@@ -54,6 +54,50 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	require.Zero(t, l.engineCharges())
 }
 
+// A portal upgrade whose proration Stripe charged at once moves the tier and
+// records that charge as a payment, without moving the paid period. The
+// money invariants check the provider ledger against local payments.
+func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	l := importLegacy(t, w, "stripe", embedded)
+	w.converge()
+	client := w.client[embedded]
+	premium := "content:premium"
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
+	require.NoError(t, err)
+	hours := monthHours
+	stripePrice := "price_legacy_" + uuid.NewString()[:8]
+	w.stripe.legacyPrice(stripePrice, 1999)
+	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
+	require.NoError(t, err)
+	paidBefore := len(completed(w.payments(embedded, l.c.id)))
+	end := l.periodEnd()
+
+	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChangePaid(l.railSub, stripePrice, 1999, 500))))
+	w.settle()
+	sub := w.subscription(embedded, l.sub)
+	require.Equal(t, price.ID, sub.PriceID, "a paid proration moves the tier")
+	require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a proration never moves the paid period")
+	require.True(t, l.c.entitled(premium))
+	paid := completed(w.payments(embedded, l.c.id))
+	require.Len(t, paid, paidBefore+1, "the proration charge is a payment")
+	charge := w.stripe.latestCharge(l.railSub)
+	var proration *openrails.Payment
+	for i := range paid {
+		if paid[i].TransactionID == charge {
+			proration = &paid[i]
+		}
+	}
+	require.NotNil(t, proration, "the proration charge %s is recorded", charge)
+	require.EqualValues(t, 5_000_000, proration.Amount)
+
+	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.subscriptionObject(l.railSub))))
+	w.settle()
+	require.Len(t, completed(w.payments(embedded, l.c.id)), paidBefore+1, "a replayed event records it once")
+}
+
 // An event that lands while the converge job for its subscription is running
 // is not lost: a follow-up reads Stripe again once that job finishes.
 func TestStripeEventMidConvergeIsNotLost(t *testing.T) {
