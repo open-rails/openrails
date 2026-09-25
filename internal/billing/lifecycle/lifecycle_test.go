@@ -71,7 +71,8 @@ func TestTransitions(t *testing.T) {
 			effects: []Effect{CloseDunning{}}},
 		{name: "first decline exhausts a no-retry cycle", from: snap(Active, Engine), event: DunningExhausted{t2}, want: Cancelled, through: t1,
 			effects: []Effect{CloseDunning{}, EndAccess{t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
-		{name: "provider-owned decline is mirrored only", from: snap(Active, Provider), event: RenewalDeclined{t1, NonRecoverable, t1}, want: PastDue, through: t1},
+		{name: "provider-owned decline is mirrored only", from: snap(Active, Provider), event: RenewalDeclined{t1, NonRecoverable, t1}, want: PastDue, through: t1,
+			effects: []Effect{OpenDunning{t1}}},
 		{name: "stale decline of a paid period", from: snap(Active, NMISchedule), event: RenewalDeclined{t0, Retry, t1}, want: Active, through: t1},
 		{name: "decline after cancellation ignored", from: snap(Cancelled, Engine), event: RenewalDeclined{t1, Retry, t1}, want: Cancelled, through: t1},
 

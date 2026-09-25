@@ -287,8 +287,14 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			return s, nil, nil // a decline for a period already paid or not yet due
 		}
 		if s.Owner == Provider {
-			s.Status = PastDue // the provider retries; mirror only
-			return s, nil, nil
+			// The provider retries; the mirror only opens the dunning window
+			// the access policy reads.
+			var effects []Effect
+			if s.Status != PastDue {
+				effects = []Effect{OpenDunning{ev.PeriodStart}}
+			}
+			s.Status = PastDue
+			return s, effects, nil
 		}
 		switch ev.Bucket {
 		case FixMethod:

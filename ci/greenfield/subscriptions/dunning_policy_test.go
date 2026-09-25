@@ -94,7 +94,15 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 			require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status)
 			require.False(t, l.c.entitled(l.ent), "suspend ends access with the paid period")
 
-			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(true)))
+			if rail == "stripe" {
+				require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(true)))
+			} else {
+				// NMI never retries: OpenRails dunning's first retry recovers it.
+				next := w.subscription(embedded, l.sub).NextRetryAt
+				require.NotNil(t, next)
+				w.advance(next.Sub(w.clock.Now()) + time.Second)
+				w.runRenewals()
+			}
 			w.settle()
 			require.Equal(t, "active", w.subscription(embedded, l.sub).Status)
 			require.True(t, l.c.entitled(l.ent), "the recovered renewal reopens access")
