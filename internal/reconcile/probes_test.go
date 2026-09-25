@@ -144,6 +144,9 @@ func TestStripeSnapshotFromLiveness(t *testing.T) {
 		{name: "past_due Stripe stopped retrying grants nothing", want: TransitionCancel, gone: true,
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
 				LatestInvoiceCollectionFailed: true, LatestInvoiceRetryExhausted: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x", LatestInvoiceCreated: periodEnd.Add(time.Hour)}},
+		{name: "an unpaid proration is no declined renewal", want: TransitionAdoptPeriodEnd,
+			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "active", CurrentPeriodStart: periodEnd, CurrentPeriodEnd: remoteEnd,
+				LatestInvoiceCollectionFailed: true, LatestInvoiceAmountDue: 500, LatestInvoiceTransactionID: "in_up", LatestInvoiceCreated: periodEnd.Add(time.Hour), LatestInvoiceBillingReason: "subscription_update"}},
 		{name: "an undated failed collection is not evidence", want: TransitionPastDue,
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
 				LatestInvoiceCollectionFailed: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x"}},
@@ -161,6 +164,20 @@ func TestStripeSnapshotFromLiveness(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Stripe runs its own retries: past_due while it retries, however long.
+func TestStripePastDueFollowsStripeRetries(t *testing.T) {
+	now := time.Date(2040, time.July, 13, 16, 30, 0, 0, time.UTC)
+	periodEnd := now.Add(-60 * oneDay)
+	rec := subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: periodEnd, CurrentPeriodEnd: periodEnd.Add(30 * oneDay),
+		LatestInvoiceCollectionFailed: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x", LatestInvoiceCreated: periodEnd.Add(time.Hour)}
+	d := decideUnknown("sub_1", &periodEnd, StripeSnapshotFromLiveness("sub_1", rec, now), now)
+	require.Equal(t, TransitionPastDue, d.Kind, d.Reason)
+	rec.LatestInvoiceRetryExhausted = true
+	d = decideUnknown("sub_1", &periodEnd, StripeSnapshotFromLiveness("sub_1", rec, now), now)
+	require.Equal(t, TransitionCancel, d.Kind, "a spent Stripe schedule ends it")
+	require.True(t, d.RemoteGone)
 }
 
 // #696: viewSubscriptionStatus is the per-record read; probes only ever send it.
