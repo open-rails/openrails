@@ -45,7 +45,9 @@
 //     omitted. Cursors are decimal offsets. Error bodies use the
 //     {"type","error_code","message"} envelope with 400 or 404.
 //   - Recurring engine: schedules bill only when a test calls RenewSchedule or
-//     RunDue; a failed charge advances to the next date without retrying.
+//     RunDue; a charge is dated the schedule's next billing time (a test may
+//     force it early, so it can postdate the clock), and a failed charge
+//     advances to the next date without retrying.
 //     rebill_subscription charges the schedule amount without moving it.
 //   - Webhooks are never sent; tests deliver notices themselves.
 //   - Currency is whatever the request names (USD for schedule charges);
