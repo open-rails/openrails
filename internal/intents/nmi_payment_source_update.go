@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"strings"
 	"time"
 
@@ -404,8 +405,10 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 		now := h.now()
 		newID := p.NewPaymentMethodID
 		sub.PaymentMethodID = &newID
-		if sub.Status == models.StatusAwaitingMethod {
-			sub.Status = models.StatusPastDue
+		if _, err := subscriptions.Transition(sub, lifecycle.MethodReplaced{}, now); err != nil {
+			return err
+		}
+		if sub.Status == models.StatusPastDue {
 			sub.NextRetryAt = &now
 		}
 		return repo.UpdateAt(ctx, sub, now)

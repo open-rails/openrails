@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"time"
 
 	"github.com/google/uuid"
@@ -347,11 +348,9 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		if subscription.PspID != observedPSP || subscription.Rail != observedRail || subscription.RailSubscriptionID != observedReference {
 			return apperr.Conflictf("subscription provider binding changed before cancellation")
 		}
-		cancelType := models.CancelTypeMerchant
-		subscription.Status = models.StatusCancelled
-		subscription.CancelledAt = &now
-		subscription.CancelType = &cancelType
-		subscription.ClearRetrySchedule()
+		if _, err := Transition(subscription, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: revokeAccess, At: now}, now); err != nil {
+			return fmt.Errorf("cancel subscription %s: %w", subscription.ID, err)
+		}
 		if reason != "" {
 			subscription.CancelFeedback = &reason
 		}

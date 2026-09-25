@@ -29,6 +29,8 @@ func SnapshotOf(sub *models.Subscription) lifecycle.Snapshot {
 	}
 	if sub.EndedAt != nil {
 		s.EndedAt = sub.EndedAt.UTC()
+	} else if sub.Status == models.StatusCancelled {
+		s.EndedAt = s.PaidThrough // an older period-end cancel recorded no end
 	}
 	if sub.CancelType != nil {
 		s.CancelKind = cancelKindOf(*sub.CancelType)
