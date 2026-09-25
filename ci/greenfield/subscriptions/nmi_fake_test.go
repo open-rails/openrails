@@ -1006,14 +1006,15 @@ func (f *nmiFake) remember(c card, amount string) {
 
 // withinDupSeconds is NMI's per-request duplicate check: dup_seconds refuses
 // a sale matching an approved sale of the same card and amount within that
-// many seconds, whether or not searches show it yet.
+// many seconds, whether or not searches show it yet. Test vaults share card
+// numbers, so a card is its vault's.
 func (f *nmiFake) withinDupSeconds(c card, form url.Values) bool {
 	window, _ := strconv.Atoi(form.Get("dup_seconds"))
 	if window <= 0 {
 		return false
 	}
 	for _, s := range f.sales {
-		if s.Declined == "" && s.Card.Brand == c.Brand && s.Card.Last4 == c.Last4 && s.Amount == form.Get("amount") && f.now().Sub(s.At) <= time.Duration(window)*time.Second {
+		if s.Declined == "" && s.Vault == form.Get("customer_vault_id") && s.Card.Brand == c.Brand && s.Card.Last4 == c.Last4 && s.Amount == form.Get("amount") && f.now().Sub(s.At) <= time.Duration(window)*time.Second {
 			return true
 		}
 	}
