@@ -166,7 +166,7 @@ func ImportDeclaredSubscriptions(
 	// One declared snapshot for the whole batch: every fact gets a roster entry
 	// (cancel facts as dead entries), all declared charges ride Transactions.
 	snap := &RemoteSnapshot{
-		Provider:     Provider("declared"),
+		Provider:     ProviderDeclared,
 		FetchedAt:    asOf,
 		Transactions: txns,
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: coverage.SubscriptionsExhaustive},

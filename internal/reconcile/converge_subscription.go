@@ -101,6 +101,16 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 		return out, err
 	}
 	out.Applied = applied
+	if applied && d.Reason == reasonRenewedBeforeDecline {
+		// The renewed row now ends where the later decline's period begins.
+		next := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
+		if next.Kind == TransitionPastDue {
+			if _, err := ApplyDecision(ctx, database, lc, sub, next, now); err != nil {
+				return out, err
+			}
+			out.Decision = next
+		}
+	}
 	return out, nil
 }
 

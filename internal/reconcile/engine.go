@@ -394,6 +394,13 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		return rep, nil, nil, nil, fmt.Errorf("no PSP binding for provider %s: a pull must name the PSP its credentials armed from", provider)
 	}
 	rep.PspID = binding.ID.String()
+	// Local rows load BEFORE the fetch: a row created while the roster was
+	// being read is absent from it without being gone at the provider.
+	local, err := e.Local.Load(ctx, provider, binding.ID)
+	if err != nil {
+		return rep, nil, nil, nil, fmt.Errorf("load local state: %w", err)
+	}
+	rep.LocalSubscriptions = len(local.Subscriptions)
 	snap, err := fetcher.Fetch(ctx, FetchParams{
 		Since:      params.Since,
 		Until:      params.Until,
@@ -420,12 +427,6 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemotePaymentMethods = len(snap.PaymentMethods)
-
-	local, err := e.Local.Load(ctx, provider, binding.ID)
-	if err != nil {
-		return rep, nil, nil, nil, fmt.Errorf("load local state: %w", err)
-	}
-	rep.LocalSubscriptions = len(local.Subscriptions)
 
 	localLive := 0
 	for i := range local.Subscriptions {
