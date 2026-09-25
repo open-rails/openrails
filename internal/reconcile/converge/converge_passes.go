@@ -1252,7 +1252,7 @@ func (p *lifePass) heldRenewalsFinding(ctx context.Context, scope Scope, now tim
 	return &ConvergeFinding{
 		Type: findingRenewalHeld, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
 		SubjectKey: "engine", Provider: "self",
-		Evidence: map[string]any{"count": h.Held, "oldest_due_at": h.OldestDueAt.UTC(), "oldest_held_seconds": int64(age.Seconds())},
+		Evidence: map[string]any{"count": h.Held, "oldest_paid_through": h.OldestDueAt.UTC(), "oldest_held_seconds": int64(age.Seconds())},
 		RecommendedAction: fmt.Sprintf("%d engine renewals have had no outcome past their allowance (oldest due %s): collection is stopped. Members keep access until they are attempted. Resume collection (fleet, admission hold, breaker, provider write mode).",
 			h.Held, h.OldestDueAt.UTC().Format(time.RFC3339)),
 	}, nil

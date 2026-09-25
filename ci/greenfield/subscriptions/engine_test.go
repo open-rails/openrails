@@ -296,7 +296,13 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				require.Equal(t, attempts, e.providerAttempts(), "one provider attempt per scheduled try")
 				require.Len(t, e.providerLedger(), 1, "no charge besides the initial one")
 				require.Len(t, completed(w.payments(e.tp, e.c.id)), 1)
-				w.advance(40 * day)
+				if tc.final == "awaiting_method" {
+					// The wait for a card ends with the dunning window; recover inside it.
+					require.NotNil(t, sub.GraceEndsAt)
+					w.advance(sub.GraceEndsAt.Sub(w.clock.Now()) - time.Hour)
+				} else {
+					w.advance(40 * day)
+				}
 				w.runRenewals()
 				require.Equal(t, attempts, e.providerAttempts(), "nothing retries after the policy's last attempt")
 
