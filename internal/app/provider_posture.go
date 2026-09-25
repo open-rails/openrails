@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -116,7 +117,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 		client, err := armer.NMIClient(ctx, mid, scope)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")
-			return false
+			return !errors.Is(err, merchants.ErrSecretBackendUnavailable)
 		}
 		if client.LoopbackFixture && client.TestMode {
 			return true
@@ -129,7 +130,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 		secret, err := pspSecret(ctx, svc, mid, scope, "secret_key")
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: Stripe credentials unavailable; PSP disarmed")
-			return false
+			return !errors.Is(err, merchants.ErrSecretBackendUnavailable)
 		}
 		status, check = r.StripeClients.VerifyPosture(ctx, secret, scope.AccountID), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
 	case string(models.RailSolana):
