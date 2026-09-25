@@ -256,6 +256,11 @@ type Decision struct {
 	Decline *RemoteTransaction
 	// Reason is a short cause slug for finding evidence / logs.
 	Reason string
+	// DecidedStatus and DecidedPeriodEnd are the row the decision was made
+	// on. ApplyDecision drops the decision when the row has since moved: a
+	// renewal or decline that landed during a pull must not be overwritten.
+	DecidedStatus    string
+	DecidedPeriodEnd *time.Time
 }
 
 // DunsDecline reports that OpenRails' dunning owns the retries after this
@@ -287,6 +292,12 @@ func DunsDecline(sub *models.Subscription, d Decision) bool {
 // AND dated at/after this deployment's first pull of the merchant (#835).
 // Anything else parks as `unknown` with access intact.
 func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWindow time.Duration) Decision {
+	d := decide(sub, ev, now, dunningWindow)
+	d.DecidedStatus, d.DecidedPeriodEnd = sub.Status, sub.PeriodEnd
+	return d
+}
+
+func decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWindow time.Duration) Decision {
 	if dunningWindow <= 0 {
 		dunningWindow = DefaultDunningWindow
 	}
@@ -698,6 +709,9 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	if database == nil || lc == nil || sub == nil {
 		return false, fmt.Errorf("apply decision: db, lifecycle and subscription are required")
 	}
+	if d.Kind != TransitionNone && d.stale(sub) {
+		return false, nil
+	}
 	switch d.Kind {
 	case TransitionNone:
 		return false, nil
@@ -819,4 +833,15 @@ func (a *LifecycleDecisionApplier) ApplyDecision(ctx context.Context, subscripti
 		return false, fmt.Errorf("apply decision: load subscription %s: %w", subscriptionID, err)
 	}
 	return ApplyDecision(ctx, a.DB, a.LC, sub, d, a.clock.Now().UTC())
+}
+
+// stale reports whether the row moved since the decision was made on it.
+func (d Decision) stale(sub *models.Subscription) bool {
+	if d.DecidedStatus != "" && d.DecidedStatus != string(sub.Status) {
+		return true
+	}
+	if d.DecidedPeriodEnd == nil {
+		return false
+	}
+	return sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(*d.DecidedPeriodEnd)
 }
