@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -111,6 +113,29 @@ type ConvergeFinding struct {
 type Pass interface {
 	Plane() string
 	Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error)
+	// Standing lists the finding types a merchant-wide Run reports in full:
+	// an open finding of one of them that the run no longer reports has
+	// cleared and resolves itself.
+	Standing() []string
+}
+
+// scanState carries, through one Converge, the standing types whose scan hit
+// convergeScanCap: their unreported findings may lie past the cap, so they
+// stay open.
+type scanState struct{ truncated map[string]bool }
+
+type scanStateKey struct{}
+
+// markTruncated records that a capped scan of findingType returned n rows.
+func markTruncated(ctx context.Context, n int, findingTypes ...string) {
+	if n < convergeScanCap {
+		return
+	}
+	if s, ok := ctx.Value(scanStateKey{}).(*scanState); ok {
+		for _, t := range findingTypes {
+			s.truncated[t] = true
+		}
+	}
 }
 
 // ConvergeEngine runs the internal plane passes and persists their findings to the
@@ -197,6 +222,8 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	if scope.Merchant.UUID() == uuid.Nil {
 		return res, fmt.Errorf("converge: scope.Merchant required")
 	}
+	scans := &scanState{truncated: map[string]bool{}}
+	ctx = context.WithValue(ctx, scanStateKey{}, scans)
 	var collected []ConvergeFinding
 	for _, p := range e.passes {
 		fs, err := p.Run(ctx, scope)
@@ -268,6 +295,9 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	if err := apply(notifyFindings); err != nil {
 		return res, err
 	}
+	if err := e.resolveCleared(ctx, q, scope, scans, append(collected, notifyFindings...)); err != nil {
+		return res, err
+	}
 
 	if runID == nil {
 		return res, nil // converged: no run, no writes
@@ -283,6 +313,36 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	}
 	return res, nil
 }
+
+// resolveCleared closes the open standing findings a merchant-wide pass no
+// longer reports: their subject has cleared. Subject keys do not carry the
+// customer, so a narrower scope cannot tell cleared from out of scope.
+func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, scope Scope, scans *scanState, reported []ConvergeFinding) error {
+	if !scope.IsGlobal() {
+		return nil
+	}
+	var types []string
+	for _, p := range append(e.passes, e.notify) {
+		for _, t := range p.Standing() {
+			if !scans.truncated[t] {
+				types = append(types, t)
+			}
+		}
+	}
+	keep := make([]string, 0, len(reported))
+	for _, f := range reported {
+		keep = append(keep, f.Type+findingKeySep+f.SubjectKey)
+	}
+	if _, err := q.ResolveClearedFindings(ctx, gen.ResolveClearedFindingsParams{
+		MerchantID: scope.Merchant.UUID(), FindingTypes: types, Keep: keep,
+	}); err != nil {
+		return fmt.Errorf("converge: resolve cleared findings: %w", err)
+	}
+	return nil
+}
+
+// findingKeySep joins a finding's type and subject (ResolveClearedFindings).
+const findingKeySep = "\x1f"
 
 // remediate decides a finding's ledger status and applies its repair. The
 // confirmed-absence gate (§3.2) keeps a destructive EXCESS repair in
@@ -314,6 +374,9 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeF
 	switch f.Class {
 	case ClassAuto:
 		if f.Repair != nil {
+			if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeRepair, Kind: f.Type, Subscription: subjectSubscription(f.SubjectKey)}); err != nil {
+				return "", err
+			}
 			if err := f.Repair(ctx); err != nil {
 				return "", fmt.Errorf("converge: repair %s (%s): %w", f.Type, f.SubjectKey, err)
 			}
@@ -366,4 +429,10 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 		return gen.OpenrailsReconciliationFinding{}, fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)
 	}
 	return row, nil
+}
+
+// subjectSubscription is the subscription a "subscription:<id>" subject names.
+func subjectSubscription(subject string) uuid.UUID {
+	id, _ := uuid.Parse(strings.TrimPrefix(subject, "subscription:"))
+	return id
 }

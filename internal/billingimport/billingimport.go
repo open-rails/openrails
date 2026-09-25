@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -320,6 +321,12 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		if err := importAdminGrants(ctx, q, merchantID.UUID(), opts.Book.AdminGrants, &res); err != nil {
 			return err
 		}
+		// Access commits with the memberships it derives from: a converge
+		// running between the two would otherwise see a member without a
+		// grant and record the import's own effect as a repair.
+		if err := deriveImportedAccess(ctx, q, merchantID, opts.Book, opts.Clock); err != nil {
+			return fmt.Errorf("derive imported access: %w", err)
+		}
 		sort.Strings(res.Imported)
 		sort.Strings(res.Skipped)
 		sort.Strings(res.Blocked)
@@ -328,17 +335,19 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	// Access is derived now, for exactly the book's customers, by the same
-	// convergence an operator run performs: an imported member is entitled
-	// without a merchant-wide pass. A replay re-derives, so a failure here
-	// heals on the next post of the same book.
-	if err := deriveImportedAccess(ctx, database, merchantID, opts.Book, opts.Clock); err != nil {
-		return res, fmt.Errorf("import committed; deriving access failed (re-post the book to retry): %w", err)
+	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.Committed, Kind: FailpointKind}); err != nil {
+		return res, err
 	}
 	return res, nil
 }
 
-func deriveImportedAccess(ctx context.Context, database *db.DB, merchantID merchant.ID, book DeclaredBilling, clock clockwork.Clock) error {
+// FailpointKind names the import at its failpoints.
+const FailpointKind = "billing_import"
+
+// deriveImportedAccess derives, for exactly the book's customers, the grants
+// an operator convergence would: an imported member is entitled without a
+// merchant-wide pass.
+func deriveImportedAccess(ctx context.Context, q *gen.Queries, merchantID merchant.ID, book DeclaredBilling, clock clockwork.Clock) error {
 	customers := map[uuid.UUID]struct{}{}
 	for _, c := range book.Customers {
 		customers[c.Customer.UUID()] = struct{}{}
@@ -356,26 +365,17 @@ func deriveImportedAccess(ctx context.Context, database *db.DB, merchantID merch
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
 	now := timeutil.FirstClock(clock).Now().UTC()
-	// Deriving the imported memberships' grants is the import's own effect,
-	// written directly; a convergence pass would record each as a repaired
-	// finding.
 	scanSince := now.Add(-3 * 365 * 24 * time.Hour)
+	ledger := grants.New(q, merchantID.UUID())
 	for i := range ids {
-		customer := ids[i]
-		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			ledger := grants.New(gen.New(tx), merchantID.UUID())
-			subs, err := ledger.UngrantedSubscriptions(ctx, &customer, scanSince)
-			if err != nil {
-				return err
+		subs, err := ledger.UngrantedSubscriptions(ctx, &ids[i], scanSince)
+		if err != nil {
+			return fmt.Errorf("customer %s: %w", ids[i], err)
+		}
+		for _, sub := range subs {
+			if err := ledger.DeriveSubscriptionGrant(ctx, sub); err != nil {
+				return fmt.Errorf("customer %s subscription %s: %w", ids[i], sub.ID, err)
 			}
-			for _, sub := range subs {
-				if err := ledger.DeriveSubscriptionGrant(ctx, sub); err != nil {
-					return fmt.Errorf("subscription %s: %w", sub.ID, err)
-				}
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("customer %s: %w", customer, err)
 		}
 	}
 	return nil

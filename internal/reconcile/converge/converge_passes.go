@@ -13,8 +13,11 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -284,6 +287,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan active subscriptions with expired bounded access: %w", err)
 	}
+	markTruncated(ctx, len(expiredBounded), "derive.grant_effect.mismatch")
 	for i := range expiredBounded {
 		s := expiredBounded[i]
 		// The established grant-direction detector already repairs a bounded
@@ -329,6 +333,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan dead subscriptions with live entitlements: %w", err)
 	}
+	markTruncated(ctx, len(dead), "derive.grant_effect.mismatch")
 	for i := range dead {
 		d := dead[i]
 		closeAt := now // no recorded bound: close at detection time
@@ -370,6 +375,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unjustified entitlement windows: %w", err)
 	}
+	markTruncated(ctx, len(unjustified), "derive.entitlement.unjustified")
 	for i := range unjustified {
 		out = append(out, unjustifiedEntitlementFinding(&unjustified[i]))
 	}
@@ -463,8 +469,8 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	now := p.e.Now()
 	// Repairs retain this pass's detection clock without mutating the lifecycle
 	// shared by overlapping runs. Its dependencies are fixed during wiring.
-	lifecycle := *p.e.lifecycle
-	lifecycle.SetClock(clockwork.NewFakeClockAt(now.UTC()))
+	lc := *p.e.lifecycle
+	lc.SetClock(clockwork.NewFakeClockAt(now.UTC()))
 	stale, err := q.ListStaleCheckoutSessions(ctx, gen.ListStaleCheckoutSessionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
@@ -494,81 +500,55 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
-	// The lapsed cohort (#664/#665) — ONE scan (active past period end, or
-	// past_due with grace elapsed and no retry scheduled) carrying its evidence
-	// legs; the ONE decider (reconcile.Decide) chooses the transition and the
-	// repair applies it through the shared lifecycle (reconcile.ApplyDecision).
-	// LIFE carries no provider snapshot, so the decider can only PARK as
-	// `unknown` (access intact); only a seen decline opens dunning — convergence
-	// never terminally cancels; FailMembership + provider-confirmed outcomes
-	// own that. #691: grace here is a PACING marker only — an auto-renew sub's
-	// entitlement window is STANDING, so none of these transitions touch
-	// access. Finding vocabulary is unchanged:
-	//   active, no renewal recorded  → life.subscription.needs_verification
-	//   past_due, dunning stalled    → life.subscription.grace_exhausted
-	lapsed, err := q.ListLapsedSubscriptionsWithEvidence(ctx, gen.ListLapsedSubscriptionsWithEvidenceParams{
+	// A clock reading is not evidence (#1089 §1, §8): an overdue renewal or a
+	// dunning window that closed with nothing scheduled only asks the
+	// provider. The repair is the lifecycle's own event on the locked row
+	// (RenewalOverdue / DunningStale → unverified, read at once, §12), taken
+	// only while the premise still holds; it never moves a period or a retry.
+	overdue, err := q.ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, OverdueBefore: now.Add(-reconcile.PeriodGrace), RowLimit: convergeScanCap,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("life: scan overdue renewals: %w", err)
+	}
+	markTruncated(ctx, len(overdue), findingRenewalOverdue)
+	for i := range overdue {
+		row := overdue[i]
+		out = append(out, ConvergeFinding{
+			Type: findingRenewalOverdue, Shape: ShapeMismatch, Class: ClassAuto, Severity: SeverityMedium,
+			SubjectKey: "subscription:" + row.ID.String(), Provider: "self",
+			Evidence: map[string]any{"subscription_id": openrails.SubscriptionID(row.ID).String(), "rail": row.Rail, "paid_through": row.CurrentPeriodEndsAt.UTC(), "cause": "no_renewal_observed"},
+			Repair: func(ctx context.Context) error {
+				_, err := lc.Decide(ctx, p.e.DB, row.ID, lifecycle.RenewalOverdue{}, func(ctx context.Context, d *db.DB, sub *models.Subscription) (bool, error) {
+					if sub.Status != models.StatusActive || !samePeriod(sub.CurrentPeriodEndsAt, row.CurrentPeriodEndsAt) {
+						return false, nil
+					}
+					paid, err := d.Gen(ctx).SubscriptionHasCompletedPayment(ctx, gen.SubscriptionHasCompletedPaymentParams{MerchantID: scope.Merchant.UUID(), SubscriptionID: sub.ID, Since: sub.CurrentPeriodEndsAt})
+					return !paid, err
+				})
+				return err
+			},
+		})
+	}
+	pastGrace, err := q.ListDunningPastGrace(ctx, gen.ListDunningPastGraceParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("life: scan lapsed subscriptions: %w", err)
+		return nil, fmt.Errorf("life: scan dunning past grace: %w", err)
 	}
-	// #835 evidence-staleness floor. LIFE cannot reach a cancel today (its
-	// certainty legs are unpopulated), but the floor travels with the decider
-	// invocation so the day a plane starts producing them it is already gated.
-	floor := reconcile.EvidenceFloorFor(ctx, p.e.DB, scope.Merchant.UUID())
-	for i := range lapsed {
-		row := lapsed[i]
-		state := reconcile.SubscriptionState{
-			CollectionPolicy:   models.CollectionPolicy(row.CollectionPolicy),
-			Status:             string(row.Status),
-			Rail:               row.Rail,
-			RailSubscriptionID: row.RailSubscriptionID,
-			PeriodEnd:          row.CurrentPeriodEndsAt,
-			GraceEndsAt:        row.GraceEndsAt,
-			NextRetryScheduled: row.NextRetryAt != nil,
-		}
-		d := reconcile.Decide(state, reconcile.EvidenceBundle{
-			Charge:        reconcile.ChargeEvidence{RenewalPaymentAfterPeriodEnd: row.RenewalPaymentAfterEnd},
-			EvidenceFloor: floor,
-		}, now, 0)
-
-		var ftype, severity string
-		evidence := map[string]any{"subscription_id": openrails.SubscriptionID(row.ID).String(), "cause": d.Reason}
-		switch d.Kind {
-		case reconcile.TransitionParkUnknown:
-			if row.Status == gen.OpenrailsSubscriptionStatus(models.StatusPastDue) {
-				ftype, severity = "life.subscription.grace_exhausted", "high"
-				if row.GraceEndsAt != nil {
-					evidence["grace_ends_at"] = *row.GraceEndsAt
-				}
-			} else {
-				ftype, severity = "life.subscription.needs_verification", "medium"
-				evidence["rail"] = row.Rail
-			}
-		default:
-			continue // no evidence-justified move (e.g. within grace slack)
-		}
-		subID, decision := row.ID, d
+	markTruncated(ctx, len(pastGrace), findingGraceExhausted)
+	for i := range pastGrace {
+		row := pastGrace[i]
 		out = append(out, ConvergeFinding{
-			Type:       ftype,
-			Shape:      ShapeMismatch,
-			Class:      ClassAuto,
-			Severity:   Severity(severity),
-			SubjectKey: "subscription:" + subID.String(),
-			Provider:   "self",
-			Evidence:   evidence,
+			Type: findingGraceExhausted, Shape: ShapeMismatch, Class: ClassAuto, Severity: SeverityHigh,
+			SubjectKey: "subscription:" + row.ID.String(), Provider: "self",
+			Evidence: map[string]any{"subscription_id": openrails.SubscriptionID(row.ID).String(), "grace_ends_at": row.GraceEndsAt.UTC(), "cause": "dunning_stalled_past_grace"},
 			Repair: func(ctx context.Context) error {
-				sub, err := subscriptions.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
-				if err != nil {
-					return fmt.Errorf("life: load lapsed subscription %s: %w", subID, err)
-				}
-				// The decision was made on the scanned row; a renewal or decline that
-				// landed since makes it stale, and the next pass decides afresh.
-				scanned := row.CurrentPeriodEndsAt
-				if string(sub.Status) != string(row.Status) || (scanned != nil) != (sub.CurrentPeriodEndsAt != nil) || (scanned != nil && !scanned.Equal(*sub.CurrentPeriodEndsAt)) {
-					return nil
-				}
-				_, err = reconcile.ApplyDecision(ctx, p.e.DB, &lifecycle, sub, decision, now)
+				_, err := lc.Decide(ctx, p.e.DB, row.ID, lifecycle.DunningStale{}, func(_ context.Context, _ *db.DB, sub *models.Subscription) (bool, error) {
+					return sub.Status == models.StatusPastDue && sub.NextRetryAt == nil &&
+						sub.GraceEndsAt != nil && sub.GraceEndsAt.Before(now) &&
+						samePeriod(sub.CurrentPeriodEndsAt, row.CurrentPeriodEndsAt), nil
+				})
 				return err
 			},
 		})
@@ -579,6 +559,15 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		return nil, err
 	}
 	out = append(out, unverified...)
+	if scope.IsGlobal() {
+		funnel, err := p.funnelFinding(ctx, scope, now)
+		if err != nil {
+			return nil, err
+		}
+		if funnel != nil {
+			out = append(out, *funnel)
+		}
+	}
 
 	paidPending, err := q.ListPaidPendingSubscriptions(ctx, gen.ListPaidPendingSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-paidPendingAfter),
@@ -587,6 +576,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	if err != nil {
 		return nil, fmt.Errorf("life: scan paid pending subscriptions: %w", err)
 	}
+	markTruncated(ctx, len(paidPending), "life.subscription.paid_pending")
 	for i := range paidPending {
 		row := paidPending[i]
 		out = append(out, ConvergeFinding{
@@ -622,6 +612,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	if err != nil {
 		return nil, fmt.Errorf("life: scan stale pending subscriptions: %w", err)
 	}
+	markTruncated(ctx, len(stalePending), "life.subscription.pending_stale")
 	for i := range stalePending {
 		subID := stalePending[i]
 		out = append(out, ConvergeFinding{
@@ -637,25 +628,14 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Provider:     "self",
 			Evidence:     map[string]any{"subscription_id": openrails.SubscriptionID(subID).String()},
 			Repair: func(ctx context.Context) error {
-				// Terminal cancel through the shared core. A never-confirmed pending
-				// sub has no entitlements/money to unwind (RevokeSources empty); the
-				// Solana cascade is a tolerant no-op when no row was ever enrolled.
-				return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-					txdb := p.e.DB.NewWithPgxTx(tx)
-					sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subID)
-					if err != nil {
-						return fmt.Errorf("life: load stale-pending subscription %s: %w", subID, err)
-					}
+				_, err := lc.Decide(ctx, p.e.DB, subID, lifecycle.InitialFailed{At: now}, func(ctx context.Context, d *db.DB, sub *models.Subscription) (bool, error) {
 					if sub.Status != models.StatusPending {
-						return nil
+						return false, nil
 					}
-					fb := "pending stale (never confirmed)"
-					return lifecycle.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
-						EndedAt:    now,
-						CancelType: models.CancelTypeExpired,
-						Feedback:   &fb,
-					})
+					paid, err := d.Gen(ctx).SubscriptionHasCompletedPayment(ctx, gen.SubscriptionHasCompletedPaymentParams{MerchantID: scope.Merchant.UUID(), SubscriptionID: sub.ID})
+					return !paid, err
 				})
+				return err
 			},
 		})
 	}
@@ -693,7 +673,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Provider:   "self",
 			Evidence:   map[string]any{"subscription_id": openrails.SubscriptionID(subID).String()},
 			Repair: func(ctx context.Context) error {
-				_, e := lifecycle.ResumeStalledDunning(ctx, p.e.DB, subID)
+				_, e := lc.ResumeStalledDunning(ctx, p.e.DB, subID)
 				return e
 			},
 		})
@@ -984,8 +964,6 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate charges: %w", err)
 	}
-	const duplicateChargeType = "consistency.duplicate.provider_charge"
-	subjects := []string{}
 	for i := range dupCharges {
 		d := dupCharges[i]
 		ids := make([]string, len(d.PaymentIds))
@@ -997,12 +975,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			subID = openrails.SubscriptionID(*d.SubscriptionID)
 		}
 		subject := "provider_charge:" + d.UserID + ":" + subID.String() + ":" + d.PeriodKey
-		subjects = append(subjects, subject)
 		// payment_ids is ordered purchased_at DESC: ids[0] is the later charge —
 		// the default refund target (operator can override before approving).
 		rec := recommend.CancelAndRefundRec(openrails.SubscriptionID{}, openrails.PaymentID(d.PaymentIds[0]))
 		out = append(out, ConvergeFinding{
-			Type:       duplicateChargeType,
+			Type:       findingDuplicateCharge,
 			Shape:      ShapeExcess,
 			Class:      ClassAdmin,
 			Severity:   "critical",
@@ -1019,13 +996,6 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 				d.UserID, d.Count, d.PeriodKey, subID.String(), d.ProductKey, d.TotalAmount, strings.Join(ids, ", "), ids[0]),
 			// surface-only: a refund/credit is an operator decision, never automatic.
 		})
-	}
-	prefix := "provider_charge:"
-	if cust != nil {
-		prefix += cust.String() + ":"
-	}
-	if _, err := q.ResolveVanishedFindings(ctx, gen.ResolveVanishedFindingsParams{MerchantID: scopeMerchantID.UUID(), FindingType: duplicateChargeType, SubjectPrefix: prefix, KeepSubjects: subjects}); err != nil {
-		return nil, fmt.Errorf("con: resolve vanished duplicate charges: %w", err)
 	}
 
 	// consistency.duplicate.ownership (#690) — more than one LIVE paid
@@ -1171,59 +1141,42 @@ const unverifiedUnresolvedAfter = 72 * time.Hour
 // can watch it converge) and escalates each row unresolved past
 // unverifiedUnresolvedAfter (life.unverified.unresolved).
 func (p *lifePass) unverifiedFindings(ctx context.Context, scope Scope, now time.Time) ([]ConvergeFinding, error) {
-	rows, err := p.e.DB.Qx(ctx).Query(ctx, `SELECT s.id, s.psp_id, s.rail, COALESCE(v.since, s.updated_at), COALESCE(v.reads, 0), v.last_read_at
-		FROM openrails.subscriptions s
-		LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
-		WHERE s.merchant_id = $1 AND s.status = 'unverified' AND s.deleted_at IS NULL
-		  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-		ORDER BY 4
-		LIMIT $3`, scope.Merchant.UUID(), scope.Customer, convergeScanCap)
+	rows, err := p.e.DB.Gen(ctx).ListUnverifiedSubscriptions(ctx, gen.ListUnverifiedSubscriptionsParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, RowLimit: convergeScanCap,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("life: scan unverified subscriptions: %w", err)
 	}
-	defer rows.Close()
+	markTruncated(ctx, len(rows), findingUnverifiedUnresolved, findingUnverifiedBacklog)
 	type backlog struct {
 		count  int
 		oldest time.Time
 	}
 	accounts := map[uuid.UUID]*backlog{}
 	var out []ConvergeFinding
-	for rows.Next() {
-		var (
-			id, psp  uuid.UUID
-			rail     string
-			since    time.Time
-			reads    int
-			lastRead *time.Time
-		)
-		if err := rows.Scan(&id, &psp, &rail, &since, &reads, &lastRead); err != nil {
-			return nil, err
-		}
-		b := accounts[psp]
+	for _, r := range rows {
+		b := accounts[r.PspID]
 		if b == nil {
-			b = &backlog{oldest: since}
-			accounts[psp] = b
+			b = &backlog{oldest: r.Since}
+			accounts[r.PspID] = b
 		}
 		b.count++
-		if since.Before(b.oldest) {
-			b.oldest = since
+		if r.Since.Before(b.oldest) {
+			b.oldest = r.Since
 		}
-		if now.Sub(since) < unverifiedUnresolvedAfter {
+		if now.Sub(r.Since) < unverifiedUnresolvedAfter {
 			continue
 		}
-		evidence := map[string]any{"subscription_id": openrails.SubscriptionID(id).String(), "rail": rail, "unverified_since": since.UTC(), "reads": reads}
-		if lastRead != nil {
-			evidence["last_read_at"] = lastRead.UTC()
+		evidence := map[string]any{"subscription_id": openrails.SubscriptionID(r.ID).String(), "rail": r.Rail, "unverified_since": r.Since.UTC(), "reads": r.Reads}
+		if r.LastReadAt != nil {
+			evidence["last_read_at"] = r.LastReadAt.UTC()
 		}
 		out = append(out, ConvergeFinding{
-			Type: "life.unverified.unresolved", Shape: ShapeMismatch, Class: ClassAdmin, Severity: SeverityHigh,
-			SubjectKey: "subscription:" + id.String(), Provider: "self", Evidence: evidence,
+			Type: findingUnverifiedUnresolved, Shape: ShapeMismatch, Class: ClassAdmin, Severity: SeverityHigh,
+			SubjectKey: "subscription:" + r.ID.String(), Provider: "self", Evidence: evidence,
 			RecommendedAction: fmt.Sprintf("Subscription %s has been unverified since %s: provider reads found no payment, decline or cancellation to settle it. Access is held. Check the schedule at %s and record the outcome.",
-				openrails.SubscriptionID(id), since.UTC().Format(time.RFC3339), rail),
+				openrails.SubscriptionID(r.ID), r.Since.UTC().Format(time.RFC3339), r.Rail),
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	if !scope.IsGlobal() {
 		return out, nil
@@ -1235,10 +1188,112 @@ func (p *lifePass) unverifiedFindings(ctx context.Context, scope Scope, now time
 			severity = SeverityMedium
 		}
 		out = append(out, ConvergeFinding{
-			Type: "life.unverified.backlog", Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
+			Type: findingUnverifiedBacklog, Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
 			SubjectKey: "psp:" + psp.String(), Provider: "self",
 			Evidence: map[string]any{"psp_id": psp.String(), "count": b.count, "oldest_since": b.oldest.UTC(), "oldest_age_seconds": int64(age.Seconds())},
 		})
 	}
 	return out, nil
+}
+
+// Finding types this package names in more than one place.
+const (
+	findingRenewalOverdue       = "life.subscription.renewal_overdue"
+	findingGraceExhausted       = "life.subscription.grace_exhausted"
+	findingUnverifiedBacklog    = "life.unverified.backlog"
+	findingUnverifiedUnresolved = "life.unverified.unresolved"
+	findingDunningFunnel        = "life.dunning.funnel"
+	findingDuplicateCharge      = "consistency.duplicate.provider_charge"
+)
+
+func (*derivePass) Standing() []string {
+	return []string{"derive.grant_effect.missing", "derive.grant_effect.excess", "derive.grant.missing", "derive.grant.excess",
+		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", "derive.entitlement.unjustified"}
+}
+
+// Standing leaves out life.provider_intent.stuck, which resolves by its own
+// criteria (AutoResolveRecoveredStuckIntentFindings).
+func (*lifePass) Standing() []string {
+	return []string{"life.checkout_session.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
+		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
+		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel}
+}
+
+func (*notifyPass) Standing() []string { return []string{"notify.access_ended.missing"} }
+
+func (*conPass) Standing() []string {
+	return []string{"consistency.reference.source_reference", findingDuplicateCharge, "consistency.duplicate.ownership"}
+}
+
+// declineCodeLookback bounds the unmapped decline-code scan of the funnel.
+const declineCodeLookback = 30 * 24 * time.Hour
+
+// funnelFinding is the merchant's recovery funnel (#1089 §9): live
+// subscriptions by state, the oldest unverified entry, open unknown provider
+// operations and decline codes no table maps. Raised only while something is
+// in recovery or needs attention; it resolves when the funnel is empty.
+func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time) (*ConvergeFinding, error) {
+	q := p.e.DB.Gen(ctx)
+	mid := scope.Merchant.UUID()
+	f, err := q.CountSubscriptionFunnel(ctx, gen.CountSubscriptionFunnelParams{MerchantID: mid, Now: now})
+	if err != nil {
+		return nil, fmt.Errorf("life: count subscription funnel: %w", err)
+	}
+	unknown, err := q.CountUnknownOperations(ctx, gen.CountUnknownOperationsParams{MerchantID: mid, Now: now})
+	if err != nil {
+		return nil, fmt.Errorf("life: count unknown operations: %w", err)
+	}
+	codes, err := q.ListSubscriptionDeclineCodes(ctx, gen.ListSubscriptionDeclineCodesParams{MerchantID: mid, Since: now.Add(-declineCodeLookback)})
+	if err != nil {
+		return nil, fmt.Errorf("life: list decline codes: %w", err)
+	}
+	var unmapped []map[string]any
+	for _, c := range codes {
+		if collection.ClassifyDeclineDetail(c.Rail, c.FailureCode).NeedsMapping() {
+			unmapped = append(unmapped, map[string]any{"rail": c.Rail, "code": c.FailureCode, "declines": c.Declines})
+		}
+	}
+	if f.PastDue+f.AwaitingMethod+f.Unverified+unknown.OpenCount == 0 && len(unmapped) == 0 {
+		return nil, nil
+	}
+	evidence := map[string]any{
+		"subscriptions":      funnelStates{Active: f.Active, PastDue: f.PastDue, AwaitingMethod: f.AwaitingMethod, Unverified: f.Unverified},
+		"unknown_operations": unknown.OpenCount, "unmapped_decline_codes": unmapped,
+	}
+	severity := SeverityLow
+	if f.Unverified > 0 {
+		evidence["oldest_unverified_age_seconds"] = f.OldestUnverifiedAgeSeconds
+		if time.Duration(f.OldestUnverifiedAgeSeconds)*time.Second >= unverifiedUnresolvedAfter {
+			severity = SeverityMedium
+		}
+	}
+	if unknown.OpenCount > 0 {
+		evidence["oldest_unknown_operation_age_seconds"] = unknown.OldestAgeSeconds
+		if time.Duration(unknown.OldestAgeSeconds)*time.Second >= stuckVerifyAge {
+			severity = SeverityMedium
+		}
+	}
+	if len(unmapped) > 0 {
+		severity = SeverityMedium
+	}
+	return &ConvergeFinding{
+		Type: findingDunningFunnel, Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
+		SubjectKey: "merchant:" + mid.String(), Provider: "self", Evidence: evidence,
+	}, nil
+}
+
+// funnelStates is the funnel's live subscriptions by lifecycle state.
+type funnelStates struct {
+	Active         int64 `json:"active"`
+	PastDue        int64 `json:"in_dunning"` // past_due; the key avoids the money-name guard
+	AwaitingMethod int64 `json:"awaiting_method"`
+	Unverified     int64 `json:"unverified"`
+}
+
+// samePeriod reports whether the locked row is still on the scanned period.
+func samePeriod(current, scanned *time.Time) bool {
+	if current == nil || scanned == nil {
+		return current == scanned
+	}
+	return current.Equal(*scanned)
 }
