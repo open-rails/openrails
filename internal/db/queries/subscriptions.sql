@@ -28,8 +28,8 @@ INSERT INTO openrails.subscriptions (
 );
 
 -- name: UpdateSubscriptionAt :execrows
--- Full-column update (the bun version listed every column explicitly so nil
--- pointers CLEAR fields like cancelled_at on reactivation).
+-- Full-column update (nil pointers CLEAR fields like cancelled_at) against the
+-- row version it was read at (#1102): a stale image never reverts a change.
 UPDATE openrails.subscriptions SET
     price_id = $2,
     product_id = $3,
@@ -56,6 +56,7 @@ UPDATE openrails.subscriptions SET
     scheduled_price_id = sqlc.narg(scheduled_price_id),
     updated_at = sqlc.arg(updated_at)
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+  AND row_version = sqlc.arg(expected_version)
   AND deleted_at IS NULL;
 
 -- name: UpdateSubscriptionDecided :execrows
@@ -91,6 +92,7 @@ UPDATE openrails.subscriptions SET
     lifecycle_rev = lifecycle_rev + 1
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND lifecycle_rev = sqlc.arg(expected_rev)
+  AND row_version = sqlc.arg(expected_version)
   AND deleted_at IS NULL;
 
 -- name: DeleteSubscription :execrows
@@ -405,17 +407,13 @@ FOR UPDATE;
 SELECT * FROM openrails.subscriptions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
--- name: WakeEngineSubscriptionsForPaymentMethod :execrows
--- A replaced card retries its delinquent engine memberships at the next due
--- pass instead of waiting out the old card's schedule; a membership awaiting
--- a new card resumes dunning.
-UPDATE openrails.subscriptions SET
-    status = 'past_due',
-    lifecycle_rev = lifecycle_rev + CASE WHEN status = 'past_due' THEN 0 ELSE 1 END,
-    next_retry_at = sqlc.arg(now)::timestamptz,
-    updated_at = sqlc.arg(now)::timestamptz
+-- name: ListEngineSubscriptionsToWake :many
+-- The delinquent engine memberships a replaced card retries at the next due
+-- pass, and those awaiting a card (subscriptions.WakeForReplacedMethod).
+SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND collection_policy = 'engine'
   AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > sqlc.arg(now)::timestamptz)))
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+ORDER BY id;

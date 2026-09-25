@@ -102,6 +102,9 @@ type Subscription struct {
 	// LifecycleRev is the lifecycle revision the row was read at (#1091 part
 	// C). A lifecycle decision advances it by one against this value.
 	LifecycleRev int64 `json:"-"`
+	// RowVersion is the row version the image was read at; every update
+	// advances it (#1102), and a write from an older image is refused.
+	RowVersion int64 `json:"-"`
 	// loaded is the lifecycle state as read; decision names what changed it.
 	loaded   lifecycleFields
 	decision string

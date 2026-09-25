@@ -3,7 +3,6 @@ package subscriptions
 import (
 	"context"
 	"errors"
-	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -106,11 +105,8 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		// A delinquent membership retries on the new card at the next due
 		// pass instead of waiting out the old card's schedule; one waiting
 		// for a card resumes dunning.
-		if _, err := Transition(sub, lifecycle.MethodReplaced{}, now); err != nil {
+		if err := ReplaceMethod(sub, now); err != nil {
 			return err
-		}
-		if sub.Status == models.StatusPastDue {
-			sub.NextRetryAt = &now
 		}
 		return NewSubscriptionRepo(d).UpdateAt(ctx, sub, now)
 	})
