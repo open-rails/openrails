@@ -232,7 +232,9 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, in gen.OpenrailsRailIn
 		return outcome
 	}
 	if EvidenceString(current, rebillSubmittedAt) == "" {
-		return h.Execute(ctx, current)
+		// Verification never charges: an unsubmitted rebill waits for an
+		// executor claim, which bumps the fencing token.
+		return Retryable("unsubmitted rebill awaits gated execution")
 	}
 	reference := ""
 	if candidate, found, err := LoadCollectionCandidate(current); err != nil {

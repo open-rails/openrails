@@ -200,7 +200,7 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 	ctx = pinIntentAddress(ctx, claimed)
 	ctx = context.WithValue(ctx, operatorResolutionContextKey{}, resolution.Record(now))
 	logEntry := r.resolutionLog(ctx, claimed, resolution)
-	stopBeat := r.renewClaimWhile(ctx, logEntry, claimed.ID)
+	ctx, stopBeat := r.renewClaimWhile(ctx, logEntry, claimed)
 	outcome, rerr := resolver.Resolve(ctx, claimed, resolution)
 	stopBeat()
 	if rerr != nil {
@@ -237,7 +237,7 @@ func (r *Runner) resolveUnsent(ctx context.Context, row gen.OpenrailsRailIntent,
 	ctx = pinIntentAddress(ctx, claimed)
 	ctx = context.WithValue(ctx, operatorResolutionContextKey{}, resolution.Record(now))
 	logEntry := r.resolutionLog(ctx, claimed, resolution)
-	stopBeat := r.renewClaimWhile(ctx, logEntry, claimed.ID)
+	ctx, stopBeat := r.renewClaimWhile(ctx, logEntry, claimed)
 	outcome, rerr := resolver.ResolveUnsent(ctx, claimed, resolution)
 	stopBeat()
 	if rerr != nil {

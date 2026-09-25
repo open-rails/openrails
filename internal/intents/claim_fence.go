@@ -3,6 +3,7 @@ package intents
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,26 +17,32 @@ import (
 var ErrClaimLost = errors.New("the executor's claim lapsed or passed to another executor before the provider call")
 
 // claim is the fencing token of one executor run: every claim of a row bumps
-// attempts, so a later executor's claim never matches an earlier one.
+// attempts, so a later executor's claim never matches an earlier one. lost is
+// set when the run's heartbeat finds the claim gone.
 type claim struct {
 	id       uuid.UUID
 	status   string
 	attempts int32
+	lost     atomic.Bool
 }
+
+func (c *claim) lose() { c.lost.Store(true) }
 
 type claimKey struct{}
 
-func withClaim(ctx context.Context, in gen.OpenrailsRailIntent) context.Context {
-	return context.WithValue(ctx, claimKey{}, claim{id: in.ID, status: in.Status, attempts: in.Attempts})
+func withClaim(ctx context.Context, in gen.OpenrailsRailIntent) (context.Context, *claim) {
+	c := &claim{id: in.ID, status: in.Status, attempts: in.Attempts}
+	return context.WithValue(ctx, claimKey{}, c), c
 }
 
 // RequireClaim re-reads the row on its own connection immediately before a
-// provider charge: the run's claim must still be the row's, with a lease past
-// now. It narrows, not closes, the window of a stalled executor: the provider
-// has no remote fence.
+// provider charge: the run must hold an executor claim (verification never
+// charges), its heartbeat must not have lost it, and the row must still carry
+// it with a lease past now. It narrows, not closes, the window of a stalled
+// executor: the provider has no remote fence.
 func (s *Store) RequireClaim(ctx context.Context, id uuid.UUID, now time.Time) error {
-	c, ok := ctx.Value(claimKey{}).(claim)
-	if !ok || c.id != id {
+	c, ok := ctx.Value(claimKey{}).(*claim)
+	if !ok || c.id != id || c.status != StatusInFlight || c.lost.Load() {
 		return ErrClaimLost
 	}
 	ctx, release, err := s.db.WithIndependentMerchantConn(ctx)

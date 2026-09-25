@@ -451,10 +451,10 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	})
 }
 
-// RenewClaim extends a live lease while the handler runs (xs-007 row 32).
-// false means the lease had already lapsed — another executor may own the row
-// now, and this one must not write over it without its per-type verify.
-func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (bool, error) {
+// RenewClaim extends a live lease the caller still owns (xs-007 row 32): the
+// row must still carry the claim's status and attempts. false means the lease
+// lapsed or another executor claimed the row; this one must send nothing more.
+func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, attempts int32, now, leaseUntil time.Time) (bool, error) {
 	ctx, release, err := s.db.WithIndependentMerchantConn(ctx)
 	if err != nil {
 		return false, err
@@ -466,7 +466,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil ti
 	}
 	n, err := s.db.Gen(ctx).RenewRailIntentClaim(ctx, gen.RenewRailIntentClaimParams{
 		MerchantID: scopeMerchantID.UUID(),
-		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		ID:         id, Status: status, Attempts: attempts, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})
 	if err != nil {
 		return false, err
