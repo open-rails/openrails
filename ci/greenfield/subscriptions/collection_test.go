@@ -140,6 +140,57 @@ func TestReplicasFailpointInterleavings(t *testing.T) {
 	}
 }
 
+// Replica A stalls between its fence and the provider call; its lease
+// expires and another executor claims the renewal. A re-checks its claim
+// immediately before the provider call and sends nothing; the renewal is
+// charged once, by the executor that holds it.
+func TestReplicasStalledExecutorSendsNothing(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			f := newFleet(t, 2)
+			e := enroll(t, f.replicas[0], rail, embedded)
+			end := f.periodEnd(e)
+			f.toDue(e)
+			sub := uuid.MustParse(subUUID(e.sub))
+			var once sync.Once
+			stalled := make(chan struct{})
+			remove := failpoint.Set(func(ctx context.Context, s failpoint.Site) error {
+				if s.Point != failpoint.BeforeProvider || s.Subscription != sub || s.Kind != "subscription_collection" {
+					return nil
+				}
+				once.Do(func() {
+					// The stall outlives the lease; another executor claims
+					// the row exactly as ClaimRailIntentByID does.
+					_, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE openrails.rail_intents
+						SET attempts = attempts + 1, claimed_until = $2 WHERE id = $1 AND status = 'in_flight'`),
+						s.Operation, f.base.clock.Now().Add(2*time.Minute))
+					if err != nil {
+						t.Errorf("take over the claim: %v", err)
+					}
+					close(stalled)
+				})
+				return nil
+			})
+			defer remove()
+			before := f.submissions(e)
+			f.startPasses()
+			select {
+			case <-stalled:
+			case <-time.After(30 * time.Second):
+				t.Fatal("the renewal never reached the provider call")
+			}
+			f.until(func() bool { return f.periodEnd(e).After(end) }, "the holding executor completes the renewal")
+			f.advance(time.Hour)
+			f.wake()
+			f.passes()
+			require.Equal(t, before+1, f.submissions(e), "the stalled executor sent nothing; one charge request in all")
+			f.requireExactlyOnce(e, 1, -1)
+		})
+	}
+}
+
 // paused holds the first hit of a failpoint for one subscription's renewal
 // until release or until its executor's context ends.
 type paused struct {

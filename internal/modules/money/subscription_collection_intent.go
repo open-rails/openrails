@@ -159,6 +159,9 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	if err := intents.NewStore(h.DB).RequireClaim(ctx, in.ID, h.now()); err != nil {
+		return intents.Ambiguous("nothing sent: " + err.Error())
+	}
 	result, refusal, err := execute(ctx, charge.Request{
 		Instrument:  charge.Instrument{PaymentMethodID: p.PaymentMethodID, Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
 		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: chargeContext,

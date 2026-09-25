@@ -260,7 +260,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	}
 	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
 	defer stopBeat() // A panic must not keep an abandoned claim alive.
-	outcome := handler.Execute(ctx, intent)
+	outcome := handler.Execute(withClaim(ctx, intent), intent)
 	stopBeat()
 	r.record(ctx, logEntry, stats, handler, intent, outcome, outcome.Reason, false)
 }
@@ -382,7 +382,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		}
 		// Verification is read-only: no mode gate.
 		stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
-		outcome := handler.Verify(ctx, intent)
+		outcome := handler.Verify(withClaim(ctx, intent), intent)
 		stopBeat()
 		r.apply(ctx, logEntry, &stats, handler, intent, outcome, true)
 	}
@@ -691,7 +691,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRai
 	stop := r.renewClaimWhile(ctx, logger, in.ID)
 	defer stop()
 	if h != nil {
-		out = h.Verify(ctx, in)
+		out = h.Verify(withClaim(ctx, in), in)
 	}
 	stop()
 	var stats Stats

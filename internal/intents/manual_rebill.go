@@ -122,6 +122,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 	if err := hitFailpoint(ctx, in, failpoint.BeforeProvider); err != nil {
 		return Ambiguous(err.Error())
 	}
+	if err := NewStore(h.DB).RequireClaim(ctx, in.ID, h.now()); err != nil {
+		return Ambiguous("nothing sent: " + err.Error())
+	}
 	response, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
 		VaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
 		SubscriptionID: p.RailSubscriptionID, OrderID: p.OrderReference, PONumber: p.OrderReference,
