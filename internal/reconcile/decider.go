@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -268,7 +269,7 @@ type Decision struct {
 // Law, in evidence order:
 //  1. Provider snapshot (when present and the row has a provider handle)
 //     decides conclusively: verified renewal charge → renew; roster alive with
-//     future boundary without a decline → adopt end; declared failure → past_due within the
+//     future boundary without a decline → adopt end (never lifting past_due); declared failure → past_due within the
 //     window, cancel beyond; roster dead / absent-from-exhaustive → cancel.
 //  2. First-party evidence (the #664 LIFE law): a lapsed active row with
 //     ownership evidence (payment opened period, or watermark newer than the
@@ -303,6 +304,11 @@ func Decide(sub SubscriptionState, ev EvidenceBundle, now time.Time, dunningWind
 	var carried Decision // backfill/customer-id survive an inconclusive snapshot
 	if ev.Snapshot != nil && sub.RailSubscriptionID != "" {
 		d := decideFromSnapshot(sub.RailSubscriptionID, sub.PeriodStart, sub.PeriodEnd, periodEnd, ev.Snapshot, now, dunningWindow)
+		if d.Kind == TransitionAdoptPeriodEnd && sub.Status == string(models.StatusPastDue) {
+			// A recorded decline stands until a verified charge renews the row.
+			// A future provider date is not payment: NMI advances it on a decline too.
+			d.Kind, d.NewPeriodEnd, d.NewPeriodStart, d.Reason = TransitionNone, nil, nil, "past_due_awaits_verified_charge"
+		}
 		if d.Kind != TransitionNone {
 			return gateCancelCertainty(d, ev)
 		}
@@ -676,11 +682,17 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 
 	case TransitionRenew, TransitionAdoptPeriodEnd, TransitionCancel:
 		if sub.Status != models.StatusUnknown {
-			if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+			from := []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue}
+			if d.Kind == TransitionAdoptPeriodEnd {
+				// Adoption never lifts dunning; checked again under the row lock
+				// because a decline can land after the decision was made.
+				from = from[:1]
+			}
+			if !slices.Contains(from, sub.Status) {
 				return false, nil
 			}
 			// `unknown` waypoint: one resolution implementation for every plane.
-			if err := lc.ApplyLocalUnknown(ctx, database, sub); err != nil {
+			if err := lc.ApplyLocalUnknown(ctx, database, sub, from...); err != nil {
 				return false, err
 			}
 		}

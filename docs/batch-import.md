@@ -174,7 +174,8 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
   real provider evidence. Absent evidence never costs a customer access.
 - **Adoption alone never grants access.** An adopted-active row re-anchors
   its period end only; entitlement windows come from real charges and the
-  derive pass the import runs.
+  derive pass the import runs. A `past_due` row is never adopted: only a
+  verified charge lifts a recorded decline.
 - **Period anchoring**: `current_period_ends_at` = the declared
   `paid_through`; the period start is one billing cycle back, clamped to
   `started_at`. Provider-billed rails then renew on the *provider's*

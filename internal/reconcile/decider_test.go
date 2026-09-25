@@ -36,6 +36,7 @@ func TestDecideSnapshotLaw(t *testing.T) {
 	cases := []struct {
 		name       string
 		provider   Provider
+		status     string
 		start, end *time.Time
 		roster     *RemoteSubscription
 		exhaustive bool
@@ -70,6 +71,13 @@ func TestDecideSnapshotLaw(t *testing.T) {
 			roster: rosterSub(SubscriptionStatusActive, next), want: TransitionAdoptPeriodEnd, reason: "roster_alive_future_boundary"},
 		{name: "NMI boundary within half a period adopts", start: rel(-31 * oneDay), end: rel(-oneDay),
 			roster: rosterSub(SubscriptionStatusActive, rel(3*oneDay)), want: TransitionAdoptPeriodEnd},
+		{name: "a future boundary never lifts a recorded decline", provider: ProviderStripe, status: "past_due", end: e5,
+			roster: rosterSub(SubscriptionStatusActive, next), want: TransitionNone, reason: "past_due_awaits_verified_charge"},
+		{name: "NMI date after a daily decline never lifts it", status: "past_due", end: dailyEnd,
+			roster: rosterSub(SubscriptionStatusActive, rel(20*time.Hour)), want: TransitionNone, reason: "past_due_awaits_verified_charge"},
+		{name: "a verified charge lifts a recorded decline", status: "past_due", end: e5, roster: rosterSub(SubscriptionStatusActive, next),
+			txns: []RemoteTransaction{rtx("rs", TransactionTypeSale, true, e5.Add(time.Hour), "")},
+			want: TransitionRenew, reason: "verified_renewal_charge", backfill: 1},
 		{name: "NMI boundary past a whole period needs a probe", end: e5, roster: rosterSub(SubscriptionStatusActive, next), want: TransitionNone},
 		{name: "future schedule cannot erase a declined renewal", end: e5, roster: rosterSub(SubscriptionStatusActive, next),
 			txns: []RemoteTransaction{rtx("rs", TransactionTypeDecline, false, e5.Add(time.Hour), "202")},
@@ -136,7 +144,11 @@ func TestDecideSnapshotLaw(t *testing.T) {
 			if c.noFloor {
 				ev.EvidenceFloor = time.Time{}
 			}
-			sub := SubscriptionState{Status: "unknown", Rail: "nmi", HasPaymentMethod: true, RailSubscriptionID: "rs", PeriodStart: c.start, PeriodEnd: c.end}
+			status := c.status
+			if status == "" {
+				status = "unknown"
+			}
+			sub := SubscriptionState{Status: status, Rail: "nmi", HasPaymentMethod: true, RailSubscriptionID: "rs", PeriodStart: c.start, PeriodEnd: c.end}
 
 			d := Decide(sub, ev, decideNow, 0)
 			require.Equal(t, c.want, d.Kind, "reason=%q certainty=%q", d.Reason, d.Certainty)

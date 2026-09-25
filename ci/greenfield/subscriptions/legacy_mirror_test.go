@@ -169,3 +169,39 @@ func TestLegacyNMIMirrorPull(t *testing.T) {
 		})
 	}
 }
+
+// A declined renewal recorded from NMI's webhook survives a provider pull.
+// NMI's bulk report names no schedule, so the pull never sees the decline,
+// while the schedule's next date has already moved on: it is no payment.
+// The paid-through instant sits at 18:00, so NMI's next date (midnight) lies
+// within half a daily period of it and reads as the same boundary (#1081).
+func TestLegacyNMIMirrorPullKeepsDecline(t *testing.T) {
+	t.Parallel()
+	for i, cadence := range mirrorCadences[:2] {
+		t.Run(cadence.name, func(t *testing.T) {
+			t.Parallel()
+			tp := []topology{embedded, remote}[i%2]
+			w := newWorld(t)
+			w.armDestructive()
+			half := time.Duration(cadence.days) * 12 * time.Hour
+			paid := w.clock.Now().Add(half).Truncate(24 * time.Hour).Add(42 * time.Hour)
+			w.advanceTo(paid.Add(-half))
+			tier := w.bookTier(cadence.name, cadence.cents, cadence.days)
+			l := w.mirrorBook(tp, tier, 1)[0]
+			end := *w.subscription(tp, l.sub).CurrentPeriodEndsAt
+			require.Equal(t, 18*time.Hour, end.Sub(end.Truncate(24*time.Hour)))
+			w.advance(end.Sub(w.clock.Now()) + time.Hour)
+
+			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
+			require.Equal(t, "past_due", w.subscription(tp, l.sub).Status)
+			charges := w.localCharges(tp, l.c.id)
+
+			w.pull()
+			sub := w.subscription(tp, l.sub)
+			require.Equal(t, "past_due", sub.Status, "a pull without a charge never lifts a decline")
+			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "an unpaid period is never granted (%s vs %s)", sub.CurrentPeriodEndsAt, end)
+			require.Equal(t, charges, w.localCharges(tp, l.c.id))
+			require.Zero(t, w.nmi.saleAttempts())
+		})
+	}
+}
