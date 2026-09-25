@@ -79,6 +79,7 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	}
 
 	d := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
+	d.Silent = snap.Provider == ProviderDeclared
 	if d.EvidenceFloored {
 		recordEvidenceStaleFinding(ctx, database.Gen(ctx), merchant.ID(sub.MerchantID), snap.Provider, sub.ID.String(), d.Reason)
 	}
@@ -104,6 +105,7 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	if applied && d.Reason == reasonRenewedBeforeDecline {
 		// The renewed row now ends where the later decline's period begins.
 		next := Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
+		next.Silent = d.Silent
 		if next.Kind == TransitionPastDue {
 			if _, err := ApplyDecision(ctx, database, lc, sub, next, now); err != nil {
 				return out, err

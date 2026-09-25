@@ -154,7 +154,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 		if len(effects) == 0 && subscriptions.SnapshotOf(cur) == before {
 			return nil
 		}
-		if notices, err = lc.ApplyEffects(ctx, tx, cur, effects, now); err != nil {
+		if notices, err = lc.ApplyEffects(ctx, tx, cur, customerNotices(effects, d.Silent), now); err != nil {
 			return err
 		}
 		if _, renewed := ev.(lifecycle.RenewalPaid); renewed {
@@ -184,4 +184,18 @@ func paidThroughOf(sub *models.Subscription) time.Time {
 		return time.Time{}
 	}
 	return sub.CurrentPeriodEndsAt.UTC()
+}
+
+// customerNotices keeps a mirrored transition's notices, except the end of
+// access, which the converge NOTIFY pass sends once for every ending (#789),
+// and every notice when the decision replays declared history.
+func customerNotices(effects []lifecycle.Effect, silent bool) []lifecycle.Effect {
+	out := effects[:0:0]
+	for _, e := range effects {
+		if n, ok := e.(lifecycle.Notify); ok && (silent || n.Kind == lifecycle.NoticeEnded) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }

@@ -259,6 +259,8 @@ type Decision struct {
 	// renewal or decline that landed during a pull must not be overwritten.
 	DecidedStatus    string
 	DecidedPeriodEnd *time.Time
+	// Silent sends no customer notices: a declared import replays history.
+	Silent bool
 }
 
 // DunsDecline reports that OpenRails' dunning owns the retries after this
