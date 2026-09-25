@@ -5500,7 +5500,7 @@
     "internal/http/handlers/stripe_method_setup.go": "2ad62cd87266a4753189bdb6a7104e4c223eb7951e213a3fa2f89bb663ebcc18",
     "internal/http/handlers/subscription_lifecycle.go": "e6a343fe5b61417449686bac055912b3ef477696ffb00ae55ff78ca3fbba90d2",
     "internal/http/handlers/subscription_view.go": "72487b16b771aed17246bcb854210a7f4da800a457c7e870c46c707dcdd66ae6",
-    "internal/http/handlers/update_subscription_payment_method.go": "44462780d42092b20f289da58c2fcd61c5950922279feb8c674ceec71cb4107f",
+    "internal/http/handlers/update_subscription_payment_method.go": "9f9f0dfca60edf0316b768ea4a90bfec29c5936d95b18c5f44991737aed80a30",
     "internal/http/handlers/user_payments.go": "5762b36aea6e9755d7fe9312be34c28cc8ae321636c48ee59f33cadd3b992154",
     "internal/http/handlers/user_subscriptions.go": "f4d7dd869eedcc3e40fc49841e42daf654f2a60fe51874cda2ea12caa8920850",
     "internal/http/handlers/webhook.go": "b9f9def19270f1a0b4a57cae86eefed6ca736e9439c318de8c753d7819d9fbd8",
