@@ -135,6 +135,8 @@ type Request struct {
 	// verify legs answer "did this charge land?" by.
 	OrderRef string
 	Context  Context
+	// DupSeconds sets NMI's duplicate-check window when positive (resends).
+	DupSeconds int
 }
 
 // TokenType is the credential form the rail presented to the network for one

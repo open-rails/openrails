@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -89,6 +90,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 	if client.ReadOnly {
 		return Parked("nmi client is read-only")
 	}
+	if outcome, done := h.obligationPaid(ctx, in, p); done {
+		return outcome
+	}
 	if _, err := h.validateAndFence(ctx, in, p, false); err != nil {
 		if errors.Is(err, errRebillSuperseded) || errors.Is(err, charge.ErrInstrumentChanged) {
 			return h.finalizeNotExecuted(ctx, in, p, err.Error())
@@ -108,15 +112,24 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 	if !first {
 		return h.Verify(ctx, in)
 	}
+	if err := hitFailpoint(ctx, in, failpoint.AfterFence); err != nil {
+		return Ambiguous(err.Error())
+	}
 	posture := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
 	if p.Initiator == charge.InitiatorCustomer {
 		posture = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+	}
+	if err := hitFailpoint(ctx, in, failpoint.BeforeProvider); err != nil {
+		return Ambiguous(err.Error())
 	}
 	response, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
 		VaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
 		SubscriptionID: p.RailSubscriptionID, OrderID: p.OrderReference, PONumber: p.OrderReference,
 		StoredCredential: nmidirect.StoredCredentialFor(posture),
 	})
+	if hitErr := hitFailpoint(ctx, in, failpoint.AfterProvider); hitErr != nil {
+		return Ambiguous(hitErr.Error())
+	}
 	if errors.Is(err, nmi.ErrDuplicateTransaction) {
 		// The matching recent charge on this card and amount may be NMI's own
 		// schedule paying this period. Stay unknown: no new order is sent until
@@ -225,6 +238,32 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, in gen.OpenrailsRailIn
 		reference = candidate.TransactionID
 	}
 	return h.qualifyRebill(ctx, current, p, reference)
+}
+
+// obligationPaid reads the period's shared order before a later attempt is
+// fenced: an earlier attempt's charge, found late, pays the period and
+// nothing is sent.
+func (h *ManualRebillHandler) obligationPaid(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload) (Outcome, bool) {
+	if p.Attempt == 0 {
+		return Outcome{}, false
+	}
+	receipt, found, err := ReadNMICollectionReceipt(ctx, in, h.Resolver, "")
+	if err != nil {
+		return Ambiguous("the period's order cannot be read before a new attempt: " + err.Error()), true
+	}
+	if !found {
+		return Outcome{}, false
+	}
+	return h.finalizeSuccess(ctx, in, p, receipt), true
+}
+
+// hitFailpoint runs the named failpoint for an operation.
+func hitFailpoint(ctx context.Context, in gen.OpenrailsRailIntent, point failpoint.Point) error {
+	site := failpoint.Site{Point: point, Kind: in.IntentType, Operation: in.ID}
+	if in.SubscriptionID != nil {
+		site.Subscription = *in.SubscriptionID
+	}
+	return failpoint.Hit(ctx, site)
 }
 
 func (h *ManualRebillHandler) qualifyRebill(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, reference string) Outcome {

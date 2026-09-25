@@ -13,14 +13,18 @@ import (
 )
 
 // A submitted engine charge the provider has no record of is resolved from the
-// provider's authoritative read: after LostSubmissionSettle with no
-// transaction under the operation's reference, the same operation is sent
-// again under the same reference, at most MaxLostSubmissionResends times. An
-// inconclusive or contradictory read never arms a resend.
+// provider's authoritative reads: after LostSubmissionSettle with no
+// transaction under the obligation's order and none at all on the vault since
+// the fence, the same operation is sent again under the same order, at most
+// MaxLostSubmissionResends times. An inconclusive or contradictory read never
+// arms a resend. ClockMargin widens every read window for clock skew between
+// replicas and the gateway.
 const (
 	LostSubmissionSettle     = 5 * time.Minute
 	MaxLostSubmissionResends = 2
+	ClockMargin              = 2 * time.Minute
 	resendArmedKey           = "resend_armed"
+	duplicateRefusedKey      = "duplicate_refused_at"
 )
 
 func resentKey(attempt int) string { return fmt.Sprintf("resent_%d_at", attempt) }
@@ -30,6 +34,7 @@ func resentKey(attempt int) string { return fmt.Sprintf("resent_%d_at", attempt)
 type SubmissionHistory struct {
 	Resends int
 	Armed   int
+	First   time.Time
 	Latest  time.Time
 }
 
@@ -42,7 +47,7 @@ func LoadSubmissionHistory(in gen.OpenrailsRailIntent) (SubmissionHistory, error
 	if err != nil {
 		return SubmissionHistory{}, fmt.Errorf("submission fence is unreadable: %w", err)
 	}
-	h := SubmissionHistory{Latest: latest, Armed: evidenceInt(in, resendArmedKey)}
+	h := SubmissionHistory{First: latest, Latest: latest, Armed: evidenceInt(in, resendArmedKey)}
 	for n := 1; ; n++ {
 		raw := EvidenceString(in, resentKey(n))
 		if raw == "" {
@@ -61,6 +66,28 @@ func LoadSubmissionHistory(in gen.OpenrailsRailIntent) (SubmissionHistory, error
 // the provider to be its answer rather than lag.
 func (h SubmissionHistory) Settled(now time.Time) bool {
 	return !now.Before(h.Latest.Add(LostSubmissionSettle))
+}
+
+// Window is the start of every provider read for this operation's charge.
+func (h SubmissionHistory) Window() time.Time { return h.First.Add(-ClockMargin) }
+
+// DupSeconds is the NMI duplicate-check window a resend sends: from the
+// original fence to now, so any charge the original made is refused.
+func (h SubmissionHistory) DupSeconds(now time.Time) int {
+	return int(now.Sub(h.Window()) / time.Second)
+}
+
+// RecordDuplicateRefusal marks that NMI refused the charge as a duplicate of
+// a recent one. Such an operation is never resent.
+func (s *Store) RecordDuplicateRefusal(ctx context.Context, in gen.OpenrailsRailIntent, at time.Time) error {
+	_, err := s.RecordProgressIfAbsent(ctx, in.ID, duplicateRefusedKey, at.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+// DuplicateRefusedAt is when NMI refused the operation as a duplicate.
+func DuplicateRefusedAt(in gen.OpenrailsRailIntent) (time.Time, bool) {
+	at, err := time.Parse(time.RFC3339Nano, EvidenceString(in, duplicateRefusedKey))
+	return at, err == nil
 }
 
 // ArmLostSubmissionResend records that an authoritative read found nothing
@@ -101,9 +128,13 @@ func (s *Store) BeginLostSubmissionResend(ctx context.Context, in gen.OpenrailsR
 	return CollectionNonexecutionProof{binding: binding, submittedAt: EvidenceString(in, "submitted_at")}, true, nil
 }
 
-// ReadNMIOrderAttempts reads every transaction under the operation's order
-// reference from its accepted account.
+// ReadNMIOrderAttempts reads this attempt's transactions under the
+// obligation's shared order from its accepted account.
 func ReadNMIOrderAttempts(ctx context.Context, in gen.OpenrailsRailIntent, resolver NMIClientResolver) (nmi.OrderAttempts, error) {
+	history, err := LoadSubmissionHistory(in)
+	if err != nil {
+		return nmi.OrderAttempts{}, err
+	}
 	p, err := decodeCollectedTerms(in)
 	if err != nil {
 		return nmi.OrderAttempts{}, err
@@ -112,7 +143,24 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.OpenrailsRailIntent, resol
 	if err != nil {
 		return nmi.OrderAttempts{}, err
 	}
-	return client.ReadOrderAttempts(ctx, p.OrderReference)
+	return client.ReadOrderAttemptsSince(ctx, p.OrderReference, history.Window())
+}
+
+// ReadNMIVaultTransactions reads every transaction on the operation's frozen
+// vault since since, of any order and outcome.
+func ReadNMIVaultTransactions(ctx context.Context, in gen.OpenrailsRailIntent, resolver NMIClientResolver, since time.Time) ([]nmi.VaultTransaction, error) {
+	p, err := decodeCollectedTerms(in)
+	if err != nil {
+		return nil, err
+	}
+	if p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" {
+		return nil, errors.New("operation has no NMI vault to read")
+	}
+	client, err := resolveReceiptNMIClient(ctx, resolver, in)
+	if err != nil {
+		return nil, err
+	}
+	return client.ReadVaultTransactions(ctx, p.Instrument.RailCustomerRef, since)
 }
 
 func evidenceInt(in gen.OpenrailsRailIntent, key string) int {

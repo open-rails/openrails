@@ -58,7 +58,7 @@ func (c *Charger) chargeRecurring(ctx context.Context, req charge.Request) (char
 	sale, err := c.Client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID: req.Instrument.CustomerRef, BillingID: req.Instrument.MethodRef,
 		Amount: req.AmountMinor, Currency: req.Currency, OrderID: req.OrderRef,
-		OrderDescription: req.Description, StoredCredential: sc,
+		OrderDescription: req.Description, StoredCredential: sc, DupSeconds: req.DupSeconds,
 	})
 	if errors.Is(err, nmi.ErrDuplicateTransaction) && req.Context.Initiator == charge.InitiatorCustomer {
 		// A customer-present request refused unprocessed resolves as not

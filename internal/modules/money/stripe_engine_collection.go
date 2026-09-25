@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -44,13 +45,22 @@ func (h *SubscriptionCollectionHandler) executeStripeEngine(ctx context.Context,
 	if !first {
 		return h.executeStripeEngineDecline(ctx, in)
 	}
+	if err := h.hit(ctx, in, failpoint.AfterFence); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	return h.dispatchStripe(ctx, in, p, service, params, proof)
 }
 
 // dispatchStripe creates the PaymentIntent under the operation's idempotency
 // key. Only the writer of a fresh submission or resend fence calls it.
 func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams, proof intents.CollectionNonexecutionProof) intents.Outcome {
+	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	result, err := service.CreateEnginePayment(ctx, params)
+	if hitErr := h.hit(ctx, in, failpoint.AfterProvider); hitErr != nil {
+		return intents.Ambiguous(hitErr.Error())
+	}
 	if errors.Is(err, charge.ErrNotDispatched) {
 		return h.completeNotExecuted(ctx, in, p, "not_dispatched", charge.ErrNotDispatched.Error(), proof)
 	}
@@ -197,6 +207,9 @@ func (h *SubscriptionCollectionHandler) resendLostStripeSubmission(ctx context.C
 	}
 	if !first {
 		return h.Verify(ctx, in)
+	}
+	if err := h.hit(ctx, in, failpoint.AfterFence); err != nil {
+		return intents.Ambiguous(err.Error())
 	}
 	return h.dispatchStripe(ctx, in, p, service, params, proof)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/failpoint"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
@@ -158,6 +159,9 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.Openra
 		return Ambiguous("retain rebill receipt before local completion: " + err.Error())
 	}
 	outcome := Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": p.Rail, "verified_existing": true})
+	if err := hitFailpoint(ctx, in, failpoint.BeforeComplete); err != nil {
+		return Ambiguous(err.Error())
+	}
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -195,6 +199,9 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 	refusal, found, err := loadRebillDecline(in)
 	if err != nil || !found {
 		return Ambiguous("rebill has no valid retained refusal")
+	}
+	if err := hitFailpoint(ctx, in, failpoint.BeforeComplete); err != nil {
+		return Ambiguous(err.Error())
 	}
 	code := fmt.Sprint(refusal.ResponseCode)
 	failureReason := payments.NormalizeFailureReason(string(models.RailNMI), code)

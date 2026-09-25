@@ -159,6 +159,7 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 		auth:   &verifier{secret: []byte("greenfield-subscriptions-" + uuid.NewString())},
 	}
 	w.auth.slug = w.slug
+	w.nmi.clock = w.clock.Now
 	if len(configure) > 0 {
 		w.cfg = configure[0]
 	}
