@@ -43,7 +43,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574/#719): the 4h periodic kind is a SCHEDULER that
@@ -92,6 +92,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Config: riverjobs.DefaultCleanupConfig(),
 	}); err != nil {
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
+	}
+	if err := addTrackedWorker(r, workers, &riverjobs.IdempotencyGCWorker{DB: r.DB, Clock: clock}); err != nil {
+		return fmt.Errorf("add idempotency gc worker: %w", err)
 	}
 	// or#795: the batch account-updater cadence. Ingests results for open
 	// batches, then opens new ones for instruments renewing inside the
@@ -559,6 +562,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.CleanupExpiredDataArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: delete expired request and webhook claims (#1099).
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.IdempotencyGCArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

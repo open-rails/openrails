@@ -68,7 +68,6 @@ type CheckoutService struct {
 	CustodianSaleService     *CheckoutCustodianSaleService
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
-	IdempotencyService       checkoutIdempotencyStore
 	MerchantSecrets          merchants.MerchantSecretReader
 	ProviderSecrets          merchants.PSPSecretResolver
 	// RailCustomerService maps app users to rail customer ids so we
@@ -125,7 +124,7 @@ func NewCheckoutService(
 	entitlementService *entitlements.EntitlementService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
 	railPMService *paymentmethods.RailPaymentMethodService,
-	idempotencyService checkoutIdempotencyStore,
+	idempotencyService idempotencyStore,
 	railCustomerService *payments.RailCustomerService,
 	cfg *config.Config,
 	railSet railresolve.Source,
@@ -142,7 +141,6 @@ func NewCheckoutService(
 		PaymentMethodResolver:    NewCheckoutPaymentMethodResolver(paymentMethodService, railPMService),
 		PaymentMethodService:     paymentMethodService,
 		RailPaymentMethodService: railPMService,
-		IdempotencyService:       idempotencyService,
 		RailCustomerService:      railCustomerService,
 		StripeService:            &subscriptions.StripeService{Config: cfg, Rails: railSet},
 		clock:                    clock,

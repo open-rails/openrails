@@ -39,7 +39,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -226,8 +225,6 @@ type Runtime struct {
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	WebhookDispatcher            *webhooks.WebhookDispatcher
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *replaycache.Store
-	webhookIdempotencyService    *replaycache.Store
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
@@ -366,12 +363,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 		if err := r.DB.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close db: %w", err))
 		}
-	}
-	if r.IdempotencyService != nil {
-		r.IdempotencyService.Close()
-	}
-	if r.webhookIdempotencyService != nil {
-		r.webhookIdempotencyService.Close()
 	}
 	if r.RedisClient != nil && r.redisOwned {
 		if err := r.RedisClient.Close(); err != nil {

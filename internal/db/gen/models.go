@@ -501,6 +501,21 @@ type OpenrailsHostOutbox struct {
 	DedupeKey string
 }
 
+// #1099: one claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. claims fences a superseded owner. Rows past expires_at are deleted by openrails.idempotency_gc.
+type OpenrailsIdempotencyKey struct {
+	MerchantID     uuid.UUID
+	Operation      string
+	IdempotencyKey string
+	Status         string
+	Claims         int64
+	Result         []byte
+	Error          *string
+	LeaseExpiresAt time.Time
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.
 type OpenrailsInvoice struct {
 	ID             uuid.UUID

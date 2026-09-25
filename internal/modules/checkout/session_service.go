@@ -31,10 +31,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -46,7 +46,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -56,41 +55,22 @@ const (
 	// rail_fields when it differs from the rail kind, so execution (including
 	// idempotent resume) lands on the requested PSP, not a re-resolved one (#848).
 	checkoutSessionPSPFieldKey = "psp"
-	// checkoutSessionPendingLease is the SILENCE after which a pending create
-	// is treated as abandoned by its holder. It is measured from the last
-	// heartbeat, not from the start (xs-007 row 39, same shape as the webhook
-	// pending lease, #678): the holder renews every lease/4 for as long as the
-	// provider call runs, so a takeover only ever fires for a dead holder —
-	// never for a slow rail, where it used to race a second provider create.
-	checkoutSessionPendingLease = 30 * time.Second
-	defaultCheckoutSessionTTL   = 15 * time.Minute
-	redirectCheckoutSessionTTL  = 24 * time.Hour
+	defaultCheckoutSessionTTL  = 15 * time.Minute
+	redirectCheckoutSessionTTL = 24 * time.Hour
 )
 
-// Idempotency types are the idempotency module's own (#666 — the copy that
-// lived here, plus the payments adapter that translated between the two, is
-// gone; checkout consumes the module's types directly).
-type IdempotencyStatus = replaycache.Status
-
+// IdempotencyLease is how long a silent checkout request keeps its claim.
+// The owner renews it every quarter lease while it works, so only a dead
+// owner's claim lapses, never a slow provider call's (xs-007 row 39).
+// IdempotencyTTL is how long a completed request replays its response.
 const (
-	IdempotencyStatusPending = replaycache.StatusPending
-	IdempotencyStatusSuccess = replaycache.StatusSuccess
-	IdempotencyStatusFailed  = replaycache.StatusFailed
+	IdempotencyLease = 30 * time.Second
+	IdempotencyTTL   = 24 * time.Hour
 )
-
-type IdempotencyRecord = replaycache.Record
 
 type checkoutSessionIdempotencyResult struct {
 	RequestFingerprint string                   `json:"request_fingerprint"`
 	Response           *CheckoutSessionResponse `json:"response"`
-}
-
-type sessionIdempotencyStore interface {
-	Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error)
-	TryTakeoverPending(ctx context.Context, operation, key string, olderThan time.Duration) (bool, error)
-	RenewPending(ctx context.Context, operation, key string) (bool, error)
-	Fail(ctx context.Context, operation, key string, operationErr error) error
-	Complete(ctx context.Context, operation, key string, result json.RawMessage) error
 }
 
 type checkoutSessionExecutor interface {
@@ -143,7 +123,7 @@ type CheckoutSessionService struct {
 	priceService             *catalog.PriceService
 	productService           *catalog.ProductService
 	paymentMethodService     *paymentmethods.PaymentMethodService
-	idempotencyService       sessionIdempotencyStore
+	idempotencyService       idempotencyStore
 	checkoutService          checkoutSessionExecutor
 	solanaPayService         solanaPaymentService
 	solanaTransactionService solanaTransactionService
@@ -157,8 +137,6 @@ type CheckoutSessionService struct {
 	clock       clockwork.Clock
 	// cardFailures is the durable card-testing ledger (SEC-30).
 	cardFailures *abuse.FailureLedger
-	// pendingLease overrides checkoutSessionPendingLease (tests); zero = default.
-	pendingLease time.Duration
 
 	// Recurring Solana (#261/#262), injected via SetSolanaRecurring at the
 	// composition root. nil -> solana+subscription checkout returns 503.
@@ -287,7 +265,7 @@ func NewCheckoutSessionService(
 	priceService *catalog.PriceService,
 	productService *catalog.ProductService,
 	paymentMethodService *paymentmethods.PaymentMethodService,
-	idempotencyService sessionIdempotencyStore,
+	idempotencyService idempotencyStore,
 	checkoutService checkoutSessionExecutor,
 	solanaPayService solanaPaymentService,
 	solanaTransactionService solanaTransactionService,
@@ -384,108 +362,55 @@ func (s *CheckoutSessionService) createSession(ctx context.Context, req *Checkou
 
 	req.IdempotencyKey = scopeIdempotencyKey(user.ID, req.IdempotencyKey)
 
-	claimed := false
+	var claim *idempotency.Claim
 	if s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
-		rec, exists, err := s.idempotencyService.Begin(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey)
+		var rec *idempotency.Record
+		var err error
+		claim, rec, err = s.idempotencyService.Begin(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey)
 		if err != nil {
 			return nil, err
 		}
-		if exists {
-			switch rec.Status {
-			case IdempotencyStatusSuccess:
-				cached, err := decodeCheckoutSessionIdempotencyResult(rec.Result, req, user)
-				if err != nil {
-					return nil, err
-				}
-				if cached.MembershipQuote != nil || cached.Mode == string(models.CheckoutSessionModeOneOff) && s.db != nil {
-					return s.GetSession(ctx, cached.ID.UUID(), user)
-				}
-				return cached, nil
-			case IdempotencyStatusPending:
-				if s.now().Sub(rec.CreatedAt) < s.lease() {
-					return nil, ErrCheckoutSessionPending
-				}
-				taken, err := s.idempotencyService.TryTakeoverPending(
-					ctx,
-					checkoutSessionIdempotencyOp,
-					req.IdempotencyKey,
-					s.lease(),
-				)
-				if err != nil {
-					return nil, fmt.Errorf("take over stale checkout session request: %w", err)
-				}
-				if !taken {
-					return nil, ErrCheckoutSessionPending
-				}
-				// claimed is set unconditionally after the switch.
-			case IdempotencyStatusFailed:
-				return nil, fmt.Errorf("%w: previous request failed: %s", ErrCheckoutSessionConflict, rec.Error)
+		if claim == nil {
+			if rec.Status != idempotency.StatusSucceeded {
+				return nil, ErrCheckoutSessionPending
 			}
+			cached, err := decodeCheckoutSessionIdempotencyResult(rec.Result, req, user)
+			if err != nil {
+				return nil, err
+			}
+			if cached.MembershipQuote != nil || cached.Mode == string(models.CheckoutSessionModeOneOff) && s.db != nil {
+				return s.GetSession(ctx, cached.ID.UUID(), user)
+			}
+			return cached, nil
 		}
-		claimed = true
+		// A reclaimed claim reruns: the session row and its rail_intents are
+		// keyed by this request key, so the rerun resumes them, never charges again.
 	}
 
-	stopHeartbeat := func() {}
-	if claimed {
-		stopHeartbeat = s.startPendingHeartbeat(ctx, req.IdempotencyKey)
+	stop := func() {}
+	if claim != nil {
+		stop = claim.Hold(ctx)
 	}
 	resp, err := s.createSessionWithValidation(ctx, req, user)
-	stopHeartbeat() // before Complete/Fail: a renewal must never race the final state
+	stop() // before Complete/Fail: a renewal must never race the final state
 	if err != nil {
-		if claimed && s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
-			isDeterministic := errors.Is(err, ErrCheckoutSessionValidation) || errors.Is(err, ErrCheckoutSessionConflict)
-			if isDeterministic {
-				_ = s.idempotencyService.Fail(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey, err)
+		if claim != nil {
+			// Deterministic refusals release the key; anything else keeps the
+			// claim until its lease lapses, so a retry waits out the outcome.
+			if errors.Is(err, ErrCheckoutSessionValidation) || errors.Is(err, ErrCheckoutSessionConflict) {
+				failCheckoutIdempotency(ctx, claim, checkoutSessionIdempotencyOp, req.IdempotencyKey, err)
 			}
 		}
 		return nil, err
 	}
 
-	if claimed && s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
+	if claim != nil {
 		fingerprint := checkoutSessionRequestFingerprintForRail(req, user, resp.Payment.Rail)
 		payload, _ := json.Marshal(checkoutSessionIdempotencyResult{RequestFingerprint: fingerprint, Response: resp})
-		completeCheckoutIdempotency(ctx, s.idempotencyService, checkoutSessionIdempotencyOp, req.IdempotencyKey, payload)
+		completeCheckoutIdempotency(ctx, claim, checkoutSessionIdempotencyOp, req.IdempotencyKey, payload)
 	}
 
 	return resp, nil
-}
-
-func (s *CheckoutSessionService) lease() time.Duration {
-	if s != nil && s.pendingLease > 0 {
-		return s.pendingLease
-	}
-	return checkoutSessionPendingLease
-}
-
-// startPendingHeartbeat renews the pending lease while the create runs, so a
-// stale-pending takeover only fires for dead holders, not slow ones. The
-// returned func stops it and waits for the beat goroutine to exit.
-func (s *CheckoutSessionService) startPendingHeartbeat(ctx context.Context, key string) func() {
-	hbCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := s.newPendingTicker(s.lease() / 4)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-hbCtx.Done():
-				return
-			case <-ticker.Chan():
-				if _, err := s.idempotencyService.RenewPending(hbCtx, checkoutSessionIdempotencyOp, key); err != nil && hbCtx.Err() == nil {
-					log.WithContext(hbCtx).WithError(err).Warn("checkout session pending-lease renewal failed")
-				}
-			}
-		}
-	}()
-	return func() {
-		cancel()
-		<-done
-	}
-}
-
-func (s *CheckoutSessionService) newPendingTicker(d time.Duration) clockwork.Ticker {
-	return timeutil.FirstClock(s.clock).NewTicker(d)
 }
 
 func canonicalizeCheckoutPaymentName(payment *CheckoutSessionPaymentRequest) {

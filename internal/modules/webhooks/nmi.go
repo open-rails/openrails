@@ -278,7 +278,6 @@ func (s *NMIWebhookService) HandleNMIWebhook(ctx context.Context) error {
 			s.Data.EventID,
 			s.Data.EventType,
 			models.Rail(s.Rail).EventSource(),
-			s.Data,
 			s.handleWebhook,
 		)
 	}

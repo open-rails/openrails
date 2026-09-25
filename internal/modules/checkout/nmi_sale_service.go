@@ -26,12 +26,6 @@ type checkoutSaleIdempotencyResult struct {
 	DelayedStart  *string   `json:"delayed_start,omitempty"`
 }
 
-type checkoutIdempotencyStore interface {
-	Begin(ctx context.Context, operation, key string) (*IdempotencyRecord, bool, error)
-	Fail(ctx context.Context, operation, key string, operationErr error) error
-	Complete(ctx context.Context, operation, key string, result json.RawMessage) error
-}
-
 // intentExecutor is the write-through provider-intents surface (#674):
 // EnqueueAndExecute posts the durable intent and executes it inline; anything
 // not finished inline is drained by the scheduled executor/verifier.
