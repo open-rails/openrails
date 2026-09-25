@@ -1257,7 +1257,7 @@ func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time
 		return nil, nil
 	}
 	evidence := map[string]any{
-		"active": f.Active, "past_due": f.PastDue, "awaiting_method": f.AwaitingMethod, "unverified": f.Unverified,
+		"subscriptions":      funnelStates{Active: f.Active, PastDue: f.PastDue, AwaitingMethod: f.AwaitingMethod, Unverified: f.Unverified},
 		"unknown_operations": unknown.OpenCount, "unmapped_decline_codes": unmapped,
 	}
 	severity := SeverityLow
@@ -1280,6 +1280,14 @@ func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time
 		Type: findingDunningFunnel, Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
 		SubjectKey: "merchant:" + mid.String(), Provider: "self", Evidence: evidence,
 	}, nil
+}
+
+// funnelStates is the funnel's live subscriptions by lifecycle state.
+type funnelStates struct {
+	Active         int64 `json:"active"`
+	PastDue        int64 `json:"past_due"`
+	AwaitingMethod int64 `json:"awaiting_method"`
+	Unverified     int64 `json:"unverified"`
 }
 
 // samePeriod reports whether the locked row is still on the scanned period.

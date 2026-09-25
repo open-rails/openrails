@@ -1727,6 +1727,7 @@
       "type txnBreadcrumbs struct {\n\tOrderID         string `json:\"order_id\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\tEmail           string `json:\"email\"`\n\tCustomer        string `json:\"customer\"`\n\tInvoice         string `json:\"invoice\"`\n\tCharge          string `json:\"charge\"`\n}"
     ],
     "internal/reconcile/converge": [
+      "type funnelStates struct {\n\tActive         int64 `json:\"active\"`\n\tPastDue        int64 `json:\"past_due\"`\n\tAwaitingMethod int64 `json:\"awaiting_method\"`\n\tUnverified     int64 `json:\"unverified\"`\n}",
       "type ownershipPurchase struct {\n\tGrantID     string  `json:\"grant_id\"`\n\tSourceType  string  `json:\"source_type\"`\n\tSourceID    string  `json:\"source_id\"`\n\tPaymentID   *string `json:\"payment_id\"`\n\tAmount      *int64  `json:\"amount,string\"`\n\tCurrency    *string `json:\"currency\"`\n\tPurchasedAt string  `json:\"purchased_at\"`\n}",
       "type ownershipPurchaseRow struct {\n\tGrantID     string  `json:\"grant_id\"`\n\tSourceType  string  `json:\"source_type\"`\n\tSourceID    string  `json:\"source_id\"`\n\tPaymentID   *string `json:\"payment_id\"`\n\tAmount      *int64  `json:\"amount\"`\n\tCurrency    *string `json:\"currency\"`\n\tPurchasedAt string  `json:\"purchased_at\"`\n}"
     ],
@@ -4665,12 +4666,15 @@
     },
     "internal/reconcile/converge/converge_passes.go": {
       "clockwork": "github.com/jonboulle/clockwork",
+      "collection": "github.com/open-rails/openrails/internal/modules/collection",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "grants": "github.com/open-rails/openrails/internal/modules/grants",
       "json": "encoding/json",
+      "lifecycle": "github.com/open-rails/openrails/internal/billing/lifecycle",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "openrails": "github.com/open-rails/openrails",
@@ -5588,6 +5592,7 @@
     "internal/migrate/postgres/0013_subscription_transient_retries.up.sql": "2499867c6deaaa5e3d2b45fe881a17f2635cbbb9e74c0f47f428b288772670e4",
     "internal/migrate/postgres/0014_subscription_verifications.up.sql": "1bbd8c68a4cd975c6d938c5f241a56a18d1ef6c7e0c1213f69cfd74a9e9817a4",
     "internal/migrate/postgres/0015_subscription_lifecycle_single_writer.up.sql": "0e554c008ac19bd31cc3b4aecd211a28d5b60fd2a8fae0c4f6a5d10d003a8983",
+    "internal/migrate/postgres/0016_payment_method_default_once.up.sql": "2a05ce832837915238edb915f8abf062559f078e8c47547313baa5fe9a6bb3f3",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "4794cb1f1a292c7b598ebbd886f8d19c32f221178969dd95fbd96f603898f196",
