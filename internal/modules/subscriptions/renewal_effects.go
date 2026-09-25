@@ -62,7 +62,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		}
 	}
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
-		if err := pushEngineRenewalGrace(ctx, entitlementsService, sub, entitlementNames(sub.EntitlementsSpecSnapshot), effects.PeriodStart, effects.PeriodEnd); err != nil {
+		if err := pushEngineRenewalGrace(ctx, d, entitlementsService, sub, entitlementNames(sub.EntitlementsSpecSnapshot), effects.PeriodStart, effects.PeriodEnd); err != nil {
 			return nil, err
 		}
 	}

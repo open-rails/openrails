@@ -33,8 +33,8 @@ func forEachCadence(t *testing.T, run func(t *testing.T, hours int)) {
 }
 
 // The renewal allowance is a bounded share of the period for every cadence:
-// at most a tenth of it, never more than a day, and with the engine halted
-// access ends exactly when the allowance does.
+// at most a tenth of it, never more than a day. A merchant that suspends held
+// renewals ends access exactly when the allowance does.
 func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 	t.Parallel()
 	forEachCadence(t, func(t *testing.T, hours int) {
@@ -45,6 +45,7 @@ func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 		require.Less(t, window, period, "the dunning window ends inside one cycle")
 
 		w := newWorld(t)
+		require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), openrails.MerchantSettings{DunningPolicy: &openrails.DunningPolicy{AccessWhileRenewalHeld: openrails.DunningAccessSuspend}}))
 		e := enrollEvery(t, w, "nmi", embedded, hours)
 		end := e.periodEnd()
 		w.cfg = func(c *config.Config) { c.EngineAdmissionHold = true }
@@ -59,8 +60,44 @@ func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 	})
 }
 
+// A renewal with no outcome because collection is stopped keeps access by
+// default (Paul, 2026-09-25). The operator sees life.renewal.held with the
+// count and the oldest held age; once collection resumes the held renewal is
+// charged exactly once, access continues and the finding resolves.
+func TestHeldRenewalKeepsAccess(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	e := enroll(t, w, "nmi", embedded)
+	end := e.periodEnd()
+	w.cfg = func(c *config.Config) { c.EngineAdmissionHold = true }
+	w.restart()
+	w.advance(end.Sub(w.clock.Now()) + 3*day)
+	w.runRenewals()
+	require.True(t, e.c.entitled(e.ent), "a held renewal keeps access past its allowance")
+	require.Equal(t, 1, e.providerAttempts(), "a halted engine charges nothing")
+	w.converge()
+	var count int
+	var heldSeconds int64
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT (evidence->'local'->>'count')::int, (evidence->'local'->>'oldest_held_seconds')::bigint
+		FROM openrails.reconciliation_findings WHERE finding_type = 'life.renewal.held' AND status = 'requires_review'`)).Scan(&count, &heldSeconds))
+	require.Equal(t, 1, count)
+	require.Equal(t, int64((3 * day).Seconds()), heldSeconds, "the oldest held renewal has waited since its period end")
+
+	w.cfg = nil
+	w.restart()
+	w.runRenewals()
+	w.wake()
+	sub := w.subscription(embedded, e.sub)
+	require.Equal(t, "active", sub.Status)
+	require.True(t, sub.CurrentPeriodEndsAt.After(w.clock.Now()), "the resumed renewal pays a current period")
+	require.Len(t, e.providerLedger(), 2, "exactly one renewal charge once collection resumes")
+	require.True(t, e.c.entitled(e.ent), "access continues")
+	w.converge()
+	require.Empty(t, w.openFindings("life.renewal.held"), "the finding resolves once the renewal is attempted")
+}
+
 // A renewal challenged by the issuer waits for the member no longer than the
-// period's allowance, and access never outlasts it while the challenge is open.
+// period's allowance; access continues until the closed challenge's outcome.
 func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 	t.Parallel()
 	forEachCadence(t, func(t *testing.T, hours int) {
@@ -79,7 +116,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 		w.wake()
 		require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the challenge stays open for the whole allowance")
 		w.advance(2 * time.Second)
-		require.False(t, e.c.entitled(e.ent), "access ends at period end + %s even while the challenge is open", grace)
+		require.True(t, e.c.entitled(e.ent), "no outcome yet: access continues past the allowance")
 		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned challenge waits for a new card")
 		require.True(t, e.c.entitled(e.ent), "a membership waiting for a new card keeps access")
 		require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")

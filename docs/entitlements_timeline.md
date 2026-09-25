@@ -79,7 +79,9 @@ end the user expects.
 Engine memberships (OpenRails collects them itself) are the exception: access is the paid
 period plus a bounded renewal allowance (`grace`, min(24h, max(5m, period/10))) that holds access across the
 boundary until the engine's own renewal decides. The renewal supersedes it; a decline or
-cancellation revokes it; if no outcome arrives, access still ends when it lapses.
+cancellation revokes it. A renewal with no outcome past the allowance is held (collection is
+stopped): by default access continues until it is attempted; `access_while_renewal_held: suspend`
+ends access when the allowance lapses.
 
 Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day (`23:59:59Z`) to
 avoid access gaps from ambiguity.

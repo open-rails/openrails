@@ -567,6 +567,13 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		if funnel != nil {
 			out = append(out, *funnel)
 		}
+		held, err := p.heldRenewalsFinding(ctx, scope, now)
+		if err != nil {
+			return nil, err
+		}
+		if held != nil {
+			out = append(out, *held)
+		}
 	}
 
 	paidPending, err := q.ListPaidPendingSubscriptions(ctx, gen.ListPaidPendingSubscriptionsParams{
@@ -1203,6 +1210,7 @@ const (
 	findingUnverifiedBacklog    = "life.unverified.backlog"
 	findingUnverifiedUnresolved = "life.unverified.unresolved"
 	findingDunningFunnel        = "life.dunning.funnel"
+	findingRenewalHeld          = "life.renewal.held"
 	findingDuplicateCharge      = "consistency.duplicate.provider_charge"
 )
 
@@ -1216,7 +1224,7 @@ func (*derivePass) Standing() []string {
 func (*lifePass) Standing() []string {
 	return []string{"life.checkout_session.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
 		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
-		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel}
+		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld}
 }
 
 func (*notifyPass) Standing() []string { return []string{"notify.access_ended.missing"} }
@@ -1227,6 +1235,28 @@ func (*conPass) Standing() []string {
 
 // declineCodeLookback bounds the unmapped decline-code scan of the funnel.
 const declineCodeLookback = 30 * 24 * time.Hour
+
+// heldRenewalsFinding reports engine renewals with no outcome past their
+// allowance: collection is stopped (fleet halted, admission hold, breaker,
+// readonly). Members keep access by default, so the backlog is the operator's
+// signal. It resolves once collection resumes and the renewals are attempted.
+func (p *lifePass) heldRenewalsFinding(ctx context.Context, scope Scope, now time.Time) (*ConvergeFinding, error) {
+	h, err := p.e.DB.Gen(ctx).SummarizeHeldEngineRenewals(ctx, gen.SummarizeHeldEngineRenewalsParams{MerchantID: scope.Merchant.UUID(), Now: now})
+	if err != nil {
+		return nil, fmt.Errorf("life: summarize held renewals: %w", err)
+	}
+	if h.Held == 0 {
+		return nil, nil
+	}
+	age := max(now.Sub(h.OldestDueAt), 0)
+	return &ConvergeFinding{
+		Type: findingRenewalHeld, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
+		SubjectKey: "engine", Provider: "self",
+		Evidence: map[string]any{"count": h.Held, "oldest_due_at": h.OldestDueAt.UTC(), "oldest_held_seconds": int64(age.Seconds())},
+		RecommendedAction: fmt.Sprintf("%d engine renewals have had no outcome past their allowance (oldest due %s): collection is stopped. Members keep access until they are attempted. Resume collection (fleet, admission hold, breaker, provider write mode).",
+			h.Held, h.OldestDueAt.UTC().Format(time.RFC3339)),
+	}, nil
+}
 
 // funnelFinding is the merchant's recovery funnel (#1089 §9): live
 // subscriptions by state, the oldest unverified entry, open unknown provider

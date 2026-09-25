@@ -962,6 +962,19 @@ UPDATE openrails.reconciliation_findings
    AND status IN ('reconcile_required', 'requires_review')
    AND NOT ((finding_type || chr(31) || subject_key) = ANY(sqlc.arg(keep)::text[]));
 
+-- name: SummarizeHeldEngineRenewals :one
+-- LIFE life.renewal.held: engine renewals with no outcome past their allowance,
+-- min(24h, max(5m, period/10)) after the paid period. Collection is stopped.
+SELECT count(*)::int AS held,
+       COALESCE(min(s.current_period_ends_at), sqlc.arg(now)::timestamptz)::timestamptz AS oldest_due_at
+FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND s.deleted_at IS NULL AND s.cancelled_at IS NULL
+  AND s.status = 'active' AND s.collection_policy = 'engine'
+  AND s.current_period_ends_at > s.current_period_starts_at
+  AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '5 minutes',
+      (s.current_period_ends_at - s.current_period_starts_at) / 10)) <= sqlc.arg(now)::timestamptz;
+
 -- LIFE life.unverified.* (#1094/#1096): unverified subscriptions with the
 -- instant they became unverified, oldest first, capped (or#837).
 -- name: ListUnverifiedSubscriptions :many

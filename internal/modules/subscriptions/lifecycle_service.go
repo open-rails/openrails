@@ -691,7 +691,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			}).Info("Granted subscription entitlement")
 		}
 		if len(entNames) > 0 {
-			if err := pushEngineRenewalGrace(ctx, entitlementService, subscription, entNames, periodStartsAt, periodEndsAt); err != nil {
+			if err := pushEngineRenewalGrace(ctx, dbb, entitlementService, subscription, entNames, periodStartsAt, periodEndsAt); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1262,7 +1262,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			return fmt.Errorf("resume membership: reopen subscription access: %w", err)
 		}
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
-			if err := pushEngineRenewalGrace(ctx, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
+			if err := pushEngineRenewalGrace(ctx, txdb, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}

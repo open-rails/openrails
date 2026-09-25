@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -12,11 +13,15 @@ import (
 
 // Engine renewal grace keeps an engine member's access across the paid-period
 // boundary until the engine's own renewal decides. A qualified renewal
-// supersedes it; a decline, cancellation or terminal outcome revokes it. If no
-// outcome ever arrives (the fleet is down), access still ends when it expires.
+// supersedes it; a decline, cancellation or terminal outcome revokes it.
 //
-// The grace is a bounded share of the period, never a fixed day (a fixed 24h
-// gave an hourly member 24 free periods):
+// A renewal with no outcome past its allowance is held: collection is stopped
+// (fleet halted, admission hold, breaker, readonly). By default the member
+// keeps access until the renewal is attempted, and life.renewal.held reports
+// the backlog; access_while_renewal_held=suspend ends access at the allowance.
+//
+// The allowance is a bounded share of the period, never a fixed day (a fixed
+// 24h gave an hourly member 24 free periods):
 //
 //	grace(period) = min(24h, max(5m, period/10))
 //
@@ -51,10 +56,11 @@ type graceWriter interface {
 	PushNewEntitlement(context.Context, entitlements.PushNewEntitlementParams) (*models.Entitlement, error)
 }
 
-// pushEngineRenewalGrace appends the renewal allowance after periodEnd for a
-// live engine-owned subscription. Other collection policies project their own
+// pushEngineRenewalGrace appends the renewal grace after periodEnd for a live
+// engine-owned subscription: open-ended by default, the allowance when the
+// merchant suspends held renewals. Other collection policies project their own
 // access (provider cohorts hold standing windows).
-func pushEngineRenewalGrace(ctx context.Context, ent graceWriter, sub *models.Subscription, names []string, periodStart, periodEnd time.Time) error {
+func pushEngineRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, names []string, periodStart, periodEnd time.Time) error {
 	if ent == nil || sub == nil || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.CancelledAt != nil || sub.Status == models.StatusCancelled {
 		return nil
 	}
@@ -62,10 +68,18 @@ func pushEngineRenewalGrace(ctx context.Context, ent graceWriter, sub *models.Su
 	if err != nil {
 		return fmt.Errorf("engine renewal grace for %s: %w", sub.ID, err)
 	}
+	policy, err := DunningPolicy(ctx, d)
+	if err != nil {
+		return err
+	}
 	start := periodEnd.UTC()
 	end := start.Add(grace)
 	for _, name := range names {
-		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}); err != nil {
+		p := entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}
+		if !policy.SuspendWhenHeld {
+			p.EndAt, p.Indefinite = nil, true
+		}
+		if _, err := ent.PushNewEntitlement(ctx, p); err != nil {
 			return fmt.Errorf("grant engine renewal grace %s: %w", name, err)
 		}
 	}

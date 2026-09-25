@@ -90,6 +90,14 @@ jobs:
           cache: true
       - name: Wait for PostgreSQL
         run: timeout 60 bash -c 'until docker exec greenfield-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
+      - name: Generated SQL bindings match the queries
+        env:
+          SQLC_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
+        run: |
+          sqlc_bin="$(scripts/ci-install-tool.sh sqlc)"
+          export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
+          "$sqlc_bin" generate
+          git diff --exit-code -- internal/db/gen
       - name: Run focused greenfield contracts
         run: bash scripts/greenfield.sh
 
