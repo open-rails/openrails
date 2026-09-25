@@ -18,16 +18,25 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
+// EffectOptions is the caller's context for a transition's effects.
+type EffectOptions struct {
+	// RevokeReason labels ended access; empty derives it from the cancel type.
+	RevokeReason models.EntitlementRevokeReason
+	// EndedReason is the premium_ended notice's reason.
+	EndedReason PremiumEndReason
+	// Notice is the base data of every customer notice.
+	Notice openrails.NotificationData
+}
+
 // ApplyEffects carries out a transition's effects inside the caller's
 // transaction (#1089 §3), on the row the caller holds locked. Call it after
 // Transition and before persisting the row: a provider cancel stamps the
-// row's deletion marker. The returned notifications are dispatched by the
-// caller after commit (DispatchNotifications).
+// row's deletion marker. Notices are queued idempotently and returned for the
+// caller to deliver after commit (DispatchNotifications).
 //
 // Dunning effects are no-ops here (Transition edits the retry fields), and so
-// is ProbeProvider: the unverified trigger notifies the resolver on commit.
-func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, tx pgx.Tx, sub *models.Subscription, effects []lifecycle.Effect, now time.Time) ([]*models.NotificationQueue, error) {
-	d := db.NewWithPgxTx(tx)
+// is ProbeProvider: the unverified trigger wakes the resolver on commit.
+func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects []lifecycle.Effect, now time.Time, opts EffectOptions) ([]*models.NotificationQueue, error) {
 	ents := s.newLifecycleEntitlementService(d)
 	var out []*models.NotificationQueue
 	var granted *lifecycle.GrantPeriod
@@ -49,11 +58,13 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, tx pgx.
 				}
 			}
 		case lifecycle.EndAccess:
-			reason := models.EntitlementRevokeDunning
-			if sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback {
-				reason = models.EntitlementRevokeChargeback
+			// Grace ends now; paid access runs to At and is revoked only once
+			// At has passed. The bound closes the standing window at At.
+			sources, asOf := []models.EntitlementSourceType{models.EntitlementSourceGrace}, now
+			if !e.At.After(now) {
+				sources, asOf = append(sources, models.EntitlementSourceSubscription), e.At
 			}
-			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, e.At, reason, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, asOf, revokeReason(sub, opts), sources...); err != nil {
 				return nil, fmt.Errorf("end access %s: %w", sub.ID, err)
 			}
 			if err := ents.BoundSubscriptionAccess(ctx, sub.ID, e.At); err != nil {
@@ -79,11 +90,13 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, tx pgx.
 			}
 			at := SystemDeferredDeleteAt(sub, now)
 			sub.DeletionScheduledAt = &at
-			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, at); err != nil {
+			if err := d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, at)
+			}); err != nil {
 				return nil, fmt.Errorf("queue provider cancel %s: %w", sub.ID, err)
 			}
 		case lifecycle.Notify:
-			n, err := s.queueNotice(ctx, d, sub, e.Kind, granted)
+			n, err := s.queueNotice(ctx, d, sub, e.Kind, granted, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -95,13 +108,34 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, tx pgx.
 	return out, nil
 }
 
-// queueNotice queues one customer notice, idempotent per subscription and
-// period so a replayed transition never notifies twice.
-func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod) (*models.NotificationQueue, error) {
-	data := openrails.NotificationData{SubscriptionID: openrails.SubscriptionID(sub.ID), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID}
+func revokeReason(sub *models.Subscription, opts EffectOptions) models.EntitlementRevokeReason {
+	switch {
+	case opts.RevokeReason != "":
+		return opts.RevokeReason
+	case sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback:
+		return models.EntitlementRevokeChargeback
+	default:
+		return models.EntitlementRevokeDunning
+	}
+}
+
+// queueNotice queues one customer notice, idempotent per subscription, kind
+// and period so a replayed transition never notifies twice.
+func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod, opts EffectOptions) (*models.NotificationQueue, error) {
+	data := opts.Notice
+	data.SubscriptionID = openrails.SubscriptionID(sub.ID)
+	if data.Rail == "" {
+		data.Rail, data.RailSubscriptionID = string(sub.Rail), sub.RailSubscriptionID
+	}
+	if kind == lifecycle.NoticeEnded && opts.EndedReason != "" {
+		data.Reason = string(opts.EndedReason)
+	}
 	key := string(kind)
 	if sub.CurrentPeriodEndsAt != nil {
 		key += ":" + sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339Nano)
+	}
+	if sub.EndedAt != nil {
+		key += ":" + sub.EndedAt.UTC().Format(time.RFC3339Nano)
 	}
 	if granted != nil {
 		start, end := granted.Start, granted.End
@@ -125,12 +159,11 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 // renewal of an NMI schedule: the provider already bills the scheduled price,
 // so the renewed period is the new tier's. Call after a RenewalPaid
 // transition, before persisting the row.
-func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, tx pgx.Tx, sub *models.Subscription) error {
+func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d *db.DB, sub *models.Subscription) error {
 	if sub.CollectionPolicy == models.CollectionPolicyEngine || !rails.IsNMI(sub.Rail) || sub.ScheduledPriceID == nil ||
 		sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil {
 		return nil
 	}
-	d := db.NewWithPgxTx(tx)
 	price, err := catalog.NewPriceService(d).GetByID(ctx, *sub.ScheduledPriceID)
 	if err != nil {
 		return fmt.Errorf("scheduled tier %s: price: %w", sub.ID, err)

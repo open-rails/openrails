@@ -49,14 +49,8 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 			}
 			return true, lc.ApplyLocalUnknown(ctx, database, sub, models.StatusActive)
 		}
-		at := now
-		if d.Decline != nil && !d.Decline.OccurredAt.IsZero() {
-			at = d.Decline.OccurredAt
-		}
 		duns := DunsDecline(sub, d)
-		applied, err := transition(ctx, database, lc, sub, d, now, duns, func(cur *models.Subscription) lifecycle.Event {
-			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.Retry, At: at}
-		})
+		applied, err := transition(ctx, database, lc, sub, d, now, duns)
 		if err != nil || !applied || !duns {
 			return applied, err
 		}
@@ -66,44 +60,56 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if d.NewPeriodEnd == nil {
 			return false, nil
 		}
-		return transition(ctx, database, lc, sub, d, now, false, func(cur *models.Subscription) lifecycle.Event {
-			start := paidThroughOf(cur)
-			if start.IsZero() {
-				start = now
-				if d.NewPeriodStart != nil && d.NewPeriodStart.Before(*d.NewPeriodEnd) {
-					start = d.NewPeriodStart.UTC()
-				}
-			}
-			return lifecycle.RenewalPaid{PeriodStart: start, PeriodEnd: d.NewPeriodEnd.UTC()}
-		})
+		return transition(ctx, database, lc, sub, d, now, false)
 
 	case TransitionAdoptPeriodEnd:
-		// A live schedule is no payment: it only confirms an unverified row
-		// whose paid period is still running, and never moves the period.
 		if sub.Status != models.StatusUnverified {
 			return false, nil
 		}
-		return transition(ctx, database, lc, sub, d, now, false, func(*models.Subscription) lifecycle.Event {
-			return lifecycle.ProviderConfirmedCurrent{At: now}
-		})
+		return transition(ctx, database, lc, sub, d, now, false)
 
 	case TransitionCancel:
+		return transition(ctx, database, lc, sub, d, now, false)
+	}
+	return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)
+}
+
+// eventFor is the lifecycle event a decision asserts about the locked row.
+// Only a payment renews; a live schedule without one (Adopt) only confirms
+// an unverified row whose paid period is still running, and never moves it.
+func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Event {
+	switch d.Kind {
+	case TransitionPastDue:
+		at := now
+		if d.Decline != nil && !d.Decline.OccurredAt.IsZero() {
+			at = d.Decline.OccurredAt
+		}
+		return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.Retry, At: at}
+	case TransitionRenew:
+		start := paidThroughOf(cur)
+		if start.IsZero() {
+			start = now
+			if d.NewPeriodStart != nil && d.NewPeriodStart.Before(*d.NewPeriodEnd) {
+				start = d.NewPeriodStart.UTC()
+			}
+		}
+		return lifecycle.RenewalPaid{PeriodStart: start, PeriodEnd: d.NewPeriodEnd.UTC()}
+	case TransitionAdoptPeriodEnd:
+		return lifecycle.ProviderConfirmedCurrent{At: now}
+	default:
 		at := d.EvidenceAt
 		if at.IsZero() {
 			at = now
 		}
-		return transition(ctx, database, lc, sub, d, now, false, func(cur *models.Subscription) lifecycle.Event {
-			switch {
-			case d.RemoteGone:
-				return lifecycle.ProviderCancelled{At: at}
-			case d.Certainty == collection.CertaintyNonRetryableDecline:
-				return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
-			default:
-				return lifecycle.DunningExhausted{At: at}
-			}
-		})
+		switch {
+		case d.RemoteGone:
+			return lifecycle.ProviderCancelled{At: at}
+		case d.Certainty == collection.CertaintyNonRetryableDecline:
+			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
+		default:
+			return lifecycle.DunningExhausted{At: at}
+		}
 	}
-	return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)
 }
 
 // applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule
@@ -126,7 +132,7 @@ func applyDunnedDecline(ctx context.Context, lc *subscriptions.SubscriptionLifec
 
 // transition applies one event to the locked row and carries out its
 // effects in the same transaction; notifications go out after commit.
-func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, quiet bool, event func(*models.Subscription) lifecycle.Event) (bool, error) {
+func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, quiet bool) (bool, error) {
 	var notices []*models.NotificationQueue
 	applied := false
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -140,7 +146,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 			return nil
 		}
 		before := subscriptions.SnapshotOf(cur)
-		ev := event(cur)
+		ev := eventFor(d, cur, now)
 		effects, err := subscriptions.Transition(cur, ev, now)
 		if err != nil {
 			if errors.Is(err, lifecycle.ErrIllegal) || errors.Is(err, lifecycle.ErrInvalid) || errors.Is(err, lifecycle.ErrTerminal) {
@@ -153,11 +159,11 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 		if len(effects) == 0 && subscriptions.SnapshotOf(cur) == before {
 			return nil
 		}
-		if notices, err = lc.ApplyEffects(ctx, tx, cur, customerNotices(effects, quiet || d.Declared), now); err != nil {
+		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared), now, subscriptions.EffectOptions{}); err != nil {
 			return err
 		}
 		if _, renewed := ev.(lifecycle.RenewalPaid); renewed {
-			if err := lc.ApplyScheduledTier(ctx, tx, cur); err != nil {
+			if err := lc.ApplyScheduledTier(ctx, txdb, cur); err != nil {
 				return err
 			}
 		}
