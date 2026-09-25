@@ -2,12 +2,16 @@ package checkout
 
 import (
 	"context"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/pkg/merchant"
-	"strings"
 )
 
 // LookupSession finds only a buyer-bound idempotent session and validates the
@@ -24,19 +28,22 @@ func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *Checkou
 		return nil, err
 	}
 	scoped := scopeIdempotencyKey(user.ID, req.IdempotencyKey)
-	// While a request for the key is running, its outcome is not known: a host
-	// must not move on to another attempt (#1099).
-	if s.idempotencyService != nil {
-		rec, err := s.idempotencyService.Get(ctx, checkoutSessionIdempotencyOp, scoped)
+	id := idempotentCheckoutSessionID(mid.UUID(), scoped)
+	// The claim and the session are read from one snapshot, so no reclaim can
+	// land between them. While a request for the key runs its outcome is not
+	// known, and a host must not move on to another attempt (#1099).
+	var session *models.CheckoutSession
+	err = s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		rec, err := idempotency.GetInTx(ctx, tx, mid.UUID(), checkoutSessionIdempotencyOp, scoped)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if rec != nil && rec.Status == idempotency.StatusProcessing && rec.Leased {
-			return nil, ErrCheckoutSessionPending
+			return ErrCheckoutSessionPending
 		}
-	}
-	id := idempotentCheckoutSessionID(mid.UUID(), scoped)
-	session, err := s.repo.GetByID(ctx, id)
+		session, err = NewCheckoutSessionRepo(s.db.NewWithPgxTx(tx)).GetByID(ctx, id)
+		return err
+	})
 	if db.IsNotFound(err) {
 		return nil, ErrCheckoutSessionNotFound
 	}

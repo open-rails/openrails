@@ -26,7 +26,7 @@ var excludedTables = map[string]string{
 	"destructive_action_switch": "deployment-wide safety switch",
 	"webhook_health":            "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
 	"card_attempt_failures": "card-testing telemetry",
-	"idempotency_keys":      "short-lived request claims and replays; money is rail_intents and webhook_events",
+	"idempotency_keys":      "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and rail_intents; money is rail_intents and webhook_events",
 	"dashboard_configs":     "presentation",
 	"merchant_deks":         "encryption key material", "merchant_secrets": "credentials are re-entered at destination",
 	"merchant_destructive_policy": "deployment safety policy", "merchant_webhooks": "destinations and signing-key versions are reconfigured",
@@ -53,7 +53,7 @@ var excludedColumns = map[string]string{
 	"webhook_health_daily":            "merchant_id rail day_at rejected drift",
 	"admission_denials_hourly":        "merchant_id customer_id denial_reason hour_at denials updated_at",
 	"card_attempt_failures":           "merchant_id subject bucket_at failures",
-	"idempotency_keys":                "merchant_id operation idempotency_key status claims result error lease_expires_at expires_at created_at updated_at",
+	"idempotency_keys":                "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"dashboard_configs":               "merchant_id layout updated_at updated_by",
 	"merchant_deks":                   "merchant_id wrapped_dek created_at updated_at",
 	"merchant_secrets":                "merchant_id name value version created_at updated_at",
@@ -210,6 +210,9 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
 		{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
 		{"checkout_sessions", "status NOT IN ('succeeded','failed','expired','canceled')"},
+		// A request still running under a live claim has an outcome the archive
+		// would miss; settled, failed and lapsed claims are not moved (#1099).
+		{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},
 		{"rail_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
 		{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
 		{"invoices", "collection_intent_id IS NOT NULL"},

@@ -554,3 +554,65 @@ func TestWebhookMarkRollsBackADuplicateTransaction(t *testing.T) {
 	require.NoError(t, e.admin.QueryRow(t.Context(), e.q(`SELECT count(*) FROM openrails.webhook_events WHERE op = $1 AND event_id = 'evt_twice'`), op).Scan(&marks))
 	require.Equal(t, 1, marks)
 }
+
+// Duplicates waiting out an owner use neither the lease-renewal pool nor
+// their request's pinned connection: two dozen waiters on 10-connection pools
+// all get their answer, and the owner's renewals keep its claim alive.
+func TestWebhookDuplicatesLeaveRenewalsAlone(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	dedup := [2]*webhooks.DeduplicationService{e.dedup(0, lease), e.dedup(1, lease)}
+	e.effects()
+	source := models.RailStripe.EventSource()
+	op := fmt.Sprintf("webhook.%s.%s", source, "invoice.paid")
+	apply := func(i int) func(ctx context.Context) error {
+		return func(ctx context.Context) error { return effect(ctx, e.replicas[i].db, "evt_hot", true) }
+	}
+
+	inside, resume := make(chan struct{}), make(chan struct{})
+	ownerErr := make(chan error, 1)
+	go func() {
+		ownerErr <- dedup[0].ProcessWebhook(e.ctx(), "evt_hot", "invoice.paid", source, func(ctx context.Context) error {
+			close(inside)
+			<-resume
+			return apply(0)(ctx)
+		})
+	}()
+	<-inside
+	renewals := e.replicas[0].leases.Pool().Stat().AcquireCount()
+
+	const waiters = 24
+	errs := make([]error, waiters)
+	var wg sync.WaitGroup
+	for i := range waiters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, release, err := e.replicas[i%2].db.WithMerchantConn(e.ctx())
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer release()
+			errs[i] = dedup[i%2].ProcessWebhook(ctx, "evt_hot", "invoice.paid", source, apply(i%2))
+		}()
+	}
+	time.Sleep(lease / 2)
+	require.Eventually(t, func() bool {
+		held := e.replicas[0].db.Pool().Stat().AcquiredConns() + e.replicas[1].db.Pool().Stat().AcquiredConns()
+		return held <= 4
+	}, 2*lease, 50*time.Millisecond, "waiters hold no request connection")
+	time.Sleep(lease) // past the lease: only renewals keep the owner's claim
+	rec, err := e.store(1).Watch(e.ctx(), op, "evt_hot")
+	require.NoError(t, err)
+	require.True(t, rec.Leased, "the owner's renewals stayed on time")
+	require.LessOrEqual(t, e.replicas[0].leases.Pool().Stat().AcquireCount()-renewals, int64(10), "the lease pool served renewals only")
+
+	close(resume)
+	require.NoError(t, <-ownerErr)
+	wg.Wait()
+	for i, err := range errs {
+		require.NoError(t, err, "waiter %d answers the owner's outcome", i)
+	}
+	require.Equal(t, 1, e.applied("evt_hot"))
+}

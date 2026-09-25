@@ -25,8 +25,9 @@ const (
 	WebhookClaimTTL       = 24 * time.Hour
 	WebhookEventRetention = 90 * 24 * time.Hour
 
-	webhookDuplicateWait = 10 * time.Second
-	webhookDuplicatePoll = 100 * time.Millisecond
+	webhookDuplicateWait    = 10 * time.Second
+	webhookDuplicatePoll    = 500 * time.Millisecond
+	webhookDuplicatePollMax = 2 * time.Second
 )
 
 // DeduplicationService dedups webhook deliveries across replicas (#1099).
@@ -238,12 +239,14 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 // claim claims the delivery. A duplicate that arrives while another replica
 // processes the event waits for that outcome, briefly: the provider treats
 // any 2xx as delivered, so answering before the owner succeeds could lose the
-// event, and answering 5xx would only schedule a needless redelivery. It
-// waits on the lease pool, holding no request connection, and claims again
-// only once the owner's claim is settled or lapsed.
+// event, and answering 5xx would only schedule a needless redelivery. While it
+// waits it returns the request's pinned connection to the pool and polls on
+// short-lived connections with backoff, never the lease-renewal pool; it
+// claims again only once the owner's claim is settled or lapsed.
 func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*idempotency.Claim, *idempotency.Record, error) {
 	deadline := time.NewTimer(webhookDuplicateWait)
 	defer deadline.Stop()
+	poll := webhookDuplicatePoll
 	for {
 		claim, rec, err := s.claims.Begin(ctx, op, eventID)
 		if err != nil {
@@ -252,14 +255,16 @@ func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*
 		if claim != nil || rec.Status != idempotency.StatusProcessing {
 			return claim, rec, nil
 		}
+		s.db.ReleasePin(ctx)
 		for rec != nil && rec.Status == idempotency.StatusProcessing && rec.Leased {
 			select {
 			case <-ctx.Done():
 				return nil, nil, ctx.Err()
 			case <-deadline.C:
 				return nil, rec, nil
-			case <-time.After(webhookDuplicatePoll):
+			case <-time.After(poll):
 			}
+			poll = min(2*poll, webhookDuplicatePollMax)
 			if rec, err = s.claims.Watch(ctx, op, eventID); err != nil {
 				return nil, nil, fmt.Errorf("failed to watch webhook claim: %w", err)
 			}

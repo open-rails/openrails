@@ -296,6 +296,16 @@ func (l *lazyMerchantPgxConn) release() {
 	l.conn = nil
 }
 
+// releaseIdle releases the pin when no transaction is open on it.
+func (l *lazyMerchantPgxConn) releaseIdle() {
+	l.mu.Lock()
+	idle := l.conn != nil && !l.conn.Conn().IsClosed() && l.conn.Conn().PgConn().TxStatus() == 'I'
+	l.mu.Unlock()
+	if idle {
+		l.release()
+	}
+}
+
 func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	conn, err := l.get(ctx)
 	if err != nil {

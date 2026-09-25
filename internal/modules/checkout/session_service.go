@@ -325,9 +325,6 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 		return nil, err
 	}
 	resp, err := s.createSession(ctx, req, user)
-	if err == nil && req != nil && req.Acceptance != nil && resp != nil && resp.MembershipQuote != nil {
-		resp, err = s.acceptQuoteOnCreate(ctx, resp, user, *req.Acceptance)
-	}
 	s.noteCardAttempt(ctx, user, resp, err)
 	return resp, err
 }
@@ -379,7 +376,13 @@ func (s *CheckoutSessionService) createSession(ctx context.Context, req *Checkou
 				return nil, err
 			}
 			if cached.MembershipQuote != nil || cached.Mode == string(models.CheckoutSessionModeOneOff) && s.db != nil {
-				return s.GetSession(ctx, cached.ID.UUID(), user)
+				live, err := s.GetSession(ctx, cached.ID.UUID(), user)
+				if err != nil {
+					return nil, err
+				}
+				// The accepted quote's operation is keyed by the session, so
+				// accepting again replays it.
+				return s.acceptOnCreate(ctx, req, live, user)
 			}
 			return cached, nil
 		}
@@ -389,11 +392,17 @@ func (s *CheckoutSessionService) createSession(ctx context.Context, req *Checkou
 
 	work, stop := ctx, func() {}
 	if claim != nil {
+		// The owner works under its lease, and no transaction it opens
+		// commits once the claim has passed on (#1099).
 		work, stop = claim.Hold(ctx)
+		work = db.WithCommitGuard(work, claim.InTx)
 	}
 	resp, err := s.createSessionWithValidation(work, req, user)
+	if err == nil {
+		resp, err = s.acceptOnCreate(work, req, resp, user)
+	}
 	stop() // before Complete/Fail: a renewal must never race the final state
-	if claim != nil && errors.Is(context.Cause(work), idempotency.ErrClaimLost) {
+	if claim != nil && (errors.Is(context.Cause(work), idempotency.ErrClaimLost) || errors.Is(err, idempotency.ErrClaimLost)) {
 		// The lease lapsed under us: another request owns the key now.
 		return nil, ErrCheckoutSessionPending
 	}
@@ -413,6 +422,14 @@ func (s *CheckoutSessionService) createSession(ctx context.Context, req *Checkou
 	}
 
 	return resp, nil
+}
+
+// acceptOnCreate accepts a quoted membership in the same call when asked to.
+func (s *CheckoutSessionService) acceptOnCreate(ctx context.Context, req *CheckoutSessionCreateRequest, resp *CheckoutSessionResponse, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	if req.Acceptance == nil || resp == nil || resp.MembershipQuote == nil {
+		return resp, nil
+	}
+	return s.acceptQuoteOnCreate(ctx, resp, user, *req.Acceptance)
 }
 
 func canonicalizeCheckoutPaymentName(payment *CheckoutSessionPaymentRequest) {
@@ -700,7 +717,13 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		}
 	}
 
-	create := s.repo.Create
+	// Created in a transaction, so a request whose claim passed on cannot
+	// commit it (#1099).
+	create := func(ctx context.Context, session *models.CheckoutSession) error {
+		return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			return NewCheckoutSessionRepo(s.db.NewWithPgxTx(tx)).Create(ctx, session)
+		})
+	}
 	if mode == models.CheckoutSessionModeOneOff {
 		create = s.admitPurchaseSession
 	}

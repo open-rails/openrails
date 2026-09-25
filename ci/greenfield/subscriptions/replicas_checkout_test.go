@@ -242,3 +242,63 @@ func (f *fleet) submissionCount(rail string) int {
 	}
 	return len(f.base.nmi.Attempts())
 }
+
+// #1099: an owner frozen past its lease before it creates its session cannot
+// create or confirm it once another request reclaimed the key: every
+// transaction it opens proves the claim first. Here the reclaiming request's
+// new card is refused (402) and releases the key, the host moves on, and the
+// frozen owner then wakes with an approvable card.
+func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
+	t.Parallel()
+	f := newFleet(t, 2)
+	a, b := f.replicas[0], f.replicas[1]
+	price := a.membership("content:members", 9_990_000)
+	charges := func() int { return len(f.base.nmi.Ledger("")) }
+	subscriptions := func(c *customer) int {
+		subs, err := b.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+		require.NoError(t, err)
+		return len(subs.Data)
+	}
+	request := func(c *customer, key string) openrails.CreateCheckoutSessionRequest {
+		return openrails.CreateCheckoutSessionRequest{
+			Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
+			PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
+		}
+	}
+	c := a.newCustomer()
+	before := charges()
+
+	req1 := request(c, "checkout:"+uuid.NewString()+":1")
+	vault := f.hold("nmi", func(r *http.Request) bool {
+		return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v5/customers")
+	}, true)
+	owner := make(chan error, 1)
+	go func() {
+		_, err := a.client[embedded].CreateCheckoutSession(context.WithoutCancel(t.Context()), req1)
+		owner <- err
+	}()
+	require.Equal(t, a, vault.wait()) // frozen before its session exists
+
+	f.lapseCheckoutClaims(c.id)
+	f.base.nmi.DeclineValidations(1)
+	_, err := b.client[embedded].CreateCheckoutSession(t.Context(), req1) // reclaims; the card save is refused
+	requireStatus(t, err, http.StatusPaymentRequired)
+
+	// The host moves on; the frozen owner wakes and must not commit anything.
+	vault.release()
+	requireStatus(t, <-owner, http.StatusConflict)
+	f.settle()
+	require.Equal(t, before, charges(), "the frozen owner never charges")
+	require.Zero(t, subscriptions(c), "nor enrolls")
+	var sessions int
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT count(*) FROM openrails.checkout_sessions WHERE customer_id = $1`), c.id).Scan(&sessions))
+	require.Zero(t, sessions, "nor creates its session")
+
+	s2, err := b.client[embedded].CreateCheckoutSession(t.Context(), request(c, "checkout:"+uuid.NewString()+":2"))
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", s2.Status)
+	f.settle()
+	require.Equal(t, before+1, charges(), "the attempt the host moved to charges once")
+	require.Equal(t, 1, subscriptions(c))
+	require.Empty(t, f.base.nmi.Unexpected())
+}

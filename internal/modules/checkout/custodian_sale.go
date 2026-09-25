@@ -199,6 +199,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 	}
 	work, stop := claim.Hold(ctx)
 	defer stop()
+	work = db.WithCommitGuard(work, claim.InTx)
 
 	tid, err := merchant.Require(ctx)
 	if err != nil {

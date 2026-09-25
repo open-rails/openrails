@@ -69,7 +69,8 @@ type Store struct {
 	lease  time.Duration
 }
 
-// NewStore claims on database; leases is the small pool lease renewals use.
+// NewStore claims on database; leases is the small pool lease renewals use,
+// and nothing else.
 func NewStore(database, leases *db.DB, ttl, lease time.Duration) (*Store, error) {
 	if database == nil || leases == nil || ttl <= 0 || lease <= 0 || lease > ttl {
 		return nil, fmt.Errorf("idempotency store needs a database, a lease pool and 0 < lease <= ttl")
@@ -120,7 +121,7 @@ func (s *Store) Begin(ctx context.Context, operation, key string) (*Claim, *Reco
 		if !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("reclaim idempotency key: %w", err)
 		}
-		rec, err := s.get(ctx, q, mid.UUID(), operation, key)
+		rec, err := read(ctx, q, mid.UUID(), operation, key)
 		if err != nil {
 			return nil, nil, fmt.Errorf("read idempotency key: %w", err)
 		}
@@ -138,20 +139,21 @@ func (s *Store) Get(ctx context.Context, operation, key string) (*Record, error)
 	if err != nil {
 		return nil, err
 	}
-	return s.get(ctx, s.queries(ctx), mid.UUID(), operation, key)
+	return read(ctx, s.queries(ctx), mid.UUID(), operation, key)
 }
 
-// Watch reads a key's record on the lease pool, holding no request
-// connection: for callers that wait out another owner.
+// Watch reads a key's record on a short-lived pool connection, never the
+// request's pin and never the lease pool, which is for renewals only: for
+// callers that wait out another owner.
 func (s *Store) Watch(ctx context.Context, operation, key string) (*Record, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.get(ctx, s.leases.GenDirectory(), mid.UUID(), operation, key)
+	return read(ctx, s.db.GenDirectory(), mid.UUID(), operation, key)
 }
 
-func (s *Store) get(ctx context.Context, q *gen.Queries, mid uuid.UUID, operation, key string) (*Record, error) {
+func read(ctx context.Context, q *gen.Queries, mid uuid.UUID, operation, key string) (*Record, error) {
 	row, err := q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: mid, Operation: operation, IdempotencyKey: key})
 	if db.IsNotFound(err) {
 		return nil, nil
@@ -166,6 +168,11 @@ func (s *Store) get(ctx context.Context, q *gen.Queries, mid uuid.UUID, operatio
 	})
 	r.Leased = row.Leased
 	return r, nil
+}
+
+// GetInTx reads a key's record inside tx, nil when absent.
+func GetInTx(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, operation, key string) (*Record, error) {
+	return read(ctx, gen.New(tx), merchantID, operation, key)
 }
 
 // DeleteExpired deletes up to limit idempotency rows past their expiry,
