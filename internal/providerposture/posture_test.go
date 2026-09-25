@@ -173,3 +173,40 @@ func TestTrackedReportsCachedStateAndRecoversAfterBackoff(t *testing.T) {
 	}
 	require.Equal(t, []int{0, 0, 1, 2}, attempts, "consecutive unknowns back off further")
 }
+
+// A provider that never answers cannot hold checkouts: concurrent callers
+// share one bounded check and each returns within its own context.
+func TestRequireIsSingleFlightBoundedAndContextAware(t *testing.T) {
+	r := NewRegistry(func(int) time.Duration { return time.Minute })
+	r.Timeout = time.Hour
+	release := make(chan struct{})
+	var calls atomic.Int64
+	hang := func(context.Context) (Verdict, error) {
+		calls.Add(1)
+		<-release
+		return Simulated, nil
+	}
+	k := Key{Rail: "nmi", Credential: Fingerprint("hang")}
+	var wg sync.WaitGroup
+	start := time.Now()
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			require.ErrorIs(t, r.Require(ctx, k, hang), ErrDisarmed)
+		}()
+	}
+	wg.Wait()
+	require.Less(t, time.Since(start), 2*time.Second, "callers return within their contexts")
+	close(release)
+	require.Eventually(t, func() bool { return r.Require(context.Background(), k, hang) == nil }, 2*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, calls.Load(), "one check for every concurrent caller")
+
+	r.Timeout = 50 * time.Millisecond
+	slow := func(ctx context.Context) (Verdict, error) { <-ctx.Done(); return Unknown, ctx.Err() }
+	start = time.Now()
+	require.ErrorIs(t, r.Require(context.Background(), Key{Rail: "stripe", Credential: Fingerprint("slow")}, slow), ErrDisarmed)
+	require.Less(t, time.Since(start), time.Second, "a check is bounded by the posture timeout")
+}

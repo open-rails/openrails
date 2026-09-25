@@ -119,18 +119,26 @@ func (s Status) Error() error {
 }
 
 type entry struct {
-	run      sync.Mutex
+	mu       sync.Mutex
 	status   Status
 	done     bool
 	failures int
 	retryAt  time.Time
+	// flight is closed when the running check has recorded its verdict.
+	flight chan struct{}
 }
 
-// Registry is a concurrency-safe verdict cache. An Unknown verdict (the
-// provider did not answer) is retried after Backoff(consecutive unknowns);
-// live and unsupported verdicts stay disarmed until an explicit Verify
-// (credential reload) replaces them.
+// DefaultTimeout bounds one posture check, whatever the provider client's own
+// timeout: a checkout waiting on it must not hang.
+const DefaultTimeout = 5 * time.Second
+
+// Registry is a concurrency-safe verdict cache. One check runs per key at a
+// time, bounded by Timeout; every caller waits for it only as long as its own
+// context allows. An Unknown verdict (the provider did not answer) is retried
+// after Backoff(consecutive unknowns); live and unsupported verdicts stay
+// disarmed until an explicit Verify (credential reload) replaces them.
 type Registry struct {
+	Timeout time.Duration
 	Backoff func(attempt int) time.Duration
 	Now     func() time.Time
 
@@ -140,7 +148,7 @@ type Registry struct {
 
 // NewRegistry returns an empty registry retrying unknown verdicts after backoff.
 func NewRegistry(backoff func(attempt int) time.Duration) *Registry {
-	return &Registry{Backoff: backoff, entries: map[Key]*entry{}}
+	return &Registry{Timeout: DefaultTimeout, Backoff: backoff, entries: map[Key]*entry{}}
 }
 
 var process = NewRegistry(func(attempt int) time.Duration { return retry.Backoff(attempt, time.Second, retry.Max) })
@@ -170,42 +178,59 @@ func (r *Registry) entry(k Key) *entry {
 	return e
 }
 
-// Verify runs check now and records the verdict, replacing any prior one.
+// Verify checks k now (joining a check already running) and records the
+// verdict, replacing any prior one.
 func (r *Registry) Verify(ctx context.Context, k Key, check Check) Status {
-	e := r.entry(k)
-	e.run.Lock()
-	defer e.run.Unlock()
-	return r.record(ctx, e, k, check)
+	return r.resolve(ctx, k, check, true)
+}
+
+// Require returns nil only for an armed key. An unseen key is verified once;
+// an Unknown verdict is re-verified once its backoff has elapsed.
+func (r *Registry) Require(ctx context.Context, k Key, check Check) error {
+	return r.resolve(ctx, k, check, false).Error()
+}
+
+// Refresh re-verifies k only when its Unknown verdict is due for retry.
+func (r *Registry) Refresh(ctx context.Context, k Key, check Check) Status {
+	return r.resolve(ctx, k, check, false)
 }
 
 func (r *Registry) settled(e *entry) bool {
 	return e.done && (e.status.Verdict != Unknown || r.now().Before(e.retryAt))
 }
 
-// Require returns nil only for an armed key. An unseen key is verified once;
-// an Unknown verdict is re-verified once its backoff has elapsed.
-func (r *Registry) Require(ctx context.Context, k Key, check Check) error {
+func (r *Registry) resolve(ctx context.Context, k Key, check Check, force bool) Status {
 	e := r.entry(k)
-	e.run.Lock()
-	defer e.run.Unlock()
-	if r.settled(e) {
-		return e.status.Error()
+	e.mu.Lock()
+	if !force && r.settled(e) {
+		s := e.status
+		e.mu.Unlock()
+		return s
 	}
-	return r.record(ctx, e, k, check).Error()
-}
-
-// Refresh re-verifies k only when its Unknown verdict is due for retry.
-func (r *Registry) Refresh(ctx context.Context, k Key, check Check) Status {
-	e := r.entry(k)
-	e.run.Lock()
-	defer e.run.Unlock()
-	if r.settled(e) {
+	flight := e.flight
+	if flight == nil {
+		flight = make(chan struct{})
+		e.flight = flight
+		go r.record(context.WithoutCancel(ctx), e, k, check, flight)
+	}
+	e.mu.Unlock()
+	select {
+	case <-flight:
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		return e.status
+	case <-ctx.Done():
+		return Status{Key: k, Verdict: Unknown, Err: ctx.Err(), CheckedAt: r.now()}
 	}
-	return r.record(ctx, e, k, check)
 }
 
-func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check) Status {
+func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check, flight chan struct{}) {
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	verdict, err := Unknown, error(nil)
 	if check == nil {
 		err = errors.New("no posture check")
@@ -215,6 +240,8 @@ func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check) Sta
 	if verdict == k.expected() && err != nil {
 		verdict = Unknown
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	now := r.now()
 	e.status = Status{Key: k, Verdict: verdict, Err: err, CheckedAt: now}
 	e.done = true
@@ -226,7 +253,8 @@ func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check) Sta
 	} else {
 		e.failures, e.retryAt = 0, time.Time{}
 	}
-	return e.status
+	e.flight = nil
+	close(flight)
 }
 
 // Lookup returns the recorded status for k.
@@ -237,8 +265,8 @@ func (r *Registry) Lookup(k Key) (Status, bool) {
 	if e == nil {
 		return Status{}, false
 	}
-	e.run.Lock()
-	defer e.run.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.status, e.done
 }
 
