@@ -1145,7 +1145,7 @@ SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
-  AND collection_policy <> 'engine'
+  AND collection_policy = 'provider_dunning'
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > $3::timestamptz)
@@ -1158,8 +1158,10 @@ type ListDunningStalledSubscriptionsParams struct {
 	Now        time.Time
 }
 
-// #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
-// grace but with NO retry scheduled — its dunning schedule stalled. MISSING.
+// LIFE plane (life.subscription.dunning_overdue): an OpenRails-dunned NMI
+// schedule past_due in grace with NO retry scheduled. Engine rows own their
+// schedule (past_due without a retry is their awaiting-new-card state);
+// provider-owned rows are retried by the provider or not at all.
 func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListDunningStalledSubscriptionsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listDunningStalledSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
@@ -2558,32 +2560,6 @@ type ResolveStandingFindingParams struct {
 // A standing finding whose subject is healthy again closes itself.
 func (q *Queries) ResolveStandingFinding(ctx context.Context, arg ResolveStandingFindingParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resolveStandingFinding, arg.MerchantID, arg.FindingType, arg.SubjectKey)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setSubscriptionNextRetry = `-- name: SetSubscriptionNextRetry :execrows
-UPDATE openrails.subscriptions
-SET next_retry_at = $1::timestamptz, updated_at = now()
-WHERE id = $2
-  AND merchant_id = $3
-  AND status = 'past_due'
-  AND next_retry_at IS NULL
-  AND deleted_at IS NULL
-`
-
-type SetSubscriptionNextRetryParams struct {
-	NextRetryAt time.Time
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-}
-
-// Repair for dunning_overdue: re-establish the retry schedule so the dunning
-// worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
-func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscriptionNextRetryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setSubscriptionNextRetry, arg.NextRetryAt, arg.ID, arg.MerchantID)
 	if err != nil {
 		return 0, err
 	}

@@ -129,6 +129,17 @@ func NextRetryIn(cycleHours, failures int) (time.Duration, error) {
 	return offsets[failures-1] - offsets[failures-2], nil
 }
 
+// NextAttemptAt is the schedule's next attempt after the failures-th
+// consecutive failure (1-based) made at lastAttempt. ok is false when that
+// failure spent the schedule. Every consumer takes retry times from here.
+func NextAttemptAt(cycleHours, failures int, lastAttempt time.Time) (next time.Time, ok bool, err error) {
+	gap, err := NextRetryIn(cycleHours, failures)
+	if err != nil || gap == 0 {
+		return time.Time{}, false, err
+	}
+	return lastAttempt.Add(gap), true, nil
+}
+
 // Window returns the DERIVED staleness window (#344, #359): how long past the
 // missed charge collection may still attempt one. Past it the charge is SKIPPED
 // — a card that failed months ago is never surprise-charged by a catch-up run —

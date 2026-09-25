@@ -657,12 +657,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
-	// life.subscription.dunning_overdue — a past_due sub still within its grace
-	// window but with NO retry scheduled: its dunning schedule stalled (a missed
-	// enqueue, a crash between attempts). MISSING → materialize the schedule so
-	// the dunning worker resumes. Converge-not-replay: we schedule the NEXT retry
-	// (now), we do NOT re-run the missed attempts; a sub whose grace has actually
-	// elapsed is handled by grace_exhausted, not here. AUTO, not gated.
+	// life.subscription.dunning_overdue — an OpenRails-dunned NMI schedule
+	// (provider_dunning) past_due within grace with no retry scheduled. The
+	// dunning schedule picks the time; this pass never does.
 	dunningStalled, err := q.ListDunningStalledSubscriptions(ctx, gen.ListDunningStalledSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
@@ -678,11 +675,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Severity:   "medium",
 			SubjectKey: "subscription:" + subID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"subscription_id": openrails.SubscriptionID(subID).String(), "next_retry_at": now},
+			Evidence:   map[string]any{"subscription_id": openrails.SubscriptionID(subID).String()},
 			Repair: func(ctx context.Context) error {
-				_, e := q.SetSubscriptionNextRetry(ctx, gen.SetSubscriptionNextRetryParams{
-					ID: subID, MerchantID: scope.Merchant.UUID(), NextRetryAt: p.e.Now(),
-				})
+				_, e := lifecycle.ResumeStalledDunning(ctx, p.e.DB, subID)
 				return e
 			},
 		})

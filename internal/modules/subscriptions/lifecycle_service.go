@@ -1720,6 +1720,53 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 	})
 }
 
+// ResumeStalledDunning restores the retry of an OpenRails-dunned NMI schedule
+// (provider_dunning) that is past_due with no attempt scheduled: the
+// schedule's next step after its last attempt (the missed charge when none
+// was recorded), never earlier, clamped to grace. Past grace, or with the
+// schedule spent, it does nothing: grace_exhausted owns the row. Reports
+// whether a retry was scheduled.
+func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context, dbb *db.DB, subscriptionID uuid.UUID) (bool, error) {
+	resumed := false
+	err := withLockedSubscription(ctx, dbb, &models.Subscription{ID: subscriptionID}, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+		now := s.now()
+		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil || sub.CurrentPeriodEndsAt == nil {
+			return nil
+		}
+		if sub.GraceEndsAt != nil && !sub.GraceEndsAt.After(now) {
+			return nil
+		}
+		price, err := catalog.NewPriceService(dbb).GetByID(ctx, sub.PriceID)
+		if err != nil {
+			return fmt.Errorf("resume dunning %s: load price: %w", sub.ID, err)
+		}
+		failures, last := 1, *sub.CurrentPeriodEndsAt
+		if sub.RetryAttempts != nil && *sub.RetryAttempts > 1 {
+			failures = *sub.RetryAttempts
+		}
+		if sub.LastRetryAt != nil {
+			last = *sub.LastRetryAt
+		}
+		next, ok, err := collection.NextAttemptAt(collection.BillingCycleHoursOf(price), failures, last)
+		if err != nil && !errors.Is(err, collection.ErrUnknownCycle) {
+			return err
+		}
+		if !ok {
+			return nil // spent, or an unknown cycle the due pass reports
+		}
+		if sub.GraceEndsAt != nil && next.After(*sub.GraceEndsAt) {
+			next = *sub.GraceEndsAt
+		}
+		sub.NextRetryAt = &next
+		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+			return fmt.Errorf("resume dunning %s: %w", sub.ID, err)
+		}
+		resumed = true
+		return nil
+	})
+	return resumed, err
+}
+
 // ApplyLocalUnknown parks a subscription as `unknown` (#632/#664): a
 // needs-provider-verification state resolved by provider-pull (#633). Entry
 // from `active` (period elapsed, no ownership evidence) or `past_due` (dunning
@@ -2353,11 +2400,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				subscription.EndedAt = &now
 				subscription.ClearRetrySchedule()
 			} else {
-				gap, err := collection.NextRetryIn(cycleHours, *subscription.RetryAttempts)
+				nextRetry, _, err := collection.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
 				if err != nil {
 					return err
 				}
-				nextRetry := now.Add(gap)
 				subscription.NextRetryAt = &nextRetry
 			}
 		}

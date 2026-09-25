@@ -644,14 +644,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY current_period_ends_at ASC NULLS FIRST
 LIMIT sqlc.arg(max_rows)::int;
 
--- #511 LIFE plane (life.subscription.dunning_overdue): a past_due sub still in
--- grace but with NO retry scheduled — its dunning schedule stalled. MISSING.
+-- LIFE plane (life.subscription.dunning_overdue): an OpenRails-dunned NMI
+-- schedule past_due in grace with NO retry scheduled. Engine rows own their
+-- schedule (past_due without a retry is their awaiting-new-card state);
+-- provider-owned rows are retried by the provider or not at all.
 -- name: ListDunningStalledSubscriptions :many
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
-  AND collection_policy <> 'engine'
+  AND collection_policy = 'provider_dunning'
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
@@ -692,17 +694,6 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   )
 ORDER BY s.id
 LIMIT sqlc.arg(row_limit);
-
--- name: SetSubscriptionNextRetry :execrows
--- Repair for dunning_overdue: re-establish the retry schedule so the dunning
--- worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
-UPDATE openrails.subscriptions
-SET next_retry_at = sqlc.arg(next_retry_at)::timestamptz, updated_at = now()
-WHERE id = sqlc.arg(id)
-  AND merchant_id = sqlc.arg(merchant_id)
-  AND status = 'past_due'
-  AND next_retry_at IS NULL
-  AND deleted_at IS NULL;
 
 -- #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
 -- legacy pull engine's PS-9. An `active` sub in a RUNNING period whose product

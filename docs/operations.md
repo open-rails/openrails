@@ -519,7 +519,12 @@ downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements
 + rail-side delete via the intent ledger's deferred-delete mechanism.
 
 This schedule governs every subscription OpenRails collects itself: engine
-memberships on Stripe and NMI, and NMI `provider_dunning` rebills.
+memberships on Stripe and NMI, and NMI `provider_dunning` rebills. NMI never
+retries a declined scheduled charge, so on `provider_dunning` the provider's
+decline is the schedule's first failure (first retry at the first offset, never
+at once). A past_due `provider_dunning` row left with no retry scheduled resumes
+at its next step after the last attempt, clamped to grace. NMI `provider`
+schedules get no retries: the next scheduled charge is the only attempt.
 Provider-owned Stripe subscriptions use Stripe's own dunning. Ours is sparser
 than Stripe's 8-retry default because each NMI decline costs a per-transaction
 fee.

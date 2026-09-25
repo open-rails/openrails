@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -258,8 +259,18 @@ type Decision struct {
 	// planes turn it into an operator finding — a floored row must be visible,
 	// not a silent no-op.
 	EvidenceFloored bool
+	// Decline is the provider's declined renewal behind a TransitionPastDue,
+	// when one was seen: the attempt OpenRails dunning counts and classifies.
+	Decline *RemoteTransaction
 	// Reason is a short cause slug for finding evidence / logs.
 	Reason string
+}
+
+// DunsDecline reports that OpenRails' dunning owns the retries after this
+// decision's decline: a provider_dunning NMI schedule entering past_due off a
+// seen decline. FailMembership then counts, classifies and schedules it.
+func DunsDecline(sub *models.Subscription, d Decision) bool {
+	return d.Kind == TransitionPastDue && d.Decline != nil && sub != nil && sub.CollectionPolicy == models.CollectionPolicyProviderDunning
 }
 
 // Decide maps (current row, evidence bundle) → transition. PURE. dunningWindow
@@ -536,7 +547,7 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	//    through gateCancelCertainty and parks.
 	if declineTxn != nil {
 		if now.Sub(periodEnd) <= dunningWindow {
-			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "declined_renewal_within_window"})
+			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Decline: declineTxn, Reason: "declined_renewal_within_window"})
 		}
 		// #835: the decline attempt itself dates this cancel. On an imported
 		// book the decline arrived with the data and can be years older than
@@ -678,7 +689,22 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if sub.CurrentPeriodEndsAt == nil {
 			return false, nil // chk_past_due_has_period_end: unsatisfiable; park path owns it
 		}
-		return true, lc.ApplyLocalPastDue(ctx, database, sub, d.GraceEndsAt)
+		if err := lc.ApplyLocalPastDue(ctx, database, sub, d.GraceEndsAt); err != nil {
+			return true, err
+		}
+		if !DunsDecline(sub, d) || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil || (sub.RetryAttempts != nil && *sub.RetryAttempts > 0) {
+			return true, nil
+		}
+		// The decline is dunning's first failure: the same path as a declined
+		// OpenRails retry, so its schedule (never "now") and classification apply.
+		code := normalize.Trim(d.Decline.DeclineCode)
+		return true, lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
+			Rail:            sub.Rail,
+			SubscriptionID:  &sub.ID,
+			FailureCode:     normalize.OptionalString(code),
+			Decline:         collection.ClassifyDecline(string(sub.Rail), code),
+			AttemptRecorded: true,
+		})
 
 	case TransitionRenew, TransitionAdoptPeriodEnd, TransitionCancel:
 		if sub.Status != models.StatusUnknown {
