@@ -81,7 +81,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 		w.advance(2 * time.Second)
 		require.False(t, e.c.entitled(e.ent), "access ends at period end + %s even while the challenge is open", grace)
 		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned challenge waits for a new card")
-		require.False(t, e.c.entitled(e.ent))
+		require.True(t, e.c.entitled(e.ent), "a membership waiting for a new card keeps access")
 		require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
 		require.True(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.Equal(end))
 	})
@@ -100,7 +100,7 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 		first := w.clock.Now()
 		w.runRenewals()
 		sub := w.subscription(embedded, e.sub)
-		require.False(t, e.c.entitled(e.ent), "a decline ends the allowance")
+		require.Equal(t, hours >= collection.MinRetryCycleHours, e.c.entitled(e.ent), "access continues through dunning; a terminal first decline ends it")
 		switch {
 		case hours < collection.MinRetryCycleHours:
 			require.Equal(t, "cancelled", sub.Status, "the first decline is terminal below 96h")

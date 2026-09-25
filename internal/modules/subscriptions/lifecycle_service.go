@@ -2474,11 +2474,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				return fmt.Errorf("record held terminal outcome for %s: %w", subscription.ID, err)
 			}
 		}
-		// Engine access is paid time plus the renewal allowance; a decided
-		// decline ends the allowance now.
+		// Engine access through dunning follows the merchant's policy: by
+		// default the member keeps access until a confirmed outcome (a payment,
+		// a non-recoverable decline, a spent schedule); under "suspend" access
+		// ends with the paid period.
 		if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCancelled && entSvc != nil {
-			if err := entSvc.RevokeSourcesForSubscriptionAsOf(ctx, subscription.CustomerID.String(), subscription.ID, now, models.EntitlementRevokeDunning, models.EntitlementSourceGrace); err != nil {
-				return fmt.Errorf("end engine renewal grace for %s: %w", subscription.ID, err)
+			if err := s.engineDunningAccess(ctx, db, entSvc, subscription, now); err != nil {
+				return err
 			}
 		}
 
@@ -2639,4 +2641,27 @@ func pspIDOf(subscription *models.Subscription) *uuid.UUID {
 	}
 	id := subscription.PspID
 	return &id
+}
+
+// engineDunningAccess applies the merchant's access policy to an engine
+// membership in dunning: an open-ended grace from the paid period's end
+// (closed by the renewal that pays, or by the terminal outcome), or no grace.
+func (s *SubscriptionLifecycleService) engineDunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
+	policy, err := DunningPolicy(ctx, d)
+	if err != nil {
+		return err
+	}
+	if policy.SuspendAccess || sub.CurrentPeriodEndsAt == nil {
+		if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, models.EntitlementRevokeDunning, models.EntitlementSourceGrace); err != nil {
+			return fmt.Errorf("end engine renewal grace for %s: %w", sub.ID, err)
+		}
+		return nil
+	}
+	start := sub.CurrentPeriodEndsAt.UTC()
+	for name := range sub.EntitlementsSpecSnapshot {
+		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, Indefinite: true, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}); err != nil {
+			return fmt.Errorf("keep access through dunning for %s: %w", sub.ID, err)
+		}
+	}
+	return nil
 }

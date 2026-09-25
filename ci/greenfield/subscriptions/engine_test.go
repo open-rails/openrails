@@ -275,7 +275,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				for range 10 {
 					sub := w.subscription(e.tp, e.sub)
 					require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a decline never extends the period")
-					require.False(t, e.c.entitled(e.ent), "no grace after a decline: engine access ends with the paid period")
+					require.Equal(t, sub.Status != "cancelled", e.c.entitled(e.ent), "members keep access through dunning; only a confirmed outcome ends it (%s)", sub.Status)
 					if sub.NextRetryAt == nil {
 						break
 					}
@@ -663,7 +663,7 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	require.True(t, e.c.entitled(e.ent), "access holds while the member can still authenticate")
 	w.advance(25 * time.Hour)
 	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned renewal waits for a new card")
-	require.False(t, e.c.entitled(e.ent))
+	require.True(t, e.c.entitled(e.ent), "access returns while the membership waits for a new card")
 	require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
 	e.replaceCard(mastercard)
 	w.runRenewals()
