@@ -244,3 +244,23 @@ order: after five minutes with no transaction it ends not executed. If the
 search is unavailable, a `life.tier_change.proration_unresolved` finding names
 `openrails intents resolve --intent <id> --step proration --not-executed`
 (accepted only when NMI holds no transaction for the order) or `--receipt`.
+
+### Verifying unverified subscriptions
+
+A schedule whose renewal OpenRails has not seen (its period lapsed with no
+charge or decline recorded) becomes `unverified`, with access kept. It is read
+from NMI as soon as that commits:
+
+- Up to 50 schedules per request: one Query API recurring report and one
+  transaction query (`subscription_id` takes a comma-separated list), plus a
+  v5 read only for a schedule the report no longer lists.
+- Above 200 unverified schedules (typically right after an import), the
+  account is read in bulk: one paged v5 roster read and a paged transaction
+  read by date range. Each transaction page is recorded, and the pass resumes
+  from its last page after a crash.
+
+A payment renews exactly the periods it paid, a decline enters dunning, and a
+schedule NMI ended is cancelled. A row with no evidence stays `unverified`. The
+`life.unverified.backlog` finding reports each account's count and oldest age;
+a row still unverified after three days raises `life.unverified.unresolved` for
+the operator.

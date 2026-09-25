@@ -38,10 +38,10 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		return true, lc.ApplyLocalUnknown(ctx, database, sub)
 
 	case TransitionPastDue:
-		if DunsDecline(sub, d) {
-			return applyDunnedDecline(ctx, lc, sub, d)
+		if sub.Status != models.StatusActive && sub.Status != models.StatusUnverified {
+			return false, nil // a recorded decline already dunned the period
 		}
-		if d.Decline == nil && subscriptions.OwnerOf(sub) != lifecycle.Provider {
+		if d.Decline == nil && !d.Declared && subscriptions.OwnerOf(sub) != lifecycle.Provider {
 			// A stalled provider date is no decline: the row is verified
 			// instead of dunned (#1089 §1).
 			if sub.Status != models.StatusActive {
@@ -53,15 +53,20 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if d.Decline != nil && !d.Decline.OccurredAt.IsZero() {
 			at = d.Decline.OccurredAt
 		}
-		return transition(ctx, database, lc, sub, d, now, func(cur *models.Subscription) lifecycle.Event {
+		duns := DunsDecline(sub, d)
+		applied, err := transition(ctx, database, lc, sub, d, now, duns, func(cur *models.Subscription) lifecycle.Event {
 			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.Retry, At: at}
 		})
+		if err != nil || !applied || !duns {
+			return applied, err
+		}
+		return applyDunnedDecline(ctx, lc, sub, d)
 
 	case TransitionRenew:
 		if d.NewPeriodEnd == nil {
 			return false, nil
 		}
-		return transition(ctx, database, lc, sub, d, now, func(cur *models.Subscription) lifecycle.Event {
+		return transition(ctx, database, lc, sub, d, now, false, func(cur *models.Subscription) lifecycle.Event {
 			start := paidThroughOf(cur)
 			if start.IsZero() {
 				start = now
@@ -73,14 +78,21 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		})
 
 	case TransitionAdoptPeriodEnd:
-		return applyAdoption(ctx, database, lc, sub, d, now)
+		// A live schedule is no payment: it only confirms an unverified row
+		// whose paid period is still running, and never moves the period.
+		if sub.Status != models.StatusUnverified {
+			return false, nil
+		}
+		return transition(ctx, database, lc, sub, d, now, false, func(*models.Subscription) lifecycle.Event {
+			return lifecycle.ProviderConfirmedCurrent{At: now}
+		})
 
 	case TransitionCancel:
 		at := d.EvidenceAt
 		if at.IsZero() {
 			at = now
 		}
-		return transition(ctx, database, lc, sub, d, now, func(cur *models.Subscription) lifecycle.Event {
+		return transition(ctx, database, lc, sub, d, now, false, func(cur *models.Subscription) lifecycle.Event {
 			switch {
 			case d.RemoteGone:
 				return lifecycle.ProviderCancelled{At: at}
@@ -95,8 +107,9 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 }
 
 // applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule
-// to FailMembership, the dunning writer, which classifies it and schedules
-// the next attempt (never "now"). A decline already counted is ignored.
+// to FailMembership, the dunning writer, which counts and classifies it,
+// schedules the next attempt (never "now") and tells the customer. A decline
+// already counted is ignored.
 func applyDunnedDecline(ctx context.Context, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision) (bool, error) {
 	if sub.NextRetryAt != nil || (sub.LastRetryAt != nil && !d.Decline.OccurredAt.After(*sub.LastRetryAt)) {
 		return false, nil
@@ -111,23 +124,9 @@ func applyDunnedDecline(ctx context.Context, lc *subscriptions.SubscriptionLifec
 	})
 }
 
-// applyAdoption keeps the provider's future boundary for a row with no
-// charge. Retired for ProviderConfirmedCurrent once the core writers land.
-func applyAdoption(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
-	if sub.Status != models.StatusUnverified {
-		if sub.Status != models.StatusActive {
-			return false, nil
-		}
-		if err := lc.ApplyLocalUnknown(ctx, database, sub, models.StatusActive); err != nil {
-			return false, err
-		}
-	}
-	return true, lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolveAdopted, d.NewPeriodStart, d.NewPeriodEnd, now)
-}
-
 // transition applies one event to the locked row and carries out its
 // effects in the same transaction; notifications go out after commit.
-func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, event func(*models.Subscription) lifecycle.Event) (bool, error) {
+func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, quiet bool, event func(*models.Subscription) lifecycle.Event) (bool, error) {
 	var notices []*models.NotificationQueue
 	applied := false
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -154,13 +153,17 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 		if len(effects) == 0 && subscriptions.SnapshotOf(cur) == before {
 			return nil
 		}
-		if notices, err = lc.ApplyEffects(ctx, tx, cur, customerNotices(effects, d.Silent), now); err != nil {
+		if notices, err = lc.ApplyEffects(ctx, tx, cur, customerNotices(effects, quiet || d.Declared), now); err != nil {
 			return err
 		}
 		if _, renewed := ev.(lifecycle.RenewalPaid); renewed {
 			if err := lc.ApplyScheduledTier(ctx, tx, cur); err != nil {
 				return err
 			}
+		}
+		if cur.Status == models.StatusPastDue && cur.GraceEndsAt == nil && !d.GraceEndsAt.IsZero() {
+			grace := d.GraceEndsAt // dunning's pacing marker
+			cur.GraceEndsAt = &grace
 		}
 		if cur.Status == models.StatusCancelled && before.Status != lifecycle.Cancelled {
 			feedback := "provider-confirmed: " + d.Reason

@@ -39,8 +39,9 @@ func TestNMIStaleRosterDateInsidePaidPeriod(t *testing.T) {
 }
 
 // A decline first seen after its grace would have ended (the webhook was
-// lost; the provider probe finds it) still enters dunning: grace and the
-// first retry run from discovery, and the retry recovers the period.
+// lost) still enters dunning: the lapsed row is parked, read at once, and the
+// read finds the decline. Grace and the first retry run from discovery, and
+// the retry recovers the period.
 func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -51,10 +52,8 @@ func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	l.providerRenewal(false) // NMI declines at the boundary; no webhook arrives
 	w.advance(end.Sub(w.clock.Now()) + 3*day)
 	w.converge()
-	require.NotEqual(t, "past_due", w.subscription(embedded, l.sub).Status, "no decline seen yet")
-
-	w.pull()
 	now := w.clock.Now()
+	require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).NextRetryAt != nil }, 30*time.Second, 50*time.Millisecond, "the park's read finds the decline")
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, "past_due", sub.Status)
 	require.NotNil(t, sub.GraceEndsAt)
