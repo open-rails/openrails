@@ -222,6 +222,7 @@ func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB
 		sub.Status, sub.CancelledAt, sub.CancelType, sub.CancelFeedback = models.StatusCancelled, &now, &cancelType, &reason
 		sub.DeletionScheduledAt = &now
 		sub.ClearRetrySchedule()
+		sub.MarkLifecycleDecision("refund_revoke")
 		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
 			return err
 		}

@@ -51,6 +51,7 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 	}
 	if next != before {
 		writeSnapshot(sub, before, next, effects, now)
+		sub.MarkLifecycleDecision(lifecycle.Name(ev))
 	}
 	for _, e := range effects {
 		if _, ok := e.(lifecycle.CloseDunning); ok {

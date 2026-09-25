@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -108,6 +109,8 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
+	s.LifecycleRev = 0
+	s.RememberLifecycle()
 	return nil
 }
 
@@ -162,7 +165,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 	if scopeErr != nil {
 		return scopeErr
 	}
-	rows, err := r.db.Gen(ctx).UpdateSubscriptionAt(ctx, gen.UpdateSubscriptionAtParams{
+	p := gen.UpdateSubscriptionAtParams{
 		MerchantID:               scopeMerchantID.UUID(),
 		ID:                       s.ID,
 		PriceID:                  priceID,
@@ -189,14 +192,56 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		GatewayResponse:          s.Metadata,
 		ScheduledPriceID:         s.ScheduledPriceID,
 		UpdatedAt:                s.UpdatedAt,
-	})
+	}
+	if s.LifecycleChanged() {
+		// #1091 part C: status, paid period and cancellation change only in a
+		// named lifecycle decision, against the revision it was decided on.
+		if s.LifecycleDecision() == "" {
+			return fmt.Errorf("%w: subscription %s (caller %s)", ErrLifecycleUndecided, s.ID, callerName(2))
+		}
+		rows, err := r.db.Gen(ctx).UpdateSubscriptionDecided(ctx, decidedParams(p, s.LifecycleRev))
+		if err != nil {
+			return fmt.Errorf("save %s decision on subscription %s (caller %s): %w", s.LifecycleDecision(), s.ID, callerName(2), err)
+		}
+		if rows < 1 {
+			return fmt.Errorf("%w: subscription %s changed since it was read (%s, caller %s)", ErrSubscriptionMoved, s.ID, s.LifecycleDecision(), callerName(2))
+		}
+		s.LifecycleRev++
+		s.RememberLifecycle()
+		return nil
+	}
+	rows, err := r.db.Gen(ctx).UpdateSubscriptionAt(ctx, p)
 	if err != nil {
-		return err
+		return fmt.Errorf("update subscription %s (caller %s): %w", s.ID, callerName(2), err)
 	}
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
 	return nil
+}
+
+var (
+	// ErrLifecycleUndecided is a write that changes status, paid period or
+	// cancellation without a lifecycle decision.
+	ErrLifecycleUndecided = errors.New("subscription lifecycle changed outside a lifecycle decision")
+	// ErrSubscriptionMoved is a decision made on a row another writer has
+	// since changed; the caller re-reads and decides again.
+	ErrSubscriptionMoved = errors.New("subscription moved since it was read")
+)
+
+func callerName(skip int) string {
+	pc, _, line, ok := runtime.Caller(skip)
+	if !ok {
+		return "unknown"
+	}
+	name := "unknown"
+	if fn := runtime.FuncForPC(pc); fn != nil {
+		name = fn.Name()
+		if i := strings.LastIndex(name, "/"); i >= 0 {
+			name = name[i+1:]
+		}
+	}
+	return fmt.Sprintf("%s:%d", name, line)
 }
 
 func (r *SubscriptionRepo) Delete(ctx context.Context, id uuid.UUID) error {
@@ -803,4 +848,16 @@ func (r *SubscriptionRepo) GetLatestResumableCancelled(ctx context.Context, tena
 		return nil, err
 	}
 	return r.oneWithDetails(ctx, row, false)
+}
+
+func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscriptionDecidedParams {
+	return gen.UpdateSubscriptionDecidedParams{
+		ID: p.ID, PriceID: p.PriceID, ProductID: p.ProductID, EntitlementsSpecSnapshot: p.EntitlementsSpecSnapshot, Status: p.Status,
+		StartedAt: p.StartedAt, EndedAt: p.EndedAt, CurrentPeriodStartsAt: p.CurrentPeriodStartsAt, CurrentPeriodEndsAt: p.CurrentPeriodEndsAt,
+		Rail: p.Rail, RailSubscriptionID: p.RailSubscriptionID, UserEmail: p.UserEmail, PaymentMethodID: p.PaymentMethodID,
+		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
+		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CancelledAt: p.CancelledAt,
+		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, ScheduledPriceID: p.ScheduledPriceID,
+		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev,
+	}
 }

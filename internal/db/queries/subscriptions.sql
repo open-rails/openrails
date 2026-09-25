@@ -58,6 +58,41 @@ UPDATE openrails.subscriptions SET
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
+-- name: UpdateSubscriptionDecided :execrows
+-- A lifecycle decision (#1091 part C): the full-row write that may change
+-- status, paid period and cancellation, against the revision it was decided on.
+-- Full-column update (the bun version listed every column explicitly so nil
+-- pointers CLEAR fields like cancelled_at on reactivation).
+UPDATE openrails.subscriptions SET
+    price_id = $2,
+    product_id = $3,
+    entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
+    status = sqlc.arg(status)::openrails.subscription_status,
+    started_at = sqlc.arg(started_at),
+    ended_at = sqlc.narg(ended_at),
+    current_period_starts_at = sqlc.narg(current_period_starts_at),
+    current_period_ends_at = sqlc.narg(current_period_ends_at),
+    rail = sqlc.arg(rail),
+    rail_subscription_id = sqlc.arg(rail_subscription_id),
+    user_email = sqlc.narg(user_email),
+    payment_method_id = sqlc.narg(payment_method_id),
+    last_retry_at = sqlc.narg(last_retry_at),
+    retry_attempts = sqlc.narg(retry_attempts),
+    transient_retries = sqlc.arg(transient_retries)::int,
+    next_retry_at = sqlc.narg(next_retry_at),
+    grace_ends_at = sqlc.narg(grace_ends_at),
+    cancel_feedback = sqlc.narg(cancel_feedback),
+    cancel_type = sqlc.narg(cancel_type),
+    cancelled_at = sqlc.narg(cancelled_at),
+    deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
+    gateway_response = sqlc.narg(gateway_response),
+    scheduled_price_id = sqlc.narg(scheduled_price_id),
+    updated_at = sqlc.arg(updated_at),
+    lifecycle_rev = lifecycle_rev + 1
+WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+  AND lifecycle_rev = sqlc.arg(expected_rev)
+  AND deleted_at IS NULL;
+
 -- name: DeleteSubscription :execrows
 DELETE FROM openrails.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
@@ -379,6 +414,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 -- a new card resumes dunning.
 UPDATE openrails.subscriptions SET
     status = 'past_due',
+    lifecycle_rev = lifecycle_rev + CASE WHEN status = 'past_due' THEN 0 ELSE 1 END,
     next_retry_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid

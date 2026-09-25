@@ -216,11 +216,13 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 		Metadata:              s.GatewayResponse,
 		CreatedAt:             s.CreatedAt,
 		UpdatedAt:             s.UpdatedAt,
+		LifecycleRev:          s.LifecycleRev,
 	}
 	if s.CancelType != nil {
 		ct := CancelType(*s.CancelType)
 		m.CancelType = &ct
 	}
+	m.RememberLifecycle()
 	if err := FromJSONB(s.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "subscriptions.entitlements_spec_snapshot"); err != nil {
 		return nil, err
 	}

@@ -38,6 +38,7 @@ func (s *SubscriptionLifecycleService) CompleteUpgradeTx(ctx context.Context, tx
 	old.Status, old.CancelType = models.StatusCancelled, &reason
 	old.CancelledAt, old.DeletionScheduledAt = &at, &at
 	old.ClearRetrySchedule()
+	old.MarkLifecycleDecision("tier_change_superseded")
 	if err := repo.UpdateAt(ctx, old, at); err != nil {
 		return err
 	}
@@ -128,6 +129,7 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 		old.CurrentPeriodStartsAt = &start
 	}
 	old.ClearRetrySchedule()
+	old.MarkLifecycleDecision("tier_change_superseded")
 	if err := NewSubscriptionRepo(txDB).UpdateAt(ctx, old, s.now()); err != nil {
 		return err
 	}

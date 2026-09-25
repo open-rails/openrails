@@ -9,14 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -88,46 +85,6 @@ func (s *SubscriptionService) GetUserSubscription(ctx context.Context, userID st
 	return s.GetByUserID(ctx, userID)
 }
 
-// CancelUserSubscription cancels a user's subscription
-func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID string, feedback string) error {
-	subscription, err := s.GetByUserID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("subscription not found: %w", err)
-	}
-
-	if subscription.Status != models.StatusActive {
-		return errors.New("subscription is not active")
-	}
-
-	now := s.now()
-	cancelType := models.CancelTypeUser
-	subscription.Status = models.StatusCancelled
-	subscription.CancelledAt = &now
-	subscription.CancelType = &cancelType
-	subscription.ClearRetrySchedule()
-	if feedback != "" {
-		subscription.CancelFeedback = &feedback
-	}
-
-	if err := s.Update(ctx, subscription); err != nil {
-		return fmt.Errorf("failed to update subscription: %w", err)
-	}
-
-	// Entitlements are managed in lifecycle and user flows
-
-	// Add notification
-	notification := &models.NotificationQueue{
-		ID:         uuidutil.NewV7(),
-		CustomerID: identity.CustomerIDFromString(userID).UUID(),
-		EventType:  models.NotificationPremiumEnded,
-		Data:       openrails.NotificationData{Reason: string(PremiumEndReasonUserCancel)},
-	}
-	if err := s.notificationRepo.Create(ctx, notification); err != nil {
-		log.WithError(err).Error("failed to create cancellation notification")
-	}
-
-	return nil
-}
 
 // GetAvailableProducts returns all active products with their prices
 func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*models.Product, error) {

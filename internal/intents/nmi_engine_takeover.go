@@ -614,6 +614,7 @@ func (h *NMIEngineTakeover) commit(ctx context.Context, in gen.OpenrailsRailInte
 		kind := models.CancelTypeEngineTakeover
 		legacy.Status, legacy.CancelType, legacy.CancelledAt = models.StatusCancelled, &kind, &now
 		legacy.ClearRetrySchedule()
+		legacy.MarkLifecycleDecision("engine_takeover")
 		if err := repo.UpdateAt(ctx, legacy, now); err != nil {
 			return err
 		}

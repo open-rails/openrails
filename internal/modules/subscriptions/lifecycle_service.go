@@ -514,6 +514,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		existingPendingSub.CancelType = nil
 		existingPendingSub.CancelFeedback = nil
 		existingPendingSub.EndedAt = nil
+		existingPendingSub.MarkLifecycleDecision(lifecycle.Name(lifecycle.InitialPaid{}))
 
 		if err := subService.Update(ctx, existingPendingSub); err != nil {
 			return nil, nil, fmt.Errorf("failed to update subscription: %w", err)
@@ -1909,6 +1910,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 				sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
 				sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
 			}
+			sub.MarkLifecycleDecision("resolve_unverified")
 			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 				return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
 			}
@@ -1930,6 +1932,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 				}
 			}
 			sub.ClearRetrySchedule()
+			sub.MarkLifecycleDecision("resolve_unverified")
 			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 				return fmt.Errorf("resolve unknown (adopted) %s: %w", sub.ID, err)
 			}
@@ -1940,6 +1943,7 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 				ge := graceEndsAt
 				sub.GraceEndsAt = &ge
 			}
+			sub.MarkLifecycleDecision("resolve_unverified")
 			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 				return fmt.Errorf("resolve unknown (past_due) %s: %w", sub.ID, err)
 			}
