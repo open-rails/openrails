@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
@@ -321,12 +322,34 @@ func (w *DunningWorker) processSubscription(
 	priceSvc *catalog.PriceService,
 	materialize bool,
 ) (dunningOutcome, error) {
+	if sub.Status == models.StatusAwaitingMethod {
+		// The wait for a new card outlived its dunning window.
+		blocked := ""
+		if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
+			blocked = gate.Reason
+		}
+		if _, err := lifecycle.ExpireAwaitingMethod(ctx, w.DB, sub, blocked); err != nil {
+			return dunningOutcomeFailed, err
+		}
+		return dunningOutcomeWindowExpired, nil
+	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		// System and operator stops hold the renewal: access is kept and
+		// life.renewal.held reports it.
 		if w.EngineCollections == nil || (w.Config != nil && w.Config.EngineAdmissionHold) {
 			return dunningOutcomeFailed, nil
 		}
 		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())
 		if errors.Is(err, subscriptions.ErrRenewalHeldByUpgrade) {
+			return dunningOutcomeFailed, nil
+		}
+		if errors.Is(err, money.ErrEngineMethodUnusable) {
+			// Only the member can fix this: wait for a new card on the
+			// dunning clock, under the merchant's dunning access policy.
+			reason, code := "payment_method_unusable", "payment_method_unusable"
+			if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: collection.DeclineFixPaymentMethod}); err != nil {
+				return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
+			}
 			return dunningOutcomeFailed, nil
 		}
 		if errors.Is(err, money.ErrEngineCollectionNotDue) {

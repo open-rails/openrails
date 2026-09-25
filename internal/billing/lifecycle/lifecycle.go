@@ -66,7 +66,8 @@ type Bucket int
 const (
 	// Retry: ours or transient; keep the dunning schedule.
 	Retry Bucket = iota
-	// FixMethod: the customer's card needs fixing; stop charging, keep access.
+	// FixMethod: the customer's card needs fixing; stop charging until a new
+	// one arrives, within the dunning window.
 	FixMethod
 	// NonRecoverable: the mandate is gone; cancel at the rail.
 	NonRecoverable
@@ -291,11 +292,17 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		}
 		switch ev.Bucket {
 		case FixMethod:
+			// Charging stops until the member adds a card; the dunning window
+			// stays open, so the wait ends at exhaustion like any decline.
 			if s.Status == AwaitingMethod {
 				return s, nil, nil
 			}
+			effects := []Effect{Notify{NoticeUpdateMethod}}
+			if s.Status != PastDue {
+				effects = append([]Effect{OpenDunning{ev.PeriodStart}}, effects...)
+			}
 			s.Status = AwaitingMethod
-			return s, []Effect{CloseDunning{}, Notify{NoticeUpdateMethod}}, nil
+			return s, effects, nil
 		case NonRecoverable:
 			end := s.PaidThrough
 			if ev.At.After(end) {

@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
 // A charge names its payment method (#1087). A customer with a default card
@@ -52,11 +54,14 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 }
 
 // Renewals charge the subscription's stored method, never the customer's
-// current default: with the stored method gone the due pass refuses the
-// renewal with a clear reason and charges nothing.
+// current default. With the stored method gone only the member can fix it:
+// the membership waits for a new card on the dunning clock, the customer is
+// asked for one, access follows the dunning access policy, and the wait ends
+// when the dunning window does. It is never held as a system stop.
 func TestRenewalNeverFallsBackToDefaultCard(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
+	w.armDestructive()
 	e := enroll(t, w, "nmi", embedded)
 	other := e.c.saveCard("nmi", mastercard)
 	e.c.setDefault(embedded, other)
@@ -65,11 +70,41 @@ func TestRenewalNeverFallsBackToDefaultCard(t *testing.T) {
 	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.subscriptions SET payment_method_id = NULL WHERE id = $1::uuid`), subID)
 	require.NoError(t, err)
 	charges := len(e.providerLedger())
+	end := e.periodEnd()
 	e.toPeriodEnd()
 	w.runRenewals()
 	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the default card")
-	require.Contains(t, w.openFindings("life.due_pass.refused"), subID)
-	var action string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT recommended_action FROM openrails.reconciliation_findings WHERE finding_type = 'life.due_pass.refused' AND subject_key = $1`), subID).Scan(&action))
-	require.Contains(t, action, "never fall back to the default card")
+	sub := w.subscription(embedded, e.sub)
+	require.Equal(t, "awaiting_method", sub.Status)
+	window, err := collection.Window(monthHours)
+	require.NoError(t, err)
+	require.NotNil(t, sub.GraceEndsAt)
+	require.True(t, sub.GraceEndsAt.Equal(end.Add(window)), "the wait ends with the dunning window")
+	require.Empty(t, w.openFindings("life.due_pass.refused"), "a member-fixable refusal is not an operator finding")
+	require.True(t, e.c.hasNotification("payment_method_update_required"), "the customer is asked for a new card")
+
+	w.advance(end.Add(window).Sub(w.clock.Now()) - time.Hour)
+	w.runRenewals()
+	w.converge()
+	require.True(t, e.c.entitled(e.ent), "access is kept through the dunning window")
+	require.Empty(t, w.openFindings("life.renewal.held"), "waiting for the member is not a held renewal")
+
+	w.advance(2 * time.Hour)
+	w.runRenewals()
+	require.Equal(t, "cancelled", w.subscription(embedded, e.sub).Status, "the wait ends at dunning exhaustion")
+	require.False(t, e.c.entitled(e.ent))
+	require.Len(t, e.providerLedger(), charges)
+}
+
+// hasNotification reports whether the customer has a notification of a kind.
+func (c *customer) hasNotification(kind string) bool {
+	c.w.t.Helper()
+	out := c.must(http.MethodGet, "/notifications?limit=100", "", nil)
+	items, _ := out["data"].([]any)
+	for _, item := range items {
+		if item.(map[string]any)["event_type"] == kind {
+			return true
+		}
+	}
+	return false
 }

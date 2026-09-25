@@ -5593,6 +5593,7 @@
     "internal/migrate/postgres/0014_subscription_verifications.up.sql": "1bbd8c68a4cd975c6d938c5f241a56a18d1ef6c7e0c1213f69cfd74a9e9817a4",
     "internal/migrate/postgres/0015_subscription_lifecycle_single_writer.up.sql": "0e554c008ac19bd31cc3b4aecd211a28d5b60fd2a8fae0c4f6a5d10d003a8983",
     "internal/migrate/postgres/0016_payment_method_default_once.up.sql": "2a05ce832837915238edb915f8abf062559f078e8c47547313baa5fe9a6bb3f3",
+    "internal/migrate/postgres/0017_due_member_fixable_renewals.up.sql": "38f6e7bf95628675c3281c6197069ff26ee6dbef6ba6c73127325639cde6c68b",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "4794cb1f1a292c7b598ebbd886f8d19c32f221178969dd95fbd96f603898f196",

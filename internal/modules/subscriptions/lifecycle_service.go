@@ -2417,6 +2417,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
 		}
+		if subscription.Status == models.StatusAwaitingMethod && subscription.GraceEndsAt == nil {
+			deadline, err := awaitMethodDeadline(ctx, db, priceService, subscription)
+			if err != nil {
+				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
+			}
+			subscription.GraceEndsAt = &deadline
+		}
 		if subscription.Status == models.StatusCancelled {
 			reason := normalize.FromPtr(params.FailureReason)
 			if reason == "" {
@@ -2647,6 +2654,31 @@ func pspIDOf(subscription *models.Subscription) *uuid.UUID {
 	}
 	id := subscription.PspID
 	return &id
+}
+
+// awaitMethodDeadline is when a membership waiting for a new card is out of
+// time: the dunning window from its paid-through, as if the schedule had run.
+func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceService, sub *models.Subscription) (time.Time, error) {
+	if sub.CurrentPeriodEndsAt == nil {
+		return time.Time{}, errors.New("awaiting a payment method without a paid-through")
+	}
+	cycleHours := 0
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.CurrentPeriodStartsAt != nil {
+		cycleHours = collection.CycleHoursBetween(*sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
+	} else if price, err := prices.GetByID(ctx, sub.PriceID); err == nil {
+		cycleHours = collection.BillingCycleHoursOf(price)
+	} else {
+		return time.Time{}, fmt.Errorf("load price: %w", err)
+	}
+	policy, err := DunningPolicy(ctx, d)
+	if err != nil {
+		return time.Time{}, err
+	}
+	window, err := policy.Window(cycleHours)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return sub.CurrentPeriodEndsAt.UTC().Add(window), nil
 }
 
 // engineDunningAccess applies the merchant's access policy to an engine
