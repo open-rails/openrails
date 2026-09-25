@@ -212,16 +212,16 @@ func (g *Gateway) v5(method string, seg []string, body []byte) (int, any) {
 		}
 		return 200, obj{"plans": out, "has_more": false}
 	case seg[0] == "plans" && len(seg) == 1 && method == http.MethodPost:
-		var in struct {
-			ID           string          `json:"id"`
-			PlanName     string          `json:"plan_name"`
-			PlanAmount   json.RawMessage `json:"plan_amount"`
-			DayFrequency int             `json:"day_frequency"`
-		}
-		if json.Unmarshal(body, &in) != nil || strings.TrimSpace(in.ID) == "" || g.plans[in.ID] != nil {
+		// Raw fields: the fake stores the wire amount as sent, never as money.
+		var in map[string]json.RawMessage
+		var id, name string
+		var days int
+		if json.Unmarshal(body, &in) != nil || json.Unmarshal(in["id"], &id) != nil || strings.TrimSpace(id) == "" || g.plans[id] != nil {
 			return 400, obj{"type": "invalid", "message": "bad or duplicate plan"}
 		}
-		return 200, g.addPlan(in.ID, in.PlanName, strings.Trim(string(in.PlanAmount), `"`), in.DayFrequency)
+		_ = json.Unmarshal(in["plan_name"], &name)
+		_ = json.Unmarshal(in["day_frequency"], &days)
+		return 200, g.addPlan(id, name, strings.Trim(string(in["plan_amount"]), `"`), days)
 	case seg[0] == "plans" && len(seg) == 2 && method == http.MethodGet:
 		if p, ok := g.plans[seg[1]]; ok {
 			return 200, p
