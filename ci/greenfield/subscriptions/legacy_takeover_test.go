@@ -126,6 +126,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			w.armDestructive()
 			// The book names no recurring agreement and no sale of the schedule,
 			// so there is no anchor to take over (or to dun) with.
+			w.waive("recorded", "the book's only sale is declared without its schedule, so it is not attributed to the membership")
 			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
 				book.Transactions[0].RailSubscriptionID = ""
 			})
