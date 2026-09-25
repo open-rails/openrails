@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,17 +84,25 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []merchant
 			pending++
 			continue
 		}
+		// One unanswering provider must not hold the others' verdicts.
+		var wg sync.WaitGroup
+		var unknown atomic.Int64
 		for _, id := range ids {
 			if status, ok := r.providerPosture.PSPStatus(registry, id); ok && status.Verdict != providerposture.Unknown {
 				continue
 			}
-			vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
-			known := r.verifyPSPPosture(merchant.WithID(vctx, mid), mid, id)
-			cancel()
-			if !known {
-				pending++
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
+				defer cancel()
+				if !r.verifyPSPPosture(merchant.WithID(vctx, mid), mid, id) {
+					unknown.Add(1)
+				}
+			}()
 		}
+		wg.Wait()
+		pending += int(unknown.Load())
 	}
 	return pending
 }
