@@ -1506,6 +1506,9 @@ func validateCCBillRail(name string, proc *PSPConfig) error {
 	if ccbill == nil {
 		return fmt.Errorf("rail '%s' (ccbill): ccbill block is required", name)
 	}
+	if strings.TrimSpace(ccbill.Salt) == "" {
+		return fmt.Errorf("rail '%s' (ccbill): salt is required to sign FlexForm links", name)
+	}
 
 	hasUsername := strings.TrimSpace(ccbill.DataLinkUsername) != ""
 	hasPassword := strings.TrimSpace(ccbill.DataLinkPassword) != ""

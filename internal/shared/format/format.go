@@ -1,6 +1,7 @@
 package format
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 )
@@ -33,37 +34,37 @@ func BillingCycleDaysToStripeRecurring(days int) (string, int) {
 	}
 }
 
-// ParseExpiry parses common MM/YY, MM/YYYY, MM-YY, and MM-YYYY expiry strings.
-func ParseExpiry(exp string) (int, int, bool) {
-	exp = strings.TrimSpace(exp)
-	if exp == "" {
-		return 0, 0, false
-	}
+// ErrInvalidExpiry reports a card expiry that is not MM/YY or MM/YYYY
+// (or with "-") with month 1-12 and a year in 2001-2099.
+var ErrInvalidExpiry = errors.New("invalid card expiry")
 
+// ParseExpiry parses MM/YY, MM/YYYY, MM-YY, and MM-YYYY expiry strings.
+func ParseExpiry(exp string) (month, year int, err error) {
 	sep := "/"
 	if strings.Contains(exp, "-") {
 		sep = "-"
 	}
-
-	parts := strings.Split(exp, sep)
-	if len(parts) != 2 {
-		return 0, 0, false
+	m, y, ok := strings.Cut(strings.TrimSpace(exp), sep)
+	m, y = strings.TrimSpace(m), strings.TrimSpace(y)
+	if !ok || len(m) < 1 || len(m) > 2 || (len(y) != 2 && len(y) != 4) || !digits(m) || !digits(y) {
+		return 0, 0, ErrInvalidExpiry
 	}
-
-	month, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil {
-		return 0, 0, false
-	}
-	year, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil {
-		return 0, 0, false
-	}
-	if month == 0 || year == 0 {
-		return 0, 0, false
-	}
-	if year < 100 {
+	month, _ = strconv.Atoi(m)
+	year, _ = strconv.Atoi(y)
+	if len(y) == 2 {
 		year += 2000
 	}
+	if month < 1 || month > 12 || year < 2001 || year > 2099 {
+		return 0, 0, ErrInvalidExpiry
+	}
+	return month, year, nil
+}
 
-	return month, year, true
+func digits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

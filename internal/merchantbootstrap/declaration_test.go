@@ -12,6 +12,9 @@ func TestValidateMerchantDeclaration(t *testing.T) {
 		return MerchantConfig{PSPs: map[string]PSPConfig{"main": {"Stripe": {AccountID: "acct_1", Settings: map[string]any{"publishable_key": key}}}}}
 	}
 	sandbox := &config.Config{TestMode: config.CredentialPostureSandbox}
+	ccbill := func(secrets map[string]string) MerchantConfig {
+		return MerchantConfig{PSPs: map[string]PSPConfig{"main": {"ccbill": {AccountID: "945280-0000", Secrets: secrets}}}}
+	}
 	live := &config.Config{TestMode: config.CredentialPostureLive}
 	for _, tc := range []struct {
 		name string
@@ -27,6 +30,10 @@ func TestValidateMerchantDeclaration(t *testing.T) {
 		{"secret key as publishable", sandbox, stripeKey("sk_test_abc"), false},
 		{"non-string key", sandbox, MerchantConfig{PSPs: map[string]PSPConfig{"main": {"stripe": {Settings: map[string]any{"publishable_key": 1}}}}}, false},
 		{"invalid api host", live, MerchantConfig{APIHost: "bad_host.example"}, false},
+		{"ccbill with salt", sandbox, ccbill(map[string]string{"salt": "s", "datalink_username": "u", "datalink_password": "p"}), true},
+		{"ccbill credentials without salt", sandbox, ccbill(map[string]string{"datalink_username": "u", "datalink_password": "p"}), false},
+		{"ccbill blank salt", sandbox, ccbill(map[string]string{"salt": " "}), false},
+		{"ccbill identity only", sandbox, ccbill(nil), true},
 		{"managed backend refuses startup PSPs", &config.Config{TestMode: config.CredentialPostureSandbox, SecretBackend: config.SecretBackendDB}, stripeKey("pk_test_abc"), false},
 		{"managed backend without PSPs", &config.Config{SecretBackend: config.SecretBackendDB}, MerchantConfig{}, true},
 	} {

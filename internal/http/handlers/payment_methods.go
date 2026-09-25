@@ -637,7 +637,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) paymentMethodResponse {
 	card := &paymentMethodCardDetails{Brand: pm.CardType, Last4: pm.LastFour}
 	if pm.ExpiryDate != nil {
-		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
+		if month, year, err := sharedformat.ParseExpiry(*pm.ExpiryDate); err == nil {
 			card.ExpMonth = &month
 			card.ExpYear = &year
 		}
@@ -691,8 +691,8 @@ func cardExpiryStatus(expiry *string) string {
 	if expiry == nil {
 		return ""
 	}
-	month, year, ok := sharedformat.ParseExpiry(*expiry)
-	if !ok {
+	month, year, err := sharedformat.ParseExpiry(*expiry)
+	if err != nil {
 		return ""
 	}
 	firstAfterExpiry := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)

@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"fmt"
+	"html/template"
 	"strings"
 	"time"
 
@@ -21,27 +22,159 @@ type EmailContent struct {
 	Plain   string
 }
 
+// emailHTML holds every HTML body. html/template escapes each value by context
+// (text, attribute, URL), so customer and merchant text cannot inject markup.
+var emailHTML = template.Must(template.New("email").Option("missingkey=error").Parse(`
+{{define "button"}}{{if .URL}}<p><a href="{{.URL}}" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">{{.Label}}</a></p>{{end}}{{end}}
+
+{{define "confirmation"}}
+<h2>Welcome to {{.Premium}}!</h2>
+<p>Hi {{.Username}},</p>
+<p>Your subscription has been successfully activated. Thank you for your support!</p>
+<h3>Subscription Details:</h3>
+<ul>
+	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
+	<li><strong>Amount:</strong> {{.Amount}}</li>
+	<li><strong>Current Period:</strong> {{.PeriodStart}} to {{.PeriodEnd}}</li>
+	<li><strong>Payment Method:</strong> {{.PaymentMethod}}</li>
+</ul>
+<p>Enjoy!</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "renewal"}}
+<h2>Subscription Renewed Successfully</h2>
+<p>Hi {{.Username}},</p>
+<p>Your {{.Premium}} subscription has been automatically renewed. Thank you for your continued support!</p>
+<h3>Renewal Details:</h3>
+<ul>
+	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
+	<li><strong>Amount Charged:</strong> {{.Amount}}</li>
+	<li><strong>New Period:</strong> {{.PeriodStart}} to {{.PeriodEnd}}</li>
+	<li><strong>Transaction ID:</strong> {{.TransactionID}}</li>
+</ul>
+<p>Your access continues uninterrupted.</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "cancellation"}}
+<h2>{{.Subject}}</h2>
+<p>Hi {{.Username}},</p>
+<p>{{.Reason}}</p>
+<ul>
+	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
+	<li><strong>Premium access available until:</strong> {{.PeriodEnd}}</li>
+</ul>
+<p>You'll continue to enjoy premium access until {{.PeriodEnd}}.</p>
+<p>{{.Footer}}</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "expired"}}
+<h2>Your Premium Access Has Expired</h2>
+<p>Hi {{.Username}},</p>
+<p>We tried to renew your {{.Premium}} subscription several times but couldn't complete the payment. Your access ended on <strong>{{.PeriodEnd}}</strong>.</p>
+<p>If you'd like to jump back in, update your payment method and restart your membership any time.</p>
+{{template "button" .Button}}
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "access_ended"}}
+<h2>Your Premium Access Has Ended</h2>
+<p>Hi {{.Username}},</p>
+<p>Your {{.Store}} premium access ended on <strong>{{.EndedOn}}</strong>.</p>
+<p>To keep enjoying premium, sign up again — we'd love to have you back.</p>
+{{template "button" .Button}}
+<p>If you have any questions, just reply to this email.</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "payment_failed"}}
+<h2>Payment Attempt Unsuccessful</h2>
+<p>Hi {{.Username}},</p>
+<p>We just tried to renew your {{.Premium}} subscription but the payment didn't go through.</p>
+<ul>
+	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
+	<li><strong>Amount:</strong> {{.Amount}}</li>
+	<li><strong>Payment method:</strong> {{.PaymentMethod}}</li>
+</ul>
+<p>Your premium access stays active while we retry automatically. To be safe, please take a moment to update your payment details.</p>
+{{template "button" .Button}}
+<p>If payment continues to fail, your membership will expire.</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "method_update_required"}}
+<h2>Your Payment Method Needs Updating</h2>
+<p>Hi {{.Username}},</p>
+<p>Your bank declined the card saved for your {{.Premium}} subscription, and it won't work on future renewals — so we've paused charging it rather than trying again.</p>
+<ul>
+	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
+	<li><strong>Payment method:</strong> {{.PaymentMethod}}</li>
+</ul>
+<p><strong>Your access is still active.</strong> Add or update a card and your subscription carries on as normal. If nothing changes, the subscription will eventually end.</p>
+{{template "button" .Button}}
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "non_recoverable"}}
+<h2>Your Subscription Has Ended</h2>
+<p>Hi {{.Username}},</p>
+<p>Your bank told us the card on your {{.Premium}} subscription can no longer be used for recurring payments, so we've ended the subscription rather than keep trying.</p>
+<ul>
+	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
+</ul>
+<p>Nothing was changed about the payment methods saved to your account — you can review or remove them yourself at any time.</p>
+<p>When you're ready, start a new subscription with a different card and you're back in.</p>
+{{template "button" .Button}}
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "entitlement_expiring"}}
+<h2>Access Expiring Soon</h2>
+<p>Hi {{.Username}},</p>
+<p>This is a reminder that your <strong>{{.Entitlement}}</strong> access will expire in {{.Remaining}} on <strong>{{.ExpiresOn}}</strong>.</p>
+<p>To continue enjoying premium features, please renew your subscription before the expiration date.</p>
+<p>Thank you for being a valued member!</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "purchase_receipt"}}
+<h2>{{if .Solana}}Solana Payment Received{{else}}Payment Received{{end}}</h2>
+<p>Hi there,</p>
+<p>{{.Intro}}{{if .Solana}} This one-time Solana transaction instantly extended your premium access.{{end}}</p>
+<ul>
+	<li><strong>Product:</strong> {{.Product}}</li>
+	<li><strong>Amount:</strong> {{.Amount}}</li>
+	<li><strong>Date:</strong> {{.Date}}</li>
+</ul>
+<p>{{if .Solana}}Enjoy your premium benefits; no rebill will occur automatically.{{else}}Your access has been updated instantly. Enjoy!{{end}}</p>
+<p>The {{.Store}} Team</p>
+{{end}}
+`))
+
+type emailFields = map[string]any
+
+type emailButton struct{ URL, Label string }
+
+// renderEmailHTML executes a template parsed above; a failure is a programming
+// error in this file, caught by the render tests.
+func renderEmailHTML(name string, fields emailFields) string {
+	var b strings.Builder
+	if err := emailHTML.ExecuteTemplate(&b, name, fields); err != nil {
+		panic(fmt.Sprintf("email template %s: %v", name, err))
+	}
+	return b.String()
+}
+
 func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	amountLine := moneyutil.FormatAmount(data.Amount, data.Currency)
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Welcome to %s! Your subscription is confirmed", premiumName),
-		HTML: fmt.Sprintf(`
-			<h2>Welcome to %s!</h2>
-			<p>Hi %s,</p>
-			<p>Your subscription has been successfully activated. Thank you for your support!</p>
-			<h3>Subscription Details:</h3>
-			<ul>
-				<li><strong>Subscription ID:</strong> %s</li>
-				<li><strong>Amount:</strong> %s</li>
-				<li><strong>Current Period:</strong> %s to %s</li>
-				<li><strong>Payment Method:</strong> %s</li>
-			</ul>
-			<p>Enjoy!</p>
-			<p>The %s Team</p>
-		`, premiumName, data.Username, data.SubscriptionID, amountLine,
-			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.PaymentMethod, storeName),
+		HTML: renderEmailHTML("confirmation", emailFields{"Premium": premiumName, "Username": data.Username, "SubscriptionID": data.SubscriptionID, "Amount": amountLine,
+			"PeriodStart": data.periodInstant(data.PeriodStart), "PeriodEnd": data.periodInstant(data.PeriodEnd), "PaymentMethod": data.PaymentMethod, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			Welcome to %s!
 
@@ -68,21 +201,8 @@ func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s subscription has been renewed", premiumName),
-		HTML: fmt.Sprintf(`
-			<h2>Subscription Renewed Successfully</h2>
-			<p>Hi %s,</p>
-			<p>Your %s subscription has been automatically renewed. Thank you for your continued support!</p>
-			<h3>Renewal Details:</h3>
-			<ul>
-				<li><strong>Subscription ID:</strong> %s</li>
-				<li><strong>Amount Charged:</strong> %s</li>
-				<li><strong>New Period:</strong> %s to %s</li>
-				<li><strong>Transaction ID:</strong> %s</li>
-			</ul>
-			<p>Your access continues uninterrupted.</p>
-			<p>The %s Team</p>
-		`, data.Username, premiumName, data.SubscriptionID, amountLine,
-			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.TransactionID, storeName),
+		HTML: renderEmailHTML("renewal", emailFields{"Premium": premiumName, "Username": data.Username, "SubscriptionID": data.SubscriptionID, "Amount": amountLine,
+			"PeriodStart": data.periodInstant(data.PeriodStart), "PeriodEnd": data.periodInstant(data.PeriodEnd), "TransactionID": data.TransactionID, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			Subscription Renewed Successfully
 
@@ -127,18 +247,8 @@ func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmai
 
 	return EmailContent{
 		Subject: subject,
-		HTML: fmt.Sprintf(`
-			<h2>%s</h2>
-			<p>Hi %s,</p>
-			<p>%s</p>
-			<ul>
-				<li><strong>Subscription ID:</strong> %s</li>
-				<li><strong>Premium access available until:</strong> %s</li>
-			</ul>
-			<p>You'll continue to enjoy premium access until %s.</p>
-			<p>%s</p>
-			<p>The %s Team</p>
-		`, subject, data.Username, reasonBlurb, data.SubscriptionID, periodEnd, periodEnd, footer, storeName),
+		HTML: renderEmailHTML("cancellation", emailFields{"Subject": subject, "Username": data.Username, "Reason": reasonBlurb, "SubscriptionID": data.SubscriptionID,
+			"PeriodEnd": periodEnd, "Footer": footer, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			%s
 
@@ -160,23 +270,15 @@ func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmai
 func RenderSubscriptionExpiredEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
 	periodEnd := data.periodInstant(data.PeriodEnd)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	linkHTML := ""
 	linkText := ""
 	if customerPortalURL != "" {
-		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Manage billing settings</a></p>`, customerPortalURL)
 		linkText = fmt.Sprintf("\n\t\tUpdate your payment method anytime to restart your membership: %s\n", customerPortalURL)
 	}
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s access has expired", premiumName),
-		HTML: fmt.Sprintf(`
-			<h2>Your Premium Access Has Expired</h2>
-			<p>Hi %s,</p>
-			<p>We tried to renew your %s subscription several times but couldn't complete the payment. Your access ended on <strong>%s</strong>.</p>
-			<p>If you'd like to jump back in, update your payment method and restart your membership any time.</p>
-			%s
-			<p>The %s Team</p>
-		`, data.Username, premiumName, periodEnd, linkHTML, storeName),
+		HTML: renderEmailHTML("expired", emailFields{"Username": data.Username, "Premium": premiumName, "PeriodEnd": periodEnd,
+			"Button": emailButton{customerPortalURL, "Manage billing settings"}, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			Your Premium Access Has Expired
 
@@ -200,24 +302,14 @@ func RenderAccessEndedEmail(storeName, signupURL, username string, endedAt time.
 	if name == "" {
 		name = "there"
 	}
-	linkHTML := ""
 	linkText := ""
 	if signupURL != "" {
-		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Sign up again</a></p>`, signupURL)
 		linkText = fmt.Sprintf("Sign up again any time: %s", signupURL)
 	}
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s premium access has ended", storeName),
-		HTML: fmt.Sprintf(`
-			<h2>Your Premium Access Has Ended</h2>
-			<p>Hi %s,</p>
-			<p>Your %s premium access ended on <strong>%s</strong>.</p>
-			<p>To keep enjoying premium, sign up again — we'd love to have you back.</p>
-			%s
-			<p>If you have any questions, just reply to this email.</p>
-			<p>The %s Team</p>
-		`, name, storeName, endedOn, linkHTML, storeName),
+		HTML:    renderEmailHTML("access_ended", emailFields{"Username": name, "EndedOn": endedOn, "Button": emailButton{signupURL, "Sign up again"}, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			Your Premium Access Has Ended
 
@@ -238,29 +330,15 @@ func RenderAccessEndedEmail(storeName, signupURL, username string, endedAt time.
 func RenderPaymentFailedEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
 	amountLine := moneyutil.FormatAmount(data.Amount, data.Currency)
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	linkHTML := ""
 	linkText := ""
 	if customerPortalURL != "" {
-		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Update payment method</a></p>`, customerPortalURL)
 		linkText = fmt.Sprintf("Update your payment details here to avoid losing access: %s", customerPortalURL)
 	}
 
 	return EmailContent{
 		Subject: fmt.Sprintf("We couldn't renew your %s subscription", premiumName),
-		HTML: fmt.Sprintf(`
-			<h2>Payment Attempt Unsuccessful</h2>
-			<p>Hi %s,</p>
-			<p>We just tried to renew your %s subscription but the payment didn't go through.</p>
-			<ul>
-				<li><strong>Subscription ID:</strong> %s</li>
-				<li><strong>Amount:</strong> %s</li>
-				<li><strong>Payment method:</strong> %s</li>
-			</ul>
-			<p>Your premium access stays active while we retry automatically. To be safe, please take a moment to update your payment details.</p>
-			%s
-			<p>If payment continues to fail, your membership will expire.</p>
-			<p>The %s Team</p>
-		`, data.Username, premiumName, data.SubscriptionID, amountLine, data.PaymentMethod, linkHTML, storeName),
+		HTML: renderEmailHTML("payment_failed", emailFields{"Username": data.Username, "Premium": premiumName, "SubscriptionID": data.SubscriptionID, "Amount": amountLine,
+			"PaymentMethod": data.PaymentMethod, "Button": emailButton{customerPortalURL, "Update payment method"}, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			We couldn't renew your %s subscription
 
@@ -295,27 +373,15 @@ func subscriptionProductName(storeName, productName string) string {
 // that is a recovery opportunity rather than an apology or a goodbye.
 func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	linkHTML := ""
 	linkText := ""
 	if customerPortalURL != "" {
-		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Update payment method</a></p>`, customerPortalURL)
 		linkText = fmt.Sprintf("Update your payment method here: %s", customerPortalURL)
 	}
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Please update the payment method for your %s subscription", premiumName),
-		HTML: fmt.Sprintf(`
-			<h2>Your Payment Method Needs Updating</h2>
-			<p>Hi %s,</p>
-			<p>Your bank declined the card saved for your %s subscription, and it won't work on future renewals — so we've paused charging it rather than trying again.</p>
-			<ul>
-				<li><strong>Subscription ID:</strong> %s</li>
-				<li><strong>Payment method:</strong> %s</li>
-			</ul>
-			<p><strong>Your access is still active.</strong> Add or update a card and your subscription carries on as normal. If nothing changes, the subscription will eventually end.</p>
-			%s
-			<p>The %s Team</p>
-		`, data.Username, premiumName, data.SubscriptionID, data.PaymentMethod, linkHTML, storeName),
+		HTML: renderEmailHTML("method_update_required", emailFields{"Username": data.Username, "Premium": premiumName, "SubscriptionID": data.SubscriptionID,
+			"PaymentMethod": data.PaymentMethod, "Button": emailButton{customerPortalURL, "Update payment method"}, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			Please update the payment method for your %s subscription
 
@@ -345,27 +411,15 @@ func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string,
 // are welcome to re-subscribe.
 func RenderSubscriptionNonRecoverableEmail(storeName, checkoutURL string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
-	linkHTML := ""
 	linkText := ""
 	if checkoutURL != "" {
-		linkHTML = fmt.Sprintf(`<p><a href="%s" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">Re-subscribe</a></p>`, checkoutURL)
 		linkText = fmt.Sprintf("Re-subscribe any time: %s", checkoutURL)
 	}
 
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s subscription has ended", premiumName),
-		HTML: fmt.Sprintf(`
-			<h2>Your Subscription Has Ended</h2>
-			<p>Hi %s,</p>
-			<p>Your bank told us the card on your %s subscription can no longer be used for recurring payments, so we've ended the subscription rather than keep trying.</p>
-			<ul>
-				<li><strong>Subscription ID:</strong> %s</li>
-			</ul>
-			<p>Nothing was changed about the payment methods saved to your account — you can review or remove them yourself at any time.</p>
-			<p>When you're ready, start a new subscription with a different card and you're back in.</p>
-			%s
-			<p>The %s Team</p>
-		`, data.Username, premiumName, data.SubscriptionID, linkHTML, storeName),
+		HTML: renderEmailHTML("non_recoverable", emailFields{"Username": data.Username, "Premium": premiumName, "SubscriptionID": data.SubscriptionID,
+			"Button": emailButton{checkoutURL, "Re-subscribe"}, "Store": storeName}),
 		Plain: fmt.Sprintf(`
 			Your %s subscription has ended
 

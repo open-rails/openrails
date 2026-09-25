@@ -112,7 +112,7 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 		return nil, fmt.Errorf("stripe invoice item create: %w", err)
 	}
 
-	finalizedBody, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(invoice.ID)+"/finalize", url.Values{"auto_advance": {"false"}}, params.IdempotencyKey+":finalize")
+	finalizedBody, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(invoice.ID)+"/finalize", url.Values{"auto_advance": {"false"}, "expand[]": stripeInvoicePaymentsExpand}, params.IdempotencyKey+":finalize")
 	if err != nil {
 		return nil, fmt.Errorf("stripe invoice finalize: %w", err)
 	}
@@ -124,7 +124,7 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 		return invoice.settledResult(params)
 	}
 
-	paidBody, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(invoice.ID)+"/pay", url.Values{"payment_method": {params.PaymentMethodID}}, params.IdempotencyKey+":pay")
+	paidBody, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(invoice.ID)+"/pay", url.Values{"payment_method": {params.PaymentMethodID}, "expand[]": stripeInvoicePaymentsExpand}, params.IdempotencyKey+":pay")
 	if err != nil {
 		return nil, fmt.Errorf("stripe invoice pay: %w", err)
 	}
@@ -142,6 +142,9 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 func (i stripeCollectionInvoice) settledResult(params StripeInvoiceCollectionParams) (*StripeInvoiceCollectionResult, error) {
 	if err := i.receipt().MatchesOperation(params.IdempotencyKey, params.AmountCents, params.Currency); err != nil {
 		return nil, err
+	}
+	if i.Charge == "" && i.PaymentIntent == "" {
+		return nil, fmt.Errorf("%w: invoice %s has no single paid payment", ErrStripeReceiptMismatch, i.ID)
 	}
 	return i.result(), nil
 }
@@ -259,16 +262,24 @@ func parseStripeAPIError(statusCode int, body []byte) error {
 	}
 }
 
+// stripeInvoicePaymentsExpand returns the invoice's payments with each
+// PaymentIntent expanded: since API 2025-03-31 the invoice has no top-level
+// charge/payment_intent, and payments is not returned by default.
+var stripeInvoicePaymentsExpand = []string{"payments", "payments.data.payment.payment_intent"}
+
 type stripeCollectionInvoice struct {
-	CustomerID      string `json:"customer"`
-	PaymentMethodID string `json:"default_payment_method"`
-	ID              string `json:"id"`
-	Status          string `json:"status"`
-	AmountPaid      int64  `json:"amount_paid"`
-	Currency        string `json:"currency"`
-	PaymentIntent   string `json:"payment_intent"`
-	Charge          string `json:"charge"`
-	Metadata        map[string]string
+	CustomerID      string
+	PaymentMethodID string
+	ID              string
+	Status          string
+	AmountPaid      int64
+	Currency        string
+	// From the invoice's single paid InvoicePayment; empty when there is none
+	// or it is ambiguous.
+	PaymentInvoice string
+	PaymentIntent  string
+	Charge         string
+	Metadata       map[string]string
 }
 
 // StripeCollectionReceipt is one Stripe invoice read back for reconciliation.
@@ -330,21 +341,29 @@ func (s *StripeService) GetCollectionInvoice(ctx context.Context, invoiceID stri
 	if invoiceID == "" {
 		return StripeCollectionReceipt{}, false, errors.New("stripe invoice id is required")
 	}
-	body, status, err := s.stripeGet(ctx, "/v1/invoices/"+url.PathEscape(invoiceID), nil)
+	inv, found, err := s.getCollectionInvoice(ctx, invoiceID)
+	if err != nil || !found {
+		return StripeCollectionReceipt{}, found, err
+	}
+	return inv.receipt(), true, nil
+}
+
+func (s *StripeService) getCollectionInvoice(ctx context.Context, invoiceID string) (stripeCollectionInvoice, bool, error) {
+	body, status, err := s.stripeGet(ctx, "/v1/invoices/"+url.PathEscape(invoiceID), url.Values{"expand[]": stripeInvoicePaymentsExpand})
 	if err != nil {
-		return StripeCollectionReceipt{}, false, err
+		return stripeCollectionInvoice{}, false, err
 	}
 	if status == http.StatusNotFound {
-		return StripeCollectionReceipt{}, false, nil
+		return stripeCollectionInvoice{}, false, nil
 	}
 	if status >= 400 {
-		return StripeCollectionReceipt{}, false, parseStripeAPIError(status, body)
+		return stripeCollectionInvoice{}, false, parseStripeAPIError(status, body)
 	}
 	inv, err := parseStripeCollectionInvoice(body)
 	if err != nil {
-		return StripeCollectionReceipt{}, false, err
+		return stripeCollectionInvoice{}, false, err
 	}
-	return inv.receipt(), true, nil
+	return inv, true, nil
 }
 
 // GetCollectedInvoice reads the actual captured charge as well as its invoice.
@@ -357,11 +376,16 @@ func (s *StripeService) GetCollectedInvoice(ctx context.Context, invoiceID strin
 	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
 	s = &scoped
 
-	receipt, found, err := s.GetCollectionInvoice(ctx, invoiceID)
-	if err != nil || !found {
-		return receipt, found, err
+	invoiceID = strings.TrimSpace(invoiceID)
+	if invoiceID == "" {
+		return StripeCollectionReceipt{}, false, errors.New("stripe invoice id is required")
 	}
-	if receipt.InvoiceID != invoiceID {
+	inv, found, err := s.getCollectionInvoice(ctx, invoiceID)
+	if err != nil || !found {
+		return StripeCollectionReceipt{}, found, err
+	}
+	receipt := inv.receipt()
+	if receipt.InvoiceID != invoiceID || (inv.PaymentInvoice != "" && inv.PaymentInvoice != invoiceID) {
 		return receipt, true, fmt.Errorf("%w: invoice identity mismatch", ErrStripeReceiptMismatch)
 	}
 	chargeID := receipt.ChargeID
@@ -402,7 +426,6 @@ func (s *StripeService) GetCollectedInvoice(ctx context.Context, invoiceID strin
 		Customer       json.RawMessage `json:"customer"`
 		PaymentMethod  string          `json:"payment_method"`
 		PaymentIntent  json.RawMessage `json:"payment_intent"`
-		Invoice        json.RawMessage `json:"invoice"`
 		Paid           bool            `json:"paid"`
 		Captured       bool            `json:"captured"`
 		Status         string          `json:"status"`
@@ -410,11 +433,14 @@ func (s *StripeService) GetCollectedInvoice(ctx context.Context, invoiceID strin
 	if err := json.Unmarshal(body, &charge); err != nil {
 		return receipt, true, err
 	}
-	if charge.ID != chargeID || (receipt.PaymentIntentID != "" && rawID(charge.PaymentIntent) != receipt.PaymentIntentID) || (rawID(charge.Invoice) != "" && rawID(charge.Invoice) != receipt.InvoiceID) || (receipt.PaymentIntentID == "" && rawID(charge.Invoice) == "") {
+	// Charges no longer name their invoice (API 2025-03-31): the link is the
+	// invoice's paid InvoicePayment, which names either the PaymentIntent that
+	// produced this charge or, for a charge without one, the charge itself.
+	if charge.ID != chargeID || inv.PaymentInvoice != invoiceID || rawID(charge.PaymentIntent) != receipt.PaymentIntentID {
 		return receipt, true, fmt.Errorf("%w: charge does not belong to invoice payment", ErrStripeReceiptMismatch)
 	}
 	receipt.ChargeID = chargeID
-	receipt.ChargeInvoiceID = rawID(charge.Invoice)
+	receipt.ChargeInvoiceID = inv.PaymentInvoice
 	receipt.ChargePaymentIntentID = rawID(charge.PaymentIntent)
 	receipt.ChargedAmount = charge.AmountCaptured
 	receipt.ChargeCurrency = strings.ToUpper(charge.Currency)
@@ -634,10 +660,38 @@ func parseStripeCollectionInvoice(body []byte) (stripeCollectionInvoice, error) 
 	if len(raw["metadata"]) > 0 {
 		_ = json.Unmarshal(raw["metadata"], &out.Metadata)
 	}
-	out.PaymentIntent = rawID(raw["payment_intent"])
-	out.Charge = rawID(raw["charge"])
-	if out.Charge == "" {
-		out.Charge = rawID(raw["latest_charge"])
+	if len(raw["payments"]) > 0 {
+		var payments struct {
+			Data []struct {
+				Invoice json.RawMessage `json:"invoice"`
+				Status  string          `json:"status"`
+				Payment struct {
+					Charge        json.RawMessage `json:"charge"`
+					PaymentIntent json.RawMessage `json:"payment_intent"`
+				} `json:"payment"`
+			} `json:"data"`
+			HasMore bool `json:"has_more"`
+		}
+		if err := json.Unmarshal(raw["payments"], &payments); err != nil {
+			return stripeCollectionInvoice{}, fmt.Errorf("parse stripe invoice payments: %w", err)
+		}
+		paid := 0
+		for _, p := range payments.Data {
+			if p.Status != "paid" {
+				continue
+			}
+			paid++
+			out.PaymentInvoice = rawID(p.Invoice)
+			out.PaymentIntent = rawID(p.Payment.PaymentIntent)
+			out.Charge = rawID(p.Payment.Charge)
+			if out.Charge == "" {
+				out.Charge = rawID(rawField(p.Payment.PaymentIntent, "latest_charge"))
+			}
+		}
+		// A split or unlisted payment is not one operation's receipt.
+		if paid != 1 || payments.HasMore {
+			out.PaymentInvoice, out.PaymentIntent, out.Charge = "", "", ""
+		}
 	}
 	return out, nil
 }
@@ -650,16 +704,12 @@ func rawID(raw json.RawMessage) string {
 		return s
 	}
 	var obj struct {
-		ID           string          `json:"id"`
-		LatestCharge json.RawMessage `json:"latest_charge"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
-	if id := strings.TrimSpace(obj.ID); id != "" {
-		return id
-	}
-	return rawID(obj.LatestCharge)
+	return strings.TrimSpace(obj.ID)
 }
 
 func rawString(raw json.RawMessage) string {

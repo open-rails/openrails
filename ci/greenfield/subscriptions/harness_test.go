@@ -216,7 +216,7 @@ func (w *world) start() {
 	psps := map[string]embed.PSPConfig{
 		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": whsecStripe}}},
 		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}},
-		"ccbill": {"ccbill": {AccountID: ccbillAcct}},
+		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "greenfield-ccbill-salt"}}},
 	}
 	if w.declare != nil {
 		w.declare(psps)

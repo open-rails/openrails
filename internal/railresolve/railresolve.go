@@ -211,7 +211,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 	case models.RailCCBill:
 		// Identity is the dash-joined account_id (#697); validated by
 		// ToCCBillConfig's SplitCCBillAccountID at client-build time.
-		salt, _, err := s.secret(ctx, mid, scope, "salt")
+		salt, err := s.requireSecret(ctx, mid, scope, "salt")
 		if err != nil {
 			return nil, err
 		}

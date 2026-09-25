@@ -364,7 +364,7 @@ func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBi
 	if err != nil {
 		return nil, err
 	}
-	return ccbill.NewClient(cfg, s.Config != nil && s.Config.IsTestMode()), nil
+	return ccbill.NewClient(cfg, s.Config != nil && s.Config.IsTestMode())
 }
 
 func (s *CheckoutService) resolveCCBillConfig(ctx context.Context) (*config.CCBillConfig, error) {
@@ -431,6 +431,9 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	}
 	if (strings.TrimSpace(cfg.DataLinkUsername) == "") != (strings.TrimSpace(cfg.DataLinkPassword) == "") {
 		return nil, errors.New("merchant CCBill DataLink requires both datalink_username and datalink_password")
+	}
+	if strings.TrimSpace(cfg.Salt) == "" {
+		return nil, ccbill.ErrMissingSalt
 	}
 	return cfg, nil
 }

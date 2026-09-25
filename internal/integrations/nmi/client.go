@@ -549,7 +549,7 @@ func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.
 	}
 	client.accountMerchantID = merchantID
 	client.accountPSPID = pspID
-	client.accountSecurityKey = cfg.SecurityKey
+	client.accountSecurityKey = client.SecurityKey
 	return client, nil
 }
 

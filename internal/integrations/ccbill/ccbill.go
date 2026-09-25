@@ -3,6 +3,7 @@ package ccbill
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -54,11 +55,17 @@ const (
 	defaultLanguage     = "English"
 )
 
+// ErrMissingSalt refuses a FlexForm client without its signing salt.
+var ErrMissingSalt = errors.New("ccbill salt is required to sign FlexForm links")
+
 // NewClient creates a new CCBill client.
 // testMode: when true, uses sandbox-api.ccbill.com; when false, uses api.ccbill.com.
 // Note: The testMode param should come from config.IsTestMode().
-func NewClient(cfg *config.CCBillConfig, testMode bool) *CCBillClient {
+func NewClient(cfg *config.CCBillConfig, testMode bool) (*CCBillClient, error) {
 	cfg = requireConfig(cfg)
+	if strings.TrimSpace(cfg.Salt) == "" {
+		return nil, ErrMissingSalt
+	}
 
 	baseURL := prodFlexFormBase
 	if testMode {
@@ -68,7 +75,7 @@ func NewClient(cfg *config.CCBillConfig, testMode bool) *CCBillClient {
 	return &CCBillClient{
 		config:          cfg,
 		flexFormBaseURL: strings.TrimRight(baseURL, "/"),
-	}
+	}, nil
 }
 
 // GenerateFlexFormURL creates a CCBill FlexForm URL with subscription parameters for iFrame embedding.
@@ -178,9 +185,7 @@ func (c *CCBillClient) baseFlexFormQuery(username, email, formName, currencyCode
 		"email":        {email},
 		"username":     {username},
 	}
-	if c.config.Salt != "" {
-		q.Set("signature", c.computeSignature(url.Values{"username": {username}}))
-	}
+	q.Set("signature", c.computeSignature(url.Values{"username": {username}}))
 	return q
 }
 
