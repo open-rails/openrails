@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -67,7 +69,7 @@ type CheckoutCustodianSaleService struct {
 	DB                   *db.DB
 	PurchaseService      *CheckoutPurchaseService
 	PaymentMethodService custodianInstrumentStore
-	IdempotencyStore     checkoutIdempotencyStore
+	IdempotencyStore     idempotencyStore
 	Rails                railresolve.Source
 	Config               *config.Config
 	Intents              intentExecutor
@@ -181,31 +183,31 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		return nil, err
 	}
 
-	idempRec, alreadyExists, err := s.IdempotencyStore.Begin(ctx, idempOp, idempotencyKey)
+	claim, rec, err := s.IdempotencyStore.Begin(ctx, idempOp, idempotencyKey)
 	if err != nil {
 		return nil, fmt.Errorf("idempotency check failed: %w", err)
 	}
-	if alreadyExists {
-		switch idempRec.Status {
-		case IdempotencyStatusSuccess:
+	if claim == nil {
+		if rec.Status == idempotency.StatusSucceeded {
 			var cached checkoutSaleIdempotencyResult
-			if err := json.Unmarshal(idempRec.Result, &cached); err == nil {
+			if err := json.Unmarshal(rec.Result, &cached); err == nil {
 				return saleResponse(cached, "Purchase already completed"), nil
 			}
 			return &CheckoutResponse{Status: "success", Action: "new", Message: "Purchase already completed"}, nil
-		case IdempotencyStatusPending:
-			return nil, errors.New("checkout already in progress, please wait")
-		case IdempotencyStatusFailed:
-			// The durable intent below is the source of truth.
 		}
+		return nil, errors.New("checkout already in progress, please wait")
 	}
+	work, stop := claim.Hold(ctx)
+	defer stop()
+	work = db.WithCommitGuard(work, claim.InTx)
 
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
+		stop()
+		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+	params := intents.EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   string(models.RailNMI),
 		IntentType: TypeCustodianSale,
@@ -224,27 +226,47 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
 		OriginReason:   "checkout one-time sale (custodian-held card)",
-	})
+	}
+	// Admitted under the session's lock, like the native sale (#1099).
+	if req.CheckoutSessionID != "" && s.DB != nil {
+		err = s.DB.MerchantTx(work, func(ctx context.Context, tx pgx.Tx) error {
+			if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutSessionID); err != nil {
+				return err
+			}
+			_, err := intents.NewStore(s.DB.NewWithPgxTx(tx)).Enqueue(ctx, params)
+			return err
+		})
+		if err != nil {
+			stop()
+			failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
+			return nil, err
+		}
+	}
+	intent, err := s.Intents.EnqueueAndExecute(work, params)
 	if err != nil {
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, err)
+		stop()
+		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
 		return nil, fmt.Errorf("post custodian sale intent: %w", err)
 	}
 
+	stop()
 	switch intent.Status {
 	case intents.StatusSucceeded:
 		cached, derr := saleResultFromIntent(intent)
 		if derr != nil {
+			failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, derr)
 			return nil, fmt.Errorf("sale succeeded but evidence unreadable: %w", derr)
 		}
 		payload, _ := json.Marshal(cached)
-		completeCheckoutIdempotency(ctx, s.IdempotencyStore, idempOp, idempotencyKey, payload)
+		completeCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, payload)
 		return saleResponse(cached, "Purchase completed successfully"), nil
 	case intents.StatusFailedTerminal:
 		failErr := terminalCheckoutError(intent, "payment failed")
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, failErr)
+		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, failErr)
 		return nil, failErr
 	default:
-		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+		// The intent owns the outcome; a retry re-reads it by the same key.
+		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, ErrCheckoutProcessing)
 		return nil, ErrCheckoutProcessing
 	}
 }

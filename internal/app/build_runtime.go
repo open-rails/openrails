@@ -38,6 +38,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -45,7 +46,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -64,6 +64,9 @@ const (
 	// the simple, honest per-provider rate limit (thousands of merchants share
 	// each provider's API budget; a small worker cap is the brake).
 	standaloneRiverProviderRefreshQueueMaxWorkers = 4
+	// idempotencyLeaseConns sizes the lease-renewal pool: one short UPDATE per
+	// held claim every quarter lease.
+	idempotencyLeaseConns = 4
 )
 
 type runtimeOverrides struct {
@@ -173,12 +176,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisOwned = redisClient != nil
 	}
 
-	// Webhook-dedup posture (#678). Embedded hosts are identified by the injected
-	// DB pool.
-	if err := enforceWebhookDedupPosture(cfg, redisClient != nil, overrides != nil && overrides.DB != nil); err != nil {
-		return nil, err
-	}
-
 	solanaPriceProvider, err := createPythPriceProvider(cfg)
 	if err != nil {
 		return nil, err
@@ -232,16 +229,21 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		userDirectory = overrides.UserDirectory
 		usernameResolver = overrides.UsernameResolver
 	}
-	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver, stripeClients)
+	// #1099: idempotency leases renew on their own connections, so a pool
+	// saturated by the requests holding them can never starve a renewal.
+	leaseDB, err := database.SeparatePool(ctx, idempotencyLeaseConns)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("idempotency lease pool: %w", err)
 	}
 	defer func() {
 		if buildErr != nil {
-			serviceInstances.IdempotencyService.Close()
-			serviceInstances.webhookIdempotencyService.Close()
+			_ = leaseDB.Close()
 		}
 	}()
+	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver, stripeClients)
+	if err != nil {
+		return nil, err
+	}
 
 	var emailService *subscriptions.EmailService
 	if cfg.SendGrid != nil {
@@ -302,6 +304,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime := &Runtime{
 		StripeClients: stripeClients,
 		DB:            database,
+		leaseDB:       leaseDB,
 		RedisClient:   redisClient,
 		redisOwned:    redisOwned,
 		Config:        cfg,
@@ -338,8 +341,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		SubscriptionLifecycleService: serviceInstances.SubscriptionLifecycleService,
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
 		DeduplicationService:         serviceInstances.DeduplicationService,
-		IdempotencyService:           serviceInstances.IdempotencyService,
-		webhookIdempotencyService:    serviceInstances.webhookIdempotencyService,
 
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
@@ -606,32 +607,6 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	return client, nil
 }
 
-// enforceWebhookDedupPosture (#678): dedup TRUTH now lives in Postgres
-// (openrails.webhook_events), so running without Redis is CORRECT in any
-// topology — a replica can never replay effects. It is merely wasteful: the
-// pending-lease coordination degrades to per-process (concurrent duplicate
-// deliveries burn work; #675 row locks keep them safe) and every dedup check
-// pays a Postgres round-trip. The old hard boot-refusal existed because the
-// memStore was per-process TRUTH; that reason is gone, so this is a loud
-// warning now. Always returns nil (kept as error-shaped for the call site).
-func enforceWebhookDedupPosture(cfg *config.Config, hasRedis, embeddedHost bool) error {
-	if hasRedis {
-		return nil
-	}
-	log.Warn(webhookDedupPostureWarning(cfg, embeddedHost))
-	return nil
-}
-
-// webhookDedupPostureWarning is pure (no redis/db) so the message choice is unit testable.
-func webhookDedupPostureWarning(cfg *config.Config, embeddedHost bool) string {
-	if embeddedHost || cfg == nil {
-		return "redis not configured: webhook dedup truth stays in Postgres (safe); lease coordination and the completed-key cache degrade to per-process memory (#678)"
-	}
-	return fmt.Sprint(
-		"redis not configured in standalone mode: webhook dedup truth stays in Postgres (safe), but multi-replica deployments lose cross-replica lease coordination and the fast-path cache — expect wasted duplicate processing attempts; configure redis (#678)",
-	)
-}
-
 type servicesInstances struct {
 	SubscriptionService *subscriptions.SubscriptionService
 
@@ -665,8 +640,6 @@ type servicesInstances struct {
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
-	IdempotencyService           *replaycache.Store
-	webhookIdempotencyService    *replaycache.Store
 
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
@@ -688,7 +661,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
+func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -811,12 +784,14 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService := replaycache.NewStore(redisClient, replaycache.WithClock(clock.Now))
-	webhookIdempotencyService := replaycache.NewStoreWithTTL(
-		redisClient,
-		webhooks.WebhookIdempotencyTTL,
-		replaycache.WithClock(clock.Now),
-	)
+	idempotencyService, err := idempotency.NewStore(database, leaseDB, checkout.IdempotencyTTL, checkout.IdempotencyLease)
+	if err != nil {
+		return nil, err
+	}
+	webhookClaims, err := idempotency.NewStore(database, leaseDB, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
+	if err != nil {
+		return nil, err
+	}
 
 	userSubscriptionService := subscriptions.NewUserSubscriptionService(
 		subscriptionService,
@@ -851,11 +826,9 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	// resolver.
 	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver))
 
-	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
-	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database, clock)
+	// #1099: deliveries are claimed in Postgres; webhook_events is the applied fact (#678).
+	deduplicationService, err := webhooks.NewDeduplicationService(webhookClaims, database)
 	if err != nil {
-		idempotencyService.Close()
-		webhookIdempotencyService.Close()
 		return nil, err
 	}
 	webhookDispatcher := &webhooks.WebhookDispatcher{
@@ -953,8 +926,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		PlanMigrationService:         planMigrationService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
-		IdempotencyService:           idempotencyService,
-		webhookIdempotencyService:    webhookIdempotencyService,
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
 		CheckoutSessionService:       checkoutSessionService,

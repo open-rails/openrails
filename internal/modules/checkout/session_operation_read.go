@@ -19,26 +19,30 @@ func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Co
 	if (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.Mode != models.CheckoutSessionModeOneOff || s.db == nil {
 		return s.initialMembershipSessionResponse(ctx, session)
 	}
-	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey("checkout_native_session:"+session.ID.String()))
+	native := "checkout_native_session:" + session.ID.String()
+	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(native))
+	custodian := false
+	if db.IsNotFound(err) {
+		// A custodian-held card's sale is keyed under its own type (#1099):
+		// read it too, so its in-flight charge never reads as no operation.
+		operation, err = intents.NewStore(s.db).GetByIdempotencyKey(ctx, CustodianSaleIdempotencyKey(native))
+		custodian = true
+	}
 	if db.IsNotFound(err) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, true, err
 	}
-	terms, err := payments.DecodeNMISalePayload(operation)
-	if err != nil {
+	if err := saleOwnedBySession(operation, session, custodian); err != nil {
 		return nil, true, err
-	}
-	if terms.CheckoutSessionID != session.ID || terms.UserID != session.CustomerID.String() || session.PriceID == nil || terms.PriceID != *session.PriceID || terms.Instrument.PSPID != session.PspID {
-		return nil, true, fmt.Errorf("sale receipt contradicts checkout identity")
 	}
 	projection := *session
 	projection.PaymentID, projection.SubscriptionID, projection.TransactionID = nil, nil, nil
 	projection.ExpiresAt = nil
 	switch operation.Status {
 	case intents.StatusSucceeded:
-		if err := intents.ValidateNMISaleTerminal(operation); err != nil {
+		if err := validateSaleTerminal(operation, custodian); err != nil {
 			return nil, true, err
 		}
 		result, err := renderSaleOperation(operation)
@@ -49,7 +53,7 @@ func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Co
 			return nil, true, err
 		}
 	case intents.StatusFailedTerminal:
-		if err := intents.ValidateNMISaleTerminal(operation); err != nil {
+		if err := validateSaleTerminal(operation, custodian); err != nil {
 			return nil, true, err
 		}
 		projection.Status = models.CheckoutSessionStatusFailed
@@ -81,4 +85,32 @@ func authenticationRequired(operation gen.OpenrailsRailIntent) bool {
 		AuthenticationRequired bool `json:"authentication_required"`
 	}
 	return json.Unmarshal(operation.ResultEvidence, &evidence) == nil && evidence.AuthenticationRequired
+}
+
+func saleOwnedBySession(operation gen.OpenrailsRailIntent, session *models.CheckoutSession, custodian bool) error {
+	if custodian {
+		var p CustodianSalePayload
+		if err := json.Unmarshal(operation.Payload, &p); err != nil {
+			return err
+		}
+		if p.UserID != session.CustomerID.String() || session.PriceID == nil || p.PriceID != *session.PriceID {
+			return fmt.Errorf("sale receipt contradicts checkout identity")
+		}
+		return nil
+	}
+	terms, err := payments.DecodeNMISalePayload(operation)
+	if err != nil {
+		return err
+	}
+	if terms.CheckoutSessionID != session.ID || terms.UserID != session.CustomerID.String() || session.PriceID == nil || terms.PriceID != *session.PriceID || terms.Instrument.PSPID != session.PspID {
+		return fmt.Errorf("sale receipt contradicts checkout identity")
+	}
+	return nil
+}
+
+func validateSaleTerminal(operation gen.OpenrailsRailIntent, custodian bool) error {
+	if custodian {
+		return nil
+	}
+	return intents.ValidateNMISaleTerminal(operation)
 }

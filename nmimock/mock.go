@@ -57,6 +57,7 @@ type Mock struct {
 	recent      []recentCharge
 
 	refusedSaves int
+	declineValid int
 	duplicate    int
 	lose, lost   int
 	drop         int

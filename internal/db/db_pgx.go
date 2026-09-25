@@ -134,7 +134,7 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commit(ctx, tx)
 }
 
 // MerchantTx runs fn inside a pgx transaction with the merchant GUC pinned
@@ -157,7 +157,7 @@ func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commit(ctx, tx)
 }
 
 // setMerchantLocalGUCPgx sets the merchant GUC transaction-locally
@@ -294,6 +294,16 @@ func (l *lazyMerchantPgxConn) release() {
 	}
 	l.conn.Release()
 	l.conn = nil
+}
+
+// releaseIdle releases the pin when no transaction is open on it.
+func (l *lazyMerchantPgxConn) releaseIdle() {
+	l.mu.Lock()
+	idle := l.conn != nil && !l.conn.Conn().IsClosed() && l.conn.Conn().PgConn().TxStatus() == 'I'
+	l.mu.Unlock()
+	if idle {
+		l.release()
+	}
 }
 
 func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {

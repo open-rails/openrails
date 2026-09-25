@@ -26,6 +26,7 @@ var OwnedTables = []string{
 	"entitlements",
 	"grants",
 	"host_outbox",
+	"idempotency_keys",
 	"invoice_items",
 	"invoice_payments",
 	"invoices",

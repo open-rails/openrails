@@ -86,7 +86,7 @@ func (h BasisTheoryWebhookHandler) Apply(ctx context.Context, d *WebhookDispatch
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory webhook has no event id"))
 	}
 	svc := &basisTheoryWebhookService{d: d, accountID: msg.CustodianAccountID}
-	return d.DeduplicationService.ProcessWebhook(ctx, evt.ID, evt.Type, models.EventSourceBasisTheory, msg.Payload, func(ctx context.Context) error {
+	return d.DeduplicationService.ProcessWebhook(ctx, evt.ID, evt.Type, models.EventSourceBasisTheory, func(ctx context.Context) error {
 		return svc.apply(ctx, evt)
 	})
 }

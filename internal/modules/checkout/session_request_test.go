@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
@@ -340,50 +338,9 @@ func TestInitializeCheckoutSession(t *testing.T) {
 	}
 }
 
-// xs-007 row 39: the pending-create lease runs from the last heartbeat, so a
-// live holder inside a slow provider call is never taken over, and a dead one
-// is after one lease of silence.
-func TestCheckoutSessionPendingLeaseHeartbeat(t *testing.T) {
-	ctx := context.Background()
-	clock := clockwork.NewFakeClockAt(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC))
-	store := replaycache.NewStore(nil, replaycache.WithClock(clock.Now))
-	t.Cleanup(store.Close)
-	const lease, key = 200 * time.Millisecond, "user:1:create-abc"
-	svc := &CheckoutSessionService{idempotencyService: store, pendingLease: lease, clock: clock}
-
-	_, exists, err := store.Begin(ctx, checkoutSessionIdempotencyOp, key)
-	require.NoError(t, err)
-	require.False(t, exists)
-	stop := svc.startPendingHeartbeat(ctx, key)
-	require.NoError(t, clock.BlockUntilContext(t.Context(), 1))
-	rec, err := store.Get(ctx, checkoutSessionIdempotencyOp, key)
-	require.NoError(t, err)
-	lastBeat := rec.CreatedAt
-	for range 8 {
-		clock.Advance(lease / 4)
-		require.Eventually(t, func() bool {
-			rec, err := store.Get(ctx, checkoutSessionIdempotencyOp, key)
-			if err != nil || rec == nil || !rec.CreatedAt.After(lastBeat) {
-				return false
-			}
-			lastBeat = rec.CreatedAt
-			return true
-		}, time.Second, time.Millisecond)
-	}
-	taken, err := store.TryTakeoverPending(ctx, checkoutSessionIdempotencyOp, key, lease)
-	require.NoError(t, err)
-	require.False(t, taken)
-
-	stop()
-	clock.Advance(2 * lease)
-	taken, err = store.TryTakeoverPending(ctx, checkoutSessionIdempotencyOp, key, lease)
-	require.NoError(t, err)
-	require.True(t, taken)
-}
-
 type failingCompleter struct{ err error }
 
-func (f failingCompleter) Complete(context.Context, string, string, json.RawMessage) error {
+func (f failingCompleter) Complete(context.Context, json.RawMessage) error {
 	return f.err
 }
 

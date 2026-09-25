@@ -27,6 +27,27 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND deleted_at IS NULL
 FOR SHARE;
 
+-- #1099: the session's lock orders intent admission against a definite
+-- failure; the caller refuses to admit on a terminal session.
+-- name: LockCheckoutSessionForAdmission :one
+SELECT status FROM openrails.checkout_sessions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND deleted_at IS NULL
+FOR UPDATE;
+
+-- A definite refusal fails a created session only while no provider
+-- operation was admitted for it. Run after LockCheckoutSessionForAdmission in
+-- the same transaction, so the intent check reads committed admissions.
+-- name: FailCheckoutSessionInitialization :execrows
+UPDATE openrails.checkout_sessions cs
+SET status = 'failed', updated_at = sqlc.arg(now)::timestamptz,
+    rail_state = COALESCE(cs.rail_state, '{}'::jsonb) || jsonb_build_object('message', sqlc.arg(reason)::text, 'failure_reason', sqlc.arg(reason)::text,
+      'failure_kind', sqlc.arg(kind)::text, 'failure_code', sqlc.arg(code)::text)
+WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.id = sqlc.arg(id)::uuid
+  AND cs.deleted_at IS NULL AND cs.status = 'created'
+  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+                  WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY(sqlc.arg(intent_keys)::text[]));
+
 -- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     customer_id = $2,
@@ -273,4 +294,9 @@ SELECT EXISTS (
    AND s.status<>'succeeded'
    AND (s.status IN ('created','requires_action')
      OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
+   -- #1099: a session whose sale finally failed is resolved by that outcome.
+   AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents f
+     WHERE f.merchant_id=s.merchant_id
+       AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
+       AND f.status IN ('failed_terminal','expired','superseded'))
 );

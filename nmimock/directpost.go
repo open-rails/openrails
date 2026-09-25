@@ -179,12 +179,17 @@ func (m *Mock) validate(form url.Values) string {
 	}
 	id := m.next("validate")
 	approved := c.Decline == "" || c.Decline == "202" || c.Decline == "203"
+	code := c.Decline
+	if m.declineValid > 0 {
+		m.declineValid--
+		approved, code = false, "200"
+	}
 	if approved {
 		m.remember(*c, "0.00")
 	}
 	m.validations = append(m.validations, &Validation{TransactionID: id, Vault: v.ID, BillingID: form.Get("billing_id"), Card: *c, Approved: approved, Form: form, At: m.now()})
 	if !approved {
-		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", id, "orderid", form.Get("orderid"), "type", "validate", "response_code", c.Decline)
+		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", id, "orderid", form.Get("orderid"), "type", "validate", "response_code", code)
 	}
 	return answer("response", "1", "responsetext", "VALIDATED", "authcode", "", "transactionid", id, "orderid", form.Get("orderid"), "type", "validate", "response_code", "100")
 }

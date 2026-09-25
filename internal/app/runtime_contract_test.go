@@ -41,6 +41,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.ConvergeSweepArgs{}.Kind():             {15 * time.Minute, true},
 		riverjobs.LedgerIntegrityArgs{}.Kind():           {24 * time.Hour, true},
 		riverjobs.CleanupExpiredDataArgs{}.Kind():        {time.Hour, false},
+		riverjobs.IdempotencyGCArgs{}.Kind():             {15 * time.Minute, false},
 		riverjobs.SolanaCrankArgs{}.Kind():               {time.Hour, false},
 		riverjobs.SolanaGasAlertArgs{}.Kind():            {6 * time.Hour, false},
 		riverjobs.SolanaReconcileArgs{}.Kind():           {6 * time.Hour, false},
@@ -96,21 +97,6 @@ func TestRuntimeWiringPolicies(t *testing.T) {
 	require.Empty(t, alertingDashboardBaseURL(cfg))
 	cfg.DashboardBaseURL = "https://console.example/admin/"
 	require.Equal(t, "https://console.example/admin", alertingDashboardBaseURL(cfg))
-
-	// #678: dedup truth is in Postgres, so a Redis-less boot is never refused;
-	// the standalone warning names the multi-replica cost.
-	for _, cfg := range []*config.Config{nil, {}} {
-		for _, embedded := range []bool{false, true} {
-			require.NoError(t, enforceWebhookDedupPosture(cfg, false, embedded))
-		}
-	}
-	standalone := webhookDedupPostureWarning(&config.Config{}, false)
-	require.Contains(t, standalone, "standalone")
-	require.Contains(t, standalone, "lease coordination")
-	for _, msg := range []string{webhookDedupPostureWarning(&config.Config{}, true), webhookDedupPostureWarning(nil, false)} {
-		require.Contains(t, msg, "per-process")
-		require.NotContains(t, msg, "standalone")
-	}
 }
 
 // Devnet money is fake: a devnet deployment never depends on Hermes, while

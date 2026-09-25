@@ -14,8 +14,9 @@
 //
 // Tests seed state (Tokenize, AddVault, AddPlan, AddSchedule, AddSale),
 // inspect what the gateway saw (Sales, Ledger, Attempts, Calls, Validations)
-// and inject failures (SetDecline, LoseSales, DropSaleResponses,
-// RefuseDuplicates, QueryUnavailable, FailRequests, Hold, Intercept).
+// and inject failures (SetDecline, DeclineValidations, LoseSales,
+// DropSaleResponses, RefuseDuplicates, QueryUnavailable, FailRequests, Hold,
+// Intercept).
 // RenewSchedule and RunDue play NMI's recurring engine.
 //
 // Only tests and sandbox commands may import it; guard_test.go enforces this.

@@ -50,8 +50,7 @@ type CleanupConfig struct {
 	NotificationUnseenRetention time.Duration
 
 	// WebhookEventRetention is how long completed webhook dedup marks
-	// (openrails.webhook_events, #678) are kept. Default: 90 days — the same
-	// window as the Redis completed-key cache TTL.
+	// (openrails.webhook_events, #678) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
 
 	// PaymentSettlementAckedRetention is how long acknowledged (delivered)
@@ -87,7 +86,7 @@ func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
 		NotificationSeenRetention:   90 * 24 * time.Hour,
 		NotificationUnseenRetention: 180 * 24 * time.Hour,
-		WebhookEventRetention:       webhooks.WebhookIdempotencyTTL,
+		WebhookEventRetention:       webhooks.WebhookEventRetention,
 
 		PaymentSettlementAckedRetention:  30 * 24 * time.Hour,
 		HostLifecycleEventAckedRetention: 30 * 24 * time.Hour,

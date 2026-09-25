@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -79,8 +78,7 @@ type DunningWorker struct {
 	// NMIResolver arms store-scoped NMI clients per merchant (#730/#788, the
 	// ONLY credential plane). Consulted at the charge gate; the rebill
 	// handler re-resolves at charge time (no caching).
-	NMIResolver        money.NMIClientResolver
-	IdempotencyService *replaycache.Store
+	NMIResolver money.NMIClientResolver
 	// DeferDelete schedules the rail-side delete for terminal cancellations
 	// (#344). Threaded into the per-run lifecycle so an evidence-backed terminal
 	// decline stops the remote NMI subscription via the ONE scheduled mechanism
