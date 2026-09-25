@@ -124,7 +124,13 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
-			l := importLegacy(t, w, "nmi", tp)
+			// The book names no recurring agreement and no sale of the schedule,
+			// so there is no anchor to take over (or to dun) with.
+			w.waive("recorded", "the book's only sale is declared without its schedule, so it is not attributed to the membership")
+			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
+				book.Transactions[0].RailSubscriptionID = ""
+			})
+			require.Contains(t, w.openFindings("life.import.no_recurring_anchor"), l.railSub)
 			_, err := w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement)
 			_, err = w.client[tp].GetEngineTakeover(t.Context(), l.sub)
@@ -142,7 +148,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			_, err = w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose)
 			require.Zero(t, w.nmi.deletesOf(l.railSub))
-			require.Equal(t, "provider", w.subscription(tp, l.sub).CollectionPolicy)
+			require.Equal(t, "provider_dunning", w.subscription(tp, l.sub).CollectionPolicy)
 		})
 		t.Run(string(tp)+"/abandon_after_delete", func(t *testing.T) {
 			t.Parallel()
@@ -189,7 +195,7 @@ func TestNMIEngineTakeoverScheduleDrift(t *testing.T) {
 			require.Contains(t, w.openFindings(takeoverDrift), l.sub.UUID().String())
 			sub := w.subscription(remote, l.sub)
 			require.Equal(t, "active", sub.Status)
-			require.Equal(t, "provider", sub.CollectionPolicy)
+			require.Equal(t, "provider_dunning", sub.CollectionPolicy)
 		})
 	}
 }
@@ -220,7 +226,7 @@ func TestNMIEngineTakeoverHeld(t *testing.T) {
 		require.Zero(t, w.nmi.deletesOf(l.railSub))
 		require.True(t, w.nmi.scheduleLive(l.railSub))
 		require.Zero(t, w.nmi.saleAttempts(), "OpenRails never charged")
-		require.Equal(t, "provider", w.subscription(embedded, l.sub).CollectionPolicy)
+		require.Equal(t, "provider_dunning", w.subscription(embedded, l.sub).CollectionPolicy)
 	})
 	t.Run("abandon", func(t *testing.T) {
 		t.Parallel()

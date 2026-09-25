@@ -106,7 +106,11 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	}
 	require.Equal(t, status, sub.Status)
 	require.Equal(t, l.railSub, sub.RailSubscriptionID)
-	require.Equal(t, policy, sub.CollectionPolicy)
+	wantPolicy := policy
+	if rail == "nmi" && (book.PaymentMethods[0].RecurringTransactionID != "" || scheduleSale(book, l.railSub)) {
+		wantPolicy = "provider_dunning" // every NMI schedule with a recurring anchor is dunned by OpenRails (Paul, 2026-09-25)
+	}
+	require.Equal(t, wantPolicy, sub.CollectionPolicy)
 	require.NotNil(t, sub.PaymentMethodID)
 	charges := l.engineCharges()
 	replay, err := client.ImportBilling(t.Context(), book)
@@ -424,11 +428,12 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 	sub = w.subscription(embedded, lapsed.sub)
 	require.Nil(t, sub.NextRetryAt, "past grace, grace_exhausted owns it")
 	require.Equal(t, "unverified", sub.Status)
-	for _, l := range []*legacy{stripeOwned, nmiOwned} {
-		sub = w.subscription(embedded, l.sub)
-		require.Nil(t, sub.NextRetryAt, "%s: the provider owns its retries", l.rail)
-		require.Equal(t, "past_due", sub.Status)
-	}
+	sub = w.subscription(embedded, stripeOwned.sub)
+	require.Nil(t, sub.NextRetryAt, "stripe: the provider owns its retries")
+	require.Equal(t, "past_due", sub.Status)
+	sub = w.subscription(embedded, nmiOwned.sub)
+	require.NotNil(t, sub.NextRetryAt, "nmi: NMI never retries, so OpenRails dunning resumes")
+	require.Equal(t, "past_due", sub.Status)
 	w.runRenewals()
 	require.Zero(t, w.nmi.saleAttempts())
 	require.Equal(t, charges, stripeOwned.engineCharges())
@@ -464,4 +469,14 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	require.Zero(t, w.nmi.saleAttempts())
 	require.Len(t, w.nmi.ledger(""), 2, "the initial and NMI's renewal, nothing more")
 	require.Len(t, completed(w.payments(embedded, l.c.id)), 2)
+}
+
+// scheduleSale reports whether the book holds an approved sale of the schedule.
+func scheduleSale(book openrails.DeclaredBilling, railSub string) bool {
+	for _, t := range book.Transactions {
+		if t.RailSubscriptionID == railSub && t.Success && (t.Type == "" || t.Type == "sale") {
+			return true
+		}
+	}
+	return false
 }

@@ -2376,8 +2376,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				} else {
 					*subscription.RetryAttempts++
 				}
-				// A cycle with no retries (under 4 days) ends on its first decline.
-				terminal = *subscription.RetryAttempts >= maxFailures
+				// A cycle with no retries (under 4 days) ends on its first decline,
+				// unless NMI's own schedule charges again next cycle: then that
+				// charge is the retry, and OpenRails schedules none.
+				terminal = *subscription.RetryAttempts >= maxFailures &&
+					!(maxFailures == 1 && subscription.CollectionPolicy == models.CollectionPolicyProviderDunning)
 			}
 			leg := params.TerminalCertainty
 			if !params.Terminal {
@@ -2391,11 +2394,14 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.DunningExhausted{At: now}
 			default:
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
-				nextRetry, _, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
+				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
 				if err != nil {
 					return err
 				}
-				subscription.NextRetryAt = &nextRetry
+				subscription.NextRetryAt = nil
+				if ok {
+					subscription.NextRetryAt = &nextRetry
+				}
 			}
 		}
 		if heldTerminal != "" {
