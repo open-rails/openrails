@@ -243,7 +243,11 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			for _, x := range wants {
 				sub := x.row.sub(w, tp)
 				require.Equal(t, x.status, sub.Status, x.row.source)
-				require.Equal(t, "provider", sub.CollectionPolicy, x.row.source)
+				wantPolicy := "provider_dunning" // a live NMI schedule is dunned by OpenRails
+				if x.status == "cancelled" {
+					wantPolicy = "provider"
+				}
+				require.Equal(t, wantPolicy, sub.CollectionPolicy, x.row.source)
 				require.NotNil(t, sub.PaymentMethodID, x.row.source)
 				require.NotNil(t, sub.CurrentPeriodEndsAt, x.row.source)
 				require.True(t, x.row.paid.Equal(*sub.CurrentPeriodEndsAt), "%s: period ends at the declared paid-through (%s vs %s)", x.row.source, x.row.paid, sub.CurrentPeriodEndsAt)

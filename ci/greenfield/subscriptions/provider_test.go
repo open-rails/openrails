@@ -106,7 +106,11 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	}
 	require.Equal(t, status, sub.Status)
 	require.Equal(t, l.railSub, sub.RailSubscriptionID)
-	require.Equal(t, policy, sub.CollectionPolicy)
+	wantPolicy := policy
+	if rail == "nmi" {
+		wantPolicy = "provider_dunning" // every NMI schedule is dunned by OpenRails (Paul, 2026-09-25)
+	}
+	require.Equal(t, wantPolicy, sub.CollectionPolicy)
 	require.NotNil(t, sub.PaymentMethodID)
 	charges := l.engineCharges()
 	replay, err := client.ImportBilling(t.Context(), book)

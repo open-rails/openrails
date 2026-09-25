@@ -72,10 +72,9 @@ type DeclaredPaymentMethod struct {
 	RailMethodRef        string `json:"rail_method_ref"`
 	InitialTransactionID string `json:"initial_transaction_id,omitempty"`
 	// RecurringTransactionID is the account-scoped NMI transaction reference
-	// for an existing, verified recurring stored-card agreement. Supply it
-	// only when the imported evidence establishes that agreement; a generic
-	// initial sale is not sufficient. Import never infers it or replaces an
-	// already captured recurring reference.
+	// for an existing recurring stored-card agreement. When omitted, import
+	// takes the first approved sale of the method's NMI schedule (its
+	// recurring signup). It never replaces an already captured reference.
 	RecurringTransactionID string    `json:"recurring_transaction_id,omitempty"`
 	LastFour               string    `json:"last_four,omitempty"`
 	CardType               string    `json:"card_type,omitempty"`

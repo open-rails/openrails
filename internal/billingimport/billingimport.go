@@ -242,6 +242,19 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			})
 		}
 
+		// The first approved sale of each NMI schedule is its customer-initiated
+		// recurring signup: the stored-credential anchor OpenRails' dunning
+		// retries reference (Paul, 2026-09-25: every NMI schedule is dunned).
+		firstScheduleSale := map[string]reconcile.RemoteTransaction{}
+		for _, t := range txns {
+			if t.SubscriptionID == "" || !t.Success || t.Type != reconcile.TransactionTypeSale || t.TransactionID == "" {
+				continue
+			}
+			if prior, seen := firstScheduleSale[t.SubscriptionID]; !seen || t.OccurredAt.Before(prior.OccurredAt) {
+				firstScheduleSale[t.SubscriptionID] = t
+			}
+		}
+
 		facts := make([]reconcile.DeclaredSubscriptionFact, 0, len(opts.Book.Subscriptions))
 		for _, s := range opts.Book.Subscriptions {
 			subPSP, err := psps.resolve(s.PSP, s.Rail, fmt.Sprintf("subscription %s", s.SourceID))
@@ -296,6 +309,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				} else {
 					f.PaymentMethodUnresolved = true
 				}
+			}
+			if err := dunNMISchedule(ctx, q, merchantID.UUID(), &f, firstScheduleSale); err != nil {
+				return err
 			}
 			facts = append(facts, f)
 		}
@@ -453,4 +469,43 @@ func productEntitlementKeys(raw []byte) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// FindingNoRecurringAnchor is an imported NMI schedule OpenRails cannot dun:
+// its card has no recurring stored-credential anchor.
+const FindingNoRecurringAnchor = "life.import.no_recurring_anchor"
+
+// dunNMISchedule makes an imported NMI schedule OpenRails-dunned. NMI never
+// retries a declined renewal, so OpenRails dunning is its only retry. A card
+// without a recurring anchor takes the schedule's first approved sale (its
+// recurring signup); without one the schedule stays provider-collected and an
+// operator finding names it.
+func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f *reconcile.DeclaredSubscriptionFact, firstSale map[string]reconcile.RemoteTransaction) error {
+	if !strings.EqualFold(f.Rail, "nmi") || f.RailSubscriptionID == "" || f.CollectionPolicy == models.CollectionPolicyEngine || f.CancelKind != reconcile.DeclaredCancelNone {
+		return nil
+	}
+	if f.PaymentMethodID != nil {
+		method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: *f.PaymentMethodID})
+		if err != nil {
+			return fmt.Errorf("load payment method for %s: %w", f.SourceID, err)
+		}
+		anchor := method.StoredCredentialRecurringRef
+		if sale, ok := firstSale[f.RailSubscriptionID]; anchor == "" && ok {
+			if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: merchantID, ID: method.ID, Agreement: "recurring", Ref: sale.TransactionID}); err != nil {
+				return fmt.Errorf("import recurring anchor for %s: %w", f.SourceID, err)
+			}
+			anchor = sale.TransactionID
+		}
+		if anchor != "" {
+			f.CollectionPolicy = models.CollectionPolicyProviderDunning
+			return nil
+		}
+	}
+	evidence, _ := json.Marshal(map[string]any{"source_id": f.SourceID, "rail_subscription_id": f.RailSubscriptionID})
+	action := fmt.Sprintf("imported NMI schedule %s has no recurring card agreement (no recurring_transaction_id and no approved sale for the schedule), so OpenRails cannot retry its declines. Import the schedule's first approved sale or the card's recurring agreement", f.RailSubscriptionID)
+	_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: merchantID, FindingType: FindingNoRecurringAnchor, SubjectKey: f.RailSubscriptionID,
+		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
+	})
+	return err
 }

@@ -71,7 +71,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	for _, sub := range subs.Data {
 		if sub.RailSubscriptionID == l.railSub {
 			l.sub = sub.ID
-			require.Equal(t, "provider", sub.CollectionPolicy)
+			require.Equal(t, "provider_dunning", sub.CollectionPolicy, "every NMI schedule is dunned by OpenRails")
 		}
 	}
 	require.False(t, l.sub.IsZero())
@@ -105,11 +105,11 @@ func (l *legacy) renewAtNMI(paid, notify bool) {
 	}
 }
 
-// OpenRails never charges an NMI-owned membership: not in the due pass, not
-// in dunning after NMI's own decline, not from convergence or LIFE after
-// missing news, not after a crash mid-convergence, and not from a second
-// replica. The fake NMI journal holds no OpenRails money write for the
-// legacy vault in any row.
+// OpenRails charges an NMI-owned membership only to retry NMI's own decline
+// (NMI never retries, so OpenRails dunning is its only retry): never in the
+// due pass, never from convergence or LIFE after missing news, never after a
+// crash mid-convergence, never from a second replica. The one dunning row
+// recovers the declined period with exactly one charge.
 func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 	t.Parallel()
 	type row struct {
@@ -118,7 +118,9 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 		// ends: OpenRails may end the NMI schedule (a stale mirror cancels
 		// and stops the provider billing a member without access).
 		ends bool
-		run  func(t *testing.T, w *world, l *legacy)
+		// charges: OpenRails money writes on the legacy vault.
+		charges int
+		run     func(t *testing.T, w *world, l *legacy)
 	}
 	cycles := func(t *testing.T, w *world, l *legacy) {
 		for i := range 3 {
@@ -132,10 +134,10 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 		}
 	}
 	rows := []row{
-		{"due_pass_daily", 1, false, cycles},
-		{"due_pass_monthly", 30, false, cycles},
-		{"due_pass_yearly", 365, false, cycles},
-		{"nmi_dunning", 30, true, func(t *testing.T, w *world, l *legacy) {
+		{"due_pass_daily", 1, false, 0, cycles},
+		{"due_pass_monthly", 30, false, 0, cycles},
+		{"due_pass_yearly", 365, false, 0, cycles},
+		{"nmi_dunning", 30, true, 1, func(t *testing.T, w *world, l *legacy) {
 			w.advanceTo(l.periodEnd().Add(time.Hour))
 			l.renewAtNMI(false, true)
 			require.Equal(t, "past_due", w.subscription(l.tp, l.sub).Status)
@@ -146,7 +148,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 			}
 			w.converge()
 		}},
-		{"no_news_life", 30, false, func(t *testing.T, w *world, l *legacy) {
+		{"no_news_life", 30, false, 0, func(t *testing.T, w *world, l *legacy) {
 			w.advanceTo(l.periodEnd().Add(5 * day))
 			for range 3 {
 				w.converge()
@@ -154,7 +156,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 				w.advance(day)
 			}
 		}},
-		{"crash_mid_convergence", 30, false, func(t *testing.T, w *world, l *legacy) {
+		{"crash_mid_convergence", 30, false, 0, func(t *testing.T, w *world, l *legacy) {
 			w.advanceTo(l.periodEnd().Add(time.Hour))
 			sale, _ := w.nmi.providerRenew(l.railSub, true)
 			g := w.nmi.hold(newGate(func(r *http.Request) bool {
@@ -172,7 +174,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 			w.until(func() bool { return w.subscription(l.tp, l.sub).CurrentPeriodEndsAt.After(sale.At) }, "the NMI renewal is mirrored after the crash")
 			require.Len(t, completed(w.payments(l.tp, l.c.id)), 2, "the NMI charge is recorded once")
 		}},
-		{"two_replicas", 30, false, func(t *testing.T, w *world, l *legacy) {
+		{"two_replicas", 30, false, 0, func(t *testing.T, w *world, l *legacy) {
 			e := enroll(t, w, "nmi", embedded)
 			engineVault := w.nmi.lastSale().Vault
 			second := w.startReplica()
@@ -196,11 +198,11 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 			l := importLegacyEvery(t, w, tp, r.days, nil)
 			w.converge()
 			r.run(t, w, l)
-			require.Empty(t, w.nmi.engineWrites(l.railCust), "OpenRails never charges the NMI-owned membership")
+			require.Len(t, w.nmi.engineWrites(l.railCust), r.charges, "OpenRails charges the NMI-owned membership only to retry NMI's decline")
 			if !r.ends {
 				require.True(t, w.nmi.scheduleLive(l.railSub), "NMI still owns the schedule")
 			}
-			require.Equal(t, "provider", w.subscription(tp, l.sub).CollectionPolicy)
+			require.Equal(t, "provider_dunning", w.subscription(tp, l.sub).CollectionPolicy)
 			require.Empty(t, w.nmi.unexpected())
 		})
 	}
