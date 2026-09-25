@@ -372,7 +372,11 @@ func (w *DunningWorker) processSubscription(
 			cycleHours = collection.BillingCycleHoursOf(p)
 		}
 	}
-	window, err := collection.Window(cycleHours)
+	policy, err := subscriptions.DunningPolicy(ctx, w.DB)
+	if err != nil {
+		return dunningOutcomeFailed, err
+	}
+	window, err := policy.Window(cycleHours)
 	if err != nil {
 		// Fail closed: no charge on a guessed cadence; the operator decides.
 		logEntry.WithError(err).WithField("price_id", sub.PriceID).Error("Dunning: subscription has no billing cycle; refusing to rebill")

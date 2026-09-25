@@ -48,6 +48,7 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.Me
 		InvoiceMonthlyFloor: in.InvoiceMonthlyFloor, InvoiceBillingBoundary: in.InvoiceBillingBoundary, AlertEmail: in.AlertEmail,
 		RepriceNoticeWindowDays: in.RepriceNoticeWindowDays, RenewalReceiptMinIntervalHours: in.RenewalReceiptMinIntervalHours, ProviderRefundAccess: in.ProviderRefundAccess, ArrearsGraceDays: in.ArrearsGraceDays,
 		ArrearsDelinquencyFloor: in.ArrearsDelinquencyFloor, CheckoutRouting: in.CheckoutRouting,
+		DunningPolicy:                      in.DunningPolicy,
 		DelegatedInvokerWastedSpendWindows: windows,
 	})
 	if err != nil {
@@ -166,6 +167,7 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 			InvoiceMonthlyFloor:        cfg.InvoiceMonthlyFloor, InvoiceBillingBoundary: cfg.InvoiceBillingBoundary, AlertEmail: cfg.AlertEmail,
 			RepriceNoticeWindowDays: cfg.RepriceNoticeWindowDays, RenewalReceiptMinIntervalHours: cfg.RenewalReceiptMinIntervalHours, ProviderRefundAccess: cfg.ProviderRefundAccess, ArrearsGraceDays: cfg.ArrearsGraceDays,
 			ArrearsDelinquencyFloor: cfg.ArrearsDelinquencyFloor, CheckoutRouting: cfg.CheckoutRouting,
+			DunningPolicy: cfg.DunningPolicy,
 		}
 		if cfg.Profile != nil {
 			out.Profile = &openrails.MerchantProfileInput{DisplayName: cfg.Profile.DisplayName, LogoURL: cfg.Profile.LogoURL, FromEmail: cfg.Profile.FromEmail, SupportURL: cfg.Profile.SupportURL, SignupURL: cfg.Profile.SignupURL}

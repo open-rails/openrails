@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"sort"
 	"strconv"
 	"strings"
@@ -558,6 +559,9 @@ type MerchantConfiguration struct {
 	// the stored policy; a non-nil pointer replaces it whole (an empty slice
 	// clears it back to the built-in default order).
 	CheckoutRouting *[]models.CheckoutRoutingRule
+	// DunningPolicy (#1093) replaces the dunning schedule. A nil pointer
+	// preserves the stored policy.
+	DunningPolicy *openrails.DunningPolicy
 }
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
@@ -595,6 +599,7 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 		ArrearsGraceDays:                   cfg.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:            cfg.ArrearsDelinquencyFloor,
 		CheckoutRouting:                    routing,
+		DunningPolicy:                      cfg.DunningPolicy,
 		DelegatedInvokerWastedSpendWindows: make([]abuse.WastedWindow, 0, len(cfg.DelegatedInvokerWastedSpendWindows)),
 	}
 	for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
@@ -701,6 +706,12 @@ func applyMerchantConfiguration(cfg models.MerchantConfiguration, in MerchantCon
 			return cfg, fmt.Errorf("arrears_delinquency_floor must be >= 0")
 		}
 		cfg.ArrearsDelinquencyFloor = in.ArrearsDelinquencyFloor
+	}
+	if in.DunningPolicy != nil {
+		if _, err := subscriptions.PolicyOf(in.DunningPolicy); err != nil {
+			return cfg, err
+		}
+		cfg.DunningPolicy = in.DunningPolicy
 	}
 	if in.CheckoutRouting != nil {
 		routing, err := merchantconfig.NormalizeCheckoutRouting(*in.CheckoutRouting)

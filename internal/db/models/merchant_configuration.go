@@ -50,6 +50,10 @@ type MerchantConfiguration struct {
 	// ("" default), revoke_on_any or keep.
 	ProviderRefundAccess string `json:"provider_refund_access,omitempty"`
 
+	// DunningPolicy (#1093) replaces the built-in dunning schedule. Nil ⇒
+	// collection.DefaultPolicy.
+	DunningPolicy *openrails.DunningPolicy `json:"dunning_policy,omitempty"`
+
 	// CheckoutRouting (or#288) is the merchant's deterministic processor
 	// preference policy: ordered rules, first match wins. Empty ⇒ the built-in
 	// default order.

@@ -1756,7 +1756,11 @@ func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context,
 		if err != nil {
 			return fmt.Errorf("resume dunning %s: load price: %w", sub.ID, err)
 		}
-		next, ok, err := collection.NextAttemptAt(collection.BillingCycleHoursOf(price), *sub.RetryAttempts, *sub.LastRetryAt)
+		policy, err := DunningPolicy(ctx, dbb)
+		if err != nil {
+			return err
+		}
+		next, ok, err := policy.NextAttemptAt(collection.BillingCycleHoursOf(price), *sub.RetryAttempts, *sub.LastRetryAt)
 		if err != nil && !errors.Is(err, collection.ErrUnknownCycle) {
 			return err
 		}
@@ -2336,7 +2340,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			// An unknown cycle fails closed: nothing is retried or cancelled on
 			// a guessed cadence; the caller raises the operator finding.
-			maxFailures, err := collection.MaxFailures(cycleHours)
+			policy, err := DunningPolicy(ctx, db)
+			if err != nil {
+				return err
+			}
+			maxFailures, err := policy.MaxFailures(cycleHours)
 			if err != nil {
 				unknownCycle = subscription.MerchantID
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
@@ -2344,7 +2352,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// A processor try-again answer gets the short transient ladder first;
 			// those quick retries are not dunning failures.
 			if !params.Terminal && collection.ClassifyDeclineDetail(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
-				if next, ok := collection.NextTransientAttempt(subscription.TransientRetries, now); ok {
+				if next, ok := policy.NextTransientAttempt(subscription.TransientRetries, now); ok {
 					subscription.TransientRetries++
 					subscription.LastRetryAt = &now
 					if _, err := Transition(subscription, lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}, now); err != nil {
@@ -2379,7 +2387,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.DunningExhausted{At: now}
 			default:
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
-				nextRetry, _, err := collection.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
+				nextRetry, _, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
 				if err != nil {
 					return err
 				}

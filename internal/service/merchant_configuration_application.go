@@ -243,6 +243,9 @@ func mergeMerchantSettings(current, patch openrails.MerchantSettings) openrails.
 	if patch.CheckoutRouting != nil {
 		current.CheckoutRouting = patch.CheckoutRouting
 	}
+	if patch.DunningPolicy != nil {
+		current.DunningPolicy = patch.DunningPolicy
+	}
 	if patch.BillingPolicies != nil {
 		current.BillingPolicies = patch.BillingPolicies
 	}

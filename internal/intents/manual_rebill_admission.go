@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -161,7 +160,11 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			return err
 		}
 		p := subscriptions.ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.RebillOrderReference(key), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
-		window, err := collection.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour))
+		policy, err := subscriptions.DunningPolicy(ctx, d)
+		if err != nil {
+			return err
+		}
+		window, err := policy.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour))
 		if err != nil {
 			return err
 		}
