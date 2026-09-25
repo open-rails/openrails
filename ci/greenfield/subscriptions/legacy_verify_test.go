@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,13 +57,15 @@ func verificationReads(before, after map[string]int) map[string]int {
 // export lands unverified: NMI has since renewed most, ended some and
 // billed nothing for a few. Each import commit wakes the verifier, which
 // reads the account in bulk — a roster read and a few transaction pages, not
-// one read per member — and resolves every row from NMI's own records.
-// OpenRails charges nothing and access holds throughout; the few NMI never
-// billed stay unverified, visible in the backlog finding.
+// one read per member — and resolves every row from NMI's own records; the
+// kill switch holds the ends until the operator arms it. OpenRails charges
+// nothing and access holds throughout; the few NMI never billed stay
+// unverified, visible in the backlog finding.
 func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	t.Parallel()
+	// Destructive actions stay disarmed until the reads are counted: the
+	// provider refresh does not run, and the verifier holds its cancels.
 	w := newWorld(t)
-	w.armDestructive()
 	// 50 members holding 20 memberships each: 1,000 NMI schedules.
 	const members, tiers = 50, 20
 	var book []bookTier
@@ -91,7 +91,6 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 			}
 		}
 	}
-	w.refreshIdle() // the startup pull's reads are not the verifier's
 	reads, writes := w.nmi.readCounts(), len(w.nmiWrites())
 	// A legacy importer sends its book in request-sized batches; each commit
 	// wakes the verifier.
@@ -116,11 +115,6 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 				return false
 			}
 		}
-		for _, r := range gone {
-			if states[r.schedule].status != "cancelled" {
-				return false
-			}
-		}
 		return true
 	}, 3*time.Minute, 200*time.Millisecond, "the import is verified")
 
@@ -136,14 +130,29 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 		next := w.nmi.scheduleState(r.schedule).NextBilling.UTC().Truncate(24 * time.Hour)
 		require.True(t, next.Equal(states[r.schedule].end), "%s: renewed through NMI's next billing date (%s vs %s)", r.source, next, states[r.schedule].end)
 	}
-	for _, r := range silent {
-		require.Equal(t, "unverified", states[r.schedule].status, "%s: nothing billed, nothing decided", r.source)
+	for _, r := range append(silent, gone...) {
+		require.Equal(t, "unverified", states[r.schedule].status, "%s: nothing billed or the kill switch holds the end", r.source)
 	}
 	for _, r := range append(renewed, silent...) {
 		require.True(t, r.c.entitled(r.tier.ent), "%s: access holds", r.source)
 	}
 	require.Zero(t, w.nmi.saleAttempts(), "OpenRails charges nobody")
 	require.Len(t, w.nmiWrites(), writes, "verification only reads")
+
+	// Armed, the next pass reads the few rows left in one batch: NMI ended
+	// the gone schedules; the silent ones stay unverified.
+	w.armDestructive()
+	w.pull()
+	states = w.rowStates()
+	for _, r := range gone {
+		require.Equal(t, "cancelled", states[r.schedule].status, r.source)
+	}
+	for _, r := range silent {
+		require.Equal(t, "unverified", states[r.schedule].status, r.source)
+		require.True(t, r.c.entitled(r.tier.ent), "%s: access holds", r.source)
+	}
+	require.Zero(t, w.nmi.saleAttempts())
+	require.Len(t, w.nmiWrites(), writes, "an ended schedule is not deleted again")
 
 	w.converge()
 	require.Len(t, w.openFindings("life.unverified.backlog"), 1, "the backlog of the account")
@@ -212,20 +221,4 @@ func readBody(r *http.Request) string {
 	raw, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	return string(raw)
-}
-
-// refreshIdle waits for the startup provider refresh to finish, so its
-// reads are not counted as the verifier's.
-func (w *world) refreshIdle() {
-	w.t.Helper()
-	kinds := []string{"openrails.provider_refresh", "openrails.provider_refresh_merchant"}
-	require.Eventually(w.t, func() bool {
-		busy, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(kinds...).
-			States(rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStatePending, rivertype.JobStateScheduled).First(10))
-		if err != nil || len(busy.Jobs) > 0 {
-			return false
-		}
-		done, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(kinds[1]).States(rivertype.JobStateCompleted).First(1))
-		return err == nil && len(done.Jobs) > 0
-	}, time.Minute, 50*time.Millisecond, "the startup provider refresh")
 }
