@@ -210,15 +210,30 @@ and card saves answer `409 payment_duplicate_refused` (try again in a few
 minutes), a customer-present enrollment fails, and a replacement-card
 verification retries on its own. A scheduled renewal or dunning recovery is
 different: the matching charge may be this period's payment (for an
-NMI-scheduled subscription, NMI's own schedule), so it stays unknown and no new
-order is ever sent. An engine renewal is verified under its own order and, if
-NMI shows nothing, re-sent under that same order; a recovery waits for the
-operator (`openrails intents resolve`).
+NMI-scheduled subscription, NMI's own schedule), so it stays unknown and is
+never re-sent. An engine renewal completes if its own order shows the charge;
+otherwise it raises `life.submission.unresolved`, naming the vault's matching
+charges under other orders. A recovery waits for the operator
+(`openrails intents resolve`).
 
-OpenRails does not send `dup_seconds`, so NMI's own check stays on. It is the
-gateway's net against a double submit: the lost-submission resend re-sends
-under the same order only after the Query API shows nothing for it, and NMI's
-check still catches a first request the search had not yet indexed.
+### Exactly-once renewals
+
+Every attempt to pay one period (subscription + period) shares one NMI order
+id, so a read by order answers "was this period paid?" across attempts; a
+later attempt reads it first and completes from an earlier attempt's charge
+without sending. The idempotency key stays per attempt.
+
+A submitted engine renewal with no receipt is re-sent only when, after a
+five-minute settle, both the order read and a vault-wide read (any
+transaction on the `customer_vault_id`, any order or status, since the
+submission) are empty. The resend reuses the order and sends `dup_seconds`
+covering the time since the first submission, so NMI refuses it if the
+original charged but was not yet searchable. Any unreadable or contradictory
+read means no resend and a `life.submission.unresolved` finding.
+
+A replica paused past its lease while holding a submission (not crashed) can
+still send after another replica's resend; that late request is caught only
+by the account's own duplicate window, so keep NMI's duplicate check on.
 
 A submitted charge with no receipt is settled from NMI's record under its
 order: after five minutes with no transaction it ends not executed. If the

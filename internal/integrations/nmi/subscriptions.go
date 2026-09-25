@@ -65,8 +65,10 @@ type QueryFilter struct {
 	// SubscriptionID filters to the sales NMI's recurring engine made for one
 	// schedule, whatever order reference the schedule carries.
 	SubscriptionID string
-	PageNumber     int
-	ResultLimit    int
+	// CustomerVaultID filters to one vault's transactions.
+	CustomerVaultID string
+	PageNumber      int
+	ResultLimit     int
 }
 
 type AddSubscriptionResponse struct {
@@ -570,6 +572,9 @@ func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) 
 	}
 	if filter.OrderID != "" {
 		values.Set("order_id", filter.OrderID)
+	}
+	if filter.CustomerVaultID != "" {
+		values.Set("customer_vault_id", filter.CustomerVaultID)
 	}
 	if filter.PageNumber > 0 {
 		values.Set("page_number", fmt.Sprintf("%d", filter.PageNumber))

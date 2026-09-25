@@ -18,8 +18,8 @@ import (
 const TypeManualRebill = "manual_rebill"
 
 // ManualRebillPayload freezes one attempt, including the local effects the
-// confirmed charge buys. OrderReference identifies this attempt, not every
-// attempt in a period; a different attempt's receipt cannot settle this one.
+// confirmed charge buys. OrderReference is the obligation's, shared by every
+// attempt for the period; the idempotency key stays per attempt.
 type ManualRebillPayload struct {
 	Initiator                charge.Initiator        `json:"initiator"`
 	RequestedPaymentMethodID *uuid.UUID              `json:"requested_payment_method_id,omitempty"`
@@ -39,8 +39,11 @@ func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, r
 		periodEnd.UTC().Format(time.RFC3339Nano), strings.ToLower(strings.TrimSpace(rail)), attempt)
 }
 
-func RebillOrderReference(key string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
+// ObligationOrderReference is the NMI order id of one obligation: every
+// attempt to pay the period that starts at boundary shares it, so a read by
+// order answers "was this period paid?" across attempts.
+func ObligationOrderReference(subscriptionID uuid.UUID, boundary time.Time) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("obligation:"+subscriptionID.String()+":"+boundary.UTC().Format(time.RFC3339Nano))).String()
 }
 
 func DecodeManualRebillPayload(in gen.OpenrailsRailIntent) (ManualRebillPayload, error) {
@@ -73,8 +76,8 @@ func DecodeManualRebillPayload(in gen.OpenrailsRailIntent) (ManualRebillPayload,
 	default:
 		return p, errors.New("rebill initiation is not established")
 	}
-	if p.OrderReference != RebillOrderReference(in.IdempotencyKey) {
-		return p, errors.New("rebill identity does not name the accepted period and attempt")
+	if p.OrderReference != ObligationOrderReference(p.Renewal.SubscriptionID, p.Renewal.PeriodStart) {
+		return p, errors.New("rebill order does not name the accepted period")
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Renewal.Currency, p.Renewal.Amount)
 	if err != nil || minor != p.AmountMinor {

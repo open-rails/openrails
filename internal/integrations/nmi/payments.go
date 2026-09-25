@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -29,6 +30,10 @@ type SaleParams struct {
 	// NMI documents initiated_by, stored_credential_indicator, and the sequence
 	// reference.
 	StoredCredential *StoredCredential
+	// DupSeconds, when positive, sets NMI's duplicate-check window for this
+	// request. A lost-submission resend covers the time since its fence, so a
+	// late-indexed original is refused rather than charged twice.
+	DupSeconds int
 }
 
 type SaleResponse struct {
@@ -106,6 +111,9 @@ func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, curre
 	}
 	if params.OrderID != "" {
 		values.Set("orderid", params.OrderID)
+	}
+	if params.DupSeconds > 0 {
+		values.Set("dup_seconds", strconv.Itoa(params.DupSeconds))
 	}
 	params.StoredCredential.ApplyToForm(values)
 

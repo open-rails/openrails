@@ -183,8 +183,10 @@ func TestIdempotencyKeysAreContentAddressed(t *testing.T) {
 	assert.NotEqual(t, first, subscriptions.ManualRebillIdempotencyKey(a, period.Add(time.Microsecond), "nmi", 0))
 	second := subscriptions.ManualRebillIdempotencyKey(a, period, "nmi", 1)
 	assert.NotEqual(t, first, second)
-	assert.NotEqual(t, subscriptions.RebillOrderReference(first), subscriptions.RebillOrderReference(second),
-		"another attempt cannot present this attempt's receipt")
+	assert.Equal(t, subscriptions.ObligationOrderReference(a, period), subscriptions.ObligationOrderReference(a, period.In(time.FixedZone("x", 3600))),
+		"every attempt of one period shares its order")
+	assert.NotEqual(t, subscriptions.ObligationOrderReference(a, period), subscriptions.ObligationOrderReference(a, period.Add(time.Microsecond)))
+	assert.NotEqual(t, subscriptions.ObligationOrderReference(a, period), subscriptions.ObligationOrderReference(b, period))
 
 	key := InvoiceCollectionRetryKey(a, "client")
 	assert.True(t, InvoiceCollectionRetryKeyValid(a, key))

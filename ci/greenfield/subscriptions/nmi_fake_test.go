@@ -41,6 +41,8 @@ type nmiSale struct {
 	ScheduleID                                                 string
 	Declined                                                   string
 	At                                                         time.Time
+	// Hidden is a processed sale the Query API does not show yet.
+	Hidden bool
 }
 
 // nmiSchedule is a provider-owned recurring plan subscription. Days or
@@ -89,11 +91,17 @@ type nmiFake struct {
 	refusedSaves int
 	// failUpdates makes the next n update_subscription requests fail.
 	failUpdates int
+	// hide makes the next n approved sales invisible to searches until reveal.
+	hide int
+	// clock stamps transactions; the world's engine clock.
+	clock func() time.Time
 }
 
 func newNMIFake() *nmiFake {
-	return &nmiFake{tokens: map[string]card{}, vaults: map[string]*nmiVault{}, schedules: map[string]*nmiSchedule{}, plans: map[string]obj{}}
+	return &nmiFake{tokens: map[string]card{}, vaults: map[string]*nmiVault{}, schedules: map[string]*nmiSchedule{}, plans: map[string]obj{}, clock: time.Now}
 }
+
+func (f *nmiFake) now() time.Time { return f.clock().UTC() }
 
 func (f *nmiFake) next(prefix string) string {
 	f.seq++
@@ -508,7 +516,7 @@ func (f *nmiFake) sale(form url.Values) string {
 		return "response=3&responsetext=Invalid+Billing+Id&response_code=300"
 	}
 	if code := charged.Decline; code != "" {
-		d := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, Amount: form.Get("amount"), Currency: strings.ToUpper(form.Get("currency")), Declined: code, At: time.Now().UTC()}
+		d := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, Amount: form.Get("amount"), Currency: strings.ToUpper(form.Get("currency")), Declined: code, At: f.now()}
 		f.declined = append(f.declined, d)
 		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&orderid=%s&response_code=%s", d.TransactionID, d.OrderID, code)
 	}
@@ -516,7 +524,7 @@ func (f *nmiFake) sale(form url.Values) string {
 		f.duplicate--
 		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654321&response_code=300"
 	}
-	if f.duplicateOf(*charged, form.Get("amount")) {
+	if f.duplicateOf(*charged, form.Get("amount")) || f.withinDupSeconds(*charged, form) {
 		return "response=3&responsetext=Duplicate+transaction+REFID%3A3187654322&response_code=300"
 	}
 	amount, currency, scheduleID := form.Get("amount"), strings.ToUpper(form.Get("currency")), ""
@@ -531,9 +539,13 @@ func (f *nmiFake) sale(form url.Values) string {
 	}
 	s := &nmiSale{TransactionID: f.next("tx"), OrderID: form.Get("orderid"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
 		Currency: currency, InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),
-		Initial: form.Get("initial_transaction_id"), Card: *charged, At: time.Now().UTC()}
+		Initial: form.Get("initial_transaction_id"), Card: *charged, At: f.now()}
 	if s.BillingID == "" {
 		s.BillingID = v.BillingID
+	}
+	if f.hide > 0 {
+		f.hide--
+		s.Hidden = true
 	}
 	f.sales = append(f.sales, s)
 	f.remember(*charged, form.Get("amount"))
@@ -556,7 +568,7 @@ func (f *nmiFake) search(orderID, transactionID, scheduleID, vault string) strin
 	var b strings.Builder
 	b.WriteString("<nm_response>")
 	for _, s := range append(append([]*nmiSale{}, f.sales...), f.declined...) {
-		if (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) || (vault != "" && s.Vault != vault) {
+		if s.Hidden || (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) || (vault != "" && s.Vault != vault) {
 			continue
 		}
 		success, code := "1", "100"
@@ -576,7 +588,7 @@ func (f *nmiFake) search(orderID, transactionID, scheduleID, vault string) strin
 			success, code = "0", v.Card.Decline
 		}
 		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>USD</currency><action><amount>0.00</amount><action_type>validate</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
-			v.TransactionID, order, v.Vault, success, code, time.Now().UTC().Format("20060102150405"))
+			v.TransactionID, order, v.Vault, success, code, v.At.Format("20060102150405"))
 	}
 	b.WriteString("</nm_response>")
 	return b.String()
@@ -910,7 +922,7 @@ func (f *nmiFake) validate(form url.Values) string {
 	if approved {
 		f.remember(*c, "0.00")
 	}
-	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, BillingID: form.Get("billing_id"), Card: *c, Approved: approved, Form: form})
+	f.validations = append(f.validations, nmiValidation{TransactionID: id, Vault: v.ID, BillingID: form.Get("billing_id"), Card: *c, Approved: approved, Form: form, At: f.now()})
 	if !approved {
 		return fmt.Sprintf("response=2&responsetext=DECLINE&transactionid=%s&response_code=%s", id, c.Decline)
 	}
@@ -922,6 +934,7 @@ type nmiValidation struct {
 	Card                            card
 	Approved                        bool
 	Form                            url.Values
+	At                              time.Time
 }
 
 // validationOf is the approved card verification of a vault, or nil.
@@ -989,4 +1002,58 @@ func (f *nmiFake) remember(c card, amount string) {
 	if f.dupWindow > 0 {
 		f.recent = append(f.recent, nmiRecent{card: c, amount: amount, at: f.dupNow()})
 	}
+}
+
+// withinDupSeconds is NMI's per-request duplicate check: dup_seconds refuses
+// a sale matching an approved sale of the same card and amount within that
+// many seconds, whether or not searches show it yet. Test vaults share card
+// numbers, so a card is its vault's.
+func (f *nmiFake) withinDupSeconds(c card, form url.Values) bool {
+	window, _ := strconv.Atoi(form.Get("dup_seconds"))
+	if window <= 0 {
+		return false
+	}
+	for _, s := range f.sales {
+		if s.Declined == "" && s.Vault == form.Get("customer_vault_id") && s.Card.Brand == c.Brand && s.Card.Last4 == c.Last4 && s.Amount == form.Get("amount") && f.now().Sub(s.At) <= time.Duration(window)*time.Second {
+			return true
+		}
+	}
+	return false
+}
+
+// hideSales makes the next n approved sales invisible to the Query API, as
+// its indexing lag does, until reveal.
+func (f *nmiFake) hideSales(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hide = n
+}
+
+func (f *nmiFake) reveal() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.sales {
+		s.Hidden = false
+	}
+}
+
+// approveUnder records an approved sale NMI shows under order on vault's
+// current card, outside any request OpenRails made.
+func (f *nmiFake) approveUnder(order, vault, amount string) *nmiSale {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v := f.vaults[vault]
+	s := &nmiSale{TransactionID: f.next("tx"), OrderID: order, Vault: vault, BillingID: v.BillingID, Amount: amount, Currency: "USD", Card: v.Card, At: f.now()}
+	f.sales = append(f.sales, s)
+	return s
+}
+
+// lastDeclined is the most recent declined sale request.
+func (f *nmiFake) lastDeclined() *nmiSale {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.declined) == 0 {
+		return nil
+	}
+	return f.declined[len(f.declined)-1]
 }

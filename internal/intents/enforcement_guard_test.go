@@ -110,6 +110,8 @@ var providerWriteSurface = map[string]string{
 	"ProbeSalesByOrderID":          "read",
 	"ProbeSalesBySubscriptionID":   "read",
 	"ReadOrderAttempts":            "read",
+	"ReadOrderAttemptsSince":       "read",
+	"ReadVaultTransactions":        "read",
 	"ProbeTestMode":                "read",
 	"SearchTransactions":           "read",
 }

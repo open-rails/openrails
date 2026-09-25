@@ -14,6 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -70,6 +72,9 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if reason := h.submissionHeld(in); reason != "" {
 		return intents.Parked(reason)
 	}
+	if outcome, done := h.obligationPaid(ctx, in, p); done {
+		return outcome
+	}
 	method, _, _, err := h.validateAndFence(ctx, in, p, nil)
 	if err != nil {
 		if errors.Is(err, errEngineObligationChanged) || errors.Is(err, charge.ErrInstrumentChanged) {
@@ -94,7 +99,36 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if !first {
 		return h.Verify(ctx, in)
 	}
-	return h.dispatchNMI(ctx, in, p, charger, proof)
+	if err := h.hit(ctx, in, failpoint.AfterFence); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	return h.dispatchNMI(ctx, in, p, charger, proof, 0)
+}
+
+// obligationPaid reads the obligation's shared order before a later attempt
+// is fenced: an earlier attempt's charge, found late, pays the period and
+// nothing is sent.
+func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
+	if in.Rail == "stripe" || p.Attempt == 0 || p.Instrument.CustodianHeld() {
+		return intents.Outcome{}, false
+	}
+	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, "")
+	if err != nil {
+		return h.unresolved(ctx, in, p, "the obligation's order cannot be read before a new attempt: "+err.Error()), true
+	}
+	if !found {
+		return intents.Outcome{}, false
+	}
+	return h.completePaid(ctx, in, p, receipt), true
+}
+
+// hit runs the named failpoint for this operation.
+func (h *SubscriptionCollectionHandler) hit(ctx context.Context, in gen.OpenrailsRailIntent, point failpoint.Point) error {
+	site := failpoint.Site{Point: point, Kind: in.IntentType, Operation: in.ID}
+	if in.SubscriptionID != nil {
+		site.Subscription = *in.SubscriptionID
+	}
+	return failpoint.Hit(ctx, site)
 }
 
 func (h *SubscriptionCollectionHandler) submissionHeld(in gen.OpenrailsRailIntent) string {
@@ -115,19 +149,32 @@ func (h *SubscriptionCollectionHandler) submissionHeld(in gen.OpenrailsRailInten
 
 // dispatchNMI sends the accepted charge under its order reference. Only the
 // writer of a fresh submission or resend fence calls it.
-func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof) intents.Outcome {
+func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof, dupSeconds int) intents.Outcome {
 	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
 	execute := charger.ChargeRecurringMIT
 	if p.Initiator == charge.InitiatorCustomer {
 		chargeContext = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		execute = charger.ChargeInitialRecurring
 	}
+	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	result, refusal, err := execute(ctx, charge.Request{
 		Instrument:  charge.Instrument{PaymentMethodID: p.PaymentMethodID, Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
 		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: chargeContext,
+		DupSeconds: dupSeconds,
 	})
+	if hitErr := h.hit(ctx, in, failpoint.AfterProvider); hitErr != nil {
+		return intents.Ambiguous(hitErr.Error())
+	}
 	if errors.Is(err, charge.ErrNotDispatched) {
 		return h.completeNotExecuted(ctx, in, p, "not_dispatched", charge.ErrNotDispatched.Error(), proof)
+	}
+	if errors.Is(err, nmi.ErrDuplicateTransaction) {
+		if err := intents.NewStore(h.DB).RecordDuplicateRefusal(ctx, in, h.now()); err != nil {
+			return intents.Ambiguous("record duplicate refusal: " + err.Error())
+		}
+		return intents.Ambiguous("NMI refused the renewal as a duplicate of a recent charge; verifying whether that charge paid this period")
 	}
 	if err != nil {
 		return intents.Ambiguous("engine submission requires exact receipt recovery: " + err.Error())
@@ -305,6 +352,9 @@ func (h *SubscriptionCollectionHandler) lifecycle(d *db.DB) *subscriptions.Subsc
 	return lc
 }
 func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, outcome intents.Outcome, apply func(context.Context, *db.DB, *models.Subscription) error) intents.Outcome {
+	if err := h.hit(ctx, in, failpoint.BeforeComplete); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	ctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

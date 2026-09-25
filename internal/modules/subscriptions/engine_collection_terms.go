@@ -102,7 +102,7 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 	} else if p.Initiator != charge.InitiatorMerchant || in.Origin != "system" || p.RequestedPaymentMethodID != nil {
 		return p, errors.New("engine renewal initiation is invalid")
 	}
-	if in.IdempotencyKey != key || p.OrderReference != RebillOrderReference(key) {
+	if in.IdempotencyKey != key || p.OrderReference != ObligationOrderReference(p.Renewal.SubscriptionID, p.PreviousPeriodEnd) {
 		return p, errors.New("engine renewal key contradicts accepted attempt")
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Renewal.Currency, p.Renewal.Amount)
