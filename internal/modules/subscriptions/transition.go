@@ -47,9 +47,25 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 	if err != nil {
 		return nil, err
 	}
-	if next == before {
-		return effects, nil
+	if next != before {
+		writeSnapshot(sub, before, next, effects, now)
 	}
+	for _, e := range effects {
+		if _, ok := e.(lifecycle.CloseDunning); ok {
+			if next.Status == lifecycle.Active || next.Status == lifecycle.Cancelled {
+				sub.ClearRetrySchedule()
+			} else {
+				sub.NextRetryAt, sub.GraceEndsAt = nil, nil // attempts stay as evidence
+			}
+		}
+	}
+	if next.Status == lifecycle.Cancelled || next.Status == lifecycle.AwaitingMethod || next.Status == lifecycle.Unverified {
+		sub.NextRetryAt, sub.GraceEndsAt = nil, nil
+	}
+	return effects, nil
+}
+
+func writeSnapshot(sub *models.Subscription, before, next lifecycle.Snapshot, effects []lifecycle.Effect, now time.Time) {
 	sub.Status = models.SubscriptionStatus(next.Status)
 	if !next.PaidThrough.Equal(before.PaidThrough) {
 		end := next.PaidThrough
@@ -78,19 +94,6 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 	case before.Status == lifecycle.Cancelled:
 		sub.CancelType, sub.EndedAt, sub.CancelledAt, sub.CancelFeedback = nil, nil, nil, nil
 	}
-	for _, e := range effects {
-		if _, ok := e.(lifecycle.CloseDunning); ok {
-			if next.Status == lifecycle.Active || next.Status == lifecycle.Cancelled {
-				sub.ClearRetrySchedule()
-			} else {
-				sub.NextRetryAt, sub.GraceEndsAt = nil, nil // attempts stay as evidence
-			}
-		}
-	}
-	if next.Status == lifecycle.Cancelled || next.Status == lifecycle.AwaitingMethod || next.Status == lifecycle.Unverified {
-		sub.NextRetryAt, sub.GraceEndsAt = nil, nil
-	}
-	return effects, nil
 }
 
 func cancelKindOf(t models.CancelType) lifecycle.CancelKind {
