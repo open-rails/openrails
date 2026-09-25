@@ -79,15 +79,17 @@ export const checkoutPsps = (psps: readonly PspConfig[]): PspConfig[] =>
   psps.filter((psp) => psp.checkout !== false)
 
 /**
- * Saved cards the checkout can charge in place, for the given rails, most
- * recent first.
+ * Saved cards the checkout can charge in place, for the given rails: the
+ * default first, then most recent.
  */
 export function savedMethodsFor(
   methods: readonly PaymentMethod[],
   rails: readonly PaymentRailOption[]
 ): SavedPaymentMethod[] {
-  const recent = [...methods].sort((a, b) =>
-    (b.created_at ?? "").localeCompare(a.created_at ?? "")
+  const recent = [...methods].sort(
+    (a, b) =>
+      Number(!!b.default) - Number(!!a.default) ||
+      (b.created_at ?? "").localeCompare(a.created_at ?? "")
   )
   return recent.flatMap((method) => {
     const rail = rails.find(
@@ -103,6 +105,7 @@ export function savedMethodsFor(
         last_four: method.card?.last4 ?? undefined,
         exp_month: method.card?.exp_month ?? undefined,
         exp_year: method.card?.exp_year ?? undefined,
+        default: method.default ?? undefined,
       },
     ]
   })

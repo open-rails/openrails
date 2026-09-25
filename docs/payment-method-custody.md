@@ -169,6 +169,14 @@ hosts preselect it; `SetDefaultPaymentMethod` (or `PUT .../default-payment-metho
 switches it atomically. An expired card is not demoted by the passage of time;
 it stays default until another card is chosen or it is replaced.
 
+The default is for display and pre-selection only; nothing charges it
+implicitly (#1087). A checkout or pay-now names its method (`payment_method_id`
+or a new card `payment_token`); naming neither is `payment_method_required`
+(400). A renewal charges the method stored on its subscription, chosen at
+subscribe time or replaced by the customer; if that method is gone the due pass
+refuses the renewal (a `life.due_pass.refused` finding) and never falls back to
+the current default.
+
 Provider mirror: none is needed. OpenRails names the exact instrument on
 every charge (Stripe payment method id, NMI billing id), so Stripe's customer
 default and NMI's vault priority never select a card for OpenRails-owned

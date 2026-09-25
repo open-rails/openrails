@@ -103,7 +103,7 @@ describe("AccountBilling", () => {
 
   it("surfaces a load failure with a retry", async () => {
     const server = fakeBilling()
-    server.fail["GET /me/subscriptions"] = apiError(503, "service_unavailable")
+    server.fail["GET /me/subscriptions"] = apiError(500, "service_unavailable")
     mount(<SubscriptionsPanel />, server)
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Billing is temporarily unavailable"

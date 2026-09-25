@@ -6,6 +6,7 @@ import {
   BillingUiProvider,
   Checkout,
   checkoutRails,
+  CheckoutSourceError,
   type CheckoutRailOffer,
   type CheckoutSession,
   type PayRequest,
@@ -56,7 +57,8 @@ async function main() {
         }),
       })
       const body = await res.json()
-      if (!res.ok) throw new Error(body.error ?? "pay failed")
+      if (!res.ok)
+        throw new CheckoutSourceError(body.error ?? "pay failed", res.status)
       if (body.status === "failed") attempt = crypto.randomUUID()
       return body
     },

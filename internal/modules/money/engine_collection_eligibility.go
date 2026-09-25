@@ -17,6 +17,11 @@ import (
 
 var ErrCustomerSessionRequired = errors.New("verified customer session required")
 
+// ErrSubscriptionPaymentMethodMissing refuses a renewal whose stored method is
+// gone. Renewals charge only the method chosen at subscribe time (or replaced
+// by the customer); they never fall back to the customer's current default.
+var ErrSubscriptionPaymentMethodMissing = errors.New("subscription has no stored payment method; renewals never fall back to the default card")
+
 // engineCollectionMethod checks the local instrument and account facts shared
 // by admission and recovery readback. Call with the customer/subscription locked;
 // the handle lock precedes the method lock, as it does in method retirement.
@@ -33,7 +38,7 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 		return method, binding, err
 	}
 	if sub.PaymentMethodID == nil {
-		return unsupported(errors.New("engine subscription has no saved method"))
+		return unsupported(ErrSubscriptionPaymentMethodMissing)
 	}
 	q := d.Gen(ctx)
 	observed, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *sub.PaymentMethodID})

@@ -228,7 +228,7 @@ func TestValidatePaymentPerRail(t *testing.T) {
 		{"stripe hosted needs nothing", "stripe", CheckoutSessionPaymentRequest{}, user, ""},
 		{"stripe saved method needs ownership service", "stripe", CheckoutSessionPaymentRequest{PaymentMethodID: pmID}, user, "payment method service unavailable"},
 		{"nmi token", "nmi", CheckoutSessionPaymentRequest{PaymentToken: "tok"}, user, ""},
-		{"nmi neither", "nmi", CheckoutSessionPaymentRequest{}, user, "either payment_token or payment_method_id"},
+		{"nmi neither", "nmi", CheckoutSessionPaymentRequest{}, user, "payment_method_id or payment_token is required"},
 		{"nmi both", "nmi", CheckoutSessionPaymentRequest{PaymentToken: "tok", PaymentMethodID: pmID}, user, "either payment_token or payment_method_id"},
 		{"nmi malformed method", "nmi", CheckoutSessionPaymentRequest{PaymentMethodID: "card_1"}, user, "invalid payment_method_id"},
 		{"ccbill minimal identity", "ccbill", CheckoutSessionPaymentRequest{NameOnCard: "Prince", Zip: " 55401 ", Country: " us "}, user, ""},
@@ -247,6 +247,7 @@ func TestValidatePaymentPerRail(t *testing.T) {
 			}
 			require.ErrorIs(t, err, ErrCheckoutSessionValidation)
 			require.ErrorContains(t, err, tc.want)
+			require.Equal(t, tc.name == "nmi neither", errors.Is(err, ErrPaymentMethodRequired))
 		})
 	}
 

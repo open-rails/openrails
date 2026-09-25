@@ -104,6 +104,8 @@ export const savedPaymentMethodSchema = z.object({
   last_four: z.string().optional(),
   exp_month: z.number().optional(),
   exp_year: z.number().optional(),
+  // Pre-selected in the picker; paying still sends this id explicitly.
+  default: z.boolean().optional(),
 })
 export type SavedPaymentMethod = z.infer<typeof savedPaymentMethodSchema>
 

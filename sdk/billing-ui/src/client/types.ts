@@ -136,6 +136,8 @@ export const paymentMethodSchema = z.object({
       })
     )
     .nullish(),
+  /** The customer's default card: pre-selected, never charged implicitly. */
+  default: z.boolean().nullish(),
   /** Currencies whose invoices collect from this method by default. */
   collection_default_currencies: z.array(z.string()).nullish(),
   created_at: time.nullish(),

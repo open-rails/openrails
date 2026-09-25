@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from "vitest"
 import errorFixture from "../test/fixtures/wire/error_envelope.json"
 import subscriptionFixture from "../test/fixtures/wire/subscription.json"
 import { fakeBilling, json, subscription } from "../test/billing-server"
-import { createBillingClient, WalletRejectedError } from "./client"
-import { BillingError } from "./errors"
+import {
+  createBillingClient,
+  RETRY_BUDGET_MS,
+  WalletRejectedError,
+} from "./client"
+import { BillingError, isServerError } from "./errors"
 import { subscriptionSchema } from "./types"
 
 describe("wire fixtures", () => {
@@ -112,5 +116,76 @@ describe("createBillingClient", () => {
         throw new WalletRejectedError()
       })
     ).rejects.toMatchObject({ code: "wallet_rejected" })
+  })
+})
+
+// #1088: server errors surface at once; only a GET retries, once, briefly.
+describe("server errors", () => {
+  const ok = () => new Response("{}", { status: 200 })
+  const status = (code: number, headers?: Record<string, string>) =>
+    new Response(null, { status: code, headers })
+  const calls = (...responses: (() => Response)[]) => {
+    const fetch = vi.fn(async () => {
+      const next = responses.shift()
+      if (!next) throw new Error("unexpected request")
+      return next()
+    })
+    return fetch
+  }
+
+  it("surfaces a 500 without retrying", async () => {
+    const fetch = calls(() => status(500))
+    const err = await createBillingClient({ fetch })
+      .getStatus()
+      .catch((e: unknown) => e)
+    expect(err).toMatchObject({ status: 500, code: "server_error" })
+    expect(isServerError(err)).toBe(true)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries a GET once on 502/503/504 and network errors", async () => {
+    for (const first of [
+      () => status(502),
+      () => status(503),
+      () => status(504),
+      () => {
+        throw new TypeError("network down")
+      },
+    ]) {
+      const fetch = calls(first, ok)
+      await createBillingClient({ fetch }).listPaymentMethods()
+      expect(fetch).toHaveBeenCalledTimes(2)
+    }
+    const fetch = calls(
+      () => status(503),
+      () => status(503)
+    )
+    await expect(
+      createBillingClient({ fetch }).listPaymentMethods()
+    ).rejects.toMatchObject({ status: 503 })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("never retries a write", async () => {
+    const fetch = calls(() => status(503))
+    await expect(
+      createBillingClient({ fetch }).cancelSubscription("sub_1", {
+        feedback: "too pricey",
+      })
+    ).rejects.toMatchObject({ status: 503 })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("honours Retry-After only within the budget", async () => {
+    const slow = calls(() => status(429, { "Retry-After": "5" }))
+    await expect(
+      createBillingClient({ fetch: slow }).getStatus()
+    ).rejects.toMatchObject({ status: 429 })
+    expect(slow).toHaveBeenCalledTimes(1)
+    const quick = calls(() => status(503, { "Retry-After": "1" }), ok)
+    const started = Date.now()
+    await createBillingClient({ fetch: quick }).listPaymentMethods()
+    expect(quick).toHaveBeenCalledTimes(2)
+    expect(Date.now() - started).toBeLessThan(RETRY_BUDGET_MS)
   })
 })

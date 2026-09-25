@@ -127,3 +127,34 @@ test("a new card pays a one-time price", async ({ page, request }) => {
   const held = await billing(request, user.id)
   expect(held.subscriptions).toHaveLength(0)
 })
+
+// A server error is shown at once (#1088); nothing retries behind the buyer,
+// and paying again under the same attempt completes.
+test("a server error is shown at once and paying again succeeds", async ({
+  page,
+  request,
+}) => {
+  const catalog = (await (
+    await request.get("/__test/health")
+  ).json()) as Catalog
+  const user = await createUser(request)
+  await openCheckout(page, catalog.card_once_price_id, user.id)
+  let failures = 0
+  await page.route("**/__test/checkout/pay", (route) => {
+    if (failures++ > 0) return route.continue()
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "internal error" }),
+    })
+  })
+  const started = Date.now()
+  await page.getByRole("button", { name: /^Pay / }).click()
+  await expect(page.getByRole("alert")).toContainText(/Payment service error/, {
+    timeout: 2_000,
+  })
+  expect(Date.now() - started).toBeLessThan(2_000)
+  expect(failures).toBe(1)
+  await page.getByRole("button", { name: /^Pay / }).click()
+  await expect(page.getByText("Payment complete").first()).toBeAttached()
+})

@@ -69,7 +69,8 @@ func (c *Client) PayInvoiceNow(ctx context.Context, request PayInvoiceNowRequest
 		return nil, err
 	}
 	if request.PaymentMethodID.IsZero() {
-		return nil, invalidErr("payment_method_id is required")
+		param := "payment_method_id"
+		return nil, &StatusError{Status: http.StatusBadRequest, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: CodePaymentMethodRequired, Param: &param, Message: "payment_method_id is required"}}
 	}
 	var out InvoicePayNowResult
 	err = c.doWithHeaders(ctx, http.MethodPost, "/v1/me/invoices/"+id+"/pay-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...)

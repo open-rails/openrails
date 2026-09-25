@@ -18,7 +18,7 @@ import {
   type CheckoutAppearance,
 } from "#orck/appearance"
 import { authenticatePayment } from "#orck/authenticate"
-import { isBillingError } from "#orck/client/errors"
+import { isBillingError, isServerError } from "#orck/client/errors"
 import type { PaymentMethod } from "#orck/client/types"
 import { CardBillingFields } from "#orck/components/billing-fields"
 import { CardFields } from "#orck/components/card-fields"
@@ -98,6 +98,12 @@ export interface CheckoutProps {
 
 const POLL_INTERVAL_MS = 3_000
 const DECLINED = "Your card was declined. Try another card."
+// A 5xx is shown at once. Hosts replay a retried payment under the same
+// idempotency identity, so trying again cannot charge twice.
+const SERVER_FAILED =
+  "Payment service error. The payment was not confirmed. Try again in a moment."
+const STATUS_UNAVAILABLE =
+  "Payment status is unavailable right now (service error). Still checking."
 
 function navigateTop(redirectURL: string): void {
   const parsed = new URL(redirectURL)
@@ -329,17 +335,18 @@ export function Checkout({
       }
     )
   }, [active, addedCards, session])
-  // Until the customer chooses, the most recent stored card stands selected:
-  // paying again with what is on file is the common case, and it keeps entry
-  // fields out of the way. Derived rather than stored so the default still
-  // applies when the session arrives after first render.
+  // Until the customer chooses, the default card (else the most recent)
+  // stands pre-selected. Paying always sends the selected card's id; nothing
+  // is implied server-side. Derived so it applies when the session arrives
+  // after first render.
   const [savedChoice, setSavedChoice] = React.useState<string>()
   const savedMethodID =
     savedChoice &&
     (savedChoice === NEW_CARD_VALUE ||
       savedMethods.some((method) => method.id === savedChoice))
       ? savedChoice
-      : (savedMethods[0]?.id ?? NEW_CARD_VALUE)
+      : ((savedMethods.find((method) => method.default) ?? savedMethods[0])
+          ?.id ?? NEW_CARD_VALUE)
   const usingSavedMethod =
     savedMethodID !== NEW_CARD_VALUE &&
     savedMethods.some((method) => method.id === savedMethodID)
@@ -586,7 +593,10 @@ export function Checkout({
       changePhase("processing")
     } catch (err) {
       if (!mounted.current || sourceRef.current !== source) return
-      if (submitted) {
+      if (submitted && isServerError(err)) {
+        setPayError(SERVER_FAILED)
+        changePhase("ready")
+      } else if (submitted) {
         setPayError(
           "The payment result is not confirmed yet. Keep this window open while we check its status."
         )
@@ -690,8 +700,10 @@ export function Checkout({
             // pending presentation and poll; never re-enable card entry.
             schedule()
         }
-      } catch {
-        if (!cancelled) schedule()
+      } catch (err) {
+        if (cancelled || !mounted.current) return
+        if (isServerError(err)) setPayError(STATUS_UNAVAILABLE)
+        schedule()
       }
     }
 

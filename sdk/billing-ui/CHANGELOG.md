@@ -1,5 +1,20 @@
 # Changelog
 
+## Explicit payment method, fail-fast errors (openrails#1087, #1088)
+
+- The checkout pre-selects the customer's default card (`PaymentMethod.default`,
+  `SavedPaymentMethod.default`) and always sends the chosen card's id.
+  OpenRails refuses a charge that names no method with
+  `payment_method_required` (400).
+- A server error (5xx) from `pay` is shown at once and the panel returns to
+  ready; hosts keep their idempotency key so paying again replays. A host
+  source signals it by throwing an error with a numeric `status`
+  (`CheckoutSourceError`, or any error carrying `status`).
+- The client never retries a write. A GET retries once, only on a network
+  error or 502/503/504 (429/503 with `Retry-After`), within `RETRY_BUDGET_MS`
+  (2 s). New `isServerError`; a 5xx without an error envelope has code
+  `server_error`.
+
 ## One-click card subscriptions (openrails#1085)
 
 - A checkout host relays a card subscription's pay request with OpenRails'

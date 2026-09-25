@@ -71,7 +71,8 @@ through unchanged; the PSP's `flow` and public `config` pick the browser flow
 provider:
 
 - `checkoutRails(offers)` and `savedMethodsFor(methods, rails)` build a
-  `CheckoutSource`'s `rails` and `saved_methods` (most recent card first).
+  `CheckoutSource`'s `rails` and `saved_methods` (the default card first, pre-selected; paying sends
+  the chosen card's id explicitly).
   `offers` is OpenRails' `ListCheckoutRailOptions` result, passed through: it
   lists exactly the armed PSPs whose rail can make this sale (Solana when it is
   configured, never CCBill for a new subscription), each with its `driver` and

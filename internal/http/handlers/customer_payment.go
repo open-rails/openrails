@@ -73,7 +73,7 @@ func PayMyInvoiceNow(r *httprequest.Request) {
 		return
 	}
 	if body.PaymentMethodID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "payment_method_id required")
+		writePaymentMethodRequired(r)
 		return
 	}
 	body.InvoiceID, body.IdempotencyKey = id, key

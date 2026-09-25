@@ -24,12 +24,17 @@ const (
 	// configuration (type api_error, 502). Nothing was charged; another card
 	// will not help.
 	CodePaymentProviderRejected = "payment_provider_rejected"
+	// CodePaymentMethodRequired refuses a charge that names neither a saved
+	// payment method nor a new card token (type invalid_request_error, 400).
+	// OpenRails never charges an implied card such as the default one.
+	CodePaymentMethodRequired = "payment_method_required"
 )
 
 var (
 	ErrCardDeclined            error = newCodedError(CodeCardDeclined, ErrPaymentRefused)
 	ErrPaymentMethodStale      error = newCodedError(CodePaymentMethodStale, ErrPaymentRefused)
 	ErrPaymentProviderRejected error = newCodedError(CodePaymentProviderRejected, ErrInternal)
+	ErrPaymentMethodRequired   error = newCodedError(CodePaymentMethodRequired, ErrInvalid)
 )
 
 // PaymentFailureFrom returns the customer-facing decline carried by a

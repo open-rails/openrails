@@ -72,6 +72,8 @@ type HostedCheckoutSavedMethod struct {
 	LastFour string `json:"last_four,omitempty"`
 	ExpMonth *int   `json:"exp_month,omitempty"`
 	ExpYear  *int   `json:"exp_year,omitempty"`
+	// Default pre-selects this card; paying still sends its id explicitly.
+	Default bool `json:"default,omitempty"`
 }
 
 // HostedCheckoutPayRequest is the browser's POST .../pay body.

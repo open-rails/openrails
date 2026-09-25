@@ -81,6 +81,48 @@ interface RequestOptions {
   headers?: Record<string, string>
 }
 
+/** Total wait a GET may spend on its one retry. */
+export const RETRY_BUDGET_MS = 2_000
+const RETRY_DELAY_MS = 300
+
+// The wait before retrying a GET answered with res, or null if it is final.
+function retryDelay(res: Response): number | null {
+  const retryAfter = parseRetryAfter(res.headers.get("Retry-After"))
+  switch (res.status) {
+    case 429:
+      return retryAfter
+    case 503:
+      return retryAfter ?? RETRY_DELAY_MS
+    case 502:
+    case 504:
+      return RETRY_DELAY_MS
+    default:
+      return null
+  }
+}
+
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null
+  if (/^\d+$/.test(value.trim())) return Number(value.trim()) * 1000
+  const at = Date.parse(value)
+  return Number.isNaN(at) ? null : Math.max(0, at - Date.now())
+}
+
+function pause(ms: number, signal?: AbortSignal): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort)
+      resolve(ms)
+    }, ms)
+    const abort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    signal?.addEventListener("abort", abort, { once: true })
+  })
+}
+
 export function createBillingClient(options: BillingClientOptions = {}) {
   const base = (options.baseUrl ?? "/billing/v1").replace(/\/+$/, "")
   const doFetch =
@@ -108,14 +150,44 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     if (token) headers.set("Authorization", `Bearer ${token}`)
     const lang = options.language?.()
     if (lang) headers.set("Accept-Language", lang)
-    const res = await doFetch(url(path, opts.query), {
-      method: opts.method ?? "GET",
+    const method = opts.method ?? "GET"
+    const init = {
+      method,
       headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: opts.signal,
-    })
-    if (!res.ok) throw await readBillingError(res)
-    return res
+    }
+    // Only a GET is retried: once, on a network error or 502/503/504 (and a
+    // 429 that names its wait), within RETRY_BUDGET_MS. Writes never are.
+    const retries = method === "GET" ? 1 : 0
+    let waited = 0
+    for (let attempt = 0; ; attempt++) {
+      let res: Response
+      try {
+        res = await doFetch(url(path, opts.query), init)
+      } catch (cause) {
+        const delay = RETRY_DELAY_MS
+        if (
+          attempt >= retries ||
+          opts.signal?.aborted ||
+          !(cause instanceof TypeError) ||
+          waited + delay > RETRY_BUDGET_MS
+        )
+          throw cause
+        waited += await pause(delay, opts.signal)
+        continue
+      }
+      if (res.ok) return res
+      const delay = retryDelay(res)
+      if (
+        attempt >= retries ||
+        delay === null ||
+        waited + delay > RETRY_BUDGET_MS
+      )
+        throw await readBillingError(res)
+      await res.body?.cancel().catch(() => undefined)
+      waited += await pause(delay, opts.signal)
+    }
   }
 
   async function json<S extends z.ZodType>(
