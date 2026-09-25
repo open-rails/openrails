@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -1724,11 +1725,14 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 // from `active` (period elapsed, no ownership evidence) or `past_due` (dunning
 // stalled past grace). Access stays intact — no revoke on a guess. Clears stale
 // grace/retry scheduling; keeps retry_attempts/last_retry_at as attempt
-// evidence.
-func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+// evidence. from narrows the entry statuses, checked under the row lock.
+func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, dbb *db.DB, sub *models.Subscription, from ...models.SubscriptionStatus) error {
+	if len(from) == 0 {
+		from = []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue}
+	}
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
-		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
-			return nil // idempotent: only active/past_due rows enter verification limbo
+		if !slices.Contains(from, sub.Status) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) {
+			return nil // idempotent: only active/past_due rows (narrowed by from) enter verification limbo
 		}
 		sub.Status = models.StatusUnknown
 		sub.GraceEndsAt = nil

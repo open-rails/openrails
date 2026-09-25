@@ -573,7 +573,7 @@ against ONE verdict set:
 | verified renewal charge | renewed — period advanced, the charge backfilled exactly once, never a second charge |
 | declined / roster stalled, within the dunning window | `past_due` — dunning owns it from here |
 | declined / stalled, beyond the window | cancelled; the remote record may still exist, so the deferred rail-side delete is queued |
-| no charge, remote alive with future next-billing | adopt the remote period end (clock misalignment) |
+| no charge, remote alive with future next-billing | adopt the remote period end (clock misalignment); never for a `past_due` row |
 | remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
 | no conclusive evidence / rail unreachable | stays `unknown`; the next pass re-derives the cohort and retries |
 

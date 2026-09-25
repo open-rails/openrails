@@ -773,6 +773,7 @@ func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts
 		Rail:               s.Rail,
 		HasPaymentMethod:   s.PaymentMethodID != nil,
 		RailSubscriptionID: s.RailSubscriptionID,
+		PeriodStart:        s.CurrentPeriodStartsAt,
 		PeriodEnd:          s.CurrentPeriodEndsAt,
 		NextRetryScheduled: s.NextRetryAt != nil,
 	}
