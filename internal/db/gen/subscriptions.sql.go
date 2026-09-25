@@ -529,7 +529,7 @@ const getLifecycleSubscriptionByCustomerAndProduct = `-- name: GetLifecycleSubsc
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $3::uuid AND sub.customer_id = $1
   AND sub.product_id = $2
-  AND sub.status IN ('active', 'pending', 'past_due')
+  AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1
@@ -587,7 +587,7 @@ const getLifecycleSubscriptionByCustomerAndTierGroup = `-- name: GetLifecycleSub
 SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = $3::uuid AND prod.merchant_id = $3::uuid AND sub.customer_id = $1
-  AND sub.status IN ('active', 'pending', 'past_due')
+  AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
   AND prod.tier_group = $2
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
@@ -992,7 +992,7 @@ const getUnknownSubscriptionByCustomerAndProduct = `-- name: GetUnknownSubscript
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $3::uuid AND sub.customer_id = $1
   AND sub.product_id = $2
-  AND sub.status = 'unknown'
+  AND sub.status = 'unverified'
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1
@@ -1052,7 +1052,7 @@ const getUnknownSubscriptionByCustomerAndTierGroup = `-- name: GetUnknownSubscri
 SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = $3::uuid AND prod.merchant_id = $3::uuid AND sub.customer_id = $1
-  AND sub.status = 'unknown'
+  AND sub.status = 'unverified'
   AND prod.tier_group = $2
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
@@ -1453,7 +1453,7 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 const listMigratableSubscriptionsByPriceID = `-- name: ListMigratableSubscriptionsByPriceID :many
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $1::uuid AND sub.price_id = $2::uuid
-  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
+  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status, 'awaiting_method'::openrails.subscription_status)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at
 `
@@ -1913,7 +1913,7 @@ SELECT EXISTS (
       AND s.deleted_at IS NULL
       AND p.auto_renew
       AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
-      AND s.status IN ('pending', 'active', 'past_due', 'unknown')
+      AND s.status IN ('pending', 'active', 'past_due', 'awaiting_method', 'unverified')
 ) AS standing
 `
 
@@ -2028,14 +2028,14 @@ func (q *Queries) UpdateSubscriptionAt(ctx context.Context, arg UpdateSubscripti
 
 const wakeEngineSubscriptionsForPaymentMethod = `-- name: WakeEngineSubscriptionsForPaymentMethod :execrows
 UPDATE openrails.subscriptions SET
+    status = 'past_due',
     next_retry_at = $1::timestamptz,
     updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid
   AND payment_method_id = $3::uuid
   AND collection_policy = 'engine'
-  AND status = 'past_due'
+  AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > $1::timestamptz)))
   AND deleted_at IS NULL
-  AND (next_retry_at IS NULL OR next_retry_at > $1::timestamptz)
 `
 
 type WakeEngineSubscriptionsForPaymentMethodParams struct {
@@ -2045,7 +2045,8 @@ type WakeEngineSubscriptionsForPaymentMethodParams struct {
 }
 
 // A replaced card retries its delinquent engine memberships at the next due
-// pass instead of waiting out the old card's schedule.
+// pass instead of waiting out the old card's schedule; a membership awaiting
+// a new card resumes dunning.
 func (q *Queries) WakeEngineSubscriptionsForPaymentMethod(ctx context.Context, arg WakeEngineSubscriptionsForPaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, wakeEngineSubscriptionsForPaymentMethod, arg.Now, arg.MerchantID, arg.PaymentMethodID)
 	if err != nil {

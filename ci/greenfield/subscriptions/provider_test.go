@@ -423,7 +423,7 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 	require.WithinDuration(t, last.Add(3*day), *sub.NextRetryAt, time.Second, "third attempt: +5d after the first failure, 3d after the second")
 	sub = w.subscription(embedded, lapsed.sub)
 	require.Nil(t, sub.NextRetryAt, "past grace, grace_exhausted owns it")
-	require.Equal(t, "unknown", sub.Status)
+	require.Equal(t, "unverified", sub.Status)
 	for _, l := range []*legacy{stripeOwned, nmiOwned} {
 		sub = w.subscription(embedded, l.sub)
 		require.Nil(t, sub.NextRetryAt, "%s: the provider owns its retries", l.rail)

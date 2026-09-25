@@ -36,7 +36,7 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		if sub.CustomerID != customer {
 			return pgx.ErrNoRows
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || (sub.Rail != models.RailNMI && sub.Rail != models.RailStripe) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) {
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || (sub.Rail != models.RailNMI && sub.Rail != models.RailStripe) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) {
 			return apperr.Conflictf("subscription cannot select an engine payment method")
 		}
 		if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
@@ -103,8 +103,10 @@ func (s *SubscriptionLifecycleService) UpdateEnginePaymentMethod(ctx context.Con
 		now := s.now()
 		sub.PaymentMethodID = &methodID
 		// A delinquent membership retries on the new card at the next due
-		// pass instead of waiting out the old card's schedule.
-		if sub.Status == models.StatusPastDue {
+		// pass instead of waiting out the old card's schedule; one waiting
+		// for a card resumes dunning.
+		if sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod {
+			sub.Status = models.StatusPastDue
 			sub.NextRetryAt = &now
 		}
 		return NewSubscriptionRepo(d).UpdateAt(ctx, sub, now)

@@ -211,7 +211,7 @@ func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB
 		_, err := lifecycle.CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: true})
 		return err
 	}
-	if subscriptions.NeedsProviderScheduleDelete(sub) && (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue || sub.Status == models.StatusUnknown) {
+	if subscriptions.NeedsProviderScheduleDelete(sub) && sub.Status.Live() {
 		// A provider-billed membership whose payment is refunded with access
 		// revoked ends now: otherwise the provider bills it again and the
 		// mirror re-grants access. Its schedule delete rides the same durable

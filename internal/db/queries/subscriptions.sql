@@ -93,7 +93,7 @@ LIMIT 1;
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.product_id = $2
-  AND sub.status IN ('active', 'pending', 'past_due')
+  AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
@@ -228,7 +228,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 SELECT sub.* FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
-  AND sub.status IN ('active', 'pending', 'past_due')
+  AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
   AND prod.tier_group = $2
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
@@ -241,7 +241,7 @@ LIMIT 1;
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.product_id = $2
-  AND sub.status = 'unknown'
+  AND sub.status = 'unverified'
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
@@ -250,7 +250,7 @@ LIMIT 1;
 SELECT sub.* FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
-  AND sub.status = 'unknown'
+  AND sub.status = 'unverified'
   AND prod.tier_group = $2
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
@@ -269,7 +269,7 @@ SELECT EXISTS (
       AND s.deleted_at IS NULL
       AND p.auto_renew
       AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
-      AND s.status IN ('pending', 'active', 'past_due', 'unknown')
+      AND s.status IN ('pending', 'active', 'past_due', 'awaiting_method', 'unverified')
 ) AS standing;
 
 -- name: ListSubscriptionsByPaymentMethodIDs :many
@@ -347,7 +347,7 @@ LIMIT 1;
 -- name: ListMigratableSubscriptionsByPriceID :many
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = sqlc.arg(price_id)::uuid
-  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
+  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status, 'awaiting_method'::openrails.subscription_status)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
 
@@ -374,13 +374,14 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
 -- name: WakeEngineSubscriptionsForPaymentMethod :execrows
 -- A replaced card retries its delinquent engine memberships at the next due
--- pass instead of waiting out the old card's schedule.
+-- pass instead of waiting out the old card's schedule; a membership awaiting
+-- a new card resumes dunning.
 UPDATE openrails.subscriptions SET
+    status = 'past_due',
     next_retry_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND collection_policy = 'engine'
-  AND status = 'past_due'
-  AND deleted_at IS NULL
-  AND (next_retry_at IS NULL OR next_retry_at > sqlc.arg(now)::timestamptz);
+  AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > sqlc.arg(now)::timestamptz)))
+  AND deleted_at IS NULL;

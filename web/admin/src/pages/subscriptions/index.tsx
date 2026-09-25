@@ -39,7 +39,8 @@ const statusTabs = [
   { value: "past_due", label: "Dunning" },
   { value: "pending", label: "Pending" },
   { value: "cancelled", label: "Cancelled" },
-  { value: "unknown", label: "Unknown" },
+  { value: "awaiting_method", label: "Needs card" },
+  { value: "unverified", label: "Unverified" },
 ]
 
 const columns: ColumnDef<AdminSubscription, unknown>[] = [

@@ -17,6 +17,8 @@ export const zh: BillingUiMessageBundle = {
     cancelled: "已取消",
     cancel_scheduled: "即将结束",
     unknown: "未知",
+    awaiting_method: "需要更新银行卡",
+    unverified: "核实中",
     succeeded: "已支付",
     failed: "失败",
     refunded: "已退款",

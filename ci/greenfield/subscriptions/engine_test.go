@@ -253,7 +253,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 	}{
 		{"soft/armed", "insufficient_funds", "202", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "cancelled"},
 		{"soft/default_switch_off", "insufficient_funds", "202", false, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "past_due"},
-		{"fix_payment_method", "expired_card", "223", true, nil, "past_due"},
+		{"fix_payment_method", "expired_card", "223", true, nil, "awaiting_method"},
 		{"non_recoverable/armed", "stolen_card", "252", true, nil, "cancelled"},
 		{"non_recoverable/default_switch_off", "stolen_card", "252", false, nil, "past_due"},
 	}
@@ -287,7 +287,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				require.Equal(t, tc.retries, offsets, "retry schedule")
 				sub := w.subscription(e.tp, e.sub)
 				require.Equal(t, tc.final, sub.Status)
-				if !tc.armed && tc.final == "past_due" {
+				if !tc.armed && tc.name != "fix_payment_method" {
 					status, body := w.staff(http.MethodGet, "/v1/merchant/findings")
 					require.Equal(t, http.StatusOK, status)
 					require.Contains(t, body, "life.terminal_outcome.held", "a held terminal outcome is visible to the operator")
@@ -651,7 +651,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 
 // A renewal the issuer challenges keeps access through the renewal grace
 // while the member may authenticate; if they never do, the engine closes the
-// payment, the membership waits past_due for a card, and a new card recovers.
+// payment, the membership waits for a new card, and a new card recovers.
 func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -662,7 +662,7 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
 	require.True(t, e.c.entitled(e.ent), "access holds while the member can still authenticate")
 	w.advance(25 * time.Hour)
-	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the abandoned renewal resolves as a decline")
+	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned renewal waits for a new card")
 	require.False(t, e.c.entitled(e.ent))
 	require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
 	e.replaceCard(mastercard)

@@ -126,7 +126,7 @@ refuses one that carries the fence. There is no evidence-free unpark/force-resen
 compensating cancel or refund is triggered by uncertainty.
 
 A manual rebill confirmed after dunning parked or the customer cancelled the
-subscription still records its payment exactly once: a parked (`unknown`) or
+subscription still records its payment exactly once: a parked (`unverified`) or
 active subscription renews from the confirmed charge; a terminally cancelled
 one gets the completed payment row without reactivation, flagged for refund
 review.

@@ -188,7 +188,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 		cancels := 0
 		for _, r := range rows {
 			state := SubscriptionState{
-				Status:             string(models.StatusUnknown),
+				Status:             string(models.StatusUnverified),
 				Rail:               rail,
 				RailSubscriptionID: r.RailSubscriptionID,
 				PeriodStart:        r.CurrentPeriodStartsAt,

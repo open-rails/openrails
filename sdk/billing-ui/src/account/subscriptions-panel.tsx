@@ -149,7 +149,10 @@ export function SubscriptionsPanel({
             !portal &&
             (s.rail !== "solana" || !!sendSolanaTransaction)
           const canChangeCard =
-            (s.status === "active" || s.status === "past_due") &&
+            (s.status === "active" ||
+              s.status === "past_due" ||
+              s.status === "awaiting_method" ||
+              s.status === "unverified") &&
             !scheduled &&
             !portal &&
             s.rail !== "solana" &&
@@ -192,7 +195,7 @@ export function SubscriptionsPanel({
                     ) : null}
                   </p>
                 ) : null}
-                {s.status === "past_due" ? (
+                {s.status === "past_due" || s.status === "awaiting_method" ? (
                   <p className="text-sm text-destructive">
                     {t("subscriptions.pastDue")}
                   </p>

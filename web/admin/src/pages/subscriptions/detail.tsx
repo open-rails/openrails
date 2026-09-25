@@ -69,7 +69,8 @@ export function SubscriptionDetailPage() {
   const cancellable =
     sub.status === "active" ||
     sub.status === "past_due" ||
-    sub.status === "unknown"
+    sub.status === "awaiting_method" ||
+    sub.status === "unverified"
   const resumable = sub.status === "cancelled" || sub.status === "past_due"
 
   return (

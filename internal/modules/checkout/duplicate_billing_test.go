@@ -83,8 +83,8 @@ func TestDuplicateBillingGuard(t *testing.T) {
 		{"same product other price in group", subscriptionRows{byTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusActive, held)}}, &models.Price{ID: uuid.New(), ProductID: held.ID}, held, true, ConflictCodeDuplicateSubscription, false},
 		{"other tier in group", subscriptionRows{byTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusActive, held)}}, higherPrice, higher, true, ConflictCodeChangeTierRequired, false},
 		{"different group", subscriptionRows{byTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusActive, held)}}, otherPrice, other, false, "", false},
-		{"unknown sub on product", subscriptionRows{unknownByProduct: map[uuid.UUID]*models.Subscription{held.ID: heldSub(models.StatusUnknown, held)}}, heldPrice, held, true, ConflictCodeMembershipPendingVerification, false},
-		{"unknown sub in group", subscriptionRows{unknownByTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusUnknown, held)}}, higherPrice, higher, true, ConflictCodeMembershipPendingVerification, false},
+		{"unknown sub on product", subscriptionRows{unknownByProduct: map[uuid.UUID]*models.Subscription{held.ID: heldSub(models.StatusUnverified, held)}}, heldPrice, held, true, ConflictCodeMembershipPendingVerification, false},
+		{"unknown sub in group", subscriptionRows{unknownByTierGroup: map[string]*models.Subscription{group: heldSub(models.StatusUnverified, held)}}, higherPrice, higher, true, ConflictCodeMembershipPendingVerification, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := (&CheckoutPurchaseService{SubscriptionService: tc.rows}).CheckSubscriptionConflict(context.Background(), "user-1", tc.price, tc.product)

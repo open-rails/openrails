@@ -97,10 +97,10 @@ Each subscription fact takes one of two lanes:
 - **Explicit cancel evidence** (`user_cancelled` / `chargeback` /
   `provider_terminated`) is settled history — written directly with faithful
   `cancel_type` and dates (cancel-with-runway keeps the paid-through end).
-- **No cancel evidence** — seeded `unknown` and resolved by the decider at
+- **No cancel evidence** — seeded `unverified` and resolved by the decider at
   `as_of`: paid-through in the future → `active`; mid-dunning within the
   window → `past_due` with grace; roster-dead → cancelled; evidence-starved →
-  stays parked `unknown` (cancellation-last-resort by construction).
+  stays parked `unverified` (cancellation-last-resort by construction).
 
 **Re-run semantics**: re-posting the same book at the same `as_of` is a pure
 no-op (everything reports `skipped`; no duplicate payments, no lifecycle
@@ -169,7 +169,7 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
   [dunning staleness window](operations.md#dunning-359) (derived from the
   billing cycle; 14 days for monthly) gets the local no-charge cancel +
   downgrade. Missed billing periods are never back-billed.
-- **`unknown` is healthy.** Evidence-starved rows park as `unknown` and keep
+- **`unverified` is healthy.** Evidence-starved rows park as `unverified` and keep
   projecting standing access; Provider Refresh and probes resolve them with
   real provider evidence. Absent evidence never costs a customer access.
 - **Adoption alone never grants access.** An adopted-active row re-anchors
@@ -195,12 +195,12 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
   (they are attempt history, not noise).
 - Status distribution is sane at `as_of`: runway → `active`, mid-dunning →
   `past_due`, explicit cancels carry their true `cancel_type`, the rest
-  `unknown`.
+  `unverified`.
 - `openrails pull-provider report` shows a clean (or explained) diff against
   each provider's roster.
 - `openrails intents` shows only the drains you expect before raising the
   mode; nothing fires at `full` that the forecast didn't show.
-- The `unknown` cohort shrinks over subsequent Provider Refresh cycles as
+- The `unverified` cohort shrinks over subsequent Provider Refresh cycles as
   provider evidence arrives.
 
 ### Runbook: migrating a legacy NMI book

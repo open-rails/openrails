@@ -16,6 +16,8 @@ export const en = {
     cancelled: "Cancelled",
     cancel_scheduled: "Ending",
     unknown: "Unknown",
+    awaiting_method: "Update card",
+    unverified: "Verifying",
     succeeded: "Paid",
     failed: "Failed",
     refunded: "Refunded",

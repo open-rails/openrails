@@ -249,7 +249,7 @@ WHERE pm.merchant_id = $1
          WHERE s.payment_method_id = pm.id
            AND s.merchant_id = pm.merchant_id
            AND s.deleted_at IS NULL
-           AND s.status IN ('active', 'past_due')
+           AND s.status IN ('active', 'past_due', 'awaiting_method')
            AND s.current_period_ends_at IS NOT NULL
            AND s.current_period_ends_at <= $5::timestamptz)
 ORDER BY pm.account_updater_checked_at NULLS FIRST, pm.id

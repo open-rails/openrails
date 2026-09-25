@@ -190,7 +190,7 @@ must never cost a customer access. Do not "fix" them without changing the doctri
 | # | Guard | Enforced at |
 |---|---|---|
 | FO-1 | Rate limiting degrades from Redis to an in-memory limiter (degraded, not unlimited). | `ratelimit_neutral.go:209-218` |
-| FO-2 | Entitlement and access checks fail open: `unknown`-status subscriptions keep standing access; a broken justification chain must be *proven* before retraction. | `reconcile/store.go:477`; `converge/converge_passes.go:304`; `grants/grants.go:625` |
+| FO-2 | Entitlement and access checks fail open: `unverified`-status subscriptions keep standing access; a broken justification chain must be *proven* before retraction. | `reconcile/store.go:477`; `converge/converge_passes.go:304`; `grants/grants.go:625` |
 
 ## 8. No silent fabrication
 
@@ -215,8 +215,8 @@ stored card; the customer must re-enter it.
 | # | Invariant | Status |
 |---|---|---|
 | DES-1 | **Cancellation is a last resort.** Terminal cancel and provider-side delete require *certainty* — a non-retryable decline, or genuinely exhausted dunning. Never a date comparison, never an absence. | **ENFORCED** (or#821) — `gateCancelCertainty` is one chokepoint in `Decide`; every plane inherits it. `RemoteGone` (provider's own word) is certainty; our inference is not. |
-| DES-2 | Stale or unreadable provider data parks as `unknown` and never costs entitlements. | FO-2 upholds the entitlement half |
-| DES-3 | **NMI rebill is infinite retry.** Missed periods are forgiven; the customer is paid up from the latest success. A lapsed expiration is not a dead schedule — only provider roster state classifies. | **ENFORCED** (or#821) — a stale `next_billing_date` now parks as `unknown`; the `NonRetryableDecline` leg is wired to real rail codes and unrecognised codes are retryable by construction. |
+| DES-2 | Stale or unreadable provider data parks as `unverified` and never costs entitlements. | FO-2 upholds the entitlement half |
+| DES-3 | **NMI rebill is infinite retry.** Missed periods are forgiven; the customer is paid up from the latest success. A lapsed expiration is not a dead schedule — only provider roster state classifies. | **ENFORCED** (or#821) — a stale `next_billing_date` now parks as `unverified`; the `NonRetryableDecline` leg is wired to real rail codes and unrecognised codes are retryable by construction. |
 | DES-4 | Absence is not evidence of death. A subscription missing from a pull, an empty response, a 404, or a timeout must not retract standing. The confirmed-absence gate must hold at **every** retraction site. | **MOSTLY ENFORCED** (or#842) — confirmed-absence gate extended to every retraction site; an empty roster is no longer stamped exhaustive; `diff.go`'s hardcoded `forceExhaustive` removed. Residual: #839/#840 in the collection engine. |
 | DES-5 | No unattended irreversible provider call without provider-confirmed certainty, a blast-radius cap, and an operator kill switch that works without a deploy. | **SPLIT.** The switch itself is **ENFORCED** and genuinely fail-closed — `destructive_action_switch` is RLS-exempt on purpose, the read is a `LEFT JOIN` off `(SELECT 1)` so `ErrNoRows` is impossible, `COALESCE(s.enabled,false)` reads an unreadable switch as OFF, and OFF means deny. The `jobs_dunning`/or#856 residuals are closed. But on the **background intent-runner plane the gate is never consulted**: `river/jobs_provider_intents.go:49-66` runs `RunExecuteOnce` on a bare job context, so `ClaimDue` claims zero intents and neither the kill switch nor the #679 volume breaker executes at all — or#862. |
 

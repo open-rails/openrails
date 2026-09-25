@@ -442,7 +442,7 @@ SELECT COUNT(*)::bigint AS pressure_count,
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $2::uuid
   AND s.deleted_at IS NULL
-  AND s.status = 'unknown'
+  AND s.status = 'unverified'
   AND s.current_period_ends_at IS NOT NULL
   AND s.current_period_ends_at < $1::timestamptz
 `
@@ -1769,7 +1769,7 @@ WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
   AND collection_policy <> 'engine'
-  AND status = 'unknown'
+  AND status = 'unverified'
   AND ($3::text IS NULL OR rail = $3::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
 LIMIT $4::int

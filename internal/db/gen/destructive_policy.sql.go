@@ -46,7 +46,7 @@ const countLiveLinkedSubscriptionsForRail = `-- name: CountLiveLinkedSubscriptio
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND rail = $2::text
-  AND status IN ('active', 'past_due', 'unknown')
+  AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND rail_subscription_id <> ''
   AND deleted_at IS NULL
 `

@@ -560,7 +560,7 @@ queue, skipping merchants with no declared PSPs (#719). Three lanes:
 | Lane | Purpose |
 |---|---|
 | Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`openrails.rail_refresh_watermarks`) |
-| Unknown-cohort Reconcile | resolves `unknown` subscriptions against provider truth: one windowed bulk pull per rail + targeted per-subscription probes for rows the bulk pull can't decide |
+| Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth: one windowed bulk pull per rail + targeted per-subscription probes for rows the bulk pull can't decide |
 | CCBill DataLink Refresh | scheduled active-member bulk refresh (CCBill has no cheap per-subscription liveness API) |
 
 A watermark advances only after its provider/window completes successfully;
@@ -570,7 +570,7 @@ the same idempotent reconciliation writers the pull uses, then runs scoped
 convergence. It never mutates a provider and **never charges** — charging
 stays inside dunning. Dunning owns `past_due` (we SAW the failure); the
 **silence cohort** — lapsed subscriptions with NO webhook either way — is
-parked as `unknown` by the LIFE plane and resolved by the Unknown-cohort lane
+parked as `unverified` by the LIFE plane and resolved by the Unknown-cohort lane
 against ONE verdict set:
 
 | Provider evidence | Resolution |
@@ -580,7 +580,7 @@ against ONE verdict set:
 | declined / stalled, beyond the window | cancelled; the remote record may still exist, so the deferred rail-side delete is queued |
 | no charge, remote alive with future next-billing | adopt the remote period end (clock misalignment); never for a `past_due` row |
 | remote absent/terminal | cancel locally + revoke entitlements (no remote delete — it's already gone) |
-| no conclusive evidence / rail unreachable | stays `unknown`; the next pass re-derives the cohort and retries |
+| no conclusive evidence / rail unreachable | stays `unverified`; the next pass re-derives the cohort and retries |
 
 Mode gating: Provider Refresh runs under `full` AND `limited`; skipped under
 `readonly`. Each pass logs a heartbeat plus a per-merchant summary
@@ -591,7 +591,7 @@ window (the #368 trailing-grace mechanism was deleted). An auto-renew
 subscription's entitlement window is **standing (open-ended) from creation**
 and closes only on proven events: terminal dunning failure,
 provider-confirmed death, or an explicit cancel (access then ends at period
-end, as the user expects). A subscription parked `unknown` keeps access —
+end, as the user expects). A subscription parked `unverified` keeps access —
 entitlements are never lost to our own uncertainty.
 
 Note: NMI charge detection correlates by the order reference OpenRails stamps

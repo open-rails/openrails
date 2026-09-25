@@ -249,7 +249,7 @@ func rebillInFlight(ctx context.Context, d *db.DB, sub *models.Subscription) (bo
 // providerCancellable is every state in which a provider schedule may still
 // bill: the merchant (or a host's account-deletion callback) can always stop it.
 func providerCancellable(status models.SubscriptionStatus) bool {
-	return status == models.StatusActive || status == models.StatusPastDue || status == models.StatusUnknown
+	return status.Live()
 }
 
 func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess, accountDeletion bool) error {

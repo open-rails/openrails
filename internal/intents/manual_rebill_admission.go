@@ -102,7 +102,8 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning {
 			return ErrRebillUnsupported
 		}
-		if sub.Status != models.StatusPastDue || sub.CurrentPeriodEndsAt == nil || (!customer && sub.NextRetryAt != nil && sub.NextRetryAt.After(now)) {
+		retryable := sub.Status == models.StatusPastDue || (customer && sub.Status == models.StatusAwaitingMethod)
+		if !retryable || sub.CurrentPeriodEndsAt == nil || (!customer && sub.NextRetryAt != nil && sub.NextRetryAt.After(now)) {
 			return ErrRebillNotRetryable
 		}
 		ordinal := 0
