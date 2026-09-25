@@ -207,6 +207,7 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 		PaymentMethodID:       s.PaymentMethodID,
 		LastRetryAt:           s.LastRetryAt,
 		RetryAttempts:         DerefIntPtr(s.RetryAttempts),
+		TransientRetries:      int(s.TransientRetries),
 		NextRetryAt:           s.NextRetryAt,
 		GraceEndsAt:           s.GraceEndsAt,
 		CancelFeedback:        s.CancelFeedback,

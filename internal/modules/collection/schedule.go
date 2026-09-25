@@ -193,3 +193,17 @@ func CycleHoursBetween(from, to time.Time) int {
 	}
 	return int(to.Sub(from) / time.Hour)
 }
+
+// TransientLadder is the short retry ladder for explicit try-again answers:
+// minutes after the attempt, bounded, and not counted as dunning failures.
+// After it, the answer counts as an ordinary decline on the cycle schedule.
+var TransientLadder = []time.Duration{5 * time.Minute, 30 * time.Minute}
+
+// NextTransientAttempt is when the used+1-th transient retry runs, or false
+// when the ladder is spent.
+func NextTransientAttempt(used int, at time.Time) (time.Time, bool) {
+	if used < 0 || used >= len(TransientLadder) {
+		return time.Time{}, false
+	}
+	return at.Add(TransientLadder[used]), true
+}

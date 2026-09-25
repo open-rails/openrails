@@ -290,3 +290,21 @@ func must[T any](v T, err error) T {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestTransientDeclines(t *testing.T) {
+	t.Parallel()
+	require.True(t, ClassifyDeclineDetail("stripe", "processing_error").Transient)
+	require.True(t, ClassifyDeclineDetail("Stripe", "try_again_later").Transient)
+	require.False(t, ClassifyDeclineDetail("stripe", "insufficient_funds").Transient)
+	require.False(t, ClassifyDeclineDetail("stripe", "expired_card").Transient)
+	require.False(t, ClassifyDeclineDetail("nmi", "202").Transient)
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	next, ok := NextTransientAttempt(0, at)
+	require.True(t, ok)
+	require.Equal(t, at.Add(5*time.Minute), next)
+	next, ok = NextTransientAttempt(1, at)
+	require.True(t, ok)
+	require.Equal(t, at.Add(30*time.Minute), next)
+	_, ok = NextTransientAttempt(2, at)
+	require.False(t, ok, "the ladder is bounded")
+}
