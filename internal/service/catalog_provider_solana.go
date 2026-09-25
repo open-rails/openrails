@@ -160,14 +160,13 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	planID := solanaPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.AccessDurationHours, mint)
 	periodHours := uint64(*in.AccessDurationHours)
 
-	// Idempotent find-or-attach: create_plan fails on an already-occupied PDA, so
-	// on re-apply we attach to the existing on-chain plan instead of republishing.
-	if existing, found := a.findExistingPlan(ctx, plan, tid, planID, symbol); found {
-		return existing, nil
-	}
 	if in.RemoteWritesDisabled {
-		// Existing-plan discovery above is read-only and remains available in
-		// limited/readonly mode. Gate only the actual publish boundary.
+		// Read-only attach to an existing plan stays available in limited/readonly
+		// mode. With writes enabled PublishPlan owns re-apply: it attaches to the
+		// existing plan and re-ensures the receiving ATAs a failed publish missed.
+		if existing, found := a.findExistingPlan(ctx, plan, tid, planID, symbol); found {
+			return existing, nil
+		}
 		return nil, errRemoteWritesDisabled
 	}
 
@@ -327,7 +326,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			if err != nil {
 				return nil, err
 			}
-			if !strings.EqualFold(acct.Mint.String(), strings.TrimSpace(mint)) {
+			if acct.Mint.String() != strings.TrimSpace(mint) {
 				return nil, fmt.Errorf("solana plan %q mint (%s) does not match settlement token %s mint (%s)", pda, acct.Mint, symbol, mint)
 			}
 			if in.UnitAmount > 0 {
@@ -346,7 +345,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			}
 		}
 		if tid, ok := merchant.FromContext(ctx); ok {
-			if merchant, err := plan.MerchantAddress(ctx, tid); err == nil && !strings.EqualFold(acct.Owner.String(), merchant.String()) {
+			if merchant, err := plan.MerchantAddress(ctx, tid); err == nil && !acct.Owner.Equals(merchant) {
 				return nil, fmt.Errorf("solana plan %q merchant (%s) does not match this merchant's merchant (%s)", pda, acct.Owner, merchant)
 			}
 		}
@@ -389,7 +388,7 @@ func resolveSolanaTokenFromMint(plan *recurring.PlanService, mint string) (strin
 		solanaDUSDRecurringToken,
 	} {
 		configuredMint, err := plan.ResolveMint(symbol)
-		if err == nil && strings.EqualFold(strings.TrimSpace(configuredMint), strings.TrimSpace(mint)) {
+		if err == nil && strings.TrimSpace(configuredMint) == strings.TrimSpace(mint) {
 			return symbol, nil
 		}
 	}

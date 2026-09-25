@@ -31,6 +31,7 @@ type fakeChain struct {
 	accounts map[solanago.PublicKey][]byte
 	submits  int
 	readOnly bool
+	failATA  bool
 }
 
 func newFakeChain(mints map[string]uint8) *fakeChain {
@@ -47,6 +48,13 @@ func (c *fakeChain) Submit(_ context.Context, _ merchant.ID, instructions []sola
 		return solanago.Signature{}, fmt.Errorf("provider writes forbidden")
 	}
 	for _, ix := range instructions {
+		if ix.ProgramID() == subscriptions.AssociatedTokenProgramID {
+			if c.failATA {
+				return solanago.Signature{}, fmt.Errorf("transaction dropped")
+			}
+			c.accounts[ix.Accounts()[1].PublicKey] = []byte{1}
+			continue
+		}
 		if ix.ProgramID() != subscriptions.ProgramID {
 			continue
 		}
@@ -169,6 +177,34 @@ func TestSolanaAdapterBranches(t *testing.T) {
 	require.Equal(t, "USD1", token)
 	_, err = resolveSolanaTokenFromMint(plan, solanago.NewWallet().PublicKey().String())
 	require.Error(t, err, "unconfigured mint")
+	_, err = resolveSolanaTokenFromMint(plan, "usd1usd1usd1usd1usd1usd1usd1usd1usd1usd1usd")
+	require.Error(t, err, "base58 is case-sensitive")
+}
+
+// A catalog apply whose plan landed but whose receiving ATA did not is healed
+// by re-apply.
+func TestSolanaCatalogReapplyEnsuresReceivingATA(t *testing.T) {
+	chain := newFakeChain(map[string]uint8{usdcMint: 6})
+	chain.failATA = true
+	adapter := solanaFixture(chain, "mainnet", map[string]string{"USDC": usdcMint}, true)
+	ctx := solanaCtx()
+	ata, _, err := subscriptions.DeriveATA(chain.owner, solanago.MustPublicKeyFromBase58(usdcMint), solanago.TokenProgramID)
+	require.NoError(t, err)
+
+	_, err = adapter.AutoCreate(ctx, recurringTerms(10_000_000))
+	require.ErrorContains(t, err, "ensure receiving ata")
+	require.Nil(t, chain.accounts[ata])
+
+	chain.failATA = false
+	out, err := adapter.AutoCreate(ctx, recurringTerms(10_000_000))
+	require.NoError(t, err)
+	require.Equal(t, strconv.FormatInt(testPlanCreatedAt, 10), out["created_at"], "attached to the landed plan")
+	require.NotNil(t, chain.accounts[ata], "re-apply created the receiving ATA")
+
+	submits := chain.submits
+	_, err = adapter.AutoCreate(ctx, recurringTerms(10_000_000))
+	require.NoError(t, err)
+	require.Equal(t, submits, chain.submits, "a healthy plan re-applies without writes")
 }
 
 // Reference preflight only reads: an existing plan must match owner, amount,

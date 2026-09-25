@@ -2427,7 +2427,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(storedTokenMint) {
 		return nil, fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutSessionValidation)
 	}
-	if !strings.EqualFold(storedTokenMint, tokenMint) {
+	if strings.TrimSpace(storedTokenMint) != strings.TrimSpace(tokenMint) {
 		return nil, fmt.Errorf("%w: token_mint mismatch", ErrCheckoutSessionValidation)
 	}
 

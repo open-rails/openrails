@@ -131,7 +131,7 @@ var knownStablecoins = []StablecoinInfo{
 func KnownStablecoinByMint(mint string) (StablecoinInfo, bool) {
 	mint = strings.TrimSpace(mint)
 	for _, sc := range knownStablecoins {
-		if strings.EqualFold(sc.Mint, mint) {
+		if sc.Mint == mint {
 			return sc, true
 		}
 	}

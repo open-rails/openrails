@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestPullProviderWindowParsing(t *testing.T) {
@@ -79,18 +80,39 @@ func TestPullProviderSummaries(t *testing.T) {
 func TestPullProviderStdoutGuidesPrune(t *testing.T) {
 	run := reconcile.RunRecord{ID: uuid.New(), Status: "completed"}
 	res := &reconcile.RunResult{}
+	mid := merchant.ID(uuid.New())
 	var buf bytes.Buffer
 	plan := []pullProviderPruneLog{{Provider: "nmi", Binding: reconcile.PSPBinding{AccountID: "100001"}, Result: reconcile.PruneResult{Subscriptions: 2, Payments: 1}}}
-	require.NoError(t, renderPullProviderStdout(&buf, "table", "run.log", run, res, nil, plan, nil))
+	require.NoError(t, renderPullProviderStdout(&buf, "table", "run.log", mid, run, res, nil, plan, nil))
 	require.Contains(t, buf.String(), "PLAN ONLY — nothing was written. To apply: re-run with --expect-rows 3")
 
 	buf.Reset()
 	destructive := uuid.New()
 	applied := []pullProviderPruneLog{{Provider: "nmi", Binding: reconcile.PSPBinding{AccountID: "100001"}, Applied: true, Result: reconcile.PruneResult{RunID: destructive, Subscriptions: 2}}}
-	require.NoError(t, renderPullProviderStdout(&buf, "table", "run.log", run, res, nil, applied, &pullProviderConvergeLog{Findings: 1}))
+	soft := pruneMutationRecords("nmi", reconcile.PruneResult{SubscriptionIDs: []uuid.UUID{uuid.New(), uuid.New()}}, "applied")
+	require.NoError(t, renderPullProviderStdout(&buf, "table", "run.log", mid, run, res, soft, applied, &pullProviderConvergeLog{Findings: 1}))
 	out := buf.String()
 	require.NotContains(t, out, "PLAN ONLY")
-	require.Contains(t, out, "--run "+destructive.String())
+	require.Contains(t, out, "`openrails undo-run --merchant id:"+mid.String()+" --run "+destructive.String()+"`", "the printed command resolves as typed")
+	require.Contains(t, out, "applied: subscriptions soft_deleted=2")
 	require.Contains(t, out, "prune: subscriptions soft_deleted=2")
 	require.Contains(t, out, "converge: 1 finding(s)")
+}
+
+// undo-run's printed next steps are commands the CLI accepts verbatim: the
+// merchant is the exact id:<uuid> form, never a placeholder or a bare UUID.
+func TestUndoRunPrintsRunnableCommands(t *testing.T) {
+	mid := merchant.ID(uuid.New())
+	plan := reconcile.UndoPlan{RunID: uuid.New(), Kind: reconcile.DestructiveRunKindConvergeEnforce, Restorable: map[string]int64{"subscriptions": 2}}
+	var buf bytes.Buffer
+	printUndoPlan(&buf, plan, mid)
+	require.Contains(t, buf.String(), "  openrails undo-run --merchant id:"+mid.String()+" --run "+plan.RunID.String()+" --apply --expect-rows 2\n")
+
+	buf.Reset()
+	printUndoResult(&buf, reconcile.UndoResult{Plan: plan}, mid)
+	require.Contains(t, buf.String(), "openrails pull-provider --merchant id:"+mid.String()+" ")
+
+	parsed, err := merchant.ParseID(strings.TrimPrefix(merchantFlag(mid), "id:"))
+	require.NoError(t, err)
+	require.Equal(t, mid, parsed)
 }

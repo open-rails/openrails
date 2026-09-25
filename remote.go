@@ -571,12 +571,15 @@ func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID s
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(scope) == "" || strings.TrimSpace(scopeKey) == "" {
-		return invalidErr("scope and scope_key required")
+	scopeSegment, err := pathID("scope", scope)
+	if err != nil {
+		return err
 	}
-	path += "/spend-delegations/" + url.PathEscape(strings.TrimSpace(scope)) +
-		"/" + url.PathEscape(strings.TrimSpace(scopeKey))
-	return c.do(ctx, http.MethodDelete, path, nil, nil, requestOptions...)
+	keySegment, err := pathID("scope_key", scopeKey)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, path+"/spend-delegations/"+scopeSegment+"/"+keySegment, nil, nil, requestOptions...)
 }
 
 // ListActiveEntitlements returns active records for up to 500 subjects, keyed

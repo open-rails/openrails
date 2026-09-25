@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -61,6 +62,11 @@ func TestRegistryIntegrity(t *testing.T) {
 		if token, ok := mainnet[sc.Symbol]; ok {
 			require.Equal(t, token.Mint, sc.Mint, "%s disagrees between registries", sc.Symbol)
 		}
+		got, ok := KnownStablecoinByMint(" " + sc.Mint + " ")
+		require.True(t, ok, sc.Symbol)
+		require.Equal(t, sc, got)
+		_, ok = KnownStablecoinByMint(strings.ToLower(sc.Mint))
+		require.False(t, ok, "%s: base58 is case-sensitive; a case-folded mint is another address", sc.Symbol)
 	}
 	for symbol, token := range devnet {
 		if symbol == "SOL" {

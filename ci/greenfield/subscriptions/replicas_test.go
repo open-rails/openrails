@@ -620,12 +620,17 @@ func TestReplicasProviderOwned(t *testing.T) {
 		end := l.periodEnd()
 		f.advance(end.Sub(f.base.clock.Now()) + time.Hour)
 		f.postAll("nmi", l.providerRenewal(false))
-		sub := f.replicas[2].subscription(embedded, l.sub)
-		require.Equal(t, "past_due", sub.Status)
-		require.NotNil(t, sub.NextRetryAt)
-		f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
-		f.passes()
-		f.passes()
+		// The inline converge schedules the stalled retry for now, so a
+		// replica's periodic due pass may recover it before this read.
+		if sub := f.replicas[2].subscription(embedded, l.sub); sub.Status != "active" {
+			require.Equal(t, "past_due", sub.Status)
+			require.NotNil(t, sub.NextRetryAt)
+			f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
+			f.passes()
+			f.passes()
+		} else {
+			require.Equal(t, 1, f.base.nmi.saleAttempts(), "active again only through the recovery charge")
+		}
 		f.until(func() bool { return l.periodEnd().After(end) }, "OpenRails recovers the failed period")
 		f.passes()
 		require.Equal(t, 1, f.base.nmi.saleAttempts(), "one recovery charge")

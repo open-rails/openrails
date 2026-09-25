@@ -281,7 +281,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		if err != nil {
 			return err
 		}
-		if err := renderPullProviderStdout(opts.Out, opts.Format, logPath, run, res, appliedChanges, pruneLogs, convergeLog); err != nil {
+		if err := renderPullProviderStdout(opts.Out, opts.Format, logPath, merchantID, run, res, appliedChanges, pruneLogs, convergeLog); err != nil {
 			return err
 		}
 		return runErr
@@ -637,7 +637,7 @@ func pruneMutationRecords(provider reconcile.Provider, pr reconcile.PruneResult,
 	return out
 }
 
-func renderPullProviderStdout(w io.Writer, format, logPath string, run reconcile.RunRecord, res *reconcile.RunResult, appliedChanges []reconcile.MutationRecord, pruneLogs []pullProviderPruneLog, convergeLog *pullProviderConvergeLog) error {
+func renderPullProviderStdout(w io.Writer, format, logPath string, merchantID merchant.ID, run reconcile.RunRecord, res *reconcile.RunResult, appliedChanges []reconcile.MutationRecord, pruneLogs []pullProviderPruneLog, convergeLog *pullProviderConvergeLog) error {
 	counts := summarizeMutations(res.PlannedChanges, appliedChanges)
 	statusCounts := findingStatusCounts(res.Findings)
 	pruneCounts := summarizePrune(pruneLogs)
@@ -656,8 +656,8 @@ func renderPullProviderStdout(w io.Writer, format, logPath string, run reconcile
 		fmt.Fprintf(w, "prune: %s\n", formatPruneCounts(pruneCounts))
 		for _, pl := range pruneLogs {
 			if pl.Applied && pl.Result.RunID != uuid.Nil {
-				fmt.Fprintf(w, "  %s (%s): destructive run %s — reverse with `openrails undo-run --merchant <slug> --run %s`, then re-pull and converge\n",
-					pl.Provider, pl.Binding.AccountID, pl.Result.RunID, pl.Result.RunID)
+				fmt.Fprintf(w, "  %s (%s): destructive run %s — reverse with `openrails undo-run --merchant %s --run %s`, then re-pull and converge\n",
+					pl.Provider, pl.Binding.AccountID, pl.Result.RunID, merchantFlag(merchantID), pl.Result.RunID)
 			}
 		}
 		if !prunePlanApplied(pruneLogs) {
@@ -788,8 +788,19 @@ func formatMutationCounts(counts mutationCounts) string {
 	sort.Strings(tables)
 	var tableParts []string
 	for _, table := range tables {
+		ops := make([]string, 0, len(counts[table]))
+		for op := range counts[table] {
+			ops = append(ops, op)
+		}
+		sort.Slice(ops, func(i, j int) bool {
+			ri, rj := mutationOpRank(ops[i]), mutationOpRank(ops[j])
+			if ri != rj {
+				return ri < rj
+			}
+			return ops[i] < ops[j]
+		})
 		var opParts []string
-		for _, op := range []string{"insert", "update", "delete"} {
+		for _, op := range ops {
 			if n := counts[table][op]; n > 0 {
 				opParts = append(opParts, fmt.Sprintf("%s=%d", pastTense(op), n))
 			}
@@ -804,6 +815,16 @@ func formatMutationCounts(counts mutationCounts) string {
 	return strings.Join(tableParts, "; ")
 }
 
+// mutationOpRank orders the known operations; any other sorts after them.
+func mutationOpRank(op string) int {
+	for i, known := range []string{"insert", "update", "delete", "soft_delete"} {
+		if op == known {
+			return i
+		}
+	}
+	return 4
+}
+
 func pastTense(op string) string {
 	switch op {
 	case "insert":
@@ -812,6 +833,8 @@ func pastTense(op string) string {
 		return "updated"
 	case "delete":
 		return "deleted"
+	case "soft_delete":
+		return "soft_deleted"
 	default:
 		return op
 	}

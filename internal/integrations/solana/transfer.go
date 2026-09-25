@@ -434,10 +434,8 @@ func evaluateTokenTransfer(txResult *rpc.GetTransactionResult, accounts []*solan
 		return nil
 	}
 	mint := mintForAccount(txResult, accountIdx)
-	if expectedMint != "" {
-		if mint == "" || !mintMatches(expectedMint, mint) {
-			return nil
-		}
+	if !mintMatches(expectedMint, mint) {
+		return nil
 	}
 	if *amountPtr < expectedAmount {
 		return nil
@@ -466,15 +464,9 @@ func evaluateTokenTransferChecked(txResult *rpc.GetTransactionResult, accounts [
 	if expectedPayer != "" && accounts[3].PublicKey.String() != expectedPayer {
 		return nil
 	}
-	mint := ""
-	mint = accounts[1].PublicKey.String()
-	if mint == "" {
-		mint = mintForAccount(txResult, accountIdx)
-	}
-	if expectedMint != "" {
-		if mint == "" || !mintMatches(expectedMint, mint) {
-			return nil
-		}
+	mint := accounts[1].PublicKey.String()
+	if !mintMatches(expectedMint, mint) {
+		return nil
 	}
 	if *amountPtr < expectedAmount {
 		return nil
@@ -518,20 +510,17 @@ func mintForAccount(txResult *rpc.GetTransactionResult, accountIndex int) string
 	return ""
 }
 
+// Base58 is case-sensitive: mints compare exactly.
 func normalizeMint(m string) string {
-	return strings.ToUpper(strings.TrimSpace(m))
+	return strings.TrimSpace(m)
 }
 
 func mintMatches(expected, actual string) bool {
-	exp := normalizeMint(expected)
-	act := normalizeMint(actual)
-	if exp == "" || act == "" {
-		return exp == act
+	exp, act := normalizeMint(expected), normalizeMint(actual)
+	if isNativeSOLMint(exp) {
+		return act == wrappedSOLMint
 	}
-	if isNativeSOLMint(exp) && isNativeSOLMint(act) {
-		return true
-	}
-	return exp == act
+	return act != "" && exp == act
 }
 
 func messageContainsKey(msg solanago.Message, key solanago.PublicKey, loaded rpc.LoadedAddresses) bool {
@@ -619,17 +608,9 @@ func tokenBalanceDelta(txResult *rpc.GetTransactionResult, accountIndex int) (ui
 
 const wrappedSOLMint = "So11111111111111111111111111111111111111112"
 
-var nativeSOLMintAliases = map[string]struct{}{
-	"":                              {},
-	strings.ToUpper(wrappedSOLMint): {},
-}
-
 func isNativeSOLMint(tokenMint string) bool {
-	mint := strings.ToUpper(strings.TrimSpace(tokenMint))
-	if _, ok := nativeSOLMintAliases[mint]; ok {
-		return true
-	}
-	return false
+	mint := strings.TrimSpace(tokenMint)
+	return mint == "" || mint == wrappedSOLMint
 }
 
 func isNativeSOLSymbol(symbol string) bool {
