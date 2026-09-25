@@ -125,6 +125,7 @@ func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since, un
 			SubscriptionID  string `xml:"subscription_id"`
 			OrderID         string `xml:"order_id"`
 			CustomerVaultID string `xml:"customer_vault_id"`
+			Condition       string `xml:"condition"`
 			Currency        string `xml:"currency"`
 			Actions         []struct {
 				Amount       string `xml:"amount"`
@@ -144,6 +145,13 @@ func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since, un
 	}
 	var out []ScheduleSale
 	for _, t := range parsed.Transactions {
+		actions := make([]TransactionAction, 0, len(t.Actions))
+		for _, a := range t.Actions {
+			actions = append(actions, TransactionAction{Type: a.ActionType, Success: a.Success, Amount: a.Amount})
+		}
+		if SaleReversed(t.Condition, actions) {
+			continue // voided or refunded in full: no payment, no decline
+		}
 		for _, a := range t.Actions {
 			if !strings.EqualFold(strings.TrimSpace(a.ActionType), "sale") {
 				continue
