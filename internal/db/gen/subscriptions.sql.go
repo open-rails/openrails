@@ -2170,6 +2170,8 @@ WHERE subscriptions.merchant_id = $26::uuid AND id = $1
   AND lifecycle_rev = $27
   AND row_version = $28
   AND deleted_at IS NULL
+  -- The status-transition audit records this decision's name (0021).
+  AND set_config('billing.decision', $29::text, true) IS NOT NULL
 `
 
 type UpdateSubscriptionDecidedParams struct {
@@ -2201,6 +2203,7 @@ type UpdateSubscriptionDecidedParams struct {
 	MerchantID               uuid.UUID
 	ExpectedRev              int64
 	ExpectedVersion          int64
+	Decision                 string
 }
 
 // A lifecycle decision (#1091 part C): the full-row write that may change
@@ -2237,6 +2240,7 @@ func (q *Queries) UpdateSubscriptionDecided(ctx context.Context, arg UpdateSubsc
 		arg.MerchantID,
 		arg.ExpectedRev,
 		arg.ExpectedVersion,
+		arg.Decision,
 	)
 	if err != nil {
 		return 0, err

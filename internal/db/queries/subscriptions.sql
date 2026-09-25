@@ -93,7 +93,9 @@ UPDATE openrails.subscriptions SET
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND lifecycle_rev = sqlc.arg(expected_rev)
   AND row_version = sqlc.arg(expected_version)
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+  -- The status-transition audit records this decision's name (0021).
+  AND set_config('billing.decision', sqlc.arg(decision)::text, true) IS NOT NULL;
 
 -- name: DeleteSubscription :execrows
 DELETE FROM openrails.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
