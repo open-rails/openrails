@@ -1,10 +1,10 @@
 package webhooks
 
 import (
-	"github.com/open-rails/openrails/pkg/merchant"
-
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // StripeConvergeService is the #684 fetch-and-converge implementation for one
@@ -317,22 +319,23 @@ func (s *StripeConvergeService) markCheckoutSessionSucceeded(ctx context.Context
 	}
 }
 
-// applyFetchedMirrorFacts writes the fetch-sourced row facts that are OUTSIDE
-// the decider's transition vocabulary: the price mapping (Model B upgrades),
-// scheduled-cancellation marks (cancel_at_period_end from Stripe's portal),
-// and a portal resume clearing them. These are mirror writes of CURRENT
-// provider truth — no event ordering, no watermarks.
+// applyFetchedMirrorFacts mirrors the Stripe facts outside the decider's
+// vocabulary, under the row lock and through the lifecycle machine:
+//   - a portal cancel at period end is the user's period-end cancel;
+//   - a portal resume undoes only that user cancel, inside the paid period;
+//   - a price move takes effect only with a paid invoice for the new price
+//     (#1089 audit 11).
 func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) error {
 	var (
-		updatedSub          *models.Subscription
-		oldEntitlementsSpec map[string]*int
-		newEntitlementsSpec map[string]*int
+		updatedSub       *models.Subscription
+		oldSpec, newSpec map[string]*int
 	)
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	remoteAlive := status == "active" || status == "trialing"
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		subRepo := subscriptions.NewSubscriptionRepo(db.NewWithPgxTx(tx))
+		txdb := db.NewWithPgxTx(tx)
+		subRepo := subscriptions.NewSubscriptionRepo(txdb)
 		sub, err := subRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
 		if err != nil {
 			if db.IsNotFound(err) {
@@ -340,92 +343,51 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			}
 			return fmt.Errorf("stripe converge: load subscription for mirror facts: %w", err)
 		}
-		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal {
-			return nil // terminal locally (chargeback etc.): mirror facts never resurrect
-		}
 
-		changed := false
-
-		// Price remap (fetch-sourced): the subscription's Stripe price moved.
-		if rec.PriceID != "" {
-			if price, perr := s.PriceService.GetByStripePriceID(ctx, rec.PriceID); perr == nil {
-				if price.ID != sub.PriceID {
-					oldEntitlementsSpec = models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
-					if len(oldEntitlementsSpec) == 0 && s.ProductService != nil && sub.ProductID != uuid.Nil {
-						if oldProduct, oerr := s.ProductService.GetByID(ctx, sub.ProductID); oerr == nil {
-							oldEntitlementsSpec = oldProduct.EntitlementsSpec
-						}
-					}
-					sub.PriceID = price.ID
-					sub.ProductID = price.ProductID
-					sub.ScheduledPriceID = nil
-					// #813: if a scheduled reprice/plan-change row targeted
-					// exactly this price, the provider flip IS its
-					// application — mark it applied in the same tx so batch
-					// progress reflects provider truth. Idempotent by
-					// predicate; 0 rows on organic price moves.
-					scopeMerchantID, scopeErr := merchant.Require(ctx)
-					if scopeErr != nil {
-						return scopeErr
-					}
-					if _, aerr := db.NewWithPgxTx(tx).Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, gen.ApplyScheduledRepriceForSubscriptionPriceParams{
-						MerchantID:     scopeMerchantID.UUID(),
-						SubscriptionID: sub.ID,
-						ToPriceID:      price.ID,
-					}); aerr != nil {
-						return fmt.Errorf("stripe converge: mark scheduled reprice applied: %w", aerr)
-					}
-					if s.ProductService != nil {
-						if product, perr2 := s.ProductService.GetByID(ctx, price.ProductID); perr2 == nil {
-							sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-							newEntitlementsSpec = product.EntitlementsSpec
-						}
-					}
-					changed = true
-				}
-			} else {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"stripe_price_id": rec.PriceID, "subscription_id": sub.ID,
-				}).Warn("stripe converge: fetched price not mapped locally")
+		switch {
+		case remoteAlive && rec.CancelAtPeriodEnd && sub.Status != models.StatusCancelled:
+			if err := s.mirrorPortalCancel(ctx, txdb, sub, now); err != nil {
+				return err
+			}
+		case remoteAlive && !rec.CancelAtPeriodEnd && sub.Status == models.StatusCancelled &&
+			sub.CancelType != nil && *sub.CancelType == models.CancelTypeUser:
+			if err := s.mirrorPortalResume(ctx, txdb, sub, now); err != nil {
+				return err
 			}
 		}
 
-		// Scheduled cancellation (Stripe portal): remote alive but flagged to
-		// cancel at period end — mirror the marks, keep the paid-through owner.
-		if remoteAlive && rec.CancelAtPeriodEnd && sub.CancelledAt == nil {
-			cancelType := models.CancelTypeUser
-			sub.CancelType = &cancelType
-			ts := now
-			if !rec.CanceledAt.IsZero() {
-				ts = rec.CanceledAt
-			}
-			sub.CancelledAt = &ts
-			endAt := now
-			if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
-				endAt = *sub.CurrentPeriodEndsAt
-			}
-			sub.EndedAt = &endAt
-			changed = true
-		}
-
-		// Portal resume: remote alive, no scheduled cancel, local row still
-		// carries cancellation marks from a prior scheduled cancel.
-		if remoteAlive && !rec.CancelAtPeriodEnd &&
-			(sub.CancelledAt != nil || sub.Status == models.StatusCancelled) {
-			sub.CancelledAt = nil
-			sub.CancelType = nil
-			sub.EndedAt = nil
-			if sub.Status == models.StatusCancelled {
-				sub.Status = models.StatusActive
-			}
-			changed = true
-		}
-
-		if !changed {
+		if sub.Status == models.StatusCancelled || rec.PriceID == "" {
 			return nil
 		}
-		if err := subRepo.UpdateAt(ctx, sub, s.now()); err != nil {
-			return fmt.Errorf("stripe converge: write mirror facts: %w", err)
+		price := s.paidPriceMove(ctx, sub, rec)
+		if price == nil {
+			return nil
+		}
+		oldSpec = models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
+		if len(oldSpec) == 0 && s.ProductService != nil && sub.ProductID != uuid.Nil {
+			if product, err := s.ProductService.GetByID(ctx, sub.ProductID); err == nil {
+				oldSpec = product.EntitlementsSpec
+			}
+		}
+		sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, price.ProductID, nil
+		scope, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		// #813: the provider flip applies a scheduled reprice that targeted it.
+		if _, err := txdb.Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, gen.ApplyScheduledRepriceForSubscriptionPriceParams{
+			MerchantID: scope.UUID(), SubscriptionID: sub.ID, ToPriceID: price.ID,
+		}); err != nil {
+			return fmt.Errorf("stripe converge: mark scheduled reprice applied: %w", err)
+		}
+		if s.ProductService != nil {
+			if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
+				sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+				newSpec = product.EntitlementsSpec
+			}
+		}
+		if err := subRepo.UpdateAt(ctx, sub, now); err != nil {
+			return fmt.Errorf("stripe converge: write price remap: %w", err)
 		}
 		updatedSub = sub
 		return nil
@@ -434,12 +396,66 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 	}
 
 	// Downgrade revoke: entitlements the old product had that the new one lost.
-	if updatedSub != nil && len(oldEntitlementsSpec) > 0 {
-		if err := s.revokeDowngradedEntitlements(ctx, updatedSub, oldEntitlementsSpec, newEntitlementsSpec); err != nil {
-			return err
-		}
+	if updatedSub != nil && len(oldSpec) > 0 {
+		return s.revokeDowngradedEntitlements(ctx, updatedSub, oldSpec, newSpec)
 	}
 	return nil
+}
+
+// mirrorPortalCancel applies a Stripe portal cancel as the user's period-end
+// cancel. Stripe already holds the schedule, so no provider cancel is queued.
+func (s *StripeConvergeService) mirrorPortalCancel(ctx context.Context, txdb *db.DB, sub *models.Subscription, now time.Time) error {
+	end := now
+	if sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
+		end = *sub.CurrentPeriodEndsAt
+	}
+	return s.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
+		EndedAt:       end,
+		CancelType:    models.CancelTypeUser,
+		RevokeReason:  models.EntitlementRevokeAdmin,
+		RevokeAsOf:    now,
+		RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceGrace},
+	})
+}
+
+// mirrorPortalResume applies a Stripe portal resume. The machine refuses it
+// once the paid period is over: only a payment reactivates from then on.
+func (s *StripeConvergeService) mirrorPortalResume(ctx context.Context, txdb *db.DB, sub *models.Subscription, now time.Time) error {
+	effects, err := subscriptions.Transition(sub, lifecycle.Resume{At: now}, now)
+	if errors.Is(err, lifecycle.ErrIllegal) {
+		log.WithContext(ctx).WithField("subscription_id", sub.ID).
+			Info("stripe converge: Stripe resumed a subscription whose paid period is over; waiting for a payment")
+		return nil
+	}
+	if err != nil || len(effects) == 0 {
+		return err
+	}
+	sub.CancelFeedback = nil
+	if err := subscriptions.NewSubscriptionRepo(txdb).UpdateAt(ctx, sub, now); err != nil {
+		return fmt.Errorf("stripe converge: write resume: %w", err)
+	}
+	return entitlements.NewEntitlementService(txdb, s.Clock).ResumeSubscriptionAccess(ctx, sub.ID)
+}
+
+// paidPriceMove returns the new local price when the Stripe price moved and
+// the latest paid invoice bills it. A portal upgrade whose invoice is still
+// open grants nothing.
+func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.Subscription, rec subscriptions.StripeLivenessRecord) *models.Price {
+	price, err := s.PriceService.GetByStripePriceID(ctx, rec.PriceID)
+	if err != nil {
+		log.WithContext(ctx).WithFields(log.Fields{"stripe_price_id": rec.PriceID, "subscription_id": sub.ID}).
+			Warn("stripe converge: fetched price not mapped locally")
+		return nil
+	}
+	if price.ID == sub.PriceID {
+		return nil
+	}
+	if !rec.LatestInvoicePaid || !slices.Contains(rec.LatestInvoicePriceIDs, rec.PriceID) {
+		log.WithContext(ctx).WithFields(log.Fields{"stripe_price_id": rec.PriceID, "subscription_id": sub.ID, "invoice": rec.LatestInvoiceID}).
+			Info("stripe converge: price moved at Stripe without a paid invoice for it; keeping the paid tier")
+		return nil
+	}
+	return price
 }
 
 func (s *StripeConvergeService) revokeDowngradedEntitlements(ctx context.Context, sub *models.Subscription, oldSpec, newSpec map[string]*int) error {

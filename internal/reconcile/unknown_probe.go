@@ -241,8 +241,10 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	// recorded when Stripe gives the invoice's own created time (#651: no
 	// fabricated instants).
 	// A dead subscription's failed invoice is not a decline in progress: it
-	// would hold the row in dunning against Stripe's final word.
+	// would hold the row in dunning against Stripe's final word. An unpaid
+	// proration (a tier change) is not a declined renewal: the paid period stands.
 	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 && sub.Status != SubscriptionStatusExpired &&
+		!strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") &&
 		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
 		snap.Transactions = append(snap.Transactions, RemoteTransaction{
 			TransactionID:  "failed:" + rec.LatestInvoiceTransactionID,

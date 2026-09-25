@@ -552,6 +552,11 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	//    (NSF, do-not-honor, comms) beyond the window is a customer still in
 	//    dunning on a schedule the rail keeps retrying, not a dead one; it falls
 	//    through gateCancelCertainty and parks.
+	// Stripe runs its own retries: a past_due subscription is one Stripe is
+	// still retrying (a spent schedule maps to expired), whatever its age.
+	if snap.Provider == ProviderStripe && remoteSub != nil && remoteSub.Status == SubscriptionStatusPastDue {
+		return with(Decision{Kind: TransitionPastDue, GraceEndsAt: laterOf(periodEnd, now).Add(PeriodGrace), Decline: declineTxn, Reason: "stripe_retrying"})
+	}
 	if declineTxn != nil {
 		if now.Sub(periodEnd) <= dunningWindow {
 			// Grace runs from when the decline is seen: one found late still

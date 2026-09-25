@@ -67,18 +67,20 @@ type SubscriptionConvergeArgs struct {
 	MerchantID            uuid.UUID `json:"merchant_id" river:"unique"`
 	Rail                  string    `json:"rail" river:"unique"`
 	SubscriptionReference string    `json:"subscription_reference" river:"unique"`
-	EventType             string    `json:"event_type,omitempty"`
-	EventCreated          int64     `json:"event_created,omitempty"`
+	// After is the converge job that was already running when this event
+	// arrived: it may have fetched before the event, so this job re-fetches
+	// once that one finishes (audit 19).
+	After        int64  `json:"after,omitempty" river:"unique"`
+	EventType    string `json:"event_type,omitempty"`
+	EventCreated int64  `json:"event_created,omitempty"`
 }
 
 func (SubscriptionConvergeArgs) Kind() string { return KindSubscriptionConverge }
 
-// subscriptionConvergeUniqueStates is the default unique set MINUS completed:
-// a finished converge must never block the next wake-up for the same
-// subscription. (Dropping completed forces river's slower advisory-lock insert
-// path — fine at webhook volumes.) `running` stays required, so an event
-// landing mid-fetch dedupes away; the next event or the pull sweep re-converges
-// (slightly-old truth is self-healing, never corrupting).
+// subscriptionConvergeUniqueStates is the default unique set minus completed,
+// so a finished converge never blocks the next wake-up. River requires
+// running in the set; an event that lands on a running job queues a follow-up
+// (SubscriptionConvergeArgs.After) instead of being dropped.
 var subscriptionConvergeUniqueStates = []rivertype.JobState{
 	rivertype.JobStateAvailable,
 	rivertype.JobStatePending,
@@ -110,23 +112,37 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 	if debounce <= 0 {
 		debounce = SubscriptionConvergeDebounce
 	}
-	_, err := e.Client.Insert(ctx, SubscriptionConvergeArgs{
+	args := SubscriptionConvergeArgs{
 		MerchantID:            req.MerchantID,
 		PSPID:                 req.PSPID,
 		Rail:                  strings.ToLower(strings.TrimSpace(req.Rail)),
 		SubscriptionReference: strings.TrimSpace(req.SubscriptionReference),
 		EventType:             req.EventType,
 		EventCreated:          req.EventCreated,
-	}, &river.InsertOpts{
+	}
+	opts := &river.InsertOpts{
 		Queue:       QueueBilling,
 		ScheduledAt: time.Now().Add(debounce),
-		UniqueOpts: river.UniqueOpts{
-			ByArgs:  true,
-			ByState: subscriptionConvergeUniqueStates,
-		},
-	})
-	return err
+		UniqueOpts:  river.UniqueOpts{ByArgs: true, ByState: subscriptionConvergeUniqueStates},
+	}
+	// A job that is not running yet will fetch after this event. A running one
+	// may have fetched already, so chain a follow-up behind it.
+	for range subscriptionConvergeMaxChain {
+		res, err := e.Client.Insert(ctx, args, opts)
+		if err != nil {
+			return err
+		}
+		if !res.UniqueSkippedAsDuplicate || res.Job == nil || res.Job.State != rivertype.JobStateRunning {
+			return nil
+		}
+		args.After = res.Job.ID
+	}
+	return fmt.Errorf("subscription converge: follow-up chain for %s exceeds %d running jobs", args.SubscriptionReference, subscriptionConvergeMaxChain)
 }
+
+// subscriptionConvergeMaxChain bounds the follow-up chain. A follow-up waits
+// for its predecessor, so at most two jobs per subscription run at once.
+const subscriptionConvergeMaxChain = 4
 
 // SubscriptionConvergeWorker fetches provider truth for one subscription and
 // converges the local row through the decider (#665) plus the rail-specific
@@ -170,6 +186,11 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		return nil
 	}
 
+	if args.After != 0 && w.predecessorRunning(ctx, args.After) {
+		// Converge in order: the older fetch must not commit after this one.
+		return river.JobSnooze(SubscriptionConvergeDebounce)
+	}
+
 	mctx := db.WithPSPID(merchant.WithID(ctx, merchant.ID(args.MerchantID)), args.PSPID)
 	var customerID uuid.UUID
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
@@ -206,6 +227,17 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	// Retryable: provider API down / transient DB failure — the job IS the
 	// dirty mark; River backoff re-fetches and converges later. Access intact.
 	return err
+}
+
+// predecessorRunning reports whether the converge job this follow-up chains
+// behind is still running. An unreadable predecessor is treated as finished.
+func (w *SubscriptionConvergeWorker) predecessorRunning(ctx context.Context, id int64) bool {
+	client, err := river.ClientFromContextSafely[pgx.Tx](ctx)
+	if err != nil {
+		return false
+	}
+	job, err := client.JobGet(ctx, id)
+	return err == nil && job.State == rivertype.JobStateRunning
 }
 
 // pullCoveredSince reports whether a provider-refresh pull for the rail has
