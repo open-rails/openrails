@@ -105,6 +105,9 @@ type Subscription struct {
 	// RowVersion is the row version the image was read at; every update
 	// advances it (#1102), and a write from an older image is refused.
 	RowVersion int64 `json:"-"`
+	// DunningPolicy is the merchant's policy recorded when the current
+	// dunning case opened (#1102); nil outside a case.
+	DunningPolicy []byte `json:"-"`
 	// loaded is the lifecycle state as read; decision names what changed it.
 	loaded   lifecycleFields
 	decision string

@@ -193,6 +193,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		ScheduledPriceID:         s.ScheduledPriceID,
 		UpdatedAt:                s.UpdatedAt,
 		ExpectedVersion:          s.RowVersion,
+		DunningPolicy:            s.DunningPolicy,
 	}
 	if s.LifecycleChanged() {
 		// #1091 part C: status, paid period and cancellation change only in a
@@ -863,6 +864,6 @@ func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscr
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
 		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CancelledAt: p.CancelledAt,
 		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, ScheduledPriceID: p.ScheduledPriceID,
-		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion,
+		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion, DunningPolicy: p.DunningPolicy,
 	}
 }

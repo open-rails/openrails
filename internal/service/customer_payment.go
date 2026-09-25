@@ -218,7 +218,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}
-	policy, err := subscriptions.DunningPolicy(ctx, s.rt.DB)
+	policy, err := subscriptions.CasePolicy(ctx, s.rt.DB, sub)
 	if err != nil {
 		return nil, err
 	}

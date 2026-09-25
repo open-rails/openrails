@@ -160,7 +160,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			return err
 		}
 		p := subscriptions.ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
-		policy, err := subscriptions.DunningPolicy(ctx, d)
+		policy, err := subscriptions.CasePolicy(ctx, d, sub)
 		if err != nil {
 			return err
 		}

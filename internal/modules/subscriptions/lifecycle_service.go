@@ -1757,7 +1757,7 @@ func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context,
 		if err != nil {
 			return fmt.Errorf("resume dunning %s: load price: %w", sub.ID, err)
 		}
-		policy, err := DunningPolicy(ctx, dbb)
+		policy, err := CasePolicy(ctx, dbb, sub)
 		if err != nil {
 			return err
 		}
@@ -2123,6 +2123,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		heldTerminal := ""
 		quietRetry := false // a transient retry tells the customer nothing yet
 		var event lifecycle.Event
+		// A decline opens the dunning case under the merchant's policy of the
+		// moment; the rest of the case runs under it (#1102).
+		if subscription.Status != models.StatusCancelled && subscription.Status != models.StatusPending {
+			if err := openCase(ctx, db, subscription); err != nil {
+				return err
+			}
+		}
 		switch params.Decline {
 		case collection.DeclineFixPaymentMethod:
 			// or#870 bucket 2 — the customer's card, fixable. Charging stops,
@@ -2165,7 +2172,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			// An unknown cycle fails closed: nothing is retried or cancelled on
 			// a guessed cadence; the caller raises the operator finding.
-			policy, err := DunningPolicy(ctx, db)
+			policy, err := CasePolicy(ctx, db, subscription)
 			if err != nil {
 				return err
 			}
@@ -2491,7 +2498,7 @@ func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceSer
 	} else {
 		return time.Time{}, fmt.Errorf("load price: %w", err)
 	}
-	policy, err := DunningPolicy(ctx, d)
+	policy, err := CasePolicy(ctx, d, sub)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -2513,7 +2520,7 @@ func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.
 	if sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
 		return nil
 	}
-	policy, err := DunningPolicy(ctx, d)
+	policy, err := CasePolicy(ctx, d, sub)
 	if err != nil {
 		return err
 	}
@@ -2530,7 +2537,7 @@ func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.
 // membership in dunning: an open-ended grace from the paid period's end
 // (closed by the renewal that pays, or by the terminal outcome), or no grace.
 func (s *SubscriptionLifecycleService) engineDunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
-	policy, err := DunningPolicy(ctx, d)
+	policy, err := CasePolicy(ctx, d, sub)
 	if err != nil {
 		return err
 	}

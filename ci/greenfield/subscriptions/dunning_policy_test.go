@@ -109,3 +109,28 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 		})
 	}
 }
+
+// A dunning case runs under the policy it opened with (#1102): editing the
+// merchant's policy mid-case changes the next case, never this one.
+func TestDunningCaseKeepsItsPolicy(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	opened := &openrails.DunningPolicy{Tiers: []openrails.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
+	require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), openrails.MerchantSettings{DunningPolicy: opened}))
+	e := enroll(t, w, "nmi", embedded)
+	e.setDecline(visa.Last4, "insufficient_funds", "202")
+	e.toPeriodEnd()
+	first := w.clock.Now()
+	w.runRenewals()
+	sub := w.subscription(embedded, e.sub)
+	require.Equal(t, "past_due", sub.Status)
+	require.Equal(t, 24*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour))
+
+	edited := &openrails.DunningPolicy{Tiers: []openrails.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{36, 60}}}}
+	require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), openrails.MerchantSettings{DunningPolicy: edited}))
+	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+	w.runRenewals()
+	sub = w.subscription(embedded, e.sub)
+	require.NotNil(t, sub.NextRetryAt)
+	require.Equal(t, 48*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "the case keeps the policy it opened with")
+}

@@ -54,6 +54,7 @@ UPDATE openrails.subscriptions SET
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
     scheduled_price_id = sqlc.narg(scheduled_price_id),
+    dunning_policy = sqlc.narg(dunning_policy)::jsonb,
     updated_at = sqlc.arg(updated_at)
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND row_version = sqlc.arg(expected_version)
@@ -88,6 +89,7 @@ UPDATE openrails.subscriptions SET
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
     scheduled_price_id = sqlc.narg(scheduled_price_id),
+    dunning_policy = sqlc.narg(dunning_policy)::jsonb,
     updated_at = sqlc.arg(updated_at),
     lifecycle_rev = lifecycle_rev + 1
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1

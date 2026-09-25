@@ -473,8 +473,10 @@ type CreditLimitRequest struct {
 	CreditLimitAmount int64  `json:"credit_limit_amount,string"`
 }
 
-// DunningPolicy is a merchant's retry schedule for declined renewals. Tiers
-// (default: the built-in schedule) are ordered by billing cycle: the first tier whose MaxCycleHours exceeds a
+// DunningPolicy is a merchant's retry schedule for declined renewals. A
+// dunning case runs under the policy in force at its first decline; an edit
+// applies to the next case. Tiers (default: the built-in schedule) are
+// ordered by billing cycle: the first tier whose MaxCycleHours exceeds a
 // subscription's cycle applies, and the last tier (MaxCycleHours 0) takes
 // every longer cycle. RetryAfterHours are measured from the first decline.
 // TransientRetryMinutes is the quick ladder for processor try-again answers,

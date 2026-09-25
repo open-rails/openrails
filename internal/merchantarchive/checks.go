@@ -75,7 +75,7 @@ var excludedColumns = map[string]string{
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
 	"custodians":        "credential_versions",
-	"subscriptions":     "destructive_run_class",
+	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
 	"payments":          "discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
 	"checkout_sessions": "destructive_run_class",
