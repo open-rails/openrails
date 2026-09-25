@@ -12,7 +12,10 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -227,4 +230,46 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	pub, err := app.HostGraph(second).Runtime.MerchantSecretBackend.SolanaTransit.PublicKey(t.Context(), transitKey)
 	require.NoError(t, err)
 	require.Equal(t, want, solanago.PublicKeyFromBytes(pub).String())
+}
+
+// A Vault Transit key replaced behind OpenRails' back is still provisioned as a
+// new Solana identity, but loudly: an ERROR log names both public keys and the
+// signer identity probe fails so the host alerts.
+func TestTransitKeyChangeIsProvisionedAndAlerts(t *testing.T) {
+	t.Setenv("VAULT_MAX_RETRIES", "0")
+	f := newFixture(t)
+	fake := vaultfake.New("greenfield-root")
+	t.Cleanup(fake.Close)
+	slug := "rotate-" + uuid.NewString()[:8]
+	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
+
+	first := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
+	client, err := first.Client()
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
+	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
+	require.NoError(t, first.Close(context.Background()))
+
+	fake.Rotate(transitKey)
+	rotated := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
+	logs := logtest.NewGlobal()
+	t.Cleanup(logs.Reset)
+	second := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
+	require.Eventually(t, func() bool { return probe(t, second, "openrails_solana_signer_identity") != nil }, 30*time.Second, 50*time.Millisecond)
+	require.ErrorContains(t, probe(t, second, "openrails_solana_signer_identity"), rotated)
+	waitReady(t, second)
+
+	var logged bool
+	for _, e := range logs.AllEntries() {
+		if e.Level == logrus.ErrorLevel && e.Data["stored_public_key"] == old && e.Data["transit_public_key"] == rotated && e.Data["key"] == transitKey {
+			logged = true
+		}
+	}
+	require.True(t, logged, "the key change is logged at ERROR with both public keys")
+
+	require.Eventually(t, func() bool {
+		var n int
+		err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND account_id = $1", rotated).Scan(&n)
+		return err == nil && n == 1
+	}, 30*time.Second, 50*time.Millisecond, "the new key is still provisioned")
 }

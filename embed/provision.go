@@ -87,7 +87,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 		Merchant:   m,
 		Options:    boot.MerchantManifestReconcileOptions{Insert: true, StripeClients: a.Runtime.StripeClients},
 	}
-	var fallback *storedSignerTransit
+	var fallback *signerTransit
 	switch {
 	case conf.SecretStoreBackend() == config.SecretBackendSnapshot:
 		// Load the host-owned snapshot into this process. Metadata initialization
@@ -101,11 +101,13 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 			return merchant.ID{}, false, fmt.Errorf("openrails embed: credential backend must be initialized before provisioning")
 		}
 		req.SolanaTransit = backend.SolanaTransit
-		if tolerateVault && backend.SolanaTransit != nil {
-			fallback = &storedSignerTransit{TransitClient: backend.SolanaTransit, db: database, directory: directory, slug: slug,
-				environment: config.ExpectedProviderEnvironment(conf.IsTestMode())}
+		if backend.SolanaTransit != nil {
+			fallback = &signerTransit{TransitClient: backend.SolanaTransit, db: database, directory: directory, slug: slug,
+				environment: config.ExpectedProviderEnvironment(conf.IsTestMode()), tolerate: tolerateVault, onChange: a.Runtime.ReportSignerKeyChange}
 			req.SolanaTransit = fallback
-			req.Options.DeferPSP = func(_ string, err error) bool { return errors.Is(err, vault.ErrUnavailable) }
+			if tolerateVault {
+				req.Options.DeferPSP = func(_ string, err error) bool { return errors.Is(err, vault.ErrUnavailable) }
+			}
 		}
 	case len(m.PSPs) > 0 || len(m.Custodians) > 0:
 		return merchant.ID{}, false, fmt.Errorf("openrails embed: provider credential declarations require a host snapshot; use the Client payment-provider publication operation for managed credentials")
@@ -121,37 +123,61 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 	return tn.ID, fallback != nil && fallback.unavailable.Load(), nil
 }
 
-// storedSignerTransit answers a Transit public-key read that Vault cannot
-// serve right now from the Solana identity already stored for that key.
-type storedSignerTransit struct {
+// signerTransit checks every Transit public-key read against the Solana
+// identities already stored for that key: a different key is reported (it is
+// still provisioned, as a new identity), and with tolerate a read Vault
+// cannot serve right now is answered from the stored identity.
+type signerTransit struct {
 	solanaint.TransitClient
 	db          *db.DB
 	directory   *merchants.Service
 	slug        string
 	environment string
+	tolerate    bool
+	onChange    func(error)
 	unavailable atomic.Bool
 }
 
-func (t *storedSignerTransit) PublicKey(ctx context.Context, key string) ([]byte, error) {
+func (t *signerTransit) PublicKey(ctx context.Context, key string) ([]byte, error) {
 	pub, err := t.TransitClient.PublicKey(ctx, key)
-	if err == nil || !errors.Is(err, vault.ErrUnavailable) {
-		return pub, err
+	if err != nil && (!t.tolerate || !errors.Is(err, vault.ErrUnavailable)) {
+		return nil, err
 	}
-	t.unavailable.Store(true)
-	if account, ok := t.stored(ctx, key); ok {
+	mid, stored := t.stored(ctx, key)
+	if err != nil {
+		t.unavailable.Store(true)
+		if len(stored) == 0 {
+			return nil, err
+		}
 		log.WithField("key", key).Warn("openrails embed: Vault unavailable; Solana signer uses its stored identity until Vault confirms it")
-		return account.Bytes(), nil
+		return stored[len(stored)-1].Bytes(), nil
 	}
-	return nil, err
+	if len(pub) != 32 || len(stored) == 0 {
+		return pub, nil
+	}
+	current := solanago.PublicKeyFromBytes(pub)
+	for _, s := range stored {
+		if s.Equals(current) {
+			return pub, nil
+		}
+	}
+	previous := stored[len(stored)-1]
+	log.WithFields(log.Fields{"merchant_id": mid.String(), "key": key, "stored_public_key": previous.String(), "transit_public_key": current.String()}).
+		Error("openrails embed: Vault Transit key changed; a new Solana PSP identity is provisioned for it")
+	if t.onChange != nil {
+		t.onChange(fmt.Errorf("solana signer %q changed from %s to %s", key, previous, current))
+	}
+	return pub, nil
 }
 
-func (t *storedSignerTransit) stored(ctx context.Context, key string) (solanago.PublicKey, bool) {
+// stored returns the merchant and the identities stored for key, oldest first.
+func (t *signerTransit) stored(ctx context.Context, key string) (merchant.ID, []solanago.PublicKey) {
 	m, err := t.directory.GetBySlug(ctx, merchant.NormalizeSlug(t.slug))
 	if err != nil {
-		return solanago.PublicKey{}, false
+		return merchant.ID{}, nil
 	}
 	rail := "solana"
-	var account string
+	var out []solanago.PublicKey
 	_ = t.db.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
 		rows, err := t.db.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: m.ID.UUID(), Rail: &rail})
 		if err != nil {
@@ -164,14 +190,16 @@ func (t *storedSignerTransit) stored(ctx context.Context, key string) (solanago.
 			if row.Archived || row.Environment != t.environment || json.Unmarshal(row.Evidence, &evidence) != nil {
 				continue
 			}
-			if evidence.Signer.Mode == "vault_transit" && evidence.Signer.Key == key {
-				account = row.AccountID
+			if evidence.Signer.Mode != "vault_transit" || evidence.Signer.Key != key {
+				continue
+			}
+			if pub, err := solanago.PublicKeyFromBase58(row.AccountID); err == nil {
+				out = append(out, pub)
 			}
 		}
 		return nil
 	})
-	pub, err := solanago.PublicKeyFromBase58(account)
-	return pub, account != "" && err == nil
+	return m.ID, out
 }
 
 // ParseMerchantConfig parses a single merchant YAML document into a MerchantConfig.

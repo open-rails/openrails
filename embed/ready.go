@@ -18,7 +18,8 @@ func (r *Runtime) Ready(ctx context.Context) error {
 
 // Probe checks one optional provider the runtime depends on.
 type Probe struct {
-	// Name is stable for dashboards: "openrails_vault", "openrails_psp_posture".
+	// Name is stable for dashboards: "openrails_vault", "openrails_psp_posture",
+	// "openrails_solana_signer_identity".
 	Name string
 	// Check returns nil while the provider is usable; it honors ctx.
 	Check func(context.Context) error
@@ -34,8 +35,11 @@ type Probe struct {
 //
 // "openrails_vault" (only when the runtime logs in to Vault itself) is a live
 // token self-lookup. "openrails_psp_posture" reads cached verdicts and fails
-// while any loaded PSP is unverified or disarmed. Redis is the host's own
-// client and is not listed.
+// while any loaded PSP is unverified or disarmed.
+// "openrails_solana_signer_identity" (with Vault) fails from the moment a
+// Transit signer key no longer matches its stored Solana identity until the
+// process restarts: the new key is provisioned as a new PSP, so alert on it.
+// Redis is the host's own client and is not listed.
 func (r *Runtime) Probes() []Probe {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
 		return nil
@@ -43,7 +47,9 @@ func (r *Runtime) Probes() []Probe {
 	rt := r.app.Runtime
 	var out []Probe
 	if rt.UsesVault() {
-		out = append(out, Probe{Name: "openrails_vault", Check: rt.VaultProbe})
+		out = append(out,
+			Probe{Name: "openrails_vault", Check: rt.VaultProbe},
+			Probe{Name: "openrails_solana_signer_identity", Check: func(context.Context) error { return rt.SignerIdentityState() }})
 	}
 	return append(out, Probe{Name: "openrails_psp_posture", Check: func(context.Context) error { return rt.PostureState() }})
 }

@@ -63,6 +63,9 @@ type Runtime struct {
 	background backgroundTasks
 	// redisState is the cached Redis state the cache monitor last observed.
 	redisState dependencyState
+	// signerIdentity records a Vault Transit key that no longer matches its
+	// stored Solana identity.
+	signerIdentity dependencyState
 	// posturePending counts loaded PSPs whose verdict is not yet known; -1
 	// until StartProviderPosture's first pass completes.
 	posturePending atomic.Int64

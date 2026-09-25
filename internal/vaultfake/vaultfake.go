@@ -39,6 +39,14 @@ func (s *Server) PublicKey(name string) ed25519.PublicKey {
 	return s.key(name).Public().(ed25519.PublicKey)
 }
 
+// Rotate replaces key name with a fresh key, as an operator recreating it would.
+func (s *Server) Rotate(name string) {
+	_, k, _ := ed25519.GenerateKey(nil)
+	s.mu.Lock()
+	s.keys[name] = k
+	s.mu.Unlock()
+}
+
 func (s *Server) key(name string) ed25519.PrivateKey {
 	s.mu.Lock()
 	defer s.mu.Unlock()
