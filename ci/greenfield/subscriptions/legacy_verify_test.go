@@ -125,7 +125,8 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	t.Logf("verified %s after the first import", time.Since(started))
 	got := verificationReads(reads, w.nmi.Reads())
 	t.Logf("NMI reads to verify %d imported schedules: %v", len(b.rows), got)
-	require.LessOrEqual(t, got["v5:subscriptions"], batches, "at most one roster read per imported batch")
+	pages := (len(b.rows) + 99) / 100 // NMI's roster pages at per_page=100
+	require.LessOrEqual(t, got["v5:subscriptions"], batches*pages, "at most one roster read per imported batch")
 	require.LessOrEqual(t, got["query:transaction"], batches*5, "a few transaction pages per bulk read")
 	require.LessOrEqual(t, got["query:recurring"]+got["v5:subscriptions/{id}"], 2, "no per-member reads")
 
