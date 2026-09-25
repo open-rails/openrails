@@ -280,7 +280,7 @@ type ProviderRefreshWorker struct {
 	// Merchants resolves per-merchant PSPs + scoped secrets
 	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
 	Merchants           *merchants.Service
-	DeferDelete         subscriptions.DeferredDeleteScheduler
+	DeferDelete         subscriptions.ProviderCancelScheduler
 	NotificationService *subscriptions.NotificationService
 	// Alerts bridges requires_review findings into the #736 operator
 	// notification store (#787). nil = no-op (no alerting service wired).
@@ -485,7 +485,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 	if w.DeferDelete != nil {
 		// #679: a stale-decline cancel must durably queue the deferred NMI
 		// delete; without this the lifecycle WARNs and the remote keeps retrying.
-		lc.SetDeferredDeleteScheduler(w.DeferDelete)
+		lc.SetProviderCancelScheduler(w.DeferDelete)
 	}
 	opts := reconcile.UnknownReconcileOptions{}
 	var verifyErr error

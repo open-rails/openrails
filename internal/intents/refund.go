@@ -226,7 +226,7 @@ func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB
 		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
 			return err
 		}
-		if err := NewNMIDeleteScheduler(d, nil, OriginAdmin, "refund with access revoked").ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
+		if err := NewProviderCancelScheduler(d, nil, OriginAdmin, "refund with access revoked").ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
 			return err
 		}
 	}

@@ -1,8 +1,6 @@
 package intents
 
 import (
-	"github.com/open-rails/openrails/pkg/merchant"
-
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/config"
@@ -209,67 +206,4 @@ func (h *CCBillCancelHandler) loadSubscription(ctx context.Context, intent gen.O
 		return nil, fmt.Errorf("intent has no subscription_id")
 	}
 	return subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, *intent.SubscriptionID)
-}
-
-// CCBillCancelScheduler implements subscriptions.CCBillRemoteCancelScheduler
-// on the intent ledger: QUEUE-ALWAYS (#679 — mode/credentials gate execution
-// only), due immediately (no undo window: CCBill preserves paid access on its
-// own side, so there is nothing to defer for).
-type CCBillCancelScheduler struct {
-	db     *db.DB
-	store  *Store
-	origin Origin
-	reason string
-}
-
-// NewCCBillCancelScheduler builds the scheduler. ceiling (may be nil) is the
-// #732 rate ceiling; user/admin-origin schedulers pass it so self-service and
-// admin CCBill cancels are gated.
-func NewCCBillCancelScheduler(d *db.DB, ceiling *RateCeiling, origin Origin, reason string) *CCBillCancelScheduler {
-	return &CCBillCancelScheduler{db: d, store: NewStoreGated(d, ceiling), origin: origin, reason: reason}
-}
-
-// WithTx rebinds the scheduler onto the caller's transaction so the intent
-// enqueue commits atomically with the local cancellation. The rate ceiling
-// (its own pool-backed DB) is preserved across the rebind.
-func (s *CCBillCancelScheduler) WithTx(tx pgx.Tx) subscriptions.CCBillRemoteCancelScheduler {
-	if s == nil {
-		return s
-	}
-	txdb := s.db.NewWithPgxTx(tx)
-	return &CCBillCancelScheduler{db: txdb, store: s.store.withTxDB(txdb), origin: s.origin, reason: s.reason}
-}
-
-// ScheduleCCBillCancel enqueues the durable remote cancel, due now.
-// Idempotent per subscription (intents idempotency_key).
-func (s *CCBillCancelScheduler) ScheduleCCBillCancel(ctx context.Context, userID string, subscriptionID uuid.UUID) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("intent ledger unavailable for ccbill cancel scheduling")
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return scopeErr
-	}
-	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: subscriptionID})
-	if err != nil {
-		return fmt.Errorf("load subscription for ccbill cancel intent: %w", err)
-	}
-	_, err = s.store.Enqueue(ctx, EnqueueParams{
-		MerchantID:     sub.MerchantID,
-		Provider:       strings.ToLower(sub.Rail),
-		IntentType:     TypeCCBillCancelSubscription,
-		SubscriptionID: &subscriptionID,
-		// or#893: the cancel is addressed to the account that holds the
-		// subscription, which the row itself names.
-		PspID: sub.PspID,
-		Payload: CCBillCancelPayload{
-			UserID:             userID,
-			RailSubscriptionID: sub.RailSubscriptionID,
-		},
-		IdempotencyKey: CCBillCancelIdempotencyKey(subscriptionID),
-		NextAttemptAt:  time.Now().UTC(),
-		Origin:         s.origin,
-		OriginReason:   s.reason,
-	})
-	return err
 }

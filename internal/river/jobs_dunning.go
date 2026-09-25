@@ -86,7 +86,7 @@ type DunningWorker struct {
 	// decline stops the remote NMI subscription via the ONE scheduled mechanism
 	// (kill-switch governed at execution). nil in producer-less wirings/tests:
 	// cancellation still happens, the remote sub is left for reconciliation.
-	DeferDelete subscriptions.DeferredDeleteScheduler
+	DeferDelete subscriptions.ProviderCancelScheduler
 	// Intents executes the provider-side charge through the intent ledger
 	// (#358 phase C): the worker enqueues a manual_rebill intent and runs it
 	// synchronously through the identical gate/execute/classify pipeline,

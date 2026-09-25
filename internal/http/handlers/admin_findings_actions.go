@@ -319,49 +319,38 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 	feedback := reason
 
 	switch {
-	case rails.IsNMI(sub.Rail), sub.Rail == models.RailCCBill:
+	case rails.IsNMI(sub.Rail), sub.Rail == models.RailCCBill, sub.Rail == models.RailStripe:
 		localResult := make(map[string]any)
 		err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			txdb := r.State.DB.NewWithPgxTx(tx)
-			sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subID)
+			locked, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subID)
 			if err != nil {
 				return fmt.Errorf("lock subscription %s: %w", subID, err)
 			}
-			if sub.Status == models.StatusCancelled {
+			if locked.Status == models.StatusCancelled {
 				localResult["cancel"] = "noop_already_cancelled"
 				return nil
 			}
-			if !rails.IsNMI(sub.Rail) && sub.Rail != models.RailCCBill {
+			if locked.Rail != sub.Rail {
 				return fmt.Errorf("subscription %s rail changed before cancellation; retry", subID)
 			}
-			scheduleDelete := sub.RailSubscriptionID != ""
-			if scheduleDelete && rails.IsNMI(sub.Rail) {
-				sub.DeletionScheduledAt = &now
+			locked.DeletionScheduledAt = nil // an operator's cancel is due now
+			if err := intents.NewProviderCancelScheduler(txdb, r.State.RateCeiling(), intents.OriginAdmin, reason).
+				ScheduleProviderCancel(ctx, locked, now); err != nil {
+				return err
 			}
-			if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
+			if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, locked, subscriptions.LocalCancellation{
 				EndedAt: now, CancelType: models.CancelTypeMerchant, Feedback: &feedback,
 				RevokeReason: models.EntitlementRevokeAdmin, RevokeAsOf: now,
 				RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
 			}); err != nil {
 				return fmt.Errorf("cancel subscription %s: %w", subID, err)
 			}
-			if scheduleDelete {
-				if rails.IsNMI(sub.Rail) {
-					if err := intents.NewNMIDeleteScheduler(txdb, r.State.RateCeiling(), intents.OriginAdmin, reason).
-						ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
-						return err
-					}
-					localResult["delete_intent"] = "queued"
-				} else {
-					if err := intents.NewCCBillCancelScheduler(txdb, r.State.RateCeiling(), intents.OriginAdmin, reason).
-						ScheduleCCBillCancel(ctx, sub.CustomerID.String(), sub.ID); err != nil {
-						return err
-					}
-					localResult["cancel_intent"] = "queued"
-				}
+			if locked.RailSubscriptionID != "" {
+				localResult["provider_cancel"] = "queued"
 			}
 			localResult["cancel"] = "cancelled"
-			localResult["subscription_id"] = subID.String()
+			localResult["subscription_id"] = openrails.SubscriptionID(subID).String()
 			return nil
 		})
 		if err != nil {
@@ -370,23 +359,6 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		for key, value := range localResult {
 			result[key] = value
 		}
-		return nil
-	case sub.Rail == models.RailStripe:
-		stripeSvc := &subscriptions.StripeService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
-		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
-			return fmt.Errorf("cancel stripe subscription %s: %w", subID, err)
-		}
-		result["remote_cancel"] = "stripe_cancelled"
-		if err := r.State.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-			SubscriptionID: &sub.ID,
-			CancelType:     models.CancelTypeMerchant,
-			CancelFeedback: &feedback,
-			RevokeAccess:   true,
-		}); err != nil {
-			return fmt.Errorf("stripe cancelled remotely but local cancel failed for %s: %w", subID, err)
-		}
-		result["cancel"] = "cancelled"
-		result["subscription_id"] = openrails.SubscriptionID(subID).String()
 		return nil
 	default:
 		// Solana (subscriber-signed by design) etc.: no operator-driven cancel

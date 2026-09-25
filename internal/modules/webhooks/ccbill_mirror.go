@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -20,8 +21,9 @@ import (
 
 // ccbillMirrorTransition applies one CCBill fact to a subscription the caller
 // holds locked in d's transaction (#1094): the lifecycle machine decides, the
-// row is persisted and the access effects run in the same transaction.
-// CCBill owns its schedule, so a provider-cancel effect is never queued here.
+// row is persisted and the effects run in the same transaction. An outcome
+// OpenRails decides (refund, void, chargeback) queues the CCBill cancel with
+// it (#1102); one CCBill reported (notice.providerStopped) needs none.
 // It reports whether the row changed and returns the customer notices to
 // deliver after commit.
 func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db.DB, sub *models.Subscription, ev lifecycle.Event, notice ccbillNotice) (bool, []*models.NotificationQueue, error) {
@@ -35,7 +37,7 @@ func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db
 	if !changed && len(effects) == 0 {
 		return false, nil, nil
 	}
-	// Access effects run through the shared executor; CCBill's notices keep
+	// Effects run through the shared executor; CCBill's notices keep
 	// their handler context and are created at delivery.
 	var access []lifecycle.Effect
 	var notes []*models.NotificationQueue
@@ -46,7 +48,9 @@ func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db
 				notes = append(notes, n)
 			}
 		case lifecycle.QueueProviderCancel:
-			// CCBill owns its schedule.
+			if !notice.providerStopped {
+				access = append(access, e)
+			}
 		default:
 			access = append(access, e)
 		}
@@ -62,9 +66,11 @@ func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db
 
 // ccbillNotice carries the handler's context for the machine's effects.
 type ccbillNotice struct {
-	revoke models.EntitlementRevokeReason
-	ended  subscriptions.PremiumEndReason
-	data   openrails.NotificationData
+	// providerStopped: CCBill itself ended the schedule.
+	providerStopped bool
+	revoke          models.EntitlementRevokeReason
+	ended           subscriptions.PremiumEndReason
+	data            openrails.NotificationData
 }
 
 func (n ccbillNotice) build(sub *models.Subscription, kind lifecycle.NoticeKind) *models.NotificationQueue {
@@ -134,6 +140,7 @@ func (s *CCBillWebhookService) lifecycleIn(d *db.DB) *subscriptions.Subscription
 	if s.SubscriptionLifecycleService != nil {
 		lc.SetConfig(s.SubscriptionLifecycleService.Config)
 	}
+	lc.SetProviderCancelScheduler(intents.NewProviderCancelScheduler(d, nil, intents.OriginAdmin, "CCBill reported a refund, void or chargeback; CCBill must stop rebilling"))
 	return lc
 }
 

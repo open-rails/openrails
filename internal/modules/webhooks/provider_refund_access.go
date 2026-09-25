@@ -75,7 +75,7 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 				if err := repo.UpdateAt(ctx, locked, now); err != nil {
 					return err
 				}
-				if err := intents.NewNMIDeleteScheduler(d, nil, intents.OriginAdmin, reason).ScheduleNMIDelete(ctx, locked.CustomerID.String(), locked.ID, now); err != nil {
+				if err := intents.NewProviderCancelScheduler(d, nil, intents.OriginAdmin, reason).ScheduleNMIDelete(ctx, locked.CustomerID.String(), locked.ID, now); err != nil {
 					return err
 				}
 			}

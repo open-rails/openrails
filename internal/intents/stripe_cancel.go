@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TypeStripeCancelSubscription stops Stripe billing a membership whose access
@@ -43,31 +42,6 @@ func StripeCancelIdempotencyKey(subscriptionID uuid.UUID) string {
 func StripeOwned(sub *models.Subscription) bool {
 	return sub != nil && sub.Rail == models.RailStripe && sub.CollectionPolicy != models.CollectionPolicyEngine &&
 		strings.TrimSpace(sub.RailSubscriptionID) != ""
-}
-
-// ScheduleStripeCancel enqueues the remote cancel, due at now, on d, which
-// must be the caller's transaction so it commits with the local revoke.
-func ScheduleStripeCancel(ctx context.Context, d *db.DB, sub *models.Subscription, origin Origin, reason string, now time.Time) error {
-	if !StripeOwned(sub) {
-		return nil
-	}
-	scope, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = NewStore(d).Enqueue(ctx, EnqueueParams{
-		MerchantID:     scope.UUID(),
-		Provider:       string(models.RailStripe),
-		IntentType:     TypeStripeCancelSubscription,
-		SubscriptionID: &sub.ID,
-		PspID:          sub.PspID,
-		Payload:        StripeCancelPayload{RailSubscriptionID: sub.RailSubscriptionID},
-		IdempotencyKey: StripeCancelIdempotencyKey(sub.ID),
-		NextAttemptAt:  now.UTC(),
-		Origin:         origin,
-		OriginReason:   reason,
-	})
-	return err
 }
 
 // stripeCancelDenialMaxAttempts bounds retries of explicit auth refusals.

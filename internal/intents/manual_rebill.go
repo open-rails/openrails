@@ -32,7 +32,7 @@ type ManualRebillHandler struct {
 	Resolver    NMIClientResolver
 	Clock       clockwork.Clock
 	Policy      BackoffPolicy
-	DeferDelete subscriptions.DeferredDeleteScheduler
+	DeferDelete subscriptions.ProviderCancelScheduler
 }
 
 func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {

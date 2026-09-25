@@ -133,7 +133,7 @@ func ImportDeclaredSubscriptions(
 	ctx context.Context,
 	database *db.DB,
 	lc *subscriptions.SubscriptionLifecycleService,
-	deferDelete subscriptions.DeferredDeleteScheduler,
+	deferDelete subscriptions.ProviderCancelScheduler,
 	merchantID uuid.UUID,
 	facts []DeclaredSubscriptionFact,
 	txns []RemoteTransaction,

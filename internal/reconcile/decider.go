@@ -769,11 +769,11 @@ type LifecycleDecisionApplier struct {
 // NewDecisionApplier builds the production applier. deferDelete may be nil
 // (CLI pulls): a stale-decline cancel then logs the wiring gap instead of
 // queuing the deferred NMI delete.
-func NewDecisionApplier(database *db.DB, deferDelete subscriptions.DeferredDeleteScheduler, clocks ...clockwork.Clock) *LifecycleDecisionApplier {
+func NewDecisionApplier(database *db.DB, deferDelete subscriptions.ProviderCancelScheduler, clocks ...clockwork.Clock) *LifecycleDecisionApplier {
 	clock := timeutil.FirstClock(clocks...)
 	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clock)
 	if deferDelete != nil {
-		lc.SetDeferredDeleteScheduler(deferDelete)
+		lc.SetProviderCancelScheduler(deferDelete)
 	}
 	return &LifecycleDecisionApplier{DB: database, LC: lc, clock: clock}
 }

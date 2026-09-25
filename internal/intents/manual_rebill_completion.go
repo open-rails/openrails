@@ -149,7 +149,7 @@ func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.OpenrailsRail
 func (h *ManualRebillHandler) lifecycle(d *db.DB) *subscriptions.SubscriptionLifecycleService {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(d, catalog.NewProductService(d), catalog.NewPriceService(d), entitlements.NewEntitlementService(d, h.Clock), nil, payments.NewPaymentService(d, h.Clock), h.Clock)
 	lifecycle.SetConfig(h.Config)
-	lifecycle.SetDeferredDeleteScheduler(h.DeferDelete)
+	lifecycle.SetProviderCancelScheduler(h.DeferDelete)
 	return lifecycle
 }
 func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, receipt CollectedReceipt) Outcome {

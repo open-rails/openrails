@@ -35,7 +35,7 @@ type Verifier struct {
 	DB            *db.DB
 	Clock         clockwork.Clock
 	Builder       MerchantFetcherBuilder
-	DeferDelete   subscriptions.DeferredDeleteScheduler
+	DeferDelete   subscriptions.ProviderCancelScheduler
 	Notifications *subscriptions.NotificationService
 
 	// Workers caps concurrent provider reads (NMI documents no rate limit).
@@ -322,7 +322,7 @@ func (v *Verifier) listenOnce(ctx context.Context, channel string) error {
 func (v *Verifier) lifecycle() *subscriptions.SubscriptionLifecycleService {
 	lc := subscriptions.NewSubscriptionLifecycleService(v.DB, nil, nil, nil, v.Notifications, nil, v.Clock)
 	if v.DeferDelete != nil {
-		lc.SetDeferredDeleteScheduler(v.DeferDelete)
+		lc.SetProviderCancelScheduler(v.DeferDelete)
 	}
 	return lc
 }
