@@ -147,6 +147,16 @@ func (m *Mock) Refund(txID string, cents int64) string {
 	return m.recordRefund(s, cents)
 }
 
+// Void voids an approved, unsettled sale outside OpenRails (a dashboard
+// void): the Query API reports its condition as canceled.
+func (m *Mock) Void(txID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if bad := m.void(txID); bad != "" {
+		panic("nmimock: void of " + txID + ": " + bad)
+	}
+}
+
 // RenewSchedule is NMI's recurring engine billing a schedule, dated its next
 // billing time whatever the clock: approve false declines it with 202. Either way the schedule
 // advances to its next regular date; NMI never retries a failed period.

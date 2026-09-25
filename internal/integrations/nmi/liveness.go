@@ -19,21 +19,32 @@ import (
 // saleQueryResponse mirrors the slice of the Query API transaction report the
 // probes read (search by order_id).
 type saleQueryResponse struct {
-	XMLName      xml.Name `xml:"nm_response"`
-	Transactions []struct {
-		TransactionID string `xml:"transaction_id"`
-		OrderID       string `xml:"order_id"`
-		Currency      string `xml:"currency"`
-		Actions       []struct {
-			Amount       string `xml:"amount"`
-			ActionType   string `xml:"action_type"`
-			Success      string `xml:"success"`
-			Date         string `xml:"date"`
-			ResponseCode string `xml:"response_code"`
-			ResponseText string `xml:"response_text"`
-		} `xml:"action"`
-	} `xml:"transaction"`
-	ErrorResponse string `xml:"error_response"`
+	XMLName       xml.Name               `xml:"nm_response"`
+	Transactions  []saleQueryTransaction `xml:"transaction"`
+	ErrorResponse string                 `xml:"error_response"`
+}
+
+type saleQueryTransaction struct {
+	TransactionID string `xml:"transaction_id"`
+	OrderID       string `xml:"order_id"`
+	Condition     string `xml:"condition"`
+	Currency      string `xml:"currency"`
+	Actions       []struct {
+		Amount       string `xml:"amount"`
+		ActionType   string `xml:"action_type"`
+		Success      string `xml:"success"`
+		Date         string `xml:"date"`
+		ResponseCode string `xml:"response_code"`
+		ResponseText string `xml:"response_text"`
+	} `xml:"action"`
+}
+
+func (t saleQueryTransaction) reversed() bool {
+	actions := make([]TransactionAction, 0, len(t.Actions))
+	for _, a := range t.Actions {
+		actions = append(actions, TransactionAction{Type: a.ActionType, Success: a.Success, Amount: a.Amount})
+	}
+	return SaleReversed(t.Condition, actions)
 }
 
 // queryAPITimeFormat is the Query API start_date/end_date (and action <date>)
@@ -67,6 +78,10 @@ type SaleProbeResult struct {
 	DeclineCurrency      string
 	DeclineResponseCode  int
 	DeclineReason        string
+	// ReversedFound: an approved sale was voided or refunded in full. It
+	// executed but paid nothing: neither a success nor a decline.
+	ReversedFound         bool
+	ReversedTransactionID string
 }
 
 // ProbeSalesByOrderID queries NMI for transactions carrying the given order
@@ -114,6 +129,10 @@ func (c *NMIClient) probeSales(ctx context.Context, filter QueryFilter, orderID 
 	var latestDecline time.Time
 	for _, txn := range parsed.Transactions {
 		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
+			continue
+		}
+		if txn.reversed() {
+			result.ReversedFound, result.ReversedTransactionID = true, strings.TrimSpace(txn.TransactionID)
 			continue
 		}
 		for _, action := range txn.Actions {
@@ -172,6 +191,9 @@ func saleActions(parsed saleQueryResponse, orderID string, since time.Time) []Sa
 		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
 			continue
 		}
+		if txn.reversed() {
+			continue
+		}
 		for _, action := range txn.Actions {
 			if strings.ToLower(strings.TrimSpace(action.ActionType)) != "sale" {
 				continue
@@ -202,8 +224,16 @@ func (c *NMIClient) FindSuccessfulSaleByOrderID(ctx context.Context, orderID str
 	if err != nil {
 		return "", false, err
 	}
+	if !result.SuccessFound && result.ReversedFound {
+		return "", false, fmt.Errorf("%w: %s", ErrSaleReversed, result.ReversedTransactionID)
+	}
 	return result.SuccessTransactionID, result.SuccessFound, nil
 }
+
+// ErrSaleReversed: the order's sale executed and was voided or refunded in
+// full. It is neither payment nor an unsent submission, so a verifier must
+// neither grant it nor send again; the operation waits for review.
+var ErrSaleReversed = errors.New("nmi sale was voided or refunded in full")
 
 // RecurringLiveness is the parsed remote-truth view of one NMI recurring
 // subscription. Found=false means NMI no longer knows the subscription id —
