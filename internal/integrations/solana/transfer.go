@@ -14,7 +14,6 @@ import (
 	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 )
 
 // TransferRequest describes a Solana transfer to build.
@@ -30,25 +29,39 @@ type TransferRequest struct {
 	Memo string
 }
 
-// TransferResponse contains a base64-encoded transaction payload.
+// TransferResponse contains a base64-encoded transaction payload and the last
+// block height at which it can still land.
 type TransferResponse struct {
-	TransactionBase64 string
+	TransactionBase64    string
+	LastValidBlockHeight uint64
 }
 
-// VerifyTransferRequest describes the expected values for verifying a transfer.
-type VerifyTransferRequest struct {
-	Signature         string
-	ExpectedAmount    uint64
-	ExpectedRecipient string
-	ExpectedTokenMint string
-	ExpectedPayer     string
-	ExpectedReference string
-	// ExpectedMemoLocalID, when non-nil, is checked against the #713 purchase
-	// memo on the transaction under ExpectedMemoPolicy: mismatch always fails;
-	// absence fails only when we built the transaction ourselves.
-	ExpectedMemoLocalID uuid.UUID
-	ExpectedMemoPolicy  PurchaseMemoPolicy
+// ObserveTransferRequest names the reference, recipient and mint a landed
+// transaction is read against.
+type ObserveTransferRequest struct {
+	Signature string
+	Recipient string
+	TokenMint string
+	Reference string
+	// MemoLocalID, when set, is checked against the #713 purchase memo under
+	// MemoPolicy: a mismatch always makes the transaction foreign; absence
+	// does only when we built the transaction ourselves.
+	MemoLocalID uuid.UUID
+	MemoPolicy  PurchaseMemoPolicy
 }
+
+// TransferObservation is what one landed transaction paid the recipient.
+// Amount is the base units of the mint the recipient actually received; zero
+// means the transaction carried the reference but paid nothing.
+type TransferObservation struct {
+	Amount   uint64
+	Payer    string
+	LandedAt *time.Time
+}
+
+// ErrForeignTransfer: the transaction does not belong to the reference (the
+// reference key is absent or the purchase memo names another record).
+var ErrForeignTransfer = errors.New("solana: transaction does not belong to this reference")
 
 // BuildTransferTransaction constructs a transfer transaction and returns its base64 encoding.
 func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRequest) (*TransferResponse, error) {
@@ -64,7 +77,7 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 		return nil, fmt.Errorf("amount is required")
 	}
 
-	blockhash, err := c.GetLatestBlockhash(ctx)
+	blockhash, err := c.LatestBlockhash(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blockhash: %w", err)
 	}
@@ -76,7 +89,7 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 
 	transaction, err := solanago.NewTransaction(
 		instructions,
-		blockhash,
+		blockhash.Hash,
 		solanago.TransactionPayer(fromWallet),
 	)
 	if err != nil {
@@ -89,7 +102,8 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 	}
 
 	return &TransferResponse{
-		TransactionBase64: base64.StdEncoding.EncodeToString(txBytes),
+		TransactionBase64:    base64.StdEncoding.EncodeToString(txBytes),
+		LastValidBlockHeight: blockhash.LastValidBlockHeight,
 	}, nil
 }
 
@@ -154,35 +168,29 @@ func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanag
 	return instructions, nil
 }
 
-// VerifyTransfer confirms the transaction and validates that it matches expected values.
-func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferRequest) error {
-	if req.ExpectedAmount == 0 {
-		return fmt.Errorf("expected amount must be greater than 0")
+// ObserveTransfer reads a confirmed transaction and reports what it paid the
+// recipient in the mint. Whether that amount settles anything is the caller's
+// decision; this only states what the chain did.
+func (c *RPCClient) ObserveTransfer(ctx context.Context, req ObserveTransferRequest) (*TransferObservation, error) {
+	recipient := strings.TrimSpace(req.Recipient)
+	reference := strings.TrimSpace(req.Reference)
+	if recipient == "" || reference == "" {
+		return nil, fmt.Errorf("recipient and reference are required")
 	}
-	expectedRecipient := strings.TrimSpace(req.ExpectedRecipient)
-	if expectedRecipient == "" {
-		return fmt.Errorf("expected recipient is required")
-	}
-	expectedReference := strings.TrimSpace(req.ExpectedReference)
-	if expectedReference == "" {
-		return fmt.Errorf("expected reference is required")
-	}
-
 	txResult, err := c.fetchConfirmedTransaction(ctx, req.Signature)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	reference := expectedReference
-	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference, req.ExpectedMemoLocalID, req.ExpectedMemoPolicy); err != nil {
-		return fmt.Errorf("transaction content validation failed: %w", err)
+	amount, payer, err := observeTransactionContent(txResult, recipient, strings.TrimSpace(req.TokenMint), reference, req.MemoLocalID, req.MemoPolicy)
+	if err != nil {
+		return nil, err
 	}
-
-	log.WithFields(log.Fields{
-		"slot": txResult.Slot,
-		"fee":  txResult.Meta.Fee,
-	}).Info("Transaction verified on-chain")
-
-	return nil
+	out := &TransferObservation{Amount: amount, Payer: payer}
+	if txResult.BlockTime != nil {
+		t := txResult.BlockTime.Time().UTC()
+		out.LandedAt = &t
+	}
+	return out, nil
 }
 
 func (c *RPCClient) fetchConfirmedTransaction(ctx context.Context, signature string) (*rpc.GetTransactionResult, error) {
@@ -211,81 +219,45 @@ func (c *RPCClient) fetchConfirmedTransaction(ctx context.Context, signature str
 	return txResult, nil
 }
 
-// GetConfirmedBlockTime returns the on-chain block time of a transaction (#651) —
-// its truthful settlement time. Returns (nil, nil) when the node reports no block
-// time. Used to stamp a recorded payment with when it actually landed on-chain
-// rather than when the poller happened to observe it.
-func (c *RPCClient) GetConfirmedBlockTime(ctx context.Context, signature string) (*time.Time, error) {
-	sig, err := solanago.SignatureFromBase58(strings.TrimSpace(signature))
-	if err != nil {
-		return nil, fmt.Errorf("invalid signature format: %w", err)
-	}
-	txResult, err := c.GetTransactionWithRetry(ctx, sig, 5, 1*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %w", err)
-	}
-	if txResult == nil || txResult.BlockTime == nil {
-		return nil, nil
-	}
-	t := txResult.BlockTime.Time().UTC()
-	return &t, nil
-}
-
-func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy PurchaseMemoPolicy) error {
+func observeTransactionContent(txResult *rpc.GetTransactionResult, recipient, tokenMint, reference string, memoLocalID uuid.UUID, memoPolicy PurchaseMemoPolicy) (uint64, string, error) {
 	if txResult.Transaction == nil {
-		return fmt.Errorf("transaction data not available")
+		return 0, "", fmt.Errorf("transaction data not available")
 	}
-
 	tx, err := txResult.Transaction.GetTransaction()
 	if err != nil {
-		return fmt.Errorf("failed to decode transaction: %w", err)
+		return 0, "", fmt.Errorf("failed to decode transaction: %w", err)
 	}
-
-	// #713: a present purchase memo must name our record. Whether ABSENCE is
-	// allowed depends on who built the transaction (or#893, PurchaseMemoPolicy).
-	if err := VerifyPurchaseMemo(tx, expectedMemoLocalID, memoPolicy); err != nil {
-		return err
+	if err := VerifyPurchaseMemo(tx, memoLocalID, memoPolicy); err != nil {
+		return 0, "", fmt.Errorf("%w: %v", ErrForeignTransfer, err)
 	}
-
-	if expectedPayer != "" {
-		payerPub, err := solanago.PublicKeyFromBase58(expectedPayer)
-		if err != nil {
-			return fmt.Errorf("invalid expected payer: %w", err)
-		}
-		if len(tx.Message.AccountKeys) == 0 || !tx.Message.AccountKeys[0].Equals(payerPub) {
-			return fmt.Errorf("transaction fee payer does not match expected wallet")
-		}
-	}
-
-	if expectedReference != nil && *expectedReference != "" {
-		referencePub, err := solanago.PublicKeyFromBase58(*expectedReference)
-		if err != nil {
-			return fmt.Errorf("invalid reference key: %w", err)
-		}
-		if !messageContainsKey(tx.Message, referencePub, txResult.Meta.LoadedAddresses) {
-			return fmt.Errorf("reference key not included in transaction")
-		}
-	}
-
-	recipientCandidates := make(map[string]struct{})
-	recipientCandidates[expectedRecipient] = struct{}{}
-	if derived, err := deriveRecipientTokenAccount(expectedRecipient, expectedTokenMint); err == nil && derived != "" {
-		recipientCandidates[derived] = struct{}{}
-	}
-
-	match, err := findTransferMatch(tx, txResult, recipientCandidates, expectedTokenMint, expectedAmount, expectedPayer)
+	referencePub, err := solanago.PublicKeyFromBase58(reference)
 	if err != nil {
-		return err
+		return 0, "", fmt.Errorf("invalid reference key: %w", err)
+	}
+	if !messageContainsKey(tx.Message, referencePub, txResult.Meta.LoadedAddresses) {
+		return 0, "", fmt.Errorf("%w: reference key not included in transaction", ErrForeignTransfer)
+	}
+	payer := ""
+	if len(tx.Message.AccountKeys) > 0 {
+		payer = tx.Message.AccountKeys[0].String()
+	}
+
+	candidates := map[string]struct{}{recipient: {}}
+	if derived, err := deriveRecipientTokenAccount(recipient, tokenMint); err == nil && derived != "" {
+		candidates[derived] = struct{}{}
+	}
+	match, err := findTransferMatch(tx, txResult, candidates, tokenMint, 1, "")
+	if err != nil {
+		return 0, payer, err
 	}
 	if match == nil {
-		return fmt.Errorf("no qualifying transfer found for recipient %s", expectedRecipient)
+		return 0, payer, nil
 	}
-
-	if err := verifyBalanceChanges(txResult, match.accountIndex, match.destination.String(), expectedAmount); err != nil {
-		return err
+	received, err := receivedAmount(txResult, match.accountIndex, isNativeSOLMint(tokenMint))
+	if err != nil {
+		return 0, payer, fmt.Errorf("unable to confirm balance change for account %s: %w", match.destination, err)
 	}
-
-	return nil
+	return min(match.amount, received), payer, nil
 }
 
 func deriveRecipientTokenAccount(recipient string, tokenMint string) (string, error) {
@@ -542,29 +514,27 @@ func messageContainsKey(msg solanago.Message, key solanago.PublicKey, loaded rpc
 	return false
 }
 
-func verifyBalanceChanges(txResult *rpc.GetTransactionResult, accountIndex int, account string, expectedAmount uint64) error {
-	if accountIndex < len(txResult.Meta.PostBalances) && accountIndex < len(txResult.Meta.PreBalances) {
-		post := txResult.Meta.PostBalances[accountIndex]
-		pre := txResult.Meta.PreBalances[accountIndex]
-		if post >= pre {
-			delta := post - pre
-			if delta >= expectedAmount {
-				return nil
-			}
+// receivedAmount is the recipient account's balance increase in this
+// transaction: lamports for native SOL, token base units otherwise.
+func receivedAmount(txResult *rpc.GetTransactionResult, accountIndex int, native bool) (uint64, error) {
+	if native {
+		if accountIndex >= len(txResult.Meta.PostBalances) || accountIndex >= len(txResult.Meta.PreBalances) {
+			return 0, fmt.Errorf("lamport balance not found")
 		}
+		post, pre := txResult.Meta.PostBalances[accountIndex], txResult.Meta.PreBalances[accountIndex]
+		if post < pre {
+			return 0, nil
+		}
+		return post - pre, nil
 	}
-
-	postToken, preToken, err := tokenBalanceDelta(txResult, accountIndex)
+	post, pre, err := tokenBalanceDelta(txResult, accountIndex)
 	if err != nil {
-		return fmt.Errorf("unable to confirm balance change for account %s: %w", account, err)
+		return 0, err
 	}
-	if postToken < preToken {
-		return fmt.Errorf("token balance decreased for account %s", account)
+	if post < pre {
+		return 0, nil
 	}
-	if postToken-preToken < expectedAmount {
-		return fmt.Errorf("token transfer amount insufficient: expected >= %d, observed %d", expectedAmount, postToken-preToken)
-	}
-	return nil
+	return post - pre, nil
 }
 
 func tokenBalanceDelta(txResult *rpc.GetTransactionResult, accountIndex int) (uint64, uint64, error) {

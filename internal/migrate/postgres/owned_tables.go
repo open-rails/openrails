@@ -63,6 +63,8 @@ var OwnedTables = []string{
 	"reconciliation_findings",
 	"reconciliation_state",
 	"reprice_batches",
+	"solana_pay_receipts",
+	"solana_pay_references",
 	"solana_subscriptions",
 	"subscription_reprices",
 	"subscription_status_transitions",

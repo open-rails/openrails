@@ -50,9 +50,10 @@ func tokenBalance(idx int, mint solanago.PublicKey, amount uint64) map[string]an
 	return map[string]any{"accountIndex": idx, "mint": mint.String(), "uiTokenAmount": map[string]any{"amount": strconv.FormatUint(amount, 10), "decimals": 6}}
 }
 
-// Money truth for a one-off purchase: amount (at least), mint, recipient,
-// fee payer, reference, memo and the observed balance delta must all agree.
-func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
+// An observation reports what the recipient received in the mint, bounded by
+// both the instruction and the balance delta; the reference and memo decide
+// whether the transaction belongs to the reference at all.
+func TestObserveTransferReportsWhatTheRecipientReceived(t *testing.T) {
 	payer := solanago.NewWallet().PublicKey()
 	recipient := solanago.NewWallet().PublicKey()
 	reference := solanago.NewWallet().PublicKey()
@@ -70,7 +71,8 @@ func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
 		memo     string
 		checked  *solanago.PublicKey // SPL: TransferChecked naming this mint (into the expected ATA)
 		metaErr  any
-		req      func(*VerifyTransferRequest)
+		req      func(*ObserveTransferRequest)
+		got      uint64
 		wantErr  string
 	}
 	stamp := PurchaseMemo(localID)
@@ -78,9 +80,9 @@ func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
 	// Paying straight into the token account skips ATA derivation, so only the mint check decides.
 	recipientATA, _, err := solanago.FindAssociatedTokenAddress(recipient, mint)
 	require.NoError(t, err)
-	intoATA := func(expectedMint string) func(*VerifyTransferRequest) {
-		return func(r *VerifyTransferRequest) {
-			r.ExpectedRecipient, r.ExpectedTokenMint = recipientATA.String(), expectedMint
+	intoATA := func(expectedMint string) func(*ObserveTransferRequest) {
+		return func(r *ObserveTransferRequest) {
+			r.Recipient, r.TokenMint = recipientATA.String(), expectedMint
 		}
 	}
 	swapCase := func(s string) string {
@@ -96,28 +98,27 @@ func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
 		return string(out)
 	}
 	cases := []tc{
-		{name: "SOL exact", symbol: "SOL", sent: want, credited: want, memo: stamp},
-		{name: "SOL overpay accepted", symbol: "SOL", sent: want + 1, credited: want + 1, memo: stamp},
-		{name: "SOL underpay", symbol: "SOL", sent: want - 1, credited: want - 1, memo: stamp, wantErr: "no qualifying transfer"},
-		{name: "SOL instruction without balance movement", symbol: "SOL", sent: want, credited: want / 2, memo: stamp, wantErr: "unable to confirm balance change"},
-		{name: "SOL wrong recipient", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedRecipient = payer.String() }, wantErr: "no qualifying transfer"},
-		{name: "SOL wrong fee payer", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedPayer = recipient.String() }, wantErr: "fee payer does not match"},
+		{name: "SOL exact", symbol: "SOL", sent: want, credited: want, memo: stamp, got: want},
+		{name: "SOL overpay", symbol: "SOL", sent: want + 1, credited: want + 1, memo: stamp, got: want + 1},
+		{name: "SOL underpay", symbol: "SOL", sent: want - 1, credited: want - 1, memo: stamp, got: want - 1},
+		{name: "SOL instruction without balance movement", symbol: "SOL", sent: want, credited: want / 2, memo: stamp, got: want / 2},
+		{name: "SOL to someone else", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *ObserveTransferRequest) { r.Recipient = payer.String() }, got: 0},
 		{name: "SOL reference absent", symbol: "SOL", sent: want, credited: want, memo: stamp, noRef: true, wantErr: "reference key not included"},
-		{name: "SOL when SPL mint expected", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
-		{name: "wrapped SOL mint accepts native SOL", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = wrappedSOLMint }},
+		{name: "SOL when SPL mint expected", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = mint.String() }, got: 0},
+		{name: "wrapped SOL mint accepts native SOL", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = wrappedSOLMint }, got: want},
 		{name: "failed on chain", symbol: "SOL", sent: want, credited: want, memo: stamp, metaErr: map[string]any{"InstructionError": []any{0, "Custom"}}, wantErr: "failed on-chain"},
 		{name: "memo for another record", symbol: "SOL", sent: want, credited: want, memo: PurchaseMemo(uuid.New()), wantErr: "purchase memo mismatch"},
-		{name: "wallet dropped memo, optional", symbol: "SOL", sent: want, credited: want, req: func(r *VerifyTransferRequest) { r.ExpectedMemoPolicy = MemoPresenceOptional }},
+		{name: "wallet dropped memo, optional", symbol: "SOL", sent: want, credited: want, req: func(r *ObserveTransferRequest) { r.MemoPolicy = MemoPresenceOptional }, got: want},
 		{name: "we built it, memo missing", symbol: "SOL", sent: want, credited: want, wantErr: "purchase memo missing"},
-		{name: "SPL exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }},
-		{name: "SPL other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
-		{name: "SPL short credit", symbol: "USDC", sent: want, credited: want - 1, creditIn: mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "token transfer amount insufficient"},
-		{name: "SPL when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, wantErr: "no qualifying transfer"},
-		{name: "SPL into token account", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(mint.String())},
-		{name: "SPL mint differing only in case", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(swapCase(mint.String())), wantErr: "no qualifying transfer"},
-		{name: "SPL into token account when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(""), wantErr: "no qualifying transfer"},
-		{name: "SPL checked exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, checked: &mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }},
-		{name: "SPL checked other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, checked: &otherMint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
+		{name: "SPL exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = mint.String() }, got: want},
+		{name: "SPL other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = mint.String() }, got: 0},
+		{name: "SPL short credit", symbol: "USDC", sent: want, credited: want - 1, creditIn: mint, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = mint.String() }, got: want - 1},
+		{name: "SPL when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, got: 0},
+		{name: "SPL into token account", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(mint.String()), got: want},
+		{name: "SPL mint differing only in case", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(swapCase(mint.String())), got: 0},
+		{name: "SPL into token account when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(""), got: 0},
+		{name: "SPL checked exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, checked: &mint, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = mint.String() }, got: want},
+		{name: "SPL checked other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, checked: &otherMint, memo: stamp, req: func(r *ObserveTransferRequest) { r.TokenMint = mint.String() }, got: 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -151,50 +152,33 @@ func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
 				meta["postTokenBalances"] = []any{tokenBalance(idx, c.creditIn, 100+c.credited)}
 			}
 
-			req := VerifyTransferRequest{
-				Signature:           solanago.Signature{7}.String(),
-				ExpectedAmount:      want,
-				ExpectedRecipient:   recipient.String(),
-				ExpectedPayer:       payer.String(),
-				ExpectedReference:   reference.String(),
-				ExpectedMemoLocalID: localID,
-				ExpectedMemoPolicy:  MemoRequired,
+			req := ObserveTransferRequest{
+				Signature:   solanago.Signature{7}.String(),
+				Recipient:   recipient.String(),
+				Reference:   reference.String(),
+				MemoLocalID: localID,
+				MemoPolicy:  MemoRequired,
 			}
 			if c.req != nil {
 				c.req(&req)
 			}
-			err = transferChain(t, tx, meta).VerifyTransfer(context.Background(), req)
-			if c.wantErr == "" {
-				require.NoError(t, err)
-			} else {
+			got, err := transferChain(t, tx, meta).ObserveTransfer(context.Background(), req)
+			if c.wantErr != "" {
 				require.ErrorContains(t, err, c.wantErr)
+				return
 			}
+			require.NoError(t, err)
+			require.Equal(t, c.got, got.Amount)
+			require.Equal(t, payer.String(), got.Payer)
+			require.Equal(t, time.Unix(1_700_000_000, 0).UTC(), *got.LandedAt, "#651: landed at the chain's block time")
 		})
 	}
 }
 
-func TestVerifyTransferRefusesIncompleteExpectations(t *testing.T) {
+func TestObserveTransferRequiresRecipientAndReference(t *testing.T) {
 	c := &RPCClient{}
-	base := VerifyTransferRequest{Signature: "x", ExpectedAmount: 1, ExpectedRecipient: solanago.SystemProgramID.String(), ExpectedReference: solanago.SystemProgramID.String()}
-	for want, mutate := range map[string]func(*VerifyTransferRequest){
-		"expected amount must be greater than 0": func(r *VerifyTransferRequest) { r.ExpectedAmount = 0 },
-		"expected recipient is required":         func(r *VerifyTransferRequest) { r.ExpectedRecipient = " " },
-		"expected reference is required":         func(r *VerifyTransferRequest) { r.ExpectedReference = "" },
-	} {
-		req := base
-		mutate(&req)
-		require.ErrorContains(t, c.VerifyTransfer(context.Background(), req), want)
-	}
-}
-
-// #651: a payment is stamped with its on-chain block time, not observation time.
-func TestGetConfirmedBlockTimeIsChainTime(t *testing.T) {
-	payer := solanago.NewWallet().PublicKey()
-	ixs, err := buildTransferInstructions(TransferRequest{TokenSymbol: "SOL", Amount: 1}, payer, solanago.NewWallet().PublicKey())
-	require.NoError(t, err)
-	tx, err := solanago.NewTransaction(ixs, solanago.Hash{}, solanago.TransactionPayer(payer))
-	require.NoError(t, err)
-	got, err := transferChain(t, tx, map[string]any{"err": nil}).GetConfirmedBlockTime(context.Background(), solanago.Signature{7}.String())
-	require.NoError(t, err)
-	require.Equal(t, time.Unix(1_700_000_000, 0).UTC(), *got)
+	_, err := c.ObserveTransfer(context.Background(), ObserveTransferRequest{Signature: "x", Reference: solanago.SystemProgramID.String()})
+	require.ErrorContains(t, err, "recipient and reference are required")
+	_, err = c.ObserveTransfer(context.Background(), ObserveTransferRequest{Signature: "x", Recipient: solanago.SystemProgramID.String()})
+	require.ErrorContains(t, err, "recipient and reference are required")
 }

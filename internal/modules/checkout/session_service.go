@@ -105,15 +105,16 @@ type checkoutRailTargets interface {
 
 type solanaPaymentService interface {
 	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
-	ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error
-	// RegisterPendingReference seeds a transaction-request reference into the
-	// poller's pending set (the transfer-request flow does this via GeneratePayment).
-	RegisterPendingReference(ctx context.Context, reference string) error
+	// RegisterReference gives a transaction-request attempt its one reference
+	// (the transfer-request flow registers inside GeneratePayment).
+	RegisterReference(ctx context.Context, kind solanamodule.ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.OpenrailsSolanaPayReference, error)
 }
 
 type solanaTransactionService interface {
 	BuildPaymentTransactionFromQuote(ctx context.Context, req *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error)
-	VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solana.PurchaseMemoPolicy) error
+	ObserveTransfer(ctx context.Context, req solana.ObserveTransferRequest) (*solana.TransferObservation, error)
+	BlockHeight(ctx context.Context) (uint64, error)
+	ReferenceHasTransfers(ctx context.Context, reference string) (bool, error)
 }
 
 type CheckoutSessionService struct {
@@ -1100,13 +1101,12 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 	if session.Mode == models.CheckoutSessionModePaymentMethod {
 		return s.confirmPaymentMethodSetup(ctx, session, req)
 	}
-	if s.isTerminal(session.Status) {
+	// A paid Solana checkout still records any other signature a client
+	// submits for it: that money is flagged for refund, never dropped.
+	otherSolanaSignature := session.Rail == models.RailSolana && req != nil && strings.TrimSpace(req.Payment.Signature) != "" &&
+		(session.TransactionID == nil || strings.TrimSpace(*session.TransactionID) != strings.TrimSpace(req.Payment.Signature))
+	if s.isTerminal(session.Status) && !(otherSolanaSignature && session.Mode == models.CheckoutSessionModeOneOff) {
 		if session.Status == models.CheckoutSessionStatusSucceeded {
-			transactionID := ""
-			if session.TransactionID != nil {
-				transactionID = strings.TrimSpace(*session.TransactionID)
-			}
-			_ = s.finalizeSolanaTransferReference(ctx, session, transactionID)
 			if response, found, err := s.acceptedOperationSessionResponse(ctx, session); found || err != nil {
 				return response, err
 			}
@@ -2184,8 +2184,9 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		resp.SubscriptionID = &subID
 	}
 
+	payable := session.Status == models.CheckoutSessionStatusCreated || session.Status == models.CheckoutSessionStatusRequiresAction
 	if session.RailState != nil {
-		if val, ok := session.RailState["transaction_url"].(string); ok && strings.TrimSpace(val) != "" {
+		if val, ok := session.RailState["transaction_url"].(string); ok && strings.TrimSpace(val) != "" && payable {
 			resp.Payment.TransactionURL = val
 		}
 		// Build solana_pay_url for every Solana-Pay-capable session. The wallet POSTs
@@ -2194,7 +2195,7 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		//   - transaction_request flow → one-off transfer OR recurring subscribe
 		//     (price-driven: BuildSolanaPayTransaction reads the session mode).
 		//   - solana_cancel / solana_tier_change modes → the lifecycle tx.
-		if solanaSessionUsesPayURL(session) {
+		if payable && solanaSessionUsesPayURL(session) {
 			// Construct the Solana Pay URL:
 			// - standalone: solana:{public_billing_base_url}/v1/checkout/:id/solana-pay
 			// - embedded:   solana:{public_billing_base_url}/v1/checkout/:id/solana-pay (public_billing_base_url typically ends with /billing)
@@ -2369,9 +2370,6 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if s.solanaTransactionService == nil {
 		return nil, fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutSessionValidation)
 	}
-	if s.checkoutService == nil {
-		return nil, fmt.Errorf("%w: checkout service unavailable", ErrCheckoutSessionValidation)
-	}
 	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
@@ -2410,133 +2408,52 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	if expectedRecipient == "" {
 		return nil, fmt.Errorf("%w: recipient missing", ErrCheckoutSessionValidation)
 	}
-	// Get payer from RailState (set by BuildSolanaPayTransaction)
-	expectedPayer := strings.TrimSpace(getStringField(session.RailState, "payer"))
-	if reqWallet := strings.TrimSpace(req.Payment.Wallet); reqWallet != "" {
-		if expectedPayer != "" && expectedPayer != reqWallet {
-			return nil, fmt.Errorf("%w: wallet does not match session", ErrCheckoutSessionValidation)
-		}
-		if expectedPayer == "" {
-			expectedPayer = reqWallet
-		}
+	// A client naming a wallet must name the one the session is bound to.
+	if payer, wallet := strings.TrimSpace(getStringField(session.RailState, "payer")), strings.TrimSpace(req.Payment.Wallet); payer != "" && wallet != "" && payer != wallet {
+		return nil, fmt.Errorf("%w: wallet does not match session", ErrCheckoutSessionValidation)
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
 		return nil, fmt.Errorf("%w: reference missing", ErrCheckoutSessionValidation)
 	}
 	referenceValue := strings.TrimSpace(*session.Reference)
-	reference := &referenceValue
 
 	// or#893: the memo policy follows WHO BUILT the transaction. In the
-	// transaction-request flow OpenRails builds and stamps it (BuildSolanaPay
-	// refuses to build without a session id), so absence means the signature is
-	// not our transaction. In the transfer-request flow the buyer's wallet
-	// builds it from the Solana Pay URL and may drop the memo — a settled
-	// payment must not be rejected over a discovery hint.
+	// transaction-request flow OpenRails builds and stamps it, so absence means
+	// the signature is not our transaction. In the transfer-request flow the
+	// buyer's wallet builds it from the Solana Pay URL and may drop the memo.
 	memoPolicy := solana.MemoRequired
 	if isSolanaTransferRequestFlow(session) {
 		memoPolicy = solana.MemoPresenceOptional
 	}
-	if err := s.solanaTransactionService.VerifyTransactionWithContent(
-		ctx,
-		strings.TrimSpace(req.Payment.Signature),
-		expectedAmount,
-		expectedRecipient,
-		storedTokenMint,
-		expectedPayer,
-		reference,
-		session.ID, // #713: the purchase memo must name THIS session
-		memoPolicy,
-	); err != nil {
-		return nil, err
-	}
-
 	signature := strings.TrimSpace(req.Payment.Signature)
-	if s.db != nil {
-		if existingPayment, err := payments.NewPaymentRepo(s.db).GetByPSPTransactionID(ctx, models.RailSolana, signature); err == nil {
-			if err := validateSolanaPaymentMatchesSession(existingPayment, session, referenceValue); err != nil {
-				return nil, err
-			}
-			if err := s.MarkSucceeded(ctx, session.ID, existingPayment.ID, signature); err != nil {
-				return nil, err
-			}
-			if err := s.finalizeSolanaTransferReference(ctx, session, signature); err != nil {
-				return nil, err
-			}
-			updated, err := s.repo.GetByID(ctx, session.ID)
-			if err != nil {
-				return nil, err
-			}
-			return s.sessionToResponse(updated), nil
-		} else if !db.IsNotFound(err) {
-			return nil, fmt.Errorf("failed checking existing solana payment: %w", err)
-		}
-	}
-
-	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		CheckoutSessionID: session.ID,
-		UserID:            session.CustomerID.String(),
-		PriceID:           *session.PriceID,
-		Rail:              "solana",
-		TransactionID:     signature,
-		Amount:            *session.Amount,
-		Currency:          *session.Currency,
-		Metadata: map[string]any{
-			"solana_reference":    referenceValue,
-			"checkout_session_id": session.ID.String(),
-			"solana_payer_wallet": checkoutStateString(session.RailState, "payer"),
-			"solana_token_symbol": checkoutStateString(session.RailState, "token_symbol"),
-			"solana_token_mint":   checkoutStateString(session.RailState, "token_mint"),
-			"solana_token_amount": checkoutStateUint64(session.RailState, "token_amount"),
-			"solana_recipient":    checkoutStateString(session.RailState, "recipient"),
-		},
-		AttemptKind: payments.AttemptInitial,
+	obs, err := s.solanaTransactionService.ObserveTransfer(ctx, solana.ObserveTransferRequest{
+		Signature: signature, Recipient: expectedRecipient, TokenMint: storedTokenMint, Reference: referenceValue,
+		MemoLocalID: session.ID, MemoPolicy: memoPolicy,
 	})
+	if errors.Is(err, solana.ErrForeignTransfer) {
+		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if err := s.verifyRegisteredSolanaPayment(ctx, result.PaymentID, session, referenceValue); err != nil {
+	receipt, err := s.SettleSolanaTransfer(ctx, referenceValue, solanamodule.ObservedTransfer{Signature: signature, Amount: obs.Amount, Payer: obs.Payer, LandedAt: obs.LandedAt})
+	if errors.Is(err, solanamodule.ErrSignatureClaimed) {
+		return nil, fmt.Errorf("%w: solana signature already belongs to a different checkout", ErrCheckoutSessionConflict)
+	}
+	if err != nil {
 		return nil, err
 	}
-
-	if err := s.MarkSucceeded(ctx, session.ID, result.PaymentID, signature); err != nil {
-		return nil, err
+	switch receipt.Disposition {
+	case solanamodule.Ignored:
+		return nil, fmt.Errorf("%w: transaction paid nothing to the merchant", ErrCheckoutSessionValidation)
+	case solanamodule.Review:
+		return nil, fmt.Errorf("%w: transfer recorded for refund review (%s)", ErrCheckoutSessionConflict, receipt.ReviewReason)
 	}
-	if err := s.finalizeSolanaTransferReference(ctx, session, signature); err != nil {
-		return nil, err
-	}
-
 	updated, err := s.repo.GetByID(ctx, session.ID)
 	if err != nil {
 		return nil, err
 	}
 	return s.sessionToResponse(updated), nil
-}
-
-func (s *CheckoutSessionService) verifyRegisteredSolanaPayment(ctx context.Context, paymentID uuid.UUID, session *models.CheckoutSession, reference string) error {
-	if paymentID == uuid.Nil || session == nil || s.db == nil {
-		return nil
-	}
-	payment, err := payments.NewPaymentRepo(s.db).GetByID(ctx, paymentID)
-	if err != nil {
-		return fmt.Errorf("failed to verify registered solana payment: %w", err)
-	}
-	return validateSolanaPaymentMatchesSession(payment, session, reference)
-}
-
-func validateSolanaPaymentMatchesSession(payment *models.Payment, session *models.CheckoutSession, reference string) error {
-	if payment == nil || session == nil {
-		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
-	}
-	if payment.CustomerID.String() != session.CustomerID.String() || payment.PriceID != *session.PriceID || payment.Amount != *session.Amount || !strings.EqualFold(payment.Currency, *session.Currency) {
-		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
-	}
-	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {
-		return fmt.Errorf("%w: solana signature already belongs to a different reference", ErrCheckoutSessionConflict)
-	}
-	if strings.TrimSpace(fmt.Sprint(payment.Metadata["checkout_session_id"])) != session.ID.String() {
-		return fmt.Errorf("%w: solana signature already belongs to a different checkout session", ErrCheckoutSessionConflict)
-	}
-	return nil
 }
 
 func (s *CheckoutSessionService) MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error {
@@ -2794,31 +2711,6 @@ func isSolanaTransferRequestFlow(session *models.CheckoutSession) bool {
 	return strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow"))) == "transfer_request"
 }
 
-func (s *CheckoutSessionService) finalizeSolanaTransferReference(ctx context.Context, session *models.CheckoutSession, transactionID string) error {
-	if session == nil || session.Rail != models.RailSolana {
-		return nil
-	}
-	if !isSolanaTransferRequestFlow(session) {
-		return nil
-	}
-	if session.Reference == nil {
-		return nil
-	}
-	reference := strings.TrimSpace(*session.Reference)
-	if reference == "" {
-		return nil
-	}
-	if s.solanaPayService == nil {
-		return nil
-	}
-
-	if err := s.solanaPayService.ConsumeAndRemovePending(ctx, reference, strings.TrimSpace(transactionID)); err != nil {
-		return fmt.Errorf("failed to finalize solana reference %s: %w", reference, err)
-	}
-
-	return nil
-}
-
 func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPriceUSD, fxRate float64, fxCurrency string, quotedAt, quoteExpiresAt time.Time) error {
 	if railState == nil {
 		return fmt.Errorf("%w: rail_state unavailable", ErrCheckoutSessionValidation)
@@ -3010,14 +2902,14 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		// The lifecycle/subscribe build binds the reference to the DB session but does
-		// NOT seed the poller's pending set (only the one-off transfer flow does, via
-		// GeneratePayment). Register it here so the reference poller actually picks up
-		// the landed cancel/tier-change/subscribe tx; otherwise it would never confirm.
-		if s.solanaPayService != nil && session.Reference != nil {
-			if rerr := s.solanaPayService.RegisterPendingReference(ctx, strings.TrimSpace(*session.Reference)); rerr != nil {
-				return nil, fmt.Errorf("%w: register solana pay reference: %v", ErrCheckoutSessionValidation, rerr)
-			}
+		// The build bound the reference to the session; put it under the
+		// poller's watch so the landed cancel/tier-change/subscribe is mirrored.
+		kind := solanamodule.ReferenceLifecycle
+		if session.Mode == models.CheckoutSessionModeSubscription {
+			kind = solanamodule.ReferenceSubscribe
+		}
+		if _, err := s.registerSolanaReference(ctx, kind, session); err != nil {
+			return nil, err
 		}
 		return resp, nil
 	}
@@ -3047,28 +2939,85 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 	if err := s.repo.BindSolanaTransactionRequest(ctx, session, account, s.now()); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionConflict, err)
 	}
-
 	buildReq, err := solanaBuildRequestFromSession(session, account, tokenSymbol)
 	if err != nil {
 		return nil, err
 	}
-
-	// Build the transaction from the quote already persisted on the checkout session.
-	txResp, err := s.solanaTransactionService.BuildPaymentTransactionFromQuote(ctx, buildReq)
+	ref, err := s.registerSolanaReference(ctx, solanamodule.ReferencePurchase, session)
 	if err != nil {
 		return nil, err
 	}
-
-	// Build message for wallet
-	message := txResp.Instructions
-	if message == "" {
-		message = "Sign to complete your payment"
+	tx, err := s.offerSolanaTransaction(ctx, ref, buildReq)
+	if err != nil {
+		return nil, err
 	}
-
 	return &solanamodule.PayTransactionResponse{
-		TransactionBase64: txResp.TransactionBase64,
-		Message:           message,
+		TransactionBase64: tx,
+		Message:           solanamodule.PaymentInstructions(buildReq.Amount, buildReq.Currency, tokenSymbol),
 	}, nil
+}
+
+// offerSolanaTransaction returns the one transaction a checkout attempt may
+// be paid with. While its blockhash can still land, every request gets the
+// same transaction back, so a wallet cannot be handed a second payable one.
+// A new one is built only once the chain can no longer include the previous
+// one and nothing has landed on the reference.
+func (s *CheckoutSessionService) offerSolanaTransaction(ctx context.Context, ref gen.OpenrailsSolanaPayReference, req *solanamodule.PaymentTransactionBuildRequest) (string, error) {
+	if ref.Status != solanamodule.ReferencePending {
+		return "", ErrCheckoutSessionAlreadyCompleted
+	}
+	if ref.BuiltTransaction != nil {
+		height, err := s.solanaTransactionService.BlockHeight(ctx)
+		if err != nil {
+			return "", err
+		}
+		if height <= uint64(max(*ref.BuiltValidHeight, 0)) {
+			return *ref.BuiltTransaction, nil
+		}
+		landed, err := s.solanaTransactionService.ReferenceHasTransfers(ctx, ref.Reference)
+		if err != nil {
+			return "", err
+		}
+		if landed {
+			return "", fmt.Errorf("%w: a transfer for this checkout has already landed and is being confirmed", ErrCheckoutSessionConflict)
+		}
+	}
+	built, err := s.solanaTransactionService.BuildPaymentTransactionFromQuote(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	ledger := solanamodule.NewPayLedger(s.db)
+	stored, err := ledger.StoreBuilt(ctx, ref.Reference, built.TransactionBase64, built.LastValidBlockHeight, ref.BuiltValidHeight, s.now())
+	if err != nil {
+		return "", err
+	}
+	if stored {
+		return built.TransactionBase64, nil
+	}
+	current, err := ledger.Get(ctx, ref.Reference)
+	if err != nil {
+		return "", err
+	}
+	if current.Status != solanamodule.ReferencePending || current.BuiltTransaction == nil {
+		return "", ErrCheckoutSessionAlreadyCompleted
+	}
+	return *current.BuiltTransaction, nil
+}
+
+// registerSolanaReference puts the session's bound reference under watch.
+func (s *CheckoutSessionService) registerSolanaReference(ctx context.Context, kind solanamodule.ReferenceKind, session *models.CheckoutSession) (gen.OpenrailsSolanaPayReference, error) {
+	if s.solanaPayService == nil || session.Reference == nil {
+		return gen.OpenrailsSolanaPayReference{}, fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutSessionValidation)
+	}
+	expires := s.now().Add(defaultCheckoutSessionTTL)
+	if session.ExpiresAt != nil {
+		expires = *session.ExpiresAt
+	}
+	ref, err := s.solanaPayService.RegisterReference(ctx, kind, session.ID, *session.Reference, expires)
+	if err != nil {
+		return ref, fmt.Errorf("%w: register solana pay reference: %v", ErrCheckoutSessionConflict, err)
+	}
+	return ref, nil
 }
 
 func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tokenSymbol string) (*solanamodule.PaymentTransactionBuildRequest, error) {
