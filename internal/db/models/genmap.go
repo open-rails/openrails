@@ -217,6 +217,7 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 		CreatedAt:             s.CreatedAt,
 		UpdatedAt:             s.UpdatedAt,
 		LifecycleRev:          s.LifecycleRev,
+		RowVersion:            s.RowVersion,
 	}
 	if s.CancelType != nil {
 		ct := CancelType(*s.CancelType)

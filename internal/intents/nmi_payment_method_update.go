@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -410,8 +411,7 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		if err := NewStore(d).RecordProgress(ctx, intent.ID, map[string]any{"finalized": true}); err != nil {
 			return err
 		}
-		_, err = d.Gen(ctx).WakeEngineSubscriptionsForPaymentMethod(ctx, gen.WakeEngineSubscriptionsForPaymentMethodParams{MerchantID: intent.MerchantID, PaymentMethodID: pm.ID, Now: now})
-		return err
+		return subscriptions.WakeForReplacedMethod(ctx, d, intent.MerchantID, pm.ID, now)
 	})
 	if err != nil {
 		return Ambiguous("replacement card verified, but local finalize failed: " + err.Error())

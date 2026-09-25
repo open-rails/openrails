@@ -1323,6 +1323,7 @@ type OpenrailsSubscription struct {
 	DestructiveRunClass *string
 	TransientRetries    int32
 	LifecycleRev        int64
+	RowVersion          int64
 }
 
 // #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).

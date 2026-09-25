@@ -109,7 +109,7 @@ func (r *SubscriptionRepo) Create(ctx context.Context, s *models.Subscription) e
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	s.LifecycleRev = 0
+	s.LifecycleRev, s.RowVersion = 0, 0
 	s.RememberLifecycle()
 	return nil
 }
@@ -192,6 +192,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		GatewayResponse:          s.Metadata,
 		ScheduledPriceID:         s.ScheduledPriceID,
 		UpdatedAt:                s.UpdatedAt,
+		ExpectedVersion:          s.RowVersion,
 	}
 	if s.LifecycleChanged() {
 		// #1091 part C: status, paid period and cancellation change only in a
@@ -207,6 +208,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 			return fmt.Errorf("%w: subscription %s changed since it was read (%s, caller %s)", ErrSubscriptionMoved, s.ID, s.LifecycleDecision(), callerName(2))
 		}
 		s.LifecycleRev++
+		s.RowVersion++
 		s.RememberLifecycle()
 		return nil
 	}
@@ -215,8 +217,9 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		return fmt.Errorf("update subscription %s (caller %s): %w", s.ID, callerName(2), err)
 	}
 	if rows < 1 {
-		return errors.New("no rows affected")
+		return fmt.Errorf("%w: subscription %s changed since it was read (caller %s)", ErrSubscriptionMoved, s.ID, callerName(2))
 	}
+	s.RowVersion++
 	return nil
 }
 
@@ -858,6 +861,6 @@ func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscr
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
 		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CancelledAt: p.CancelledAt,
 		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, ScheduledPriceID: p.ScheduledPriceID,
-		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev,
+		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion,
 	}
 }
