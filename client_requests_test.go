@@ -214,6 +214,12 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"delete rate card": func(id string) error { return c.DeleteDefaultUsageRateCard(ctx, id) },
+		"delete delegation scope": func(id string) error {
+			return c.DeleteCustomerSpendDelegation(ctx, customer, id, "key")
+		},
+		"delete delegation key": func(id string) error {
+			return c.DeleteCustomerSpendDelegation(ctx, customer, "invoker", id)
+		},
 		"grant entitlement": func(id string) error {
 			_, err := c.GrantEntitlement(ctx, customer, GrantEntitlementRequest{Entitlement: id})
 			return err
@@ -241,12 +247,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"release":             func(id string) error { return c.Release(ctx, id) },
 		"extend hold":         func(id string) error { return c.ExtendHold(ctx, id, now) },
 		"entitlement subject": func(id string) error { _, err := c.ListEntitlements(ctx, id, now); return err },
-		"delete delegation scope": func(id string) error {
-			return c.DeleteCustomerSpendDelegation(ctx, customer, id, "key")
-		},
-		"delete delegation key": func(id string) error {
-			return c.DeleteCustomerSpendDelegation(ctx, customer, "invoker", id)
-		},
 	}
 	// Typed identifiers: zero, malformed, or another kind's spelling.
 	typed := map[string]func() error{

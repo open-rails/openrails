@@ -81,7 +81,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 		if jsonOut {
 			return encodeJSON(opts.Out, plan)
 		}
-		printUndoPlan(opts.Out, plan, opts.MerchantID.String())
+		printUndoPlan(opts.Out, plan, merchantID)
 		return nil
 	}
 
@@ -103,7 +103,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if jsonOut {
 		return encodeJSON(opts.Out, res)
 	}
-	printUndoResult(opts.Out, res, opts.MerchantID.String())
+	printUndoResult(opts.Out, res, merchantID)
 	return nil
 }
 
@@ -113,7 +113,10 @@ func encodeJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantSlug string) {
+// merchantFlag is the --merchant value every CLI command resolves exactly.
+func merchantFlag(id merchant.ID) string { return "id:" + id.String() }
+
+func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID merchant.ID) {
 	fmt.Fprintf(w, "DRY RUN — nothing has been changed.\n\n")
 	fmt.Fprintf(w, "run %s\n", plan.RunID)
 	fmt.Fprintf(w, "  kind    : %s (%s)\n", plan.Kind, reconcile.ReversibleRunKinds[plan.Kind])
@@ -155,10 +158,10 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantSlug string) {
 	fmt.Fprintf(w, "  coverage: every live provider row is PSP-attributed (unattributed=%d)\n", plan.Unattributed.Total())
 	fmt.Fprintf(w, "\nTo apply, confirm the row count:\n"+
 		"  openrails undo-run --merchant %s --run %s --apply --expect-rows %d\n",
-		strings.TrimSpace(merchantSlug), plan.RunID, plan.ExpectedRows())
+		merchantFlag(merchantID), plan.RunID, plan.ExpectedRows())
 }
 
-func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantSlug string) {
+func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID merchant.ID) {
 	fmt.Fprintf(w, "reversed run %s (kind %s)\n", res.Plan.RunID, res.Plan.Kind)
 	for _, table := range []string{"subscriptions", "payments", "checkout_sessions", "entitlements"} {
 		if n, ok := res.Restored[table]; ok {
@@ -199,5 +202,5 @@ func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantSlug string)
 	}
 	fmt.Fprintf(w, "local state is now BEFORE the run while the provider is at now — a rollback is not a complete operation.\n"+
 		"Finish it:  openrails pull-provider --merchant %s     (advisory; review findings, then re-arm and re-run with mutation flags)\n",
-		strings.TrimSpace(merchantSlug))
+		merchantFlag(merchantID))
 }

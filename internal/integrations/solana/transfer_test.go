@@ -75,6 +75,26 @@ func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
 	}
 	stamp := PurchaseMemo(localID)
 	otherMint := solanago.NewWallet().PublicKey()
+	// Paying straight into the token account skips ATA derivation, so only the mint check decides.
+	recipientATA, _, err := solanago.FindAssociatedTokenAddress(recipient, mint)
+	require.NoError(t, err)
+	intoATA := func(expectedMint string) func(*VerifyTransferRequest) {
+		return func(r *VerifyTransferRequest) {
+			r.ExpectedRecipient, r.ExpectedTokenMint = recipientATA.String(), expectedMint
+		}
+	}
+	swapCase := func(s string) string {
+		out := []rune(s)
+		for i, r := range out {
+			switch {
+			case r >= 'a' && r <= 'z':
+				out[i] = r - 'a' + 'A'
+			case r >= 'A' && r <= 'Z':
+				out[i] = r - 'A' + 'a'
+			}
+		}
+		return string(out)
+	}
 	cases := []tc{
 		{name: "SOL exact", symbol: "SOL", sent: want, credited: want, memo: stamp},
 		{name: "SOL overpay accepted", symbol: "SOL", sent: want + 1, credited: want + 1, memo: stamp},
@@ -93,6 +113,9 @@ func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
 		{name: "SPL other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
 		{name: "SPL short credit", symbol: "USDC", sent: want, credited: want - 1, creditIn: mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "token transfer amount insufficient"},
 		{name: "SPL when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, wantErr: "no qualifying transfer"},
+		{name: "SPL into token account", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(mint.String())},
+		{name: "SPL mint differing only in case", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(swapCase(mint.String())), wantErr: "no qualifying transfer"},
+		{name: "SPL into token account when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(""), wantErr: "no qualifying transfer"},
 		{name: "SPL checked exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, checked: &mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }},
 		{name: "SPL checked other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, checked: &otherMint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
 	}

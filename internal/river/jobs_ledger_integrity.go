@@ -111,7 +111,7 @@ func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid merc
 			"currency": b.Currency, "net": b.Net, "accounts": b.Accounts, "detail": b.String(),
 		})
 		action := fmt.Sprintf(
-			"the %s ledger does not net to zero (%d micros across %d accounts). Double entry means every transfer credits and debits the same amount, so a non-zero sum is money created or destroyed inside the ledger — a one-sided counter write, or a transfer applied to only one leg. Do NOT settle or invoice off these balances until it is explained; `openrails ledger-audit --merchant=%s` reproduces it",
+			"the %s ledger does not net to zero (%d micros across %d accounts). Double entry means every transfer credits and debits the same amount, so a non-zero sum is money created or destroyed inside the ledger — a one-sided counter write, or a transfer applied to only one leg. Do NOT settle or invoice off these balances until it is explained; `openrails ledger-audit --merchant=id:%s` reproduces it",
 			b.Currency, b.Net, b.Accounts, mid.String())
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID:        mid.UUID(),

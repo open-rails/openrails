@@ -5560,7 +5560,7 @@
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/initial_membership_new_card.go": "8988bd3766c205500e14944e15d926bdbc526b91219fcf8b503cfe61a7ea6a68",
-    "internal/modules/checkout/session_service.go": "18daecb9fd91401181ea4a7a87420c1d95f9f0cdb3072d3e100c632674280d9f",
+    "internal/modules/checkout/session_service.go": "cbf4237b7a3a3bc851b932e94ab10b47ee8ecaf34969c9ab39f26fe8f901f132",
     "internal/modules/checkout/session_types.go": "d2a942c9d615065f5893064d5377710a501cb5504338ece953d17f69cad82387",
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
     "internal/modules/checkout/stripe_method_setup.go": "8924e7385efa3ee2ab0b9052aff26921d0bd066f8273786819ed1fe2ef113a4b",

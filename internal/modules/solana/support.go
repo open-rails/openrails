@@ -195,7 +195,7 @@ const WrappedSOLMint = "So11111111111111111111111111111111111111112"
 
 func IsNativeSOLMint(tokenMint string) bool {
 	mint := strings.TrimSpace(tokenMint)
-	return mint == "" || strings.EqualFold(mint, WrappedSOLMint)
+	return mint == "" || mint == WrappedSOLMint
 }
 
 // TokenQuote represents a complete quote for converting fiat to a Solana token.

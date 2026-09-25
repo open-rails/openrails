@@ -3,6 +3,7 @@ package recurring
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -20,6 +21,7 @@ const testPlanCreatedAt = int64(1_717_200_000)
 type recordingSubmitter struct {
 	merchantPub solanago.PublicKey
 	submits     [][]solanago.Instruction
+	failATA     bool // refuse ATA creation, as a dropped transaction would
 }
 
 func (s *recordingSubmitter) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
@@ -27,16 +29,21 @@ func (s *recordingSubmitter) MerchantAddress(context.Context, merchant.ID) (sola
 }
 
 func (s *recordingSubmitter) Submit(_ context.Context, _ merchant.ID, ins []solanago.Instruction) (solanago.Signature, error) {
+	if s.failATA && ins[0].ProgramID().Equals(subscriptions.AssociatedTokenProgramID) {
+		return solanago.Signature{}, errors.New("transaction dropped")
+	}
 	s.submits = append(s.submits, ins)
 	return solanago.Signature{byte(len(s.submits))}, nil
 }
 
-// planChain serves the mint account (decimals) and the plan PDA: `existing`
-// before any submit, then a plan with `created` terms once create_plan is sent.
+// planChain serves the mint account (decimals), the plan PDA (`existing`
+// before any submit, then a plan with `created` terms once create_plan is
+// sent) and the receiving ATAs in `atas`.
 type planChain struct {
 	mintDecimals int // -1: mint account absent
 	existing     []byte
 	created      *[2]uint64 // amount, period
+	atas         map[solanago.PublicKey]bool
 	sub          *recordingSubmitter
 }
 
@@ -49,6 +56,12 @@ func (c planChain) GetAccountData(_ context.Context, addr solanago.PublicKey) ([
 		blob[44] = byte(c.mintDecimals)
 		blob[45] = 1
 		return blob, nil
+	}
+	if c.atas[addr] {
+		return []byte{1}, nil
+	}
+	if pda, _, _ := subscriptions.DerivePlanPDA(c.sub.merchantPub, 7); !addr.Equals(pda) {
+		return nil, nil
 	}
 	if c.created != nil && len(c.sub.submits) > 0 {
 		return planBlob(c.sub.merchantPub, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), c.created[0], c.created[1], testPlanCreatedAt), nil
@@ -199,14 +212,55 @@ func TestPublishPlanRepublish(t *testing.T) {
 			sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey()}
 			chain := planChain{mintDecimals: 6, existing: planBlob(sub.merchantPub, tc.mint, tc.amount, tc.hours, 1_600_000_000), sub: sub}
 			h, err := NewPlanServiceWithReader(sub, chain, "devnet", testTokens()).PublishPlan(context.Background(), planInput(10_000_000, 6))
-			require.Empty(t, sub.submits)
 			if !tc.idempotent {
 				require.ErrorContains(t, err, "IMMUTABLE")
+				require.Empty(t, sub.submits)
 				return
 			}
 			require.NoError(t, err)
 			require.Equal(t, int64(1_600_000_000), h.CreatedAt, "echo the existing on-chain created_at")
 			require.Empty(t, h.Signature)
+			require.Len(t, sub.submits, 1, "no second create_plan")
+			require.Equal(t, []solanago.PublicKey{sub.merchantPub}, ensuredATAOwners(t, sub))
+		})
+	}
+}
+
+// A publish whose create_plan landed but whose ATA creation failed is retried:
+// the retry finds the plan and creates the missing receiving ATAs, once.
+func TestPublishPlanRetryEnsuresReceivingATAs(t *testing.T) {
+	cold := randKey(t).PublicKey()
+	for _, receiving := range []string{"", cold.String()} {
+		t.Run("receiving="+receiving, func(t *testing.T) {
+			created := [2]uint64{10_000_000, 720}
+			sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey(), failATA: true}
+			chain := planChain{mintDecimals: 6, created: &created, atas: map[solanago.PublicKey]bool{}, sub: sub}
+			svc := NewPlanServiceWithReader(sub, chain, "devnet", testTokens())
+			in := planInput(10_000_000, 6)
+			in.ReceivingWallet = receiving
+
+			_, err := svc.PublishPlan(context.Background(), in)
+			require.ErrorContains(t, err, "ensure receiving ata")
+			require.Len(t, sub.submits, 1, "create_plan landed")
+
+			sub.failATA = false
+			h, err := svc.PublishPlan(context.Background(), in)
+			require.NoError(t, err)
+			require.Equal(t, testPlanCreatedAt, h.CreatedAt)
+			want := []solanago.PublicKey{sub.merchantPub}
+			if receiving != "" {
+				want = append(want, cold)
+			}
+			require.Equal(t, want, ensuredATAOwners(t, sub))
+			for _, owner := range want {
+				ata, _, _ := subscriptions.DeriveATA(owner, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), solanago.TokenProgramID)
+				chain.atas[ata] = true
+			}
+
+			submitted := len(sub.submits)
+			_, err = svc.PublishPlan(context.Background(), in)
+			require.NoError(t, err)
+			require.Len(t, sub.submits, submitted, "existing ATAs submit nothing")
 		})
 	}
 }

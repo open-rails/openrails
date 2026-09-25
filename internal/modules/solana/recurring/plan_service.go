@@ -318,6 +318,15 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 			in.AmountBaseUnits, in.AmountDecimals, symbol, mintStr, onchainDecimals)
 	}
 
+	var recv *solanago.PublicKey
+	if in.ReceivingWallet != "" {
+		pk, err := solanago.PublicKeyFromBase58(in.ReceivingWallet)
+		if err != nil {
+			return nil, fmt.Errorf("recurring: invalid receiving wallet %q: %w", in.ReceivingWallet, err)
+		}
+		recv = &pk
+	}
+
 	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant merchant address: %w", err)
@@ -347,8 +356,11 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 			if existing.Mint.Equals(mint) &&
 				existing.Amount == in.AmountBaseUnits &&
 				existing.PeriodHours == in.PeriodHours {
-				// Terms match: idempotent no-op, return the existing on-chain handle
-				// WITHOUT submitting a duplicate create_plan.
+				// Terms match: no second create_plan. A publish that failed after
+				// create_plan landed still lacks its receiving ATAs, so ensure them.
+				if err := s.ensureReceivingATAs(ctx, in.MerchantID, mint, merchant, recv); err != nil {
+					return nil, err
+				}
 				return &PlanHandle{
 					PlanPDA:         planPDA.String(),
 					PlanID:          in.PlanID,
@@ -382,13 +394,9 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 	// into the COLD wallet's ATA (tracked separately) — the crank currently targets
 	// the merchant ATA, so a cold-wallet plan needs that wiring before use.
 	var destinations, pullers [4]solanago.PublicKey
-	if in.ReceivingWallet != "" {
-		recv, err := solanago.PublicKeyFromBase58(in.ReceivingWallet)
-		if err != nil {
-			return nil, fmt.Errorf("recurring: invalid receiving wallet %q: %w", in.ReceivingWallet, err)
-		}
+	if recv != nil {
 		pullers[0] = merchant
-		destinations[0] = recv
+		destinations[0] = *recv
 	}
 
 	createdAt := s.now().UTC().Unix()
@@ -415,24 +423,10 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 
 	// Ensure the receiving ATA(s) exist before the first crank. transfer_subscription
 	// deposits INTO the receiver's associated token account; if that ATA is missing
-	// the pull reverts. CreateIdempotent is a no-op when the ATA already exists, so
-	// this is safe to repeat on every publish. The cranker (merchant) signs + pays.
-	//
-	// Default case: the merchant collects into its own ATA. Cold-wallet case: funds
-	// land in the configured ReceivingWallet's ATA, so we ensure THAT one too (the
-	// crank's destination wiring for cold wallets is a separate follow-up — see the
-	// destinations/pullers note above).
-	if err := s.ensureReceivingATA(ctx, in.MerchantID, merchant, mint); err != nil {
+	// the pull reverts. The cranker (merchant) signs + pays. A failure here is
+	// retried by the next publish, which finds the plan and re-ensures the ATAs.
+	if err := s.ensureReceivingATAs(ctx, in.MerchantID, mint, merchant, recv); err != nil {
 		return nil, err
-	}
-	if in.ReceivingWallet != "" {
-		recv, err := solanago.PublicKeyFromBase58(in.ReceivingWallet)
-		if err != nil {
-			return nil, fmt.Errorf("recurring: invalid receiving wallet %q: %w", in.ReceivingWallet, err)
-		}
-		if err := s.ensureReceivingATA(ctx, in.MerchantID, recv, mint); err != nil {
-			return nil, err
-		}
 	}
 
 	// IMPORTANT (issue #254 / the Custom:519 root cause): create_plan OVERWRITES
@@ -518,13 +512,35 @@ func (s *PlanService) SunsetPlan(ctx context.Context, tenantID merchant.ID, plan
 	return sig.String(), nil
 }
 
+// ensureReceivingATAs provisions the merchant's receiving ATA and, for a cold
+// wallet plan, the receiving wallet's too.
+func (s *PlanService) ensureReceivingATAs(ctx context.Context, tenantID merchant.ID, mint, merchant solanago.PublicKey, recv *solanago.PublicKey) error {
+	if err := s.ensureReceivingATA(ctx, tenantID, merchant, mint); err != nil {
+		return err
+	}
+	if recv == nil {
+		return nil
+	}
+	return s.ensureReceivingATA(ctx, tenantID, *recv, mint)
+}
+
 // ensureReceivingATA idempotently provisions owner's associated token account for
-// mint (classic SPL Token), paid + signed by the merchant's cranker. A failure here
-// is surfaced as a hard error: the plan cannot be billed without a receiving ATA.
+// mint (classic SPL Token), paid + signed by the merchant's cranker; an ATA already
+// on chain submits nothing. A failure is a hard error: the plan cannot be billed
+// without a receiving ATA.
 func (s *PlanService) ensureReceivingATA(ctx context.Context, tenantID merchant.ID, owner, mint solanago.PublicKey) error {
 	ata, _, err := subscriptions.DeriveATA(owner, mint, solanago.TokenProgramID)
 	if err != nil {
 		return fmt.Errorf("recurring: derive receiving ata for %s: %w", owner, err)
+	}
+	if s.reader != nil {
+		data, err := s.reader.GetAccountData(ctx, ata)
+		if err != nil {
+			return fmt.Errorf("recurring: read receiving ata for %s: %w", owner, err)
+		}
+		if len(data) > 0 {
+			return nil
+		}
 	}
 	payer, err := s.submitter.MerchantAddress(ctx, tenantID)
 	if err != nil {
