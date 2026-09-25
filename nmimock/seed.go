@@ -148,7 +148,7 @@ func (m *Mock) Refund(txID string, cents int64) string {
 }
 
 // RenewSchedule is NMI's recurring engine billing a schedule's next date
-// (dated no later than now): approve false declines it with 202. Either way the schedule
+// (dated that day's start): approve false declines it with 202. Either way the schedule
 // advances to its next regular date; NMI never retries a failed period.
 func (m *Mock) RenewSchedule(id string, approve bool) Sale {
 	m.mu.Lock()
@@ -157,12 +157,8 @@ func (m *Mock) RenewSchedule(id string, approve bool) Sale {
 }
 
 func (m *Mock) renew(s *Schedule, approve bool) Sale {
-	// A charge is dated its billing date, or now when forced ahead of it.
-	at := s.NextBilling
-	if now := m.now(); at.After(now) {
-		at = now
-	}
-	sale := Sale{Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: s.ID, At: at}
+	// NMI bills by date: the charge lands at the start of its billing day.
+	sale := Sale{Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: s.ID, At: s.NextBilling.UTC().Truncate(24 * time.Hour)}
 	if !approve {
 		v := m.mustVault(s.Vault)
 		sale.TransactionID, sale.BillingID, sale.Card, sale.Currency, sale.Declined = m.next("declined"), v.BillingID, v.Card, "USD", "202"
