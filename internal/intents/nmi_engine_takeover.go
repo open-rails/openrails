@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"net/http"
 	"strings"
 	"time"
@@ -573,6 +574,9 @@ func (h *NMIEngineTakeover) advance(ctx context.Context, in gen.OpenrailsRailInt
 		if !first {
 			return Ambiguous("delete marker already recorded; verify the schedule")
 		}
+		if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeProvider, Kind: TypeNMIEngineTakeover, Operation: in.ID, Subscription: p.LegacySubscriptionID}); err != nil {
+			return Ambiguous(err.Error())
+		}
 		if err := client.DeleteRecurringSubscription(ctx, p.RailSubscriptionID); err != nil && !errors.Is(err, nmi.ErrV5NotFound) {
 			return Ambiguous("delete NMI schedule: " + err.Error())
 		}
@@ -594,6 +598,9 @@ func (h *NMIEngineTakeover) advance(ctx context.Context, in gen.OpenrailsRailInt
 // operation succeeded in the same transaction: it is the successor's paid
 // agreement at the boundary.
 func (h *NMIEngineTakeover) commit(ctx context.Context, in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload) Outcome {
+	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeComplete, Kind: TypeNMIEngineTakeover, Operation: in.ID, Subscription: p.LegacySubscriptionID}); err != nil {
+		return Ambiguous(err.Error())
+	}
 	now := h.now()
 	evidence := map[string]any{"delete_submitted": true, "completed": true, "successor_subscription_id": p.Agreement.SubscriptionID.String()}
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

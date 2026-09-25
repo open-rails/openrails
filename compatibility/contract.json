@@ -3169,6 +3169,7 @@
       "db": "github.com/open-rails/openrails/internal/db",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "errors": "errors",
+      "failpoint": "github.com/open-rails/openrails/internal/failpoint",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "http": "net/http",
