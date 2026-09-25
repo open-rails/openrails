@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -196,7 +197,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		}
 		return nil, errors.New("checkout already in progress, please wait")
 	}
-	stop := claim.Hold(ctx)
+	work, stop := claim.Hold(ctx)
 	defer stop()
 
 	tid, err := merchant.Require(ctx)
@@ -205,7 +206,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+	params := intents.EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   string(models.RailNMI),
 		IntentType: TypeCustodianSale,
@@ -224,7 +225,23 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
 		OriginReason:   "checkout one-time sale (custodian-held card)",
-	})
+	}
+	// Admitted under the session's lock, like the native sale (#1099).
+	if req.CheckoutSessionID != "" && s.DB != nil {
+		err = s.DB.MerchantTx(work, func(ctx context.Context, tx pgx.Tx) error {
+			if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutSessionID); err != nil {
+				return err
+			}
+			_, err := intents.NewStore(s.DB.NewWithPgxTx(tx)).Enqueue(ctx, params)
+			return err
+		})
+		if err != nil {
+			stop()
+			failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)
+			return nil, err
+		}
+	}
+	intent, err := s.Intents.EnqueueAndExecute(work, params)
 	if err != nil {
 		stop()
 		failCheckoutIdempotency(ctx, claim, idempOp, idempotencyKey, err)

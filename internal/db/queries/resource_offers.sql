@@ -58,7 +58,13 @@ SELECT cardinality(sqlc.arg(entitlements)::text[])>0 AND NOT EXISTS (
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
       AND s.rail_state->'accepted_purchase'->>'access_duration_hours' IS NULL
       AND s.rail_state->'accepted_purchase'->'entitlements' ? wanted.key
-      AND COALESCE(s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0')
+      AND COALESCE(s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0'
+      -- #1099: a session whose sale finally failed reserves nothing; its
+      -- operation's outcome is the session's.
+      AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents f
+        WHERE f.merchant_id=s.merchant_id
+          AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
+          AND f.status IN ('failed_terminal','expired','superseded')))
    OR EXISTS (SELECT 1 FROM openrails.rail_intents i
     WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.intent_type='nmi_sale'
       AND i.payload->>'user_id'=sqlc.arg(customer_id)::uuid::text

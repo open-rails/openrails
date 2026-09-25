@@ -26,7 +26,7 @@ const (
 	WebhookEventRetention = 90 * 24 * time.Hour
 
 	webhookDuplicateWait = 10 * time.Second
-	webhookDuplicatePoll = 50 * time.Millisecond
+	webhookDuplicatePoll = 100 * time.Millisecond
 )
 
 // DeduplicationService dedups webhook deliveries across replicas (#1099).
@@ -158,18 +158,26 @@ func (s *DeduplicationService) writeMark(ctx context.Context, m *dedupMark) erro
 	})
 }
 
-// MarkWebhookProcessedInTx writes the completed dedup mark on the handler's
-// OWN effect tx, so mark and effects commit (or roll back) atomically (#678).
-// No-op when no Postgres dedup mark is in flight. ProcessWebhook re-asserts
-// the mark after the handler returns (ON CONFLICT DO NOTHING), so calling this
-// is an atomicity upgrade, never a requirement.
+// ErrWebhookAlreadyApplied rolls back a handler transaction whose event is
+// already marked applied: that delivery's effects committed elsewhere.
+var ErrWebhookAlreadyApplied = errors.New("webhook event already applied")
+
+// MarkWebhookProcessedInTx writes the applied mark in the handler's own effect
+// tx, so mark and effects commit (or roll back) together (#678). When the mark
+// already exists the tx must roll back (ErrWebhookAlreadyApplied). No-op
+// without a dedup mark in flight; ProcessWebhook still writes the mark after
+// the handler, so this is an atomicity upgrade, never a requirement.
 func MarkWebhookProcessedInTx(ctx context.Context, tx pgx.Tx) error {
 	m, _ := ctx.Value(dedupMarkCtxKey{}).(*dedupMark)
 	if m == nil {
 		return nil
 	}
-	if _, err := gen.New(tx).MarkWebhookEventCompleted(ctx, m.params()); err != nil {
+	inserted, err := gen.New(tx).MarkWebhookEventCompleted(ctx, m.params())
+	if err != nil {
 		return fmt.Errorf("mark webhook processed in tx: %w", err)
+	}
+	if inserted == 0 {
+		return ErrWebhookAlreadyApplied
 	}
 	return nil
 }
@@ -230,7 +238,9 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 // claim claims the delivery. A duplicate that arrives while another replica
 // processes the event waits for that outcome, briefly: the provider treats
 // any 2xx as delivered, so answering before the owner succeeds could lose the
-// event, and answering 5xx would only schedule a needless redelivery.
+// event, and answering 5xx would only schedule a needless redelivery. It
+// waits on the lease pool, holding no request connection, and claims again
+// only once the owner's claim is settled or lapsed.
 func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*idempotency.Claim, *idempotency.Record, error) {
 	deadline := time.NewTimer(webhookDuplicateWait)
 	defer deadline.Stop()
@@ -242,12 +252,17 @@ func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*
 		if claim != nil || rec.Status != idempotency.StatusProcessing {
 			return claim, rec, nil
 		}
-		select {
-		case <-ctx.Done():
-			return nil, nil, ctx.Err()
-		case <-deadline.C:
-			return nil, rec, nil
-		case <-time.After(webhookDuplicatePoll):
+		for rec != nil && rec.Status == idempotency.StatusProcessing && rec.Leased {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-deadline.C:
+				return nil, rec, nil
+			case <-time.After(webhookDuplicatePoll):
+			}
+			if rec, err = s.claims.Watch(ctx, op, eventID); err != nil {
+				return nil, nil, fmt.Errorf("failed to watch webhook claim: %w", err)
+			}
 		}
 	}
 }
@@ -255,36 +270,59 @@ func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*
 // run executes the handler under an owned claim (nil = no dedupe) and records
 // the outcome: applied or non-retryable -> truth mark + completed claim;
 // retryable -> released claim, so the provider's redelivery runs it again.
+// Every transaction the handler commits first proves the claim is still held
+// (a commit guard), so an owner whose claim lapsed can never commit effects.
 func (s *DeduplicationService) run(ctx context.Context, claim *idempotency.Claim, mark *dedupMark, processingFunc func(ctx context.Context) error) error {
 	fields := log.Fields{}
 	if mark != nil {
 		fields = log.Fields{"op": mark.op, "eventID": mark.eventID}
 		ctx = context.WithValue(ctx, dedupMarkCtxKey{}, mark)
 	}
-	stop := func() {}
+	work, stop := ctx, func() {}
 	if claim != nil {
-		stop = claim.Hold(ctx)
+		work, stop = claim.Hold(ctx)
+		work = db.WithCommitGuard(work, claim.InTx)
 	}
-	processingErr := processingFunc(ctx)
-	stop()
-	if processingErr != nil && !IsWebhookErrorNonRetryable(processingErr) {
+	defer stop()
+	lost := func(err error) bool {
+		return errors.Is(err, idempotency.ErrClaimLost) || errors.Is(context.Cause(work), idempotency.ErrClaimLost)
+	}
+	processingErr := processingFunc(work)
+	switch {
+	case processingErr != nil && errors.Is(processingErr, ErrWebhookAlreadyApplied):
+		stop()
+		if claim != nil {
+			s.complete(ctx, claim, fields)
+		}
+		log.WithContext(ctx).WithFields(fields).Info("Webhook already applied by another delivery")
+		return nil
+	case processingErr != nil && lost(processingErr):
+		log.WithContext(ctx).WithFields(fields).WithError(processingErr).Warn("Webhook claim lost mid-processing; the new owner applies it")
+		return fmt.Errorf("webhook processing abandoned: %w", idempotency.ErrClaimLost)
+	case processingErr != nil && !IsWebhookErrorNonRetryable(processingErr):
+		stop()
 		log.WithContext(ctx).WithFields(fields).WithError(processingErr).Error("Webhook processing failed")
 		if claim != nil {
 			s.release(ctx, claim, fields, processingErr)
 		}
 		return fmt.Errorf("webhook processing failed: %w", processingErr)
 	}
-	// TRUTH: verify-or-write the mark. A no-op when the handler committed it
-	// with its effects (MarkWebhookProcessedInTx). Failure is retryable: #675
+	// TRUTH: verify-or-write the mark, still under the claim. A no-op when the
+	// handler committed it with its effects. Failure is retryable: #675
 	// replay-safety makes the redelivered effects converge.
 	if mark != nil {
-		if err := s.writeMark(ctx, mark); err != nil {
+		if err := s.writeMark(work, mark); err != nil {
+			stop()
+			if lost(err) {
+				return fmt.Errorf("webhook processing abandoned: %w", idempotency.ErrClaimLost)
+			}
 			if claim != nil {
 				s.release(ctx, claim, fields, err)
 			}
 			return fmt.Errorf("failed to record webhook dedup mark: %w", err)
 		}
 	}
+	stop()
 	if claim != nil {
 		s.complete(ctx, claim, fields)
 	}

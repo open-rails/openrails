@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 
@@ -29,8 +28,7 @@ func (IdempotencyGCArgs) Kind() string { return KindIdempotencyGC }
 // IdempotencyGCWorker deletes expired request and webhook claims (#1099).
 type IdempotencyGCWorker struct {
 	river.WorkerDefaults[IdempotencyGCArgs]
-	DB    *db.DB
-	Clock clockwork.Clock
+	DB *db.DB
 }
 
 func (IdempotencyGCWorker) Kind() string { return KindIdempotencyGC }
@@ -40,16 +38,15 @@ func (w IdempotencyGCWorker) Work(ctx context.Context, _ *river.Job[IdempotencyG
 	return err
 }
 
-// Sweep deletes expired rows in batches until a batch comes back short, and
+// Sweep deletes rows expired on the database clock in batches until a batch comes back short, and
 // returns how many it deleted.
 func (w IdempotencyGCWorker) Sweep(ctx context.Context) (int64, error) {
-	if w.DB == nil || w.Clock == nil {
-		return 0, fmt.Errorf("idempotency gc requires a database and a clock")
+	if w.DB == nil {
+		return 0, fmt.Errorf("idempotency gc requires a database")
 	}
-	now := w.Clock.Now()
 	var total int64
 	for range idempotencyGCMaxBatches {
-		n, err := idempotency.DeleteExpired(ctx, w.DB, now, idempotencyGCBatch)
+		n, err := idempotency.DeleteExpired(ctx, w.DB, idempotencyGCBatch)
 		if err != nil {
 			return total, fmt.Errorf("delete expired idempotency keys: %w", err)
 		}

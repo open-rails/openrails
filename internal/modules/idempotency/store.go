@@ -9,11 +9,13 @@
 //     idempotency key), whose keys derive from the request key. A request that
 //     runs twice therefore reaches the same intent, which never executes twice.
 //
-// A processing claim is leased. Its owner renews the lease (Claim.Hold) while
-// it works; when the owner dies the lease lapses and exactly one later Begin
-// reclaims it and runs the request again. That rerun is safe only because of
-// the second layer: nothing guarded here may call a provider except through
-// rail_intents.
+// A processing claim is leased, on the database's clock. Its owner renews the
+// lease (Claim.Hold) on a small pool of its own, so renewals never queue
+// behind request traffic. When a renewal cannot be confirmed before the lease
+// could lapse, Hold cancels the owner's context: an owner stops before anyone
+// else can reclaim. A lapsed claim passes to exactly one later Begin. The
+// token fences the superseded owner: its Complete, Fail and Renew are refused,
+// and Claim.InTx lets its transactions refuse to commit.
 package idempotency
 
 import (
@@ -21,10 +23,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jonboulle/clockwork"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -40,15 +43,17 @@ const (
 	StatusFailed     Status = "failed"
 )
 
-// ErrClaimLost means the claim lapsed and another caller reclaimed it; the
-// superseded owner's write is refused.
-var ErrClaimLost = errors.New("idempotency claim was superseded")
+// ErrClaimLost means the claim lapsed or passed to another caller; the
+// superseded owner may not act on it.
+var ErrClaimLost = errors.New("idempotency claim was lost")
 
 type Record struct {
-	Status         Status
-	Result         json.RawMessage
-	Error          string
-	Claims         int64
+	Status Status
+	Result json.RawMessage
+	Error  string
+	Claims int64
+	// Leased reports a processing claim whose lease has not lapsed (Get only).
+	Leased         bool
 	LeaseExpiresAt time.Time
 	ExpiresAt      time.Time
 	CreatedAt      time.Time
@@ -58,17 +63,18 @@ type Record struct {
 // Store claims keys for one class of work. TTL bounds how long a result is
 // replayed; Lease is how long a silent owner keeps its claim.
 type Store struct {
-	db    *db.DB
-	clock clockwork.Clock
-	ttl   time.Duration
-	lease time.Duration
+	db     *db.DB
+	leases *db.DB
+	ttl    time.Duration
+	lease  time.Duration
 }
 
-func NewStore(database *db.DB, clock clockwork.Clock, ttl, lease time.Duration) (*Store, error) {
-	if database == nil || clock == nil || ttl <= 0 || lease <= 0 || lease > ttl {
-		return nil, fmt.Errorf("idempotency store needs a database, a clock and 0 < lease <= ttl")
+// NewStore claims on database; leases is the small pool lease renewals use.
+func NewStore(database, leases *db.DB, ttl, lease time.Duration) (*Store, error) {
+	if database == nil || leases == nil || ttl <= 0 || lease <= 0 || lease > ttl {
+		return nil, fmt.Errorf("idempotency store needs a database, a lease pool and 0 < lease <= ttl")
 	}
-	return &Store{db: database, clock: clock, ttl: ttl, lease: lease}, nil
+	return &Store{db: database, leases: leases, ttl: ttl, lease: lease}, nil
 }
 
 func (s *Store) Lease() time.Duration { return s.lease }
@@ -92,33 +98,34 @@ func (s *Store) Begin(ctx context.Context, operation, key string) (*Claim, *Reco
 	}
 	q := s.queries(ctx)
 	for range 3 {
-		now := s.clock.Now().UTC()
+		token := uuid.New()
+		start := time.Now()
 		row, err := q.ClaimIdempotencyKey(ctx, gen.ClaimIdempotencyKeyParams{
-			MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key,
-			LeaseExpiresAt: now.Add(s.lease), ExpiresAt: now.Add(s.ttl), Now: now,
+			MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key, Token: token,
+			LeaseSeconds: s.lease.Seconds(), TtlSeconds: s.ttl.Seconds(),
 		})
 		if err == nil {
-			return s.claim(mid.UUID(), row), nil, nil
+			return s.claim(mid.UUID(), row, start), nil, nil
 		}
 		if !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("claim idempotency key: %w", err)
 		}
 		row, err = q.ReclaimIdempotencyKey(ctx, gen.ReclaimIdempotencyKeyParams{
-			MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key,
-			LeaseExpiresAt: now.Add(s.lease), ExpiresAt: now.Add(s.ttl), Now: now,
+			MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key, Token: token,
+			LeaseSeconds: s.lease.Seconds(), TtlSeconds: s.ttl.Seconds(),
 		})
 		if err == nil {
-			return s.claim(mid.UUID(), row), nil, nil
+			return s.claim(mid.UUID(), row, start), nil, nil
 		}
 		if !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("reclaim idempotency key: %w", err)
 		}
-		row, err = q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key})
-		if err == nil {
-			return nil, record(row), nil
-		}
-		if !db.IsNotFound(err) {
+		rec, err := s.get(ctx, q, mid.UUID(), operation, key)
+		if err != nil {
 			return nil, nil, fmt.Errorf("read idempotency key: %w", err)
+		}
+		if rec != nil {
+			return nil, rec, nil
 		}
 		// Collected between our statements; claim afresh.
 	}
@@ -131,24 +138,45 @@ func (s *Store) Get(ctx context.Context, operation, key string) (*Record, error)
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.queries(ctx).GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: mid.UUID(), Operation: operation, IdempotencyKey: key})
+	return s.get(ctx, s.queries(ctx), mid.UUID(), operation, key)
+}
+
+// Watch reads a key's record on the lease pool, holding no request
+// connection: for callers that wait out another owner.
+func (s *Store) Watch(ctx context.Context, operation, key string) (*Record, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.get(ctx, s.leases.GenDirectory(), mid.UUID(), operation, key)
+}
+
+func (s *Store) get(ctx context.Context, q *gen.Queries, mid uuid.UUID, operation, key string) (*Record, error) {
+	row, err := q.GetIdempotencyKey(ctx, gen.GetIdempotencyKeyParams{MerchantID: mid, Operation: operation, IdempotencyKey: key})
 	if db.IsNotFound(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return record(row), nil
+	r := record(gen.OpenrailsIdempotencyKey{
+		MerchantID: row.MerchantID, Operation: row.Operation, IdempotencyKey: row.IdempotencyKey, Status: row.Status,
+		Token: row.Token, Claims: row.Claims, Result: row.Result, Error: row.Error,
+		LeaseExpiresAt: row.LeaseExpiresAt, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	})
+	r.Leased = row.Leased
+	return r, nil
 }
 
-// DeleteExpired deletes up to limit idempotency rows expired at now, across
-// every merchant and store.
-func DeleteExpired(ctx context.Context, database *db.DB, now time.Time, limit int32) (int64, error) {
-	return database.GenDirectory().DeleteExpiredIdempotencyKeys(ctx, gen.DeleteExpiredIdempotencyKeysParams{Now: now.UTC(), RowLimit: limit})
+// DeleteExpired deletes up to limit idempotency rows past their expiry,
+// across every merchant and store.
+func DeleteExpired(ctx context.Context, database *db.DB, limit int32) (int64, error) {
+	return database.GenDirectory().DeleteExpiredIdempotencyKeys(ctx, limit)
 }
 
-func (s *Store) claim(mid uuid.UUID, row gen.OpenrailsIdempotencyKey) *Claim {
-	return &Claim{s: s, merchantID: mid, operation: row.Operation, key: row.IdempotencyKey, token: row.Claims, Reclaimed: row.Claims > 1}
+func (s *Store) claim(mid uuid.UUID, row gen.OpenrailsIdempotencyKey, start time.Time) *Claim {
+	return &Claim{s: s, merchantID: mid, operation: row.Operation, key: row.IdempotencyKey, token: row.Token,
+		Reclaimed: row.Claims > 1, confirmed: start}
 }
 
 func record(row gen.OpenrailsIdempotencyKey) *Record {
@@ -163,66 +191,110 @@ func record(row gen.OpenrailsIdempotencyKey) *Record {
 }
 
 // Claim is an owned processing claim. Reclaimed reports that an earlier claim
-// on the key failed, expired or was abandoned by a dead owner.
+// on the key failed, expired or was abandoned.
 type Claim struct {
 	s          *Store
 	merchantID uuid.UUID
 	operation  string
 	key        string
-	token      int64
+	token      uuid.UUID
 	Reclaimed  bool
+	// confirmed is when the last confirmed lease was requested: the lease
+	// runs from at least then, on the database's clock.
+	confirmed time.Time
 }
 
-// Renew extends the lease from now. It runs beside the owner's work, so it
-// takes its own short-lived pool connection rather than the owner's pin.
+// Renew extends the lease; ErrClaimLost when it already lapsed or passed on.
 func (c *Claim) Renew(ctx context.Context) error {
-	now := c.s.clock.Now().UTC()
-	n, err := c.s.db.GenDirectory().RenewIdempotencyKey(ctx, gen.RenewIdempotencyKeyParams{
-		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Claims: c.token,
-		LeaseExpiresAt: now.Add(c.s.lease), Now: now,
-	})
-	return fenced(n, err)
+	_, err := c.renew(ctx)
+	return err
 }
 
-// Hold renews the lease every quarter lease until the returned stop is
-// called, so only a dead owner's claim lapses, never a slow one's.
-func (c *Claim) Hold(ctx context.Context) (stop func()) {
-	ctx, cancel := context.WithCancel(ctx)
+// renew returns when the confirmed lease was requested.
+func (c *Claim) renew(ctx context.Context) (time.Time, error) {
+	start := time.Now()
+	n, err := c.s.leases.GenDirectory().RenewIdempotencyKey(ctx, gen.RenewIdempotencyKeyParams{
+		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Token: c.token,
+		LeaseSeconds: c.s.lease.Seconds(),
+	})
+	return start, fenced(n, err)
+}
+
+// Hold renews the lease every quarter lease and returns the context the owner
+// works under. It is cancelled with ErrClaimLost once a renewal is refused,
+// or when none was confirmed in time to be sure the lease has not lapsed.
+// stop ends the renewals; call it before Complete or Fail.
+func (c *Claim) Hold(ctx context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	quit := make(chan struct{})
 	done := make(chan struct{})
-	ticker := c.s.clock.NewTicker(c.s.lease / 4)
+	margin := c.s.lease / 5
+	confirmed := c.confirmed
 	go func() {
 		defer close(done)
+		ticker := time.NewTicker(c.s.lease / 4)
 		defer ticker.Stop()
+		deadline := time.NewTimer(time.Until(confirmed.Add(c.s.lease - margin)))
+		defer deadline.Stop()
 		for {
 			select {
+			case <-quit:
+				return
 			case <-ctx.Done():
 				return
-			case <-ticker.Chan():
-				if err := c.Renew(ctx); err != nil && ctx.Err() == nil {
+			case <-deadline.C:
+				cancel(ErrClaimLost)
+				return
+			case <-ticker.C:
+				// A renewal never runs past the deadline it could extend.
+				rctx, rcancel := context.WithDeadline(ctx, confirmed.Add(c.s.lease-margin))
+				at, err := c.renew(rctx)
+				rcancel()
+				if errors.Is(err, ErrClaimLost) {
+					cancel(ErrClaimLost)
+					return
+				}
+				if err != nil {
 					log.WithContext(ctx).WithError(err).WithFields(log.Fields{"operation": c.operation, "idempotency_key": c.key}).
 						Warn("idempotency lease renewal failed")
+					continue
 				}
+				confirmed = at
+				deadline.Reset(time.Until(confirmed.Add(c.s.lease - margin)))
 			}
 		}
 	}()
-	return func() {
-		cancel()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() { close(quit) })
 		<-done
+		cancel(context.Canceled)
 	}
+}
+
+// InTx proves inside tx that the claim is still held, and share-locks it so
+// no reclaim can pass it on before tx ends. Use it as a commit guard.
+func (c *Claim) InTx(ctx context.Context, tx pgx.Tx) error {
+	_, err := gen.New(tx).HoldIdempotencyKeyInTx(ctx, gen.HoldIdempotencyKeyInTxParams{
+		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Token: c.token,
+	})
+	if db.IsNotFound(err) {
+		return ErrClaimLost
+	}
+	return err
 }
 
 // Complete records the replayable result and releases the lease.
 func (c *Claim) Complete(ctx context.Context, result json.RawMessage) error {
 	ctx, cancel := detached(ctx)
 	defer cancel()
-	now := c.s.clock.Now().UTC()
 	var body []byte
 	if len(result) > 0 {
 		body = result
 	}
 	n, err := c.s.queries(ctx).CompleteIdempotencyKey(ctx, gen.CompleteIdempotencyKeyParams{
-		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Claims: c.token,
-		Result: body, ExpiresAt: now.Add(c.s.ttl), Now: now,
+		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Token: c.token,
+		Result: body, TtlSeconds: c.s.ttl.Seconds(),
 	})
 	return fenced(n, err)
 }
@@ -231,14 +303,13 @@ func (c *Claim) Complete(ctx context.Context, result json.RawMessage) error {
 func (c *Claim) Fail(ctx context.Context, cause error) error {
 	ctx, cancel := detached(ctx)
 	defer cancel()
-	now := c.s.clock.Now().UTC()
 	msg := "failed"
 	if cause != nil {
 		msg = cause.Error()
 	}
 	n, err := c.s.queries(ctx).FailIdempotencyKey(ctx, gen.FailIdempotencyKeyParams{
-		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Claims: c.token,
-		Error: msg, ExpiresAt: now.Add(c.s.ttl), Now: now,
+		MerchantID: c.merchantID, Operation: c.operation, IdempotencyKey: c.key, Token: c.token,
+		Error: msg, TtlSeconds: c.s.ttl.Seconds(),
 	})
 	return fenced(n, err)
 }

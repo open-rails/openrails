@@ -14,32 +14,34 @@ import (
 
 const claimIdempotencyKey = `-- name: ClaimIdempotencyKey :one
 
-INSERT INTO openrails.idempotency_keys (merchant_id, operation, idempotency_key, status, lease_expires_at, expires_at, created_at, updated_at)
-VALUES ($1::uuid, $2::text, $3::text, 'processing',
-        $4::timestamptz, $5::timestamptz, $6::timestamptz, $6::timestamptz)
+INSERT INTO openrails.idempotency_keys (merchant_id, operation, idempotency_key, status, token, lease_expires_at, expires_at)
+VALUES ($1::uuid, $2::text, $3::text, 'processing', $4::uuid,
+        now() + make_interval(secs => $5::float8),
+        now() + make_interval(secs => $6::float8))
 ON CONFLICT (merchant_id, operation, idempotency_key) DO NOTHING
-RETURNING merchant_id, operation, idempotency_key, status, claims, result, error, lease_expires_at, expires_at, created_at, updated_at
+RETURNING merchant_id, operation, idempotency_key, status, token, claims, result, error, lease_expires_at, expires_at, created_at, updated_at
 `
 
 type ClaimIdempotencyKeyParams struct {
 	MerchantID     uuid.UUID
 	Operation      string
 	IdempotencyKey string
-	LeaseExpiresAt time.Time
-	ExpiresAt      time.Time
-	Now            time.Time
+	Token          uuid.UUID
+	LeaseSeconds   float64
+	TtlSeconds     float64
 }
 
 // Durable request and webhook-delivery claims (#1099). Every statement names
-// the merchant; claims run on the base pool, independent of any caller tx.
+// the merchant, and every time is the database's now(): replicas' clocks
+// never decide who owns a key.
 func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (OpenrailsIdempotencyKey, error) {
 	row := q.db.QueryRow(ctx, claimIdempotencyKey,
 		arg.MerchantID,
 		arg.Operation,
 		arg.IdempotencyKey,
-		arg.LeaseExpiresAt,
-		arg.ExpiresAt,
-		arg.Now,
+		arg.Token,
+		arg.LeaseSeconds,
+		arg.TtlSeconds,
 	)
 	var i OpenrailsIdempotencyKey
 	err := row.Scan(
@@ -47,6 +49,7 @@ func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyK
 		&i.Operation,
 		&i.IdempotencyKey,
 		&i.Status,
+		&i.Token,
 		&i.Claims,
 		&i.Result,
 		&i.Error,
@@ -61,34 +64,32 @@ func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyK
 const completeIdempotencyKey = `-- name: CompleteIdempotencyKey :execrows
 UPDATE openrails.idempotency_keys
 SET status = 'succeeded', result = $1::jsonb,
-    lease_expires_at = $2::timestamptz,
-    expires_at = $3::timestamptz,
-    updated_at = $2::timestamptz
-WHERE merchant_id = $4::uuid
-  AND operation = $5::text
-  AND idempotency_key = $6::text
-  AND status = 'processing' AND claims = $7::bigint
+    lease_expires_at = now(),
+    expires_at = now() + make_interval(secs => $2::float8),
+    updated_at = now()
+WHERE merchant_id = $3::uuid
+  AND operation = $4::text
+  AND idempotency_key = $5::text
+  AND status = 'processing' AND token = $6::uuid
 `
 
 type CompleteIdempotencyKeyParams struct {
 	Result         []byte
-	Now            time.Time
-	ExpiresAt      time.Time
+	TtlSeconds     float64
 	MerchantID     uuid.UUID
 	Operation      string
 	IdempotencyKey string
-	Claims         int64
+	Token          uuid.UUID
 }
 
 func (q *Queries) CompleteIdempotencyKey(ctx context.Context, arg CompleteIdempotencyKeyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeIdempotencyKey,
 		arg.Result,
-		arg.Now,
-		arg.ExpiresAt,
+		arg.TtlSeconds,
 		arg.MerchantID,
 		arg.Operation,
 		arg.IdempotencyKey,
-		arg.Claims,
+		arg.Token,
 	)
 	if err != nil {
 		return 0, err
@@ -100,27 +101,22 @@ const deleteExpiredIdempotencyKeys = `-- name: DeleteExpiredIdempotencyKeys :exe
 DELETE FROM openrails.idempotency_keys ik
 USING (
     SELECT merchant_id, operation, idempotency_key FROM openrails.idempotency_keys
-    WHERE expires_at <= $1::timestamptz
+    WHERE expires_at <= now()
     ORDER BY expires_at
-    LIMIT $2::int
+    LIMIT $1::int
     FOR UPDATE SKIP LOCKED
 ) expired
 WHERE ik.merchant_id = expired.merchant_id
   AND ik.operation = expired.operation
   AND ik.idempotency_key = expired.idempotency_key
-  AND ik.expires_at <= $1::timestamptz
+  AND ik.expires_at <= now()
 `
-
-type DeleteExpiredIdempotencyKeysParams struct {
-	Now      time.Time
-	RowLimit int32
-}
 
 // Bounded: row_limit caps one statement, the GC worker loops. SKIP LOCKED
 // leaves a row being reclaimed to its claimant; the outer predicate re-checks
 // expiry against the row actually deleted.
-func (q *Queries) DeleteExpiredIdempotencyKeys(ctx context.Context, arg DeleteExpiredIdempotencyKeysParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteExpiredIdempotencyKeys, arg.Now, arg.RowLimit)
+func (q *Queries) DeleteExpiredIdempotencyKeys(ctx context.Context, rowLimit int32) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredIdempotencyKeys, rowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -130,34 +126,32 @@ func (q *Queries) DeleteExpiredIdempotencyKeys(ctx context.Context, arg DeleteEx
 const failIdempotencyKey = `-- name: FailIdempotencyKey :execrows
 UPDATE openrails.idempotency_keys
 SET status = 'failed', error = $1::text,
-    lease_expires_at = $2::timestamptz,
-    expires_at = $3::timestamptz,
-    updated_at = $2::timestamptz
-WHERE merchant_id = $4::uuid
-  AND operation = $5::text
-  AND idempotency_key = $6::text
-  AND status = 'processing' AND claims = $7::bigint
+    lease_expires_at = now(),
+    expires_at = now() + make_interval(secs => $2::float8),
+    updated_at = now()
+WHERE merchant_id = $3::uuid
+  AND operation = $4::text
+  AND idempotency_key = $5::text
+  AND status = 'processing' AND token = $6::uuid
 `
 
 type FailIdempotencyKeyParams struct {
 	Error          string
-	Now            time.Time
-	ExpiresAt      time.Time
+	TtlSeconds     float64
 	MerchantID     uuid.UUID
 	Operation      string
 	IdempotencyKey string
-	Claims         int64
+	Token          uuid.UUID
 }
 
 func (q *Queries) FailIdempotencyKey(ctx context.Context, arg FailIdempotencyKeyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, failIdempotencyKey,
 		arg.Error,
-		arg.Now,
-		arg.ExpiresAt,
+		arg.TtlSeconds,
 		arg.MerchantID,
 		arg.Operation,
 		arg.IdempotencyKey,
-		arg.Claims,
+		arg.Token,
 	)
 	if err != nil {
 		return 0, err
@@ -166,7 +160,8 @@ func (q *Queries) FailIdempotencyKey(ctx context.Context, arg FailIdempotencyKey
 }
 
 const getIdempotencyKey = `-- name: GetIdempotencyKey :one
-SELECT merchant_id, operation, idempotency_key, status, claims, result, error, lease_expires_at, expires_at, created_at, updated_at FROM openrails.idempotency_keys
+SELECT merchant_id, operation, idempotency_key, status, token, claims, result, error, lease_expires_at, expires_at, created_at, updated_at, (status = 'processing' AND lease_expires_at > now())::boolean AS leased
+FROM openrails.idempotency_keys
 WHERE merchant_id = $1::uuid
   AND operation = $2::text
   AND idempotency_key = $3::text
@@ -178,14 +173,31 @@ type GetIdempotencyKeyParams struct {
 	IdempotencyKey string
 }
 
-func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (OpenrailsIdempotencyKey, error) {
+type GetIdempotencyKeyRow struct {
+	MerchantID     uuid.UUID
+	Operation      string
+	IdempotencyKey string
+	Status         string
+	Token          uuid.UUID
+	Claims         int64
+	Result         []byte
+	Error          *string
+	LeaseExpiresAt time.Time
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Leased         bool
+}
+
+func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (GetIdempotencyKeyRow, error) {
 	row := q.db.QueryRow(ctx, getIdempotencyKey, arg.MerchantID, arg.Operation, arg.IdempotencyKey)
-	var i OpenrailsIdempotencyKey
+	var i GetIdempotencyKeyRow
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Operation,
 		&i.IdempotencyKey,
 		&i.Status,
+		&i.Token,
 		&i.Claims,
 		&i.Result,
 		&i.Error,
@@ -193,29 +205,61 @@ func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyPa
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Leased,
 	)
 	return i, err
 }
 
+const holdIdempotencyKeyInTx = `-- name: HoldIdempotencyKeyInTx :one
+SELECT true::boolean AS held FROM openrails.idempotency_keys
+WHERE merchant_id = $1::uuid
+  AND operation = $2::text
+  AND idempotency_key = $3::text
+  AND status = 'processing' AND token = $4::uuid AND lease_expires_at > now()
+FOR SHARE
+`
+
+type HoldIdempotencyKeyInTxParams struct {
+	MerchantID     uuid.UUID
+	Operation      string
+	IdempotencyKey string
+	Token          uuid.UUID
+}
+
+// The owner's own transaction proves it still holds the claim. The share
+// lock makes a reclaim wait for that transaction, so a superseded owner can
+// never commit.
+func (q *Queries) HoldIdempotencyKeyInTx(ctx context.Context, arg HoldIdempotencyKeyInTxParams) (bool, error) {
+	row := q.db.QueryRow(ctx, holdIdempotencyKeyInTx,
+		arg.MerchantID,
+		arg.Operation,
+		arg.IdempotencyKey,
+		arg.Token,
+	)
+	var held bool
+	err := row.Scan(&held)
+	return held, err
+}
+
 const reclaimIdempotencyKey = `-- name: ReclaimIdempotencyKey :one
 UPDATE openrails.idempotency_keys
-SET status = 'processing', claims = claims + 1, result = NULL, error = NULL,
-    lease_expires_at = $1::timestamptz,
-    expires_at = $2::timestamptz,
-    updated_at = $3::timestamptz
+SET status = 'processing', token = $1::uuid, claims = claims + 1, result = NULL, error = NULL,
+    lease_expires_at = now() + make_interval(secs => $2::float8),
+    expires_at = now() + make_interval(secs => $3::float8),
+    updated_at = now()
 WHERE merchant_id = $4::uuid
   AND operation = $5::text
   AND idempotency_key = $6::text
-  AND (expires_at <= $3::timestamptz
+  AND (expires_at <= now()
        OR status = 'failed'
-       OR (status = 'processing' AND lease_expires_at <= $3::timestamptz))
-RETURNING merchant_id, operation, idempotency_key, status, claims, result, error, lease_expires_at, expires_at, created_at, updated_at
+       OR (status = 'processing' AND lease_expires_at <= now()))
+RETURNING merchant_id, operation, idempotency_key, status, token, claims, result, error, lease_expires_at, expires_at, created_at, updated_at
 `
 
 type ReclaimIdempotencyKeyParams struct {
-	LeaseExpiresAt time.Time
-	ExpiresAt      time.Time
-	Now            time.Time
+	Token          uuid.UUID
+	LeaseSeconds   float64
+	TtlSeconds     float64
 	MerchantID     uuid.UUID
 	Operation      string
 	IdempotencyKey string
@@ -226,9 +270,9 @@ type ReclaimIdempotencyKeyParams struct {
 // against the winner's row.
 func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempotencyKeyParams) (OpenrailsIdempotencyKey, error) {
 	row := q.db.QueryRow(ctx, reclaimIdempotencyKey,
-		arg.LeaseExpiresAt,
-		arg.ExpiresAt,
-		arg.Now,
+		arg.Token,
+		arg.LeaseSeconds,
+		arg.TtlSeconds,
 		arg.MerchantID,
 		arg.Operation,
 		arg.IdempotencyKey,
@@ -239,6 +283,7 @@ func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempote
 		&i.Operation,
 		&i.IdempotencyKey,
 		&i.Status,
+		&i.Token,
 		&i.Claims,
 		&i.Result,
 		&i.Error,
@@ -252,32 +297,30 @@ func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempote
 
 const renewIdempotencyKey = `-- name: RenewIdempotencyKey :execrows
 UPDATE openrails.idempotency_keys
-SET lease_expires_at = $1::timestamptz,
-    expires_at = GREATEST(expires_at, $1::timestamptz),
-    updated_at = $2::timestamptz
-WHERE merchant_id = $3::uuid
-  AND operation = $4::text
-  AND idempotency_key = $5::text
-  AND status = 'processing' AND claims = $6::bigint
+SET lease_expires_at = now() + make_interval(secs => $1::float8),
+    expires_at = GREATEST(expires_at, now() + make_interval(secs => $1::float8)),
+    updated_at = now()
+WHERE merchant_id = $2::uuid
+  AND operation = $3::text
+  AND idempotency_key = $4::text
+  AND status = 'processing' AND token = $5::uuid AND lease_expires_at > now()
 `
 
 type RenewIdempotencyKeyParams struct {
-	LeaseExpiresAt time.Time
-	Now            time.Time
+	LeaseSeconds   float64
 	MerchantID     uuid.UUID
 	Operation      string
 	IdempotencyKey string
-	Claims         int64
+	Token          uuid.UUID
 }
 
 func (q *Queries) RenewIdempotencyKey(ctx context.Context, arg RenewIdempotencyKeyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renewIdempotencyKey,
-		arg.LeaseExpiresAt,
-		arg.Now,
+		arg.LeaseSeconds,
 		arg.MerchantID,
 		arg.Operation,
 		arg.IdempotencyKey,
-		arg.Claims,
+		arg.Token,
 	)
 	if err != nil {
 		return 0, err

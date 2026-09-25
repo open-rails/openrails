@@ -387,19 +387,21 @@ func (s *CheckoutSessionService) createSession(ctx context.Context, req *Checkou
 		// keyed by this request key, so the rerun resumes them, never charges again.
 	}
 
-	stop := func() {}
+	work, stop := ctx, func() {}
 	if claim != nil {
-		stop = claim.Hold(ctx)
+		work, stop = claim.Hold(ctx)
 	}
-	resp, err := s.createSessionWithValidation(ctx, req, user)
+	resp, err := s.createSessionWithValidation(work, req, user)
 	stop() // before Complete/Fail: a renewal must never race the final state
+	if claim != nil && errors.Is(context.Cause(work), idempotency.ErrClaimLost) {
+		// The lease lapsed under us: another request owns the key now.
+		return nil, ErrCheckoutSessionPending
+	}
 	if err != nil {
 		if claim != nil {
-			// Deterministic refusals release the key; anything else keeps the
-			// claim until its lease lapses, so a retry waits out the outcome.
-			if errors.Is(err, ErrCheckoutSessionValidation) || errors.Is(err, ErrCheckoutSessionConflict) {
-				failCheckoutIdempotency(ctx, claim, checkoutSessionIdempotencyOp, req.IdempotencyKey, err)
-			}
+			// Every outcome settles the claim. A replay reruns against the
+			// durable session and its operation, which answer it the same way.
+			failCheckoutIdempotency(ctx, claim, checkoutSessionIdempotencyOp, req.IdempotencyKey, err)
 		}
 		return nil, err
 	}
@@ -718,9 +720,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	if err := s.initializeSession(ctx, session, &req.Payment, req.SuccessURL, req.CancelURL, user); err != nil {
-		if !errors.Is(err, ErrCheckoutSessionPending) {
-			_ = s.markInitializationFailed(ctx, session, err)
-		}
+		_ = s.markInitializationFailed(ctx, session, err)
 		// An accepted card operation that awaits authentication or is still
 		// unresolved answers with its state; a definite decline stays a 402.
 		if response, found, readErr := s.acceptedOperationSessionResponse(ctx, session); readErr == nil && found && response.Status != string(models.CheckoutSessionStatusFailed) {
@@ -764,18 +764,25 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 	}
 
+	// A replay answers a declined sale with the same refusal as the request
+	// that was declined.
+	if err := s.saleRefusal(ctx, existing); err != nil {
+		return nil, err
+	}
 	if response, found, err := s.acceptedOperationSessionResponse(ctx, existing); found || err != nil {
 		return response, err
 	}
 	switch existing.Status {
 	case models.CheckoutSessionStatusRequiresAction, models.CheckoutSessionStatusSucceeded:
 		return s.sessionToResponse(existing), nil
-	case models.CheckoutSessionStatusCreated, models.CheckoutSessionStatusFailed:
+	case models.CheckoutSessionStatusFailed:
+		// Final for its key: a stale request for an abandoned attempt never
+		// runs it again after the host moved on (#1099).
+		return nil, failedSessionError(existing)
+	case models.CheckoutSessionStatusCreated:
 		existing.IdempotencyKey = requested.IdempotencyKey
 		if err := s.initializeSession(ctx, existing, payment, successURL, cancelURL, user); err != nil {
-			if !errors.Is(err, ErrCheckoutSessionPending) {
-				_ = s.markInitializationFailed(ctx, existing, err)
-			}
+			_ = s.markInitializationFailed(ctx, existing, err)
 			if response, found, readErr := s.acceptedOperationSessionResponse(ctx, existing); readErr == nil && found && response.Status != string(models.CheckoutSessionStatusFailed) {
 				return response, nil
 			}

@@ -303,18 +303,6 @@ func (s *CheckoutSessionService) MarkProviderCheckoutClosed(ctx context.Context,
 	return nil
 }
 
-func (s *CheckoutSessionService) markInitializationFailed(ctx context.Context, session *models.CheckoutSession, failure error) error {
-	if _, accepted := session.RailState[acceptedPurchaseTermsKey]; accepted && session.Rail == models.RailStripe {
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		_, err = s.db.Gen(ctx).FailHostedPurchaseInitialization(ctx, gen.FailHostedPurchaseInitializationParams{MerchantID: mid.UUID(), ID: session.ID, Reason: failure.Error(), Now: s.now()})
-		return err
-	}
-	return s.MarkFailed(ctx, session.ID, failure.Error(), "")
-}
-
 func (s *CheckoutSessionService) saveInitializedSession(ctx context.Context, session *models.CheckoutSession) (*CheckoutSessionResponse, error) {
 	if err := s.repo.Update(ctx, session); err != nil {
 		// A fast provider webhook can commit payment/closure before the create

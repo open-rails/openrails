@@ -227,7 +227,7 @@ func (p *Pool) MerchantTx(ctx context.Context, id merchant.ID, fn func(context.C
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commit(ctx, tx)
 }
 
 func (p *Pool) Ping(ctx context.Context) error { return p.raw.Ping(ctx) }

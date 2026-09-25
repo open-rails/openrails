@@ -67,5 +67,5 @@ func (p *Pool) CommittedMerchantTx(ctx context.Context, id merchant.ID, fn func(
 	if err = fn(transactionContext(merchant.WithID(ctx, id)), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commit(ctx, tx)
 }

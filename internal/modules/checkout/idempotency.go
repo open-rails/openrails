@@ -14,6 +14,7 @@ import (
 // idempotencyStore claims request keys durably (#1099).
 type idempotencyStore interface {
 	Begin(ctx context.Context, operation, key string) (*idempotency.Claim, *idempotency.Record, error)
+	Get(ctx context.Context, operation, key string) (*idempotency.Record, error)
 }
 
 type idempotencyCompleter interface {

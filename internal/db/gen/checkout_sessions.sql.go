@@ -485,6 +485,46 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckout
 	return result.RowsAffected(), nil
 }
 
+const failCheckoutSessionInitialization = `-- name: FailCheckoutSessionInitialization :execrows
+UPDATE openrails.checkout_sessions cs
+SET status = 'failed', updated_at = $1::timestamptz,
+    rail_state = COALESCE(cs.rail_state, '{}'::jsonb) || jsonb_build_object('message', $2::text, 'failure_reason', $2::text,
+      'failure_kind', $3::text, 'failure_code', $4::text)
+WHERE cs.merchant_id = $5::uuid AND cs.id = $6::uuid
+  AND cs.deleted_at IS NULL AND cs.status = 'created'
+  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+                  WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY($7::text[]))
+`
+
+type FailCheckoutSessionInitializationParams struct {
+	Now        time.Time
+	Reason     string
+	Kind       string
+	Code       string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	IntentKeys []string
+}
+
+// A definite refusal fails a created session only while no provider
+// operation was admitted for it. Run after LockCheckoutSessionForAdmission in
+// the same transaction, so the intent check reads committed admissions.
+func (q *Queries) FailCheckoutSessionInitialization(ctx context.Context, arg FailCheckoutSessionInitializationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failCheckoutSessionInitialization,
+		arg.Now,
+		arg.Reason,
+		arg.Kind,
+		arg.Code,
+		arg.MerchantID,
+		arg.ID,
+		arg.IntentKeys,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const failHostedPurchaseInitialization = `-- name: FailHostedPurchaseInitialization :execrows
 UPDATE openrails.checkout_sessions
 SET status='failed', updated_at=$1::timestamptz,
@@ -769,6 +809,11 @@ SELECT EXISTS (
    AND s.status<>'succeeded'
    AND (s.status IN ('created','requires_action')
      OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
+   -- #1099: a session whose sale finally failed is resolved by that outcome.
+   AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents f
+     WHERE f.merchant_id=s.merchant_id
+       AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
+       AND f.status IN ('failed_terminal','expired','superseded'))
 )
 `
 
@@ -830,6 +875,27 @@ func (q *Queries) ListStaleCheckoutSessions(ctx context.Context, arg ListStaleCh
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCheckoutSessionForAdmission = `-- name: LockCheckoutSessionForAdmission :one
+SELECT status FROM openrails.checkout_sessions
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockCheckoutSessionForAdmissionParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #1099: the session's lock orders intent admission against a definite
+// failure; the caller refuses to admit on a terminal session.
+func (q *Queries) LockCheckoutSessionForAdmission(ctx context.Context, arg LockCheckoutSessionForAdmissionParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockCheckoutSessionForAdmission, arg.MerchantID, arg.ID)
+	var status string
+	err := row.Scan(&status)
+	return status, err
 }
 
 const lockCheckoutSessionForShare = `-- name: LockCheckoutSessionForShare :one

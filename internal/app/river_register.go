@@ -93,7 +93,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add cleanup expired data worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.IdempotencyGCWorker{DB: r.DB, Clock: clock}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.IdempotencyGCWorker{DB: r.DB}); err != nil {
 		return fmt.Errorf("add idempotency gc worker: %w", err)
 	}
 	// or#795: the batch account-updater cadence. Ingests results for open

@@ -39,6 +39,14 @@ func (m *Mock) DropSaleResponses(n int) {
 	m.drop = n
 }
 
+// DeclineValidations makes the issuer decline the next n card verifications
+// (code 200), whatever the card.
+func (m *Mock) DeclineValidations(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.declineValid = n
+}
+
 // RefuseDuplicates makes the next n sales trip the duplicate check.
 func (m *Mock) RefuseDuplicates(n int) {
 	m.mu.Lock()

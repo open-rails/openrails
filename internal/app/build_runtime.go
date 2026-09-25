@@ -64,6 +64,9 @@ const (
 	// the simple, honest per-provider rate limit (thousands of merchants share
 	// each provider's API budget; a small worker cap is the brake).
 	standaloneRiverProviderRefreshQueueMaxWorkers = 4
+	// idempotencyLeaseConns sizes the lease-renewal pool: one short UPDATE per
+	// held claim every quarter lease.
+	idempotencyLeaseConns = 4
 )
 
 type runtimeOverrides struct {
@@ -226,7 +229,18 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		userDirectory = overrides.UserDirectory
 		usernameResolver = overrides.UsernameResolver
 	}
-	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver, stripeClients)
+	// #1099: idempotency leases renew on their own connections, so a pool
+	// saturated by the requests holding them can never starve a renewal.
+	leaseDB, err := database.SeparatePool(ctx, idempotencyLeaseConns)
+	if err != nil {
+		return nil, fmt.Errorf("idempotency lease pool: %w", err)
+	}
+	defer func() {
+		if buildErr != nil {
+			_ = leaseDB.Close()
+		}
+	}()
+	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver, stripeClients)
 	if err != nil {
 		return nil, err
 	}
@@ -290,6 +304,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime := &Runtime{
 		StripeClients: stripeClients,
 		DB:            database,
+		leaseDB:       leaseDB,
 		RedisClient:   redisClient,
 		redisOwned:    redisOwned,
 		Config:        cfg,
@@ -646,7 +661,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
+func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -769,11 +784,11 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService, err := idempotency.NewStore(database, clock, checkout.IdempotencyTTL, checkout.IdempotencyLease)
+	idempotencyService, err := idempotency.NewStore(database, leaseDB, checkout.IdempotencyTTL, checkout.IdempotencyLease)
 	if err != nil {
 		return nil, err
 	}
-	webhookClaims, err := idempotency.NewStore(database, clock, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
+	webhookClaims, err := idempotency.NewStore(database, leaseDB, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
 	if err != nil {
 		return nil, err
 	}

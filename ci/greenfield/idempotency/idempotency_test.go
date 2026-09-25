@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -32,17 +31,21 @@ import (
 
 const (
 	ttl   = time.Hour
-	lease = 20 * time.Second
+	lease = 2 * time.Second
 )
 
-// env is one schema shared by two replicas, each with its own connection
-// pool, over one engine clock.
+// replica is one process: its request pool and its lease-renewal pool.
+type replica struct {
+	db     *db.DB
+	leases *db.DB
+}
+
+// env is one schema shared by two replicas.
 type env struct {
 	t        *testing.T
 	admin    *pgxpool.Pool
 	schema   string
-	clock    *clockwork.FakeClock
-	replicas [2]*db.DB
+	replicas [2]replica
 	merchant uuid.UUID
 }
 
@@ -54,8 +57,7 @@ func newEnv(t *testing.T) *env {
 	}
 	admin, err := pgxpool.New(t.Context(), dsn)
 	require.NoError(t, err)
-	e := &env{t: t, admin: admin, schema: "gf_idem_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16],
-		clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))}
+	e := &env{t: t, admin: admin, schema: "gf_idem_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -71,8 +73,12 @@ func newEnv(t *testing.T) *env {
 		pool, err := pgxpool.NewWithConfig(t.Context(), config)
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
-		e.replicas[i], err = db.NewWithPGXPool(pool, e.schema)
+		d, err := db.NewWithPGXPool(pool, e.schema)
 		require.NoError(t, err)
+		leases, err := d.SeparatePool(t.Context(), 2)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = leases.Close() })
+		e.replicas[i] = replica{db: d, leases: leases}
 	}
 	return e
 }
@@ -81,22 +87,37 @@ func (e *env) q(sql string) string {
 	return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{e.schema}.Sanitize()+".")
 }
 
+func (e *env) exec(sql string, args ...any) int64 {
+	tag, err := e.admin.Exec(e.t.Context(), e.q(sql), args...)
+	require.NoError(e.t, err)
+	return tag.RowsAffected()
+}
+
 func (e *env) newMerchant() uuid.UUID {
 	var id uuid.UUID
 	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`INSERT INTO openrails.merchants (slug) VALUES ($1) RETURNING id`), "idem-"+uuid.NewString()[:8]).Scan(&id))
 	return id
 }
 
-func (e *env) store(replica int) *idempotency.Store {
-	s, err := idempotency.NewStore(e.replicas[replica], e.clock, ttl, lease)
+func (e *env) storeWith(i int, ttl, lease time.Duration) *idempotency.Store {
+	s, err := idempotency.NewStore(e.replicas[i].db, e.replicas[i].leases, ttl, lease)
 	require.NoError(e.t, err)
 	return s
 }
+
+func (e *env) store(i int) *idempotency.Store { return e.storeWith(i, ttl, lease) }
 
 func (e *env) ctx() context.Context { return e.ctxFor(e.merchant) }
 
 func (e *env) ctxFor(id uuid.UUID) context.Context {
 	return merchant.WithID(e.t.Context(), merchant.ID(id))
+}
+
+// lapse ends key's lease on the database clock, as elapsed time or starved
+// renewals would.
+func (e *env) lapse(op, key string) {
+	require.EqualValues(e.t, 1, e.exec(`UPDATE openrails.idempotency_keys SET lease_expires_at = now() - interval '1 millisecond'
+		WHERE operation = $1 AND idempotency_key = $2 AND status = 'processing'`, op, key))
 }
 
 func (e *env) rows() int {
@@ -161,6 +182,7 @@ func TestBeginRaceHasOneWinner(t *testing.T) {
 			require.NoError(t, o.err)
 			require.Nil(t, o.claim, "a live claim is never shared")
 			require.Equal(t, idempotency.StatusProcessing, o.rec.Status)
+			require.True(t, o.rec.Leased)
 		}
 		require.NoError(t, won[0].Complete(e.ctx(), json.RawMessage(fmt.Sprintf(`{"round":%d}`, round))))
 		for _, o := range e.race(16, "checkout", key) {
@@ -199,8 +221,8 @@ func TestReplayAfterComplete(t *testing.T) {
 	claim, _, err := e.store(0).Begin(e.ctx(), "checkout", "replay")
 	require.NoError(t, err)
 	require.NoError(t, claim.Complete(e.ctx(), json.RawMessage(`{"session":"cs_1","status":"succeeded"}`)))
-	for replica := range 2 {
-		again, rec, err := e.store(replica).Begin(e.ctx(), "checkout", "replay")
+	for i := range 2 {
+		again, rec, err := e.store(i).Begin(e.ctx(), "checkout", "replay")
 		require.NoError(t, err)
 		require.Nil(t, again)
 		require.Equal(t, idempotency.StatusSucceeded, rec.Status)
@@ -236,34 +258,28 @@ func TestFailThenRetry(t *testing.T) {
 	require.Empty(t, rec.Error)
 }
 
-// A held claim survives any silence shorter than its lease; a dead owner's
-// claim is reclaimed by exactly one caller once the lease lapses, and the
+// A held claim outlives many leases; a dead owner's claim is reclaimed by
+// exactly one caller once its lease lapses on the database clock, and the
 // dead owner is fenced out.
 func TestStaleProcessing(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	owner, _, err := e.store(0).Begin(e.ctx(), "checkout", "stale")
 	require.NoError(t, err)
-	stop := owner.Hold(e.ctx())
-	require.NoError(t, e.clock.BlockUntilContext(t.Context(), 1))
-	for range 8 {
-		before, err := e.store(1).Get(e.ctx(), "checkout", "stale")
-		require.NoError(t, err)
-		e.clock.Advance(lease / 4)
-		require.Eventually(t, func() bool {
-			rec, err := e.store(1).Get(e.ctx(), "checkout", "stale")
-			return err == nil && rec.LeaseExpiresAt.After(before.LeaseExpiresAt)
-		}, 5*time.Second, 5*time.Millisecond, "the owner renews its lease")
-		for _, o := range e.race(4, "checkout", "stale") {
-			require.NoError(t, o.err)
-			require.Nil(t, o.claim, "a slow owner keeps its claim")
-		}
+	work, stop := owner.Hold(e.ctx())
+	deadline := time.Now().Add(3 * lease)
+	for time.Now().Before(deadline) {
+		require.Empty(t, owners(t, e.race(4, "checkout", "stale")), "a live owner keeps its claim")
+		time.Sleep(lease / 5)
 	}
+	require.NoError(t, work.Err(), "renewals kept the owner working")
 	stop() // the owner dies
 
-	e.clock.Advance(lease - time.Second)
 	require.Empty(t, owners(t, e.race(16, "checkout", "stale")), "not before the lease lapses")
-	e.clock.Advance(time.Second)
+	require.Eventually(t, func() bool {
+		rec, err := e.store(1).Get(e.ctx(), "checkout", "stale")
+		return err == nil && !rec.Leased
+	}, 2*lease, 20*time.Millisecond)
 	won := owners(t, e.race(16, "checkout", "stale"))
 	require.Len(t, won, 1, "exactly one reclaims a lapsed claim")
 	require.True(t, won[0].Reclaimed)
@@ -273,6 +289,63 @@ func TestStaleProcessing(t *testing.T) {
 	rec, err := e.store(0).Get(e.ctx(), "checkout", "stale")
 	require.NoError(t, err)
 	require.JSONEq(t, `{"fresh":true}`, string(rec.Result))
+}
+
+// When no renewal can be confirmed, the owner's context is cancelled before
+// its lease can lapse: an owner stops before anyone else may start.
+func TestHoldCancelsBeforeTheLeaseLapses(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	owner, _, err := e.store(0).Begin(e.ctx(), "checkout", "starved")
+	require.NoError(t, err)
+	// Starve renewals: a transaction holds the claim row.
+	tx, err := e.admin.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	_, err = tx.Exec(t.Context(), e.q(`SELECT 1 FROM openrails.idempotency_keys WHERE idempotency_key = 'starved' FOR UPDATE`))
+	require.NoError(t, err)
+
+	work, stop := owner.Hold(e.ctx())
+	defer stop()
+	select {
+	case <-work.Done():
+	case <-time.After(2 * lease):
+		t.Fatal("the owner kept working without a confirmed lease")
+	}
+	require.ErrorIs(t, context.Cause(work), idempotency.ErrClaimLost)
+	rec, err := e.store(1).Watch(e.ctx(), "checkout", "starved")
+	require.NoError(t, err)
+	require.True(t, rec.Leased, "the owner stopped while its lease still held")
+
+	// A reclaim after the lapse passes the key on; the stopped owner's
+	// transactions refuse to commit.
+	require.NoError(t, tx.Rollback(t.Context()))
+	e.lapse("checkout", "starved")
+	won := owners(t, e.race(8, "checkout", "starved"))
+	require.Len(t, won, 1)
+	guarded := db.WithCommitGuard(e.ctx(), owner.InTx)
+	err = e.replicas[0].db.MerchantTx(guarded, func(ctx context.Context, tx pgx.Tx) error { return nil })
+	require.ErrorIs(t, err, idempotency.ErrClaimLost)
+	require.NoError(t, e.replicas[1].db.MerchantTx(db.WithCommitGuard(e.ctx(), won[0].InTx), func(context.Context, pgx.Tx) error { return nil }))
+}
+
+// A token is never reused: an owner whose row was collected and claimed
+// afresh is still fenced out.
+func TestTokenSurvivesCollection(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	old, _, err := e.store(0).Begin(e.ctx(), "checkout", "gc")
+	require.NoError(t, err)
+	e.exec(`UPDATE openrails.idempotency_keys SET lease_expires_at = now() - interval '2 seconds', expires_at = now() - interval '1 second' WHERE idempotency_key = 'gc'`)
+	deleted, err := riverjobs.IdempotencyGCWorker{DB: e.replicas[1].db}.Sweep(t.Context())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted)
+	fresh, _, err := e.store(1).Begin(e.ctx(), "checkout", "gc")
+	require.NoError(t, err)
+	require.NotNil(t, fresh)
+	require.False(t, fresh.Reclaimed, "the key started over")
+	require.ErrorIs(t, old.Complete(e.ctx(), json.RawMessage(`{"old":true}`)), idempotency.ErrClaimLost)
+	require.NoError(t, fresh.Complete(e.ctx(), json.RawMessage(`{"fresh":true}`)))
 }
 
 // Rows past their expiry are claimable afresh, and the GC job deletes them in
@@ -288,21 +361,18 @@ func TestExpiryAndGC(t *testing.T) {
 	require.NoError(t, err)
 	// A backlog larger than several batches, across two merchants.
 	other := e.newMerchant()
-	now := e.clock.Now()
 	for _, m := range []uuid.UUID{e.merchant, other} {
-		_, err := e.admin.Exec(t.Context(), e.q(`INSERT INTO openrails.idempotency_keys
-			(merchant_id, operation, idempotency_key, status, result, lease_expires_at, expires_at, created_at, updated_at)
-			SELECT $1, 'webhook.stripe.test', 'evt_' || g, 'succeeded', '{}'::jsonb, $2, $3, $2, $2 FROM generate_series(1, 1300) g`),
-			m, now, now.Add(ttl))
-		require.NoError(t, err)
+		e.exec(`INSERT INTO openrails.idempotency_keys
+			(merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
+			SELECT $1, 'webhook.stripe.test', 'evt_' || g, 'succeeded', gen_random_uuid(), '{}'::jsonb, now(), now() + interval '1 hour' FROM generate_series(1, 1300) g`, m)
 	}
 	require.Equal(t, 2602, e.rows())
 
-	gc := riverjobs.IdempotencyGCWorker{DB: e.replicas[1], Clock: e.clock}
+	gc := riverjobs.IdempotencyGCWorker{DB: e.replicas[1].db}
 	require.NoError(t, gc.Work(t.Context(), &river.Job[riverjobs.IdempotencyGCArgs]{}))
 	require.Equal(t, 2602, e.rows(), "nothing has expired")
 
-	e.clock.Advance(ttl)
+	e.exec(`UPDATE openrails.idempotency_keys SET lease_expires_at = LEAST(lease_expires_at, now() - interval '2 seconds'), expires_at = now() - interval '1 second'`)
 	again, _, err := s.Begin(e.ctx(), "checkout", "done")
 	require.NoError(t, err)
 	require.NotNil(t, again, "an expired result is not replayed; the key is claimable afresh")
@@ -313,6 +383,42 @@ func TestExpiryAndGC(t *testing.T) {
 	require.NoError(t, again.Complete(e.ctx(), json.RawMessage(`{"n":2}`)))
 }
 
+// dedup is one replica's webhook dedup service.
+func (e *env) dedup(i int, lease time.Duration) *webhooks.DeduplicationService {
+	d, err := webhooks.NewDeduplicationService(e.storeWith(i, webhooks.WebhookClaimTTL, lease), e.replicas[i].db)
+	require.NoError(e.t, err)
+	return d
+}
+
+// effects is a money effect table: one row per application of an event. The
+// handler marks the event in its effect transaction.
+func (e *env) effects() func(ctx context.Context, d *db.DB, event string) error {
+	e.exec(`CREATE TABLE openrails.test_effects (event text NOT NULL)`)
+	return func(ctx context.Context, d *db.DB, event string) error {
+		return effect(ctx, d, event, true)
+	}
+}
+
+// effect applies event; mark=false is a handler that leaves the mark to
+// ProcessWebhook.
+func effect(ctx context.Context, d *db.DB, event string, mark bool) error {
+	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO openrails.test_effects (event) VALUES ($1)`, event); err != nil {
+			return err
+		}
+		if !mark {
+			return nil
+		}
+		return webhooks.MarkWebhookProcessedInTx(ctx, tx)
+	})
+}
+
+func (e *env) applied(event string) int {
+	var n int
+	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`SELECT count(*) FROM openrails.test_effects WHERE event = $1`), event).Scan(&n))
+	return n
+}
+
 // Two replicas' dedup services see one delivery storm for one event: its
 // effects run once and every duplicate answers the owner's outcome. A
 // retryable failure releases the event to the next redelivery on any replica;
@@ -321,23 +427,18 @@ func TestExpiryAndGC(t *testing.T) {
 func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	var dedup [2]*webhooks.DeduplicationService
-	for i := range dedup {
-		claims, err := idempotency.NewStore(e.replicas[i], e.clock, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
-		require.NoError(t, err)
-		dedup[i], err = webhooks.NewDeduplicationService(claims, e.replicas[i])
-		require.NoError(t, err)
-	}
+	dedup := [2]*webhooks.DeduplicationService{e.dedup(0, webhooks.WebhookClaimLease), e.dedup(1, webhooks.WebhookClaimLease)}
+	apply := e.effects()
 	source := models.RailStripe.EventSource()
-	deliver := func(replica int, event string, effect func(ctx context.Context) error) error {
-		return dedup[replica].ProcessWebhook(e.ctx(), event, "payment_intent.succeeded", source, effect)
+	deliver := func(i int, event string, effect func(ctx context.Context) error) error {
+		return dedup[i].ProcessWebhook(e.ctx(), event, "payment_intent.succeeded", source, effect)
 	}
 
-	var applied atomic.Int32
-	slow := func(ctx context.Context) error {
-		applied.Add(1)
-		time.Sleep(100 * time.Millisecond)
-		return nil
+	slow := func(i int) func(ctx context.Context) error {
+		return func(ctx context.Context) error {
+			time.Sleep(100 * time.Millisecond)
+			return apply(ctx, e.replicas[i].db, "evt_storm")
+		}
 	}
 	start := make(chan struct{})
 	errs := make([]error, 16)
@@ -347,52 +448,109 @@ func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[i] = deliver(i%2, "evt_storm", slow)
+			errs[i] = deliver(i%2, "evt_storm", slow(i%2))
 		}()
 	}
 	close(start)
 	wg.Wait()
-	require.EqualValues(t, 1, applied.Load(), "one delivery applies the event")
+	require.Equal(t, 1, e.applied("evt_storm"), "one delivery applies the event")
 	for _, err := range errs {
 		require.NoError(t, err, "a concurrent duplicate waits for the owner and answers its outcome")
 	}
-	for replica := range 2 {
-		require.NoError(t, deliver(replica, "evt_storm", slow))
+	for i := range 2 {
+		require.NoError(t, deliver(i, "evt_storm", slow(i)))
 	}
-	require.EqualValues(t, 1, applied.Load(), "late redeliveries change nothing")
+	require.Equal(t, 1, e.applied("evt_storm"), "late redeliveries change nothing")
 
 	// A retryable failure on one replica; the redelivery lands on the other.
 	var tries atomic.Int32
-	flaky := func(ctx context.Context) error {
-		if tries.Add(1) == 1 {
-			return errors.New("database hiccup")
+	flaky := func(i int) func(ctx context.Context) error {
+		return func(ctx context.Context) error {
+			if tries.Add(1) == 1 {
+				return errors.New("database hiccup")
+			}
+			return apply(ctx, e.replicas[i].db, "evt_flaky")
 		}
-		return nil
 	}
-	require.Error(t, deliver(0, "evt_flaky", flaky))
-	require.NoError(t, deliver(1, "evt_flaky", flaky))
-	require.NoError(t, deliver(0, "evt_flaky", flaky))
+	require.Error(t, deliver(0, "evt_flaky", flaky(0)))
+	require.NoError(t, deliver(1, "evt_flaky", flaky(1)))
+	require.NoError(t, deliver(0, "evt_flaky", flaky(0)))
 	require.EqualValues(t, 2, tries.Load())
+	require.Equal(t, 1, e.applied("evt_flaky"))
 
 	// A replica dies after committing the effects and the webhook_events mark
 	// in the handler's transaction, before completing its claim.
-	var crashed atomic.Int32
-	claims, err := idempotency.NewStore(e.replicas[0], e.clock, webhooks.WebhookClaimTTL, webhooks.WebhookClaimLease)
-	require.NoError(t, err)
-	dead, _, err := claims.Begin(e.ctx(), webhookOp(source), "evt_crash")
+	op := fmt.Sprintf("webhook.%s.%s", source, "payment_intent.succeeded")
+	dead, _, err := e.store(0).Begin(e.ctx(), op, "evt_crash")
 	require.NoError(t, err)
 	require.NotNil(t, dead)
-	_, err = e.admin.Exec(t.Context(), e.q(`INSERT INTO openrails.webhook_events (merchant_id, op, event_id) VALUES ($1, $2, 'evt_crash')`), e.merchant, webhookOp(source))
-	require.NoError(t, err)
-	count := func(ctx context.Context) error { crashed.Add(1); return nil }
-	e.clock.Advance(webhooks.WebhookClaimLease)
-	require.NoError(t, deliver(1, "evt_crash", count))
+	e.exec(`INSERT INTO openrails.webhook_events (merchant_id, op, event_id) VALUES ($1, $2, 'evt_crash')`, e.merchant, op)
+	e.lapse(op, "evt_crash")
+	var crashed atomic.Int32
+	require.NoError(t, deliver(1, "evt_crash", func(context.Context) error { crashed.Add(1); return nil }))
 	require.Zero(t, crashed.Load(), "the applied fact wins over the reclaimed delivery")
-	rec, err := e.store(1).Get(e.ctx(), webhookOp(source), "evt_crash")
+	rec, err := e.store(1).Get(e.ctx(), op, "evt_crash")
 	require.NoError(t, err)
 	require.Equal(t, idempotency.StatusSucceeded, rec.Status)
 }
 
-func webhookOp(source models.EventSource) string {
-	return fmt.Sprintf("webhook.%s.%s", source, "payment_intent.succeeded")
+// An owner whose lease lapsed while it was alive and mid-handler never
+// commits its effects: the replica that reclaimed the event applies it once,
+// and the superseded owner's transaction is refused by its commit guard.
+func TestWebhookOwnerLosingItsLeaseNeverApplies(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	// A lease long enough that the owner's own renewals do not notice first:
+	// the commit guard alone must stop it.
+	dedup := [2]*webhooks.DeduplicationService{e.dedup(0, time.Minute), e.dedup(1, time.Minute)}
+	e.effects()
+	// A handler without the in-transaction mark: only the guard protects it.
+	apply := func(ctx context.Context, d *db.DB, event string) error { return effect(ctx, d, event, false) }
+	source := models.RailStripe.EventSource()
+	op := fmt.Sprintf("webhook.%s.%s", source, "charge.refunded")
+
+	inside, resume := make(chan struct{}), make(chan struct{})
+	ownerErr := make(chan error, 1)
+	go func() {
+		ownerErr <- dedup[0].ProcessWebhook(e.ctx(), "evt_lapse", "charge.refunded", source, func(ctx context.Context) error {
+			close(inside)
+			<-resume
+			return apply(ctx, e.replicas[0].db, "evt_lapse")
+		})
+	}()
+	<-inside
+	e.lapse(op, "evt_lapse")
+	require.NoError(t, dedup[1].ProcessWebhook(e.ctx(), "evt_lapse", "charge.refunded", source, func(ctx context.Context) error {
+		return apply(ctx, e.replicas[1].db, "evt_lapse")
+	}))
+	close(resume)
+	require.ErrorIs(t, <-ownerErr, idempotency.ErrClaimLost)
+	require.Equal(t, 1, e.applied("evt_lapse"), "the event is applied once")
+	for i := range 2 {
+		require.NoError(t, dedup[i].ProcessWebhook(e.ctx(), "evt_lapse", "charge.refunded", source, func(ctx context.Context) error {
+			return apply(ctx, e.replicas[i].db, "evt_lapse")
+		}))
+	}
+	require.Equal(t, 1, e.applied("evt_lapse"))
+}
+
+// A handler transaction that finds the event already marked rolls back.
+func TestWebhookMarkRollsBackADuplicateTransaction(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	apply := e.effects()
+	d := e.dedup(0, webhooks.WebhookClaimLease)
+	source := models.RailStripe.EventSource()
+	op := fmt.Sprintf("webhook.%s.%s", source, "invoice.paid")
+	require.NoError(t, d.ProcessWebhook(e.ctx(), "evt_twice", "invoice.paid", source, func(ctx context.Context) error {
+		// The mark lands between the handler's two effect transactions.
+		if err := apply(ctx, e.replicas[0].db, "evt_twice"); err != nil {
+			return err
+		}
+		return apply(ctx, e.replicas[0].db, "evt_twice")
+	}))
+	require.Equal(t, 1, e.applied("evt_twice"), "the second transaction saw the mark and rolled back")
+	var marks int
+	require.NoError(t, e.admin.QueryRow(t.Context(), e.q(`SELECT count(*) FROM openrails.webhook_events WHERE op = $1 AND event_id = 'evt_twice'`), op).Scan(&marks))
+	require.Equal(t, 1, marks)
 }

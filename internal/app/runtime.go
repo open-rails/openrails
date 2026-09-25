@@ -66,7 +66,9 @@ type Runtime struct {
 	Auth          *billingauth.Integration
 	StripeClients *stripeapi.Factory
 	DB            *db.DB
-	RedisClient   *redis.Client
+	// leaseDB is the small pool idempotency lease renewals use (#1099).
+	leaseDB     *db.DB
+	RedisClient *redis.Client
 	// redisOwned marks a self-dialed client; injected clients are borrowed and
 	// must never be closed here (the host owns their lifecycle).
 	redisOwned bool
@@ -358,6 +360,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.riverProducerPool != nil {
 		r.riverProducerPool.Close()
 		r.riverProducerPool = nil
+	}
+	if r.leaseDB != nil {
+		_ = r.leaseDB.Close()
+		r.leaseDB = nil
 	}
 	if r.DB != nil {
 		if err := r.DB.Close(); err != nil {

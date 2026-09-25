@@ -5,6 +5,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"strings"
 )
@@ -22,7 +23,19 @@ func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *Checkou
 	if err != nil {
 		return nil, err
 	}
-	id := idempotentCheckoutSessionID(mid.UUID(), scopeIdempotencyKey(user.ID, req.IdempotencyKey))
+	scoped := scopeIdempotencyKey(user.ID, req.IdempotencyKey)
+	// While a request for the key is running, its outcome is not known: a host
+	// must not move on to another attempt (#1099).
+	if s.idempotencyService != nil {
+		rec, err := s.idempotencyService.Get(ctx, checkoutSessionIdempotencyOp, scoped)
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil && rec.Status == idempotency.StatusProcessing && rec.Leased {
+			return nil, ErrCheckoutSessionPending
+		}
+	}
+	id := idempotentCheckoutSessionID(mid.UUID(), scoped)
 	session, err := s.repo.GetByID(ctx, id)
 	if db.IsNotFound(err) {
 		return nil, ErrCheckoutSessionNotFound

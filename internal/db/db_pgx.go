@@ -134,7 +134,7 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commit(ctx, tx)
 }
 
 // MerchantTx runs fn inside a pgx transaction with the merchant GUC pinned
@@ -157,7 +157,7 @@ func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx
 	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commit(ctx, tx)
 }
 
 // setMerchantLocalGUCPgx sets the merchant GUC transaction-locally
