@@ -163,9 +163,13 @@ posture alone accepts nothing extra.
 - DataLink (`datalink.ccbill.com`) also powers transaction-export
   reconciliation, gated on the `datalink_username`/`datalink_password` pair.
   Once the merchant is armed for enforcement, a member DataLink lists as
-  active while the local row is not is reactivated only on a future expiry
-  (paid-through) date. A future rebill date alone is not payment: it raises a
-  `pull.ccbill.active_without_paid_through` finding instead.
+  active while the local row is not raises a `pull.ccbill.active_without_payment`
+  finding. A roster is not payment: only a RenewalSuccess restores access.
+- Webhooks mirror CCBill through the lifecycle machine, one event per post on
+  the locked row. BillingDateChange never moves the paid period;
+  UserReactivation resumes only inside a paid period (else a
+  `life.ccbill.reactivation_unapplied` finding); a RenewalSuccess on a cancelled
+  row is recorded for refund review.
 - Automatic CCBill refunds are unavailable. The admin API refuses full and
   partial requests; combined cancel-and-refund refuses before cancellation.
   Existing unresolved refund intents retain their reserved balance and evidence

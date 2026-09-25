@@ -4458,6 +4458,7 @@
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "identitydir": "github.com/open-rails/openrails/internal/identity",
       "json": "encoding/json",
+      "lifecycle": "github.com/open-rails/openrails/internal/billing/lifecycle",
       "log": "github.com/sirupsen/logrus",
       "merchantconfig": "github.com/open-rails/openrails/internal/modules/merchantconfig",
       "models": "github.com/open-rails/openrails/internal/db/models",

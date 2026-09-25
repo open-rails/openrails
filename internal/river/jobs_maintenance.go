@@ -59,8 +59,6 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 	priceService := catalog.NewPriceService(w.DB)
 	productService := catalog.NewProductService(w.DB)
 	subscriptionService := subscriptions.NewSubscriptionService(w.DB, priceService, productService, nil, w.Clock)
-	lifecycleService := &subscriptions.SubscriptionLifecycleService{DB: w.DB}
-	lifecycleService.SetClock(w.Clock)
 	localActive, err := subscriptionService.GetActiveSubscriptionsForPSP(ctx, "ccbill")
 	if err != nil {
 		return fmt.Errorf("load local ccbill subscriptions: %w", err)
@@ -90,7 +88,7 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 		}
 	}
 	missingLocal := 0
-	reactivatedLocal := 0
+	flagged := 0
 	for railSubID, record := range remoteActive {
 		if _, ok := localByRailID[railSubID]; ok {
 			continue
@@ -116,41 +114,13 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 		if existing.Status == "active" {
 			continue
 		}
-		// Only a paid-through expiry date is payment evidence. A member CCBill
-		// still lists with just a future rebill date may be in CCBill's own
-		// dunning: an operator decides, the lane never grants access on it.
-		paidThrough, ok := ccbill.DataLinkPaidThrough(record, w.now())
-		if !ok {
-			if ferr := w.recordUnpaidActiveFinding(ctx, existing, record); ferr != nil {
-				log.WithContext(ctx).WithError(ferr).Warn("CCBillReconcile: failed to persist unpaid-active finding")
-			}
-			continue
+		// A roster listing is a status fact, never payment (#1094): the lane
+		// changes no lifecycle state. CCBill's RenewalSuccess (webhook or
+		// transaction export) is what restores access.
+		if ferr := w.recordUnpaidActiveFinding(ctx, existing, record); ferr != nil {
+			log.WithContext(ctx).WithError(ferr).Warn("CCBillReconcile: failed to persist unpaid-active finding")
 		}
-		if _, err := lifecycleService.ReactivateMembership(ctx, &subscriptions.ReactivateMembershipParams{
-			Rail:                "ccbill",
-			RailSubscriptionID:  railSubID,
-			CurrentPeriodEndsAt: &paidThrough,
-		}); err != nil {
-			if subscriptions.IsTerminalTransitionBlocked(err) {
-				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_terminal_reactivation_blocked", &existing.ID, existing.CustomerID.String(), railSubID, &record, err); alertErr != nil {
-					log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist terminal-blocked repair alert")
-				}
-				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"subscription_id":      existing.ID,
-					"rail_subscription_id": railSubID,
-				}).Warn("CCBillReconcile: reactivation blocked by terminal transition policy")
-				continue
-			}
-			return fmt.Errorf("reactivate ccbill subscription %s: %w", existing.ID, err)
-		}
-		reactivatedLocal++
-		log.WithContext(ctx).WithFields(log.Fields{
-			"rail_subscription_id": railSubID,
-			"username":             record.Username,
-			"email":                record.Email,
-			"rebill_date":          record.RebillDate,
-			"expiry_date":          record.ExpiryDate,
-		}).Warn("CCBillReconcile: reactivated local subscription from DataLink active member")
+		flagged++
 	}
 	log.WithContext(ctx).WithFields(log.Fields{
 		"record_count":         len(records),
@@ -158,15 +128,15 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 		"local_active_count":   len(localActive),
 		"missing_remote_count": missingRemote,
 		"missing_local_count":  missingLocal,
-		"reactivated_count":    reactivatedLocal,
+		"flagged_count":        flagged,
 		"reconcile_mode":       "guarded_repair_no_destructive_expiry",
 	}).Info("CCBillReconcile: completed guarded repair scan")
 	return nil
 }
 
-// UnpaidActiveFindingType: CCBill lists the member as active but reports no
-// paid-through date, while the local row is not active.
-const UnpaidActiveFindingType = "pull.ccbill.active_without_paid_through"
+// UnpaidActiveFindingType: CCBill lists the member as active while the local
+// row is not, and no payment fact explains it.
+const UnpaidActiveFindingType = "pull.ccbill.active_without_payment"
 
 func (w CCBillReconciler) recordUnpaidActiveFinding(ctx context.Context, sub *models.Subscription, record ccbill.CCBillRecord) error {
 	evidence, err := json.Marshal(map[string]any{
@@ -180,7 +150,7 @@ func (w CCBillReconciler) recordUnpaidActiveFinding(ctx context.Context, sub *mo
 	if err != nil {
 		return err
 	}
-	action := "CCBill lists this member as active without a paid-through date. Confirm a successful rebill in CCBill before restoring access."
+	action := "CCBill lists this member as active, but OpenRails holds no payment for the current period. Confirm the rebill in CCBill; its RenewalSuccess restores access."
 	_, err = w.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        sub.MerchantID,
 		FindingType:       UnpaidActiveFindingType,

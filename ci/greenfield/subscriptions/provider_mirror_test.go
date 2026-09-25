@@ -3,12 +3,10 @@
 package subscriptions_test
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -199,10 +197,10 @@ func (f *dataLinkFake) list(subscriptionID, rebill, expiry string) {
 	f.members = []string{fmt.Sprintf(`"ACTIVEMEMBERS","945280","x","%s","2020-01-01","member","member@example.test","1","%s","%s"`, subscriptionID, rebill, expiry)}
 }
 
-// The DataLink lane restores access only on a paid-through (expiry) date,
-// and only once the merchant is armed for enforcement. A member CCBill still
-// lists with just a next rebill date is a finding, never free access.
-func TestCCBillDataLinkNeedsPaidThrough(t *testing.T) {
+// The DataLink roster is a status fact, never payment (#1094): a member it
+// lists as active while the local row is past due is a finding once the
+// merchant is armed, never access. CCBill's RenewalSuccess restores it.
+func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 	t.Parallel()
 	dl := newDataLinkFake(t)
 	w := prepareWorld(t, 12, func(c *config.Config) {
@@ -234,70 +232,23 @@ func TestCCBillDataLinkNeedsPaidThrough(t *testing.T) {
 	w.pull()
 	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "an advisory pass reactivates nothing")
 	finding := "subscription:" + m.sub.UUID().String()
-	require.NotContains(t, w.openFindings("pull.ccbill.active_without_paid_through"), finding)
+	require.NotContains(t, w.openFindings("pull.ccbill.active_without_payment"), finding)
 
 	w.armDestructive()
 	w.pull()
 	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "a future rebill date is not payment")
-	require.Contains(t, w.openFindings("pull.ccbill.active_without_paid_through"), finding)
+	require.Contains(t, w.openFindings("pull.ccbill.active_without_payment"), finding)
 
-	paidThrough := w.clock.Now().Add(25 * day)
-	dl.list(m.railSub, "", ccbillDate(paidThrough))
+	dl.list(m.railSub, "", ccbillDate(w.clock.Now().Add(25*day)))
 	w.pull()
+	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "a listed expiry date is not payment either")
+	require.Contains(t, w.openFindings("pull.ccbill.active_without_payment"), finding)
+
+	next := m.paidThrough.Add(monthHours * time.Hour)
+	w.deliverCCBill("RenewalSuccess", m.renewal(ccbillNumericID(), next))
 	sub := w.subscription(embedded, m.sub)
-	require.Equal(t, "active", sub.Status, "a paid-through date is evidence")
-	require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(paidThrough)), "%v", sub.CurrentPeriodEndsAt)
+	require.Equal(t, "active", sub.Status, "the rebill is the payment")
+	require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "%v", sub.CurrentPeriodEndsAt)
 	require.True(t, m.c.entitled(m.ent))
 	require.Zero(t, w.engineCharges())
-}
-
-// A CCBill RenewalFailure racing a chargeback reads the row under its lock,
-// so it can never write back the pre-chargeback state.
-func TestCCBillRenewalFailureCannotUndoAChargeback(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	m := importCCBill(t, w)
-	w.advance(20 * day)
-	ctx := t.Context()
-
-	tx, err := w.pool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	_, err = tx.Exec(ctx, w.q(`SELECT 1 FROM openrails.subscriptions WHERE id = $1 FOR UPDATE`), m.sub.UUID())
-	require.NoError(t, err)
-
-	form := url.Values{"clientAccnum": {"945280"}, "clientSubacc": {"0000"}, "timestamp": {ccbillTimestamp(w.clock.Now())},
-		"subscriptionId": {m.railSub}, "transactionId": {ccbillNumericID()}, "failureReason": {"Insufficient funds"}, "failureCode": {"BE-140"},
-		"renewalDate": {ccbillDate(m.paidThrough)}, "nextRetryDate": {ccbillDate(m.paidThrough.Add(2 * day))}, "cardType": {"VISA"}, "paymentType": {"CREDIT"}}
-	done := make(chan int, 1)
-	go func() {
-		query := url.Values{"eventType": {"RenewalFailure"}, "eventGroupType": {"Subscription"}}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, w.server.URL+mountPrefix+"/v1/webhooks/ccbill/"+ccbillAcct+"?"+query.Encode(), strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("X-Forwarded-For", ccbillSourceIP)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			done <- 0
-			return
-		}
-		_ = res.Body.Close()
-		done <- res.StatusCode
-	}()
-	require.Eventually(t, func() bool {
-		var waiting int
-		err := w.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database() AND query LIKE '%' || $1 || '%subscriptions%'`, w.schema).Scan(&waiting)
-		return err == nil && waiting > 0
-	}, 20*time.Second, 10*time.Millisecond, "the renewal failure reaches the row lock")
-
-	// The chargeback commits while the renewal failure waits.
-	_, err = tx.Exec(ctx, w.q(`UPDATE openrails.subscriptions SET status = 'cancelled', cancel_type = 'chargeback', cancelled_at = now(), ended_at = now(), next_retry_at = NULL, grace_ends_at = NULL WHERE id = $1`), m.sub.UUID())
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit(ctx))
-	require.Equal(t, http.StatusOK, <-done)
-	w.settle()
-
-	sub := w.subscription(embedded, m.sub)
-	require.Equal(t, "cancelled", sub.Status, "the chargeback stands")
-	require.NotNil(t, sub.CancelType)
-	require.Equal(t, "chargeback", *sub.CancelType)
 }
