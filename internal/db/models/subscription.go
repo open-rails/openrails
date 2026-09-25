@@ -99,6 +99,13 @@ type Subscription struct {
 	// after calling DeleteRecurringSubscription.
 	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
 
+	// LifecycleRev is the lifecycle revision the row was read at (#1091 part
+	// C). A lifecycle decision advances it by one against this value.
+	LifecycleRev int64 `json:"-"`
+	// loaded is the lifecycle state as read; decision names what changed it.
+	loaded   lifecycleFields
+	decision string
+
 	// Relationships
 	Price         *Price         `json:"price,omitempty"`
 	PaymentMethod *PaymentMethod `json:"payment_method,omitempty"`
@@ -138,6 +145,7 @@ func (s *Subscription) ActivateWithPrice(price *Price) error {
 	s.ProductID = price.ProductID // Update product when price changes (upgrade/downgrade)
 	s.CancelFeedback = nil
 	s.Status = StatusActive
+	s.decision = "paid_upgrade"
 
 	return nil
 }
@@ -171,3 +179,49 @@ func (s *Subscription) Validate(amountCents int64) error {
 
 	return nil
 }
+
+// lifecycleFields are the columns only a lifecycle decision may change.
+type lifecycleFields struct {
+	status                 SubscriptionStatus
+	periodStart, periodEnd time.Time
+	cancelType             CancelType
+	cancelledAt, endedAt   time.Time
+}
+
+func (s *Subscription) lifecycle() lifecycleFields {
+	f := lifecycleFields{status: s.Status}
+	if s.CurrentPeriodStartsAt != nil {
+		f.periodStart = s.CurrentPeriodStartsAt.UTC()
+	}
+	if s.CurrentPeriodEndsAt != nil {
+		f.periodEnd = s.CurrentPeriodEndsAt.UTC()
+	}
+	if s.CancelType != nil {
+		f.cancelType = *s.CancelType
+	}
+	if s.CancelledAt != nil {
+		f.cancelledAt = s.CancelledAt.UTC()
+	}
+	if s.EndedAt != nil {
+		f.endedAt = s.EndedAt.UTC()
+	}
+	return f
+}
+
+// RememberLifecycle records the lifecycle state as persisted: after a read,
+// an insert or a saved decision.
+func (s *Subscription) RememberLifecycle() {
+	s.loaded, s.decision = s.lifecycle(), ""
+}
+
+// LifecycleChanged reports whether status, paid period or cancellation
+// differ from what was read.
+func (s *Subscription) LifecycleChanged() bool { return s.lifecycle() != s.loaded }
+
+// MarkLifecycleDecision names the decision that changed the lifecycle
+// fields. Only the lifecycle state machine and a short allowlist of explicit
+// operator/plan-change paths call it (guarded by TestLifecycleDecisionWriters).
+func (s *Subscription) MarkLifecycleDecision(name string) { s.decision = name }
+
+// LifecycleDecision is the decision pending on this row, or "".
+func (s *Subscription) LifecycleDecision() string { return s.decision }

@@ -306,7 +306,8 @@ func (q *Queries) ResetReconciliationStateUnproven(ctx context.Context, merchant
 const restoreSubscriptionsFromBeforeImages = `-- name: RestoreSubscriptionsFromBeforeImages :execrows
 
 UPDATE openrails.subscriptions s
-SET status                   = (b.before->>'status')::openrails.subscription_status,
+SET lifecycle_rev            = s.lifecycle_rev + 1,
+    status                   = (b.before->>'status')::openrails.subscription_status,
     current_period_starts_at = (b.before->>'current_period_starts_at')::timestamptz,
     current_period_ends_at   = (b.before->>'current_period_ends_at')::timestamptz,
     ended_at                 = (b.before->>'ended_at')::timestamptz,

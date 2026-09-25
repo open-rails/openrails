@@ -71,6 +71,7 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 				locked.Status, locked.CancelledAt, locked.EndedAt, locked.CancelType, locked.CancelFeedback = models.StatusCancelled, &now, &now, &cancelType, &reason
 				locked.DeletionScheduledAt = &now
 				locked.ClearRetrySchedule()
+				locked.MarkLifecycleDecision("provider_refund_revoke")
 				if err := repo.UpdateAt(ctx, locked, now); err != nil {
 					return err
 				}

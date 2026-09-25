@@ -133,7 +133,7 @@ func TestUnknownCadenceFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
 	// Mid-dunning when the cadence went missing: a retry is due now.
-	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now())
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now())
 	require.NoError(t, err)
 	charges := l.engineCharges()
 	w.runRenewals()

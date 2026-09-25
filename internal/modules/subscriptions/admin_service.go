@@ -180,6 +180,7 @@ func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subsc
 			case "status":
 				if status, ok := value.(models.SubscriptionStatus); ok {
 					subscription.Status = status
+					subscription.MarkLifecycleDecision("admin_status_override")
 				}
 			case "notes":
 				if notes, ok := value.(string); ok {
@@ -437,6 +438,7 @@ func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Cont
 			subscription.CurrentPeriodStartsAt = &now
 		}
 		subscription.CurrentPeriodEndsAt = &end
+		subscription.MarkLifecycleDecision("admin_extend")
 		if err := NewSubscriptionRepo(d).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}

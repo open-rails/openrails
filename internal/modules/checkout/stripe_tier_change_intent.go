@@ -544,6 +544,7 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in 
 			return fmt.Errorf("subscription %s is on price %s, neither the frozen predecessor %s nor the target %s", sub.ID, sub.PriceID, p.OldPriceID, p.PriceID)
 		}
 		sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &start, &end
+		sub.MarkLifecycleDecision("tier_change_paid")
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {
 			return err
 		}

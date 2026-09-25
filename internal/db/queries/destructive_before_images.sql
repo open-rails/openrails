@@ -112,7 +112,8 @@ ORDER BY created_at;
 -- psp_id / customer_id / product_id / price_id (identity, which no transition
 -- moves).
 UPDATE openrails.subscriptions s
-SET status                   = (b.before->>'status')::openrails.subscription_status,
+SET lifecycle_rev            = s.lifecycle_rev + 1,
+    status                   = (b.before->>'status')::openrails.subscription_status,
     current_period_starts_at = (b.before->>'current_period_starts_at')::timestamptz,
     current_period_ends_at   = (b.before->>'current_period_ends_at')::timestamptz,
     ended_at                 = (b.before->>'ended_at')::timestamptz,
