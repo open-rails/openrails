@@ -92,7 +92,7 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 	require.True(t, r.periodEnd.Equal(end))
 	require.NotNil(t, r.nextRetryAt)
 	require.True(t, r.nextRetryAt.Equal(retryAt))
-	require.Zero(t, w.nmi.saleAttempts(), "convergence charges nobody")
+	require.Zero(t, len(w.nmi.Attempts()), "convergence charges nobody")
 
 	// The next pass reports the backlog and the funnel; renewals NMI
 	// charged clear it.
@@ -107,7 +107,7 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 	w.converge()
 	require.Empty(t, w.openFindings("life.unverified.backlog"), "the backlog clears with its rows")
 	require.Contains(t, w.findingsAbout(overdue.sub), "life.subscription.renewal_overdue:auto_fixed")
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }
 
 // An import commits its members together with their access, so a converge
