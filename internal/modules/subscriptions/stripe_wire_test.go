@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -87,7 +88,9 @@ func TestStripeCreateCustomerWire(t *testing.T) {
 // nothing can be swept across operations. Every step has its own key.
 func TestStripeCollectInvoiceWire(t *testing.T) {
 	params := StripeInvoiceCollectionParams{CustomerID: "cus_1", PaymentMethodID: "pm_1", AmountCents: 1999, Currency: "USD", IdempotencyKey: "idem-1"}
-	paid := `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","payment_intent":"pi_1","charge":"ch_1","metadata":{"openrails_collection_key":"idem-1"}}`
+	// Pinned API shape: no top-level charge/payment_intent; the paid
+	// InvoicePayment carries the expanded PaymentIntent.
+	paid := `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","metadata":{"openrails_collection_key":"idem-1"},` + stripeInvoicePayments + `}`
 	routes := func(finalized string) map[string]string {
 		return map[string]string{
 			"POST /v1/invoices":               `{"id":"in_1","status":"draft"}`,
@@ -102,6 +105,7 @@ func TestStripeCollectInvoiceWire(t *testing.T) {
 		result, err := wireService(srv.URL).CollectInvoice(context.Background(), params)
 		require.NoError(t, err)
 		require.Equal(t, "ch_1", result.ChargeID)
+		require.Equal(t, "pi_1", result.PaymentIntentID)
 		reqs := got()
 		require.Len(t, reqs, 3)
 		inv, item, fin := reqs[0], reqs[1], reqs[2]
@@ -114,6 +118,7 @@ func TestStripeCollectInvoiceWire(t *testing.T) {
 		require.Equal(t, []string{"1999"}, item.form["amount"])
 		require.Equal(t, []string{"usd"}, item.form["currency"])
 		require.Equal(t, []string{"idem-1:invoice", "idem-1:invoice_item", "idem-1:finalize"}, []string{inv.idem, item.idem, fin.idem})
+		require.Equal(t, stripeInvoicePaymentsExpand, fin.form["expand[]"])
 	})
 
 	t.Run("open after finalize is paid explicitly with the frozen card", func(t *testing.T) {
@@ -124,6 +129,7 @@ func TestStripeCollectInvoiceWire(t *testing.T) {
 		require.Equal(t, "/v1/invoices/in_1/pay", pay.path)
 		require.Equal(t, "pm_1", pay.form.Get("payment_method"))
 		require.Equal(t, "idem-1:pay", pay.idem)
+		require.Equal(t, stripeInvoicePaymentsExpand, pay.form["expand[]"])
 	})
 
 	for name, body := range map[string]string{
@@ -131,6 +137,9 @@ func TestStripeCollectInvoiceWire(t *testing.T) {
 		"other currency":  `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"eur","charge":"ch_1","metadata":{"openrails_collection_key":"idem-1"}}`,
 		"other operation": `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","charge":"ch_1","metadata":{"openrails_collection_key":"idem-2"}}`,
 		"not paid":        `{"id":"in_1","status":"uncollectible","amount_paid":0,"currency":"usd","metadata":{"openrails_collection_key":"idem-1"}}`,
+		// Removed legacy fields are not a receipt.
+		"legacy charge only": `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","charge":"ch_1","payment_intent":"pi_1","metadata":{"openrails_collection_key":"idem-1"}}`,
+		"split payments":     `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","metadata":{"openrails_collection_key":"idem-1"},"payments":{"data":[{"invoice":"in_1","status":"paid","payment":{"type":"charge","charge":"ch_1"}},{"invoice":"in_1","status":"paid","payment":{"type":"charge","charge":"ch_2"}}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := routes(body)
@@ -141,6 +150,40 @@ func TestStripeCollectInvoiceWire(t *testing.T) {
 		})
 	}
 
+}
+
+const stripeInvoicePayments = `"payments":{"object":"list","has_more":false,"data":[` +
+	`{"id":"inpay_0","invoice":"in_1","status":"canceled","payment":{"type":"payment_intent","payment_intent":{"id":"pi_0","latest_charge":"ch_0"}}},` +
+	`{"id":"inpay_1","invoice":"in_1","status":"paid","payment":{"type":"payment_intent","payment_intent":{"id":"pi_1","latest_charge":"ch_1"}}}]}`
+
+// The receipt reader binds the captured charge to the invoice through the
+// paid InvoicePayment; Charge objects no longer name their invoice.
+func TestStripeGetCollectedInvoiceWire(t *testing.T) {
+	invoice := `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","customer":"cus_1","metadata":{"openrails_collection_key":"idem-1"},` + stripeInvoicePayments + `}`
+	charge := func(pi string) string {
+		return `{"id":"ch_1","amount_captured":1999,"currency":"usd","customer":"cus_1","payment_method":"pm_1","payment_intent":` + pi + `,"paid":true,"captured":true,"status":"succeeded"}`
+	}
+	read := func(t *testing.T, invoiceBody, chargeBody string) (StripeCollectionReceipt, error) {
+		srv, _ := stripeFake(t, map[string]string{"GET /v1/invoices/in_1": invoiceBody, "GET /v1/charges/ch_1": chargeBody})
+		svc := NewAccountStripeService(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, uuid.New(), uuid.New(), "acct_1", "sk_test_wire")
+		svc.SetBaseURLForTest(srv.URL)
+		r, found, err := svc.GetCollectedInvoice(context.Background(), "in_1")
+		require.True(t, found)
+		return r, err
+	}
+
+	r, err := read(t, invoice, charge(`"pi_1"`))
+	require.NoError(t, err)
+	require.NoError(t, r.MatchesOperation("idem-1", 1999, "USD"))
+	require.Equal(t, []string{"ch_1", "pi_1", "pi_1", "in_1"}, []string{r.ChargeID, r.PaymentIntentID, r.ChargePaymentIntentID, r.ChargeInvoiceID})
+	require.True(t, r.ChargePaid && r.ChargeCaptured)
+
+	_, err = read(t, invoice, charge(`"pi_other"`))
+	require.ErrorIs(t, err, ErrStripeReceiptMismatch, "a charge of another PaymentIntent")
+	_, err = read(t, strings.Replace(invoice, `"invoice":"in_1","status":"paid"`, `"invoice":"in_2","status":"paid"`, 1), charge(`"pi_1"`))
+	require.ErrorIs(t, err, ErrStripeReceiptMismatch, "a payment of another invoice")
+	_, err = read(t, `{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","charge":"ch_1","metadata":{"openrails_collection_key":"idem-1"}}`, charge(`null`))
+	require.ErrorIs(t, err, ErrStripeReceiptMismatch, "removed top-level charge is not a reference")
 }
 
 // Refund amounts are literal cents, 0 = full refund (amount omitted); a PI

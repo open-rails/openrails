@@ -25,16 +25,19 @@ func TestBillingCycleFormats(t *testing.T) {
 }
 
 func TestParseExpiry(t *testing.T) {
-	for exp, want := range map[string]struct {
-		month, year int
-		ok          bool
-	}{
-		"02/27": {2, 2027, true}, "11-2030": {11, 2030, true}, " 1 / 29 ": {1, 2029, true},
-		"bad": {}, "": {}, "00/27": {}, "12/00": {}, "12/27/01": {}, "ab/27": {}, "12/xy": {},
+	for exp, want := range map[string][2]int{
+		"02/27": {2, 2027}, "11-2030": {11, 2030}, " 1 / 29 ": {1, 2029}, "12/2099": {12, 2099},
 	} {
-		month, year, ok := ParseExpiry(exp)
-		require.Equal(t, want.ok, ok, exp)
-		require.Equal(t, want.month, month, exp)
-		require.Equal(t, want.year, year, exp)
+		month, year, err := ParseExpiry(exp)
+		require.NoError(t, err, exp)
+		require.Equal(t, want, [2]int{month, year}, exp)
+	}
+	for _, exp := range []string{
+		"bad", "", "00/27", "13/27", "99/27", "12/00", "12/27/01", "ab/27", "12/xy",
+		"12/270", "12/20270", "1/2", "123/27", "+1/27", "-1/27", "12/+27", "12/1999", "01/2000", "12/2100", "12/27-01",
+	} {
+		month, year, err := ParseExpiry(exp)
+		require.ErrorIs(t, err, ErrInvalidExpiry, exp)
+		require.Zero(t, month+year, exp)
 	}
 }

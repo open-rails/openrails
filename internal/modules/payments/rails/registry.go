@@ -211,7 +211,7 @@ var descriptors = []Descriptor{
 		autoBilledAlways,
 		cancelDestructive, // #696: DataLink SMS cancel — no resume API, access rides the paid runway
 		"",                // CancelPortalURL (none since #696; cancels happen on OUR site)
-		[]CredentialKey{{"salt", true, false}, {"datalink_username", true, false}, {"datalink_password", true, false}},
+		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
 		nil,
 		false,               // OneOffSale
 		NewSubscriptionNone, // retained cohort only; new sales are refused (#1045, #1070)

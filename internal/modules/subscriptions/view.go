@@ -69,7 +69,7 @@ func subscriptionCardView(pm *models.PaymentMethod) *openrails.SubscriptionCard 
 		return nil
 	}
 	if pm.ExpiryDate != nil {
-		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
+		if month, year, err := sharedformat.ParseExpiry(*pm.ExpiryDate); err == nil {
 			card.ExpMonth = &month
 			card.ExpYear = &year
 		}

@@ -228,6 +228,28 @@ func TestClientConstructionBindsPostureAndEndpoints(t *testing.T) {
 	gotMerchant, gotPSP := bound.AccountIdentity()
 	require.Equal(t, []uuid.UUID{merchant, psp}, []uuid.UUID{gotMerchant, gotPSP})
 	require.Equal(t, "k", bound.SecurityKey)
+	require.Equal(t, "k", bound.accountSecurityKey, "the account-scoped key is trimmed at load too")
+}
+
+// A whitespace-padded account key must not break the native recurring
+// preflight (it compares both keys) or reach the gateway untrimmed.
+func TestPaddedAccountKeyIsTrimmedOnTheWire(t *testing.T) {
+	f := newNMIFake(t, reply(""))
+	c, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: " padded-key\n"}, true)
+	require.NoError(t, err)
+	c.DirectPostURL, c.QueryURL, c.V5BaseURL = f.URL+"/transact", f.URL+"/query", f.URL
+	c.LoopbackFixture = true
+	err = c.PrepareRecurringSale(context.Background(), "vault-1", "billing-1")
+	if err != nil {
+		require.NotContains(t, err.Error(), "immutable account credentials")
+	}
+	calls := f.Calls()
+	require.NotEmpty(t, calls)
+	for _, call := range calls {
+		if key := call.Form.Get("security_key"); key != "" {
+			require.Equal(t, "padded-key", key)
+		}
+	}
 }
 
 // Reads get the tight bound, mutations the generous one; a shorter caller

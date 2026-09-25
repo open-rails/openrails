@@ -1813,6 +1813,10 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt MerchantConfig) error {
 	}
 	for key, psp := range mt.PSPs {
 		for rail, account := range psp {
+			// A CCBill account with inline credentials must sign its FlexForm links.
+			if strings.EqualFold(strings.TrimSpace(rail), string(models.RailCCBill)) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
+				return fmt.Errorf("psps.%s.ccbill.secrets.salt is required", key)
+			}
 			if !strings.EqualFold(strings.TrimSpace(rail), string(models.RailStripe)) {
 				continue
 			}

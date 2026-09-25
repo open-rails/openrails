@@ -77,9 +77,6 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Openra
 		if transactionID == "" {
 			transactionID = strings.TrimSpace(result.PaymentIntentID)
 		}
-		if transactionID == "" {
-			transactionID = strings.TrimSpace(result.InvoiceID)
-		}
 		return ChargeResult{
 			Rail:              string(models.RailStripe),
 			TransactionID:     transactionID,

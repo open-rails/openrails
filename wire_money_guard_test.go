@@ -110,7 +110,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountCaptured amount_captured":                                      notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.Amount amount":                                                       notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.AmountReceived amount_received":                                      notHTTPProviderWire,
-	"internal/modules/subscriptions/stripe_invoice_collection.go:stripeCollectionInvoice.AmountPaid amount_paid":                                     notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountDue amount_due":                               notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountPaid amount_paid":                             notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_refunds.go:RefundResult.Amount amount":                                                                    notHTTPProviderWire,

@@ -214,14 +214,7 @@ func (s *EmailService) SendEntitlementExpiration(ctx context.Context, userEmail,
 	storeName := s.storeName(ctx)
 	remaining := cadence.FormatRemaining(expiresAt.Sub(s.now()))
 	expiresOn := cadence.FormatInstant(expiresAt, expiresAt.Sub(s.now()))
-	htmlContent := fmt.Sprintf(`
-		<h2>Access Expiring Soon</h2>
-		<p>Hi %s,</p>
-		<p>This is a reminder that your <strong>%s</strong> access will expire in %s on <strong>%s</strong>.</p>
-		<p>To continue enjoying premium features, please renew your subscription before the expiration date.</p>
-		<p>Thank you for being a valued member!</p>
-		<p>The %s Team</p>
-	`, username, entitlementName, remaining, expiresOn, storeName)
+	htmlContent := renderEmailHTML("entitlement_expiring", emailFields{"Username": username, "Entitlement": entitlementName, "Remaining": remaining, "ExpiresOn": expiresOn, "Store": storeName})
 	plainContent := fmt.Sprintf(`
 		Access Expiring Soon
 
@@ -294,18 +287,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 	}
 
 	if isSolana {
-		htmlContent := fmt.Sprintf(`
-			<h2>Solana Payment Received</h2>
-			<p>Hi there,</p>
-			<p>%s This one-time Solana transaction instantly extended your premium access.</p>
-			<ul>
-			<li><strong>Product:</strong> %s</li>
-			<li><strong>Amount:</strong> %s</li>
-			<li><strong>Date:</strong> %s</li>
-			</ul>
-			<p>Enjoy your premium benefits; no rebill will occur automatically.</p>
-			<p>The %s Team</p>
-		`, messageIntro, productName, amountLine, issuedAt, storeName)
+		htmlContent := renderEmailHTML("purchase_receipt", emailFields{"Solana": true, "Intro": messageIntro, "Product": productName, "Amount": amountLine, "Date": issuedAt, "Store": storeName})
 
 		plainContent := fmt.Sprintf(`
 		Solana Payment Received
@@ -322,18 +304,7 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 		return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
 	}
 
-	htmlContent := fmt.Sprintf(`
-		<h2>Payment Received</h2>
-		<p>Hi there,</p>
-		<p>%s</p>
-		<ul>
-			<li><strong>Product:</strong> %s</li>
-			<li><strong>Amount:</strong> %s</li>
-			<li><strong>Date:</strong> %s</li>
-		</ul>
-		<p>Your access has been updated instantly. Enjoy!</p>
-		<p>The %s Team</p>
-	`, messageIntro, productName, amountLine, issuedAt, storeName)
+	htmlContent := renderEmailHTML("purchase_receipt", emailFields{"Solana": false, "Intro": messageIntro, "Product": productName, "Amount": amountLine, "Date": issuedAt, "Store": storeName})
 
 	plainContent := fmt.Sprintf(`
 		Payment Received

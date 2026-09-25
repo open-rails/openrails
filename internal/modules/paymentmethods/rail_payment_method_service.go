@@ -670,8 +670,8 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 }
 
 func normalizeReplacementExpiry(value string) string {
-	month, year, ok := sharedformat.ParseExpiry(value)
-	if !ok || month < 1 || month > 12 || year < 2000 || year > 9999 {
+	month, year, err := sharedformat.ParseExpiry(value)
+	if err != nil {
 		return ""
 	}
 	return fmt.Sprintf("%02d/%02d", month, year%100)
