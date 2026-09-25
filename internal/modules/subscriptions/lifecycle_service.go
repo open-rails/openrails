@@ -2292,6 +2292,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		heldTerminal := ""
+		quietRetry := false // a transient retry tells the customer nothing yet
 		var event lifecycle.Event
 		switch params.Decline {
 		case collection.DeclineFixPaymentMethod:
@@ -2340,6 +2341,20 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				unknownCycle = subscription.MerchantID
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
+			// A processor try-again answer gets the short transient ladder first;
+			// those quick retries are not dunning failures.
+			if !params.Terminal && collection.ClassifyDeclineDetail(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
+				if next, ok := collection.NextTransientAttempt(subscription.TransientRetries, now); ok {
+					subscription.TransientRetries++
+					subscription.LastRetryAt = &now
+					if _, err := Transition(subscription, lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}, now); err != nil {
+						return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
+					}
+					subscription.NextRetryAt = &next
+					event, quietRetry = nil, true
+					break
+				}
+			}
 			terminal := params.Terminal
 			if !terminal {
 				subscription.LastRetryAt = &now
@@ -2379,8 +2394,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				"refusal":            heldTerminal,
 			}).Warn("Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued")
 		}
-		if _, err := Transition(subscription, event, now); err != nil {
-			return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
+		if event != nil {
+			if _, err := Transition(subscription, event, now); err != nil {
+				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
+			}
 		}
 		if subscription.Status == models.StatusCancelled {
 			reason := normalize.FromPtr(params.FailureReason)
@@ -2537,16 +2554,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			data.Reason = string(endReason)
 		}
 
-		notification := &models.NotificationQueue{
-			ID:         uuidutil.NewV7(),
-			CustomerID: subscription.CustomerID,
-			EventType:  eventType,
-			Data:       data,
-		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			return fmt.Errorf("create payment failed notification: %w", err)
-		} else {
-			notifications = append(notifications, notification)
+		if !quietRetry {
+			notification := &models.NotificationQueue{
+				ID:         uuidutil.NewV7(),
+				CustomerID: subscription.CustomerID,
+				EventType:  eventType,
+				Data:       data,
+			}
+			if err := notificationRepo.Create(ctx, notification); err != nil {
+				return fmt.Errorf("create payment failed notification: %w", err)
+			} else {
+				notifications = append(notifications, notification)
+			}
 		}
 
 		return nil

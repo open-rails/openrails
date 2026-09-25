@@ -45,6 +45,7 @@ UPDATE openrails.subscriptions SET
     payment_method_id = sqlc.narg(payment_method_id),
     last_retry_at = sqlc.narg(last_retry_at),
     retry_attempts = sqlc.narg(retry_attempts),
+    transient_retries = sqlc.arg(transient_retries)::int,
     next_retry_at = sqlc.narg(next_retry_at),
     grace_ends_at = sqlc.narg(grace_ends_at),
     cancel_feedback = sqlc.narg(cancel_feedback),

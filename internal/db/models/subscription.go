@@ -81,8 +81,11 @@ type Subscription struct {
 	// Manual rebill attempt fields for NMI
 	LastRetryAt   *time.Time `json:"last_retry_at"`  // Date of last rebill attempt
 	RetryAttempts *int       `json:"retry_attempts"` // Number of retry attempts (nullable for new subscriptions)
-	NextRetryAt   *time.Time `json:"next_retry_at"`  // When to try next rebill
-	GraceEndsAt   *time.Time `json:"grace_ends_at"`  // Optional grace window end during dunning (rail-specific)
+	// TransientRetries counts quick retries after processor try-again answers
+	// in the current dunning case; they are not dunning failures.
+	TransientRetries int        `json:"transient_retries"`
+	NextRetryAt      *time.Time `json:"next_retry_at"` // When to try next rebill
+	GraceEndsAt      *time.Time `json:"grace_ends_at"` // Optional grace window end during dunning (rail-specific)
 
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
@@ -142,6 +145,7 @@ func (s *Subscription) ActivateWithPrice(price *Price) error {
 func (s *Subscription) ClearRetrySchedule() {
 	s.LastRetryAt = nil
 	s.RetryAttempts = nil
+	s.TransientRetries = 0
 	s.NextRetryAt = nil
 	s.GraceEndsAt = nil
 }

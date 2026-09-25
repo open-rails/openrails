@@ -273,6 +273,16 @@ type Classification struct {
 	Code     string
 	Outcome  DeclineOutcome
 	Coverage DeclineCoverage
+	// Transient: the processor asked to try again shortly. It gets the short
+	// transient ladder before it counts as a dunning failure.
+	Transient bool
+}
+
+// transientDeclines are explicit try-again answers from the processor, not
+// the issuer's verdict on the card. Timeouts never appear here: a lost answer
+// is verified at the provider, never retried.
+var transientDeclines = map[string]map[string]bool{
+	"stripe": {"processing_error": true, "issuer_not_available": true, "try_again_later": true, "reenter_transaction": true},
 }
 
 // NeedsMapping reports an alert-worthy gap: a rail we DO have a vocabulary for
@@ -292,6 +302,12 @@ func canonicalCCBillCode(code string) string {
 
 // ClassifyDeclineDetail is ClassifyDecline plus the coverage answer.
 func ClassifyDeclineDetail(rail, code string) Classification {
+	c := classifyDeclineDetail(rail, code)
+	c.Transient = c.Outcome == DeclineRetry && transientDeclines[c.Rail][strings.ToLower(c.Code)]
+	return c
+}
+
+func classifyDeclineDetail(rail, code string) Classification {
 	c := Classification{Rail: strings.ToLower(strings.TrimSpace(rail)), Code: strings.TrimSpace(code)}
 	lowered := strings.ToLower(c.Code)
 	if lowered == "" {
