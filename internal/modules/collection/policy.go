@@ -18,6 +18,10 @@ type Policy struct {
 	// is retried. The default keeps access until a confirmed outcome (Paul,
 	// 2026-09-25); uncertainty alone never ends it.
 	SuspendAccess bool
+	// SuspendWhenHeld ends an engine member's access at the renewal allowance
+	// when collection is stopped and the renewal has no outcome. The default
+	// keeps it until the renewal is attempted (Paul, 2026-09-25).
+	SuspendWhenHeld bool
 }
 
 // Tier is the schedule for billing cycles shorter than MaxCycle.

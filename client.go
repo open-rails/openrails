@@ -474,7 +474,7 @@ type CreditLimitRequest struct {
 }
 
 // DunningPolicy is a merchant's retry schedule for declined renewals. Tiers
-// are ordered by billing cycle: the first tier whose MaxCycleHours exceeds a
+// (default: the built-in schedule) are ordered by billing cycle: the first tier whose MaxCycleHours exceeds a
 // subscription's cycle applies, and the last tier (MaxCycleHours 0) takes
 // every longer cycle. RetryAfterHours are measured from the first decline.
 // TransientRetryMinutes is the quick ladder for processor try-again answers,
@@ -486,6 +486,11 @@ type DunningPolicy struct {
 	// until a confirmed outcome ends it) or DunningAccessSuspend (access ends
 	// with the paid period while a declined renewal is retried).
 	AccessDuringDunning string `json:"access_during_dunning,omitempty"`
+	// AccessWhileRenewalHeld is DunningAccessKeep (default: a renewal with no
+	// outcome because collection is stopped keeps access until it is
+	// attempted) or DunningAccessSuspend (access ends at the renewal
+	// allowance, min(24h, max(5m, period/10)) past the paid period).
+	AccessWhileRenewalHeld string `json:"access_while_renewal_held,omitempty"`
 }
 
 // Dunning access policies.

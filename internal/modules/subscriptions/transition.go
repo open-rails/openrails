@@ -62,8 +62,11 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 			}
 		}
 	}
-	if next.Status == lifecycle.Cancelled || next.Status == lifecycle.AwaitingMethod || next.Status == lifecycle.Unverified {
+	switch next.Status {
+	case lifecycle.Cancelled, lifecycle.Unverified:
 		sub.NextRetryAt, sub.GraceEndsAt = nil, nil
+	case lifecycle.AwaitingMethod:
+		sub.NextRetryAt = nil // nothing is charged; GraceEndsAt is the deadline
 	}
 	return effects, nil
 }

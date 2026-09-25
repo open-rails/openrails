@@ -12,7 +12,7 @@ import (
 )
 
 // PolicyOf converts and validates a declared dunning policy. Nil is the
-// built-in schedule.
+// built-in schedule; a policy that declares no tiers keeps the built-in ones.
 func PolicyOf(declared *openrails.DunningPolicy) (collection.Policy, error) {
 	if declared == nil {
 		return collection.DefaultPolicy, nil
@@ -25,6 +25,9 @@ func PolicyOf(declared *openrails.DunningPolicy) (collection.Policy, error) {
 		}
 		p.Tiers = append(p.Tiers, tier)
 	}
+	if len(declared.Tiers) == 0 {
+		p.Tiers = collection.DefaultPolicy.Tiers
+	}
 	for _, m := range declared.TransientRetryMinutes {
 		p.Transient = append(p.Transient, time.Duration(m)*time.Minute)
 	}
@@ -34,6 +37,13 @@ func PolicyOf(declared *openrails.DunningPolicy) (collection.Policy, error) {
 		p.SuspendAccess = true
 	default:
 		return collection.Policy{}, fmt.Errorf("dunning_policy: access_during_dunning must be %q or %q", openrails.DunningAccessKeep, openrails.DunningAccessSuspend)
+	}
+	switch declared.AccessWhileRenewalHeld {
+	case "", openrails.DunningAccessKeep:
+	case openrails.DunningAccessSuspend:
+		p.SuspendWhenHeld = true
+	default:
+		return collection.Policy{}, fmt.Errorf("dunning_policy: access_while_renewal_held must be %q or %q", openrails.DunningAccessKeep, openrails.DunningAccessSuspend)
 	}
 	if err := p.Validate(); err != nil {
 		return collection.Policy{}, fmt.Errorf("dunning_policy: %w", err)

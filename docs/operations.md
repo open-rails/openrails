@@ -539,9 +539,21 @@ follows each paid engine period (1h → 6m, 1d → 2h24m, 7d → 16h48m, 30d and
 longer → 24h), so unpaid access never exceeds a tenth of the period and a
 member keeps access until the renewal decides; a qualified renewal
 supersedes it, and a decline or cancellation revokes it. A card-fixable
-decline, or a terminal outcome while the destructive switch is off, leaves the
-membership `past_due` waiting for a new card; a new card retries at the next
-due pass. Issuer authentication a payer never completes is closed after one
+decline, or a stored method that is gone, parked or no longer qualified, moves
+the membership to `awaiting_method`: the customer is asked for a new card,
+access follows the dunning access policy, and the wait ends (cancelled, access
+ended) when the cycle's dunning window does, unless the destructive switch is
+off. A new card retries at the next due pass. A terminal outcome while the
+destructive switch is off leaves the membership `past_due`.
+
+**Held renewals.** A renewal with no outcome past its allowance is held:
+collection is stopped (fleet halted, `engine_admission_hold`, breaker,
+readonly, kill switch). A refusal only the member can fix is not held (see
+above). By default the member keeps access until the renewal is attempted
+(`dunning_policy.access_while_renewal_held`: `keep`, or `suspend` to end access
+at the allowance). While any are held, `life.renewal.held` reports their count
+and the oldest held age; when collection resumes they are charged normally, a
+decline enters dunning, and the finding resolves. Issuer authentication a payer never completes is closed after one
 hour for a first payment and after the renewal period's allowance for a
 renewal. A
 renewal whose submission never reached the provider is re-sent under the same

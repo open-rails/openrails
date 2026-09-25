@@ -375,7 +375,7 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        s.current_period_starts_at,
        -- A provider-billed member in the provider's dunning keeps access
        -- through its grace window, as a mirrored decline does.
-       GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END)::timestamptz AS current_period_ends_at,
+       GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at,
        pd.entitlements_spec
 FROM openrails.subscriptions s

@@ -2792,6 +2792,37 @@ func (q *Queries) SubscriptionHasCompletedPayment(ctx context.Context, arg Subsc
 	return paid, err
 }
 
+const summarizeHeldEngineRenewals = `-- name: SummarizeHeldEngineRenewals :one
+SELECT count(*)::int AS held,
+       COALESCE(min(s.current_period_ends_at), $1::timestamptz)::timestamptz AS oldest_due_at
+FROM openrails.subscriptions s
+WHERE s.merchant_id = $2::uuid
+  AND s.deleted_at IS NULL AND s.cancelled_at IS NULL
+  AND s.status = 'active' AND s.collection_policy = 'engine'
+  AND s.current_period_ends_at > s.current_period_starts_at
+  AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '5 minutes',
+      (s.current_period_ends_at - s.current_period_starts_at) / 10)) <= $1::timestamptz
+`
+
+type SummarizeHeldEngineRenewalsParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+type SummarizeHeldEngineRenewalsRow struct {
+	Held        int32
+	OldestDueAt time.Time
+}
+
+// LIFE life.renewal.held: engine renewals with no outcome past their allowance,
+// min(24h, max(5m, period/10)) after the paid period. Collection is stopped.
+func (q *Queries) SummarizeHeldEngineRenewals(ctx context.Context, arg SummarizeHeldEngineRenewalsParams) (SummarizeHeldEngineRenewalsRow, error) {
+	row := q.db.QueryRow(ctx, summarizeHeldEngineRenewals, arg.Now, arg.MerchantID)
+	var i SummarizeHeldEngineRenewalsRow
+	err := row.Scan(&i.Held, &i.OldestDueAt)
+	return i, err
+}
+
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
 
 INSERT INTO openrails.reconciliation_findings (
