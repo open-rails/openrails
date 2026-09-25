@@ -61,20 +61,16 @@ import (
 //   - Schema / SolanaNetwork: NOT AttachOptions concerns — Schema follows
 //     cfg.DB.SchemaName() at the DB-wiring layer; SolanaNetwork is never
 //     overridden today.
-//   - The dev-rig flags (Ephemeral.AllowMemory, Applications.AllowPrivateNetworkJWKS,
+//   - The dev-rig flags (Applications.AllowPrivateNetworkJWKS,
 //     Registration.AllowMissingSenders; ak#314): selected explicitly through
 //     AttachOptions.Auth; billing configuration cannot enable them.
 //
 // authcore.Deps (engine dependencies):
 //   - Email / SMS: FORWARDED via AttachOptions.EmailSender / SMSSender (#738).
 //   - Redis: FORWARDED (#753) — AttachWithOptions wires the app graph's OWN
-//     Redis client (app.App.RedisClient, the same client
-//     pkg/embedded.Options.Redis produced) rather than adding a redundant
-//     AttachOptions field for state the app graph already holds. Outside
-//     development the engine refuses the in-memory ephemeral store, so a
-//     hosted attach there requires the app to have Redis configured
-//     (pkg/embedded.Options.Redis / app.BootstrapOptions.Redis); the
-//     resulting error names the requirement.
+//     Redis client (app.App.RedisClient) into authhttp.Config.Redis for
+//     shared rate limits; AuthKit keeps no other state in Redis. Without it
+//     the control plane requires auth.allow_memory (per-process limits).
 //   - NameAdmission / InstanceAdmission: FORWARDED via AttachOptions.NameAdmission
 //     and MerchantCreation.Admission.
 //   - Entitlements / DelegatedAuthorization / ApplicationAdmission /
@@ -275,11 +271,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		cpOpts = append(cpOpts, controlplane.WithRateLimitOverrides(opts.AuthRateLimitOverrides))
 	}
 	// #753: reuse the app graph's OWN Redis client (the same client
-	// pkg/embedded.Options.Redis / app.BootstrapOptions.Redis produced) as
-	// AuthKit's ephemeral store, rather than adding a redundant AttachOptions
-	// field for state the app already holds. Nil (no Redis configured) is
-	// passed through unchanged — outside development the engine refuses the
-	// in-memory ephemeral store with an error naming the Redis requirement.
+	// pkg/embedded.Options.Redis / app.BootstrapOptions.Redis produced) for
+	// AuthKit's shared rate limits. Without it the control plane requires
+	// auth.allow_memory (per-process limits, one replica).
 	if a.RedisClient != nil {
 		cpOpts = append(cpOpts, controlplane.WithRedis(a.RedisClient))
 	}

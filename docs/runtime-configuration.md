@@ -26,7 +26,7 @@ These independent exceptions default to false:
 | Setting | Explicit permission |
 | --- | --- |
 | `auth.allow_loopback_http` | HTTP issuer and request origin only on localhost or a literal loopback address. |
-| `auth.allow_memory` | AuthKit ephemeral state and rate limiting in one process without Redis. |
+| `auth.allow_memory` | AuthKit rate limits per process without Redis (one replica only; AuthKit's other state is in Postgres). |
 | `auth.allow_private_network_jwks` | AuthKit private-network JWKS retrieval for local federation. |
 | `auth.allow_missing_senders` | Construct authentication without email/message delivery. |
 | `auth.allow_ephemeral_signing_key` | Generate a disposable signing key when configured key material is absent. |

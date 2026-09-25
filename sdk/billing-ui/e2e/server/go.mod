@@ -6,7 +6,7 @@ require (
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v0.130.1
+	github.com/open-rails/authkit v0.141.0
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 )
 

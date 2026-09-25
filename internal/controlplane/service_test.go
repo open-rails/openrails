@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
 	jwtkit "github.com/open-rails/authkit/jwtkit"
+	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
@@ -184,4 +186,25 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 		_, err := (&ControlPlane{}).TouchCustomer(ctx, bad.mid, "iss", bad.subject)
 		require.ErrorIs(t, err, ErrCustomerInvalid)
 	}
+}
+
+// AuthKit's rate limits are an explicit choice: shared through Redis, or per
+// process only when the operator says the deployment is single-process; the
+// result always passes AuthKit's own exactly-one-limiter validation.
+func TestRateLimitBackendMustBeChosen(t *testing.T) {
+	var cfg authhttp.Config
+	require.ErrorContains(t, chooseRateLimits(&cfg, nil, false), "rate limits need Redis")
+
+	cfg = authhttp.Config{DirectPeerIP: true}
+	require.NoError(t, chooseRateLimits(&cfg, nil, true))
+	require.True(t, cfg.PerProcessRateLimits)
+	require.NoError(t, cfg.Validate())
+
+	rd := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	defer rd.Close()
+	cfg = authhttp.Config{DirectPeerIP: true}
+	require.NoError(t, chooseRateLimits(&cfg, rd, true))
+	require.NotNil(t, cfg.Redis)
+	require.False(t, cfg.PerProcessRateLimits)
+	require.NoError(t, cfg.Validate())
 }
