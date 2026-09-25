@@ -103,7 +103,7 @@ func TestCCBillDatesAreNotPayment(t *testing.T) {
 	require.Equal(t, "cancelled", sub.Status, "no paid period is left to resume")
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(m.paidThrough))
 	require.False(t, m.c.entitled(m.ent))
-	require.Contains(t, w.openFindings("ccbill.reactivation_unapplied"), "subscription:"+m.sub.UUID().String())
+	require.Contains(t, w.openFindings("life.ccbill.reactivation_unapplied"), "subscription:"+m.sub.UUID().String())
 	require.Zero(t, w.engineCharges())
 }
 

@@ -108,7 +108,7 @@ func sameTime(a, b *time.Time) bool {
 
 // ccbillReactivationUnappliedFinding: CCBill reactivated a membership the
 // lifecycle cannot resume (no paid period left, or a chargeback).
-const ccbillReactivationUnappliedFinding = "ccbill.reactivation_unapplied"
+const ccbillReactivationUnappliedFinding = "life.ccbill.reactivation_unapplied"
 
 func raiseCCBillFinding(ctx context.Context, d *db.DB, sub *models.Subscription, findingType, action string, evidence map[string]any) error {
 	evidence["subscription_id"] = openrails.SubscriptionID(sub.ID).String()

@@ -168,7 +168,7 @@ posture alone accepts nothing extra.
 - Webhooks mirror CCBill through the lifecycle machine, one event per post on
   the locked row. BillingDateChange never moves the paid period;
   UserReactivation resumes only inside a paid period (else a
-  `ccbill.reactivation_unapplied` finding); a RenewalSuccess on a cancelled
+  `life.ccbill.reactivation_unapplied` finding); a RenewalSuccess on a cancelled
   row is recorded for refund review.
 - Automatic CCBill refunds are unavailable. The admin API refuses full and
   partial requests; combined cancel-and-refund refuses before cancellation.

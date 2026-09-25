@@ -1764,13 +1764,7 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		if !subscriptions.IsTerminalTransitionBlocked(err) && !errors.Is(err, lifecycle.ErrTerminal) {
 			return err
 		}
-		blocked = err
-		previous := s.now().UTC()
-		if sub.CurrentPeriodEndsAt != nil {
-			previous = sub.CurrentPeriodEndsAt.UTC()
-		}
-		params.PreviousPeriodEnd = &previous
-		params.PaymentMetadata = map[string]any{"refund_review": "ccbill renewal on a cancelled subscription"}
+		blocked = err // a decided cancellation: the charge goes to refund review
 		return lc.RecordConfirmedChargeWithoutRenewal(ctx, params)
 	})
 	if err != nil {
