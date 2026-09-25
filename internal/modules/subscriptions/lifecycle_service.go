@@ -1169,7 +1169,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
 			RevokeRemoved: params.Prepared != nil || applyingDowngrade || planChangeApplied,
 			Downgrade:     applyingDowngrade, ProductName: productName,
-			PreserveLifecycle: preserveLifecycle,
+			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation,
 		})
 		if err != nil {
 			return err
@@ -1249,11 +1249,10 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 				return fmt.Errorf("resume engine: payment method is unavailable")
 			}
 		}
-		subscription.Status = models.StatusActive
-		subscription.CancelledAt = nil
-		subscription.CancelType = nil
+		if _, err := Transition(subscription, lifecycle.Resume{At: now}, now); err != nil {
+			return fmt.Errorf("resume membership %s: %w", subscription.ID, err)
+		}
 		subscription.CancelFeedback = nil
-		subscription.EndedAt = nil
 		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("resume membership: update subscription: %w", err)
 		}
@@ -1336,13 +1335,13 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		periodStartsAt := now
 		periodEndsAt := params.CurrentPeriodEndsAt.UTC()
 
-		subscription.Status = models.StatusActive
+		// An explicit reactivation decision; it is not a payment fact.
+		if _, err := Transition(subscription, lifecycle.Reinstate{PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt}, now); err != nil {
+			return fmt.Errorf("reactivate membership %s: %w", subscription.ID, err)
+		}
 		subscription.CurrentPeriodStartsAt = &periodStartsAt
 		subscription.CurrentPeriodEndsAt = &periodEndsAt
-		subscription.CancelledAt = nil
-		subscription.CancelType = nil
 		subscription.CancelFeedback = nil
-		subscription.EndedAt = nil
 		subscription.ClearRetrySchedule()
 
 		if err := subService.Update(ctx, subscription); err != nil {
@@ -1638,12 +1637,21 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	if endedAt.Before(cancelledAt) {
 		cancelledAt = endedAt
 	}
+	wasCancelled := sub.Status == models.StatusCancelled
+	applied, err := Transition(sub, lifecycle.Cancel{Kind: cancelKindOf(c.CancelType), Immediate: !endedAt.After(now), At: now}, now)
+	if err != nil {
+		return fmt.Errorf("apply local cancellation %s: %w", sub.ID, err)
+	}
+	if wasCancelled && len(applied) == 0 {
+		return nil // the first decided cancellation stands
+	}
 	cancelType := c.CancelType
-	sub.Status = models.StatusCancelled
 	sub.EndedAt = &endedAt
 	sub.CancelType = &cancelType
 	sub.CancelFeedback = c.Feedback
-	sub.CancelledAt = &cancelledAt
+	if !wasCancelled {
+		sub.CancelledAt = &cancelledAt
+	}
 	sub.ClearRetrySchedule()
 
 	if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
@@ -1710,7 +1718,13 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 		if sub.Status != models.StatusActive || !samePeriodEnd(belief, sub.CurrentPeriodEndsAt) {
 			return nil // idempotent: only an active sub on the decided period enters dunning here
 		}
-		sub.Status = models.StatusPastDue
+		paidThrough := time.Time{}
+		if sub.CurrentPeriodEndsAt != nil {
+			paidThrough = sub.CurrentPeriodEndsAt.UTC()
+		}
+		if _, err := Transition(sub, lifecycle.RenewalDeclined{PeriodStart: paidThrough, Bucket: lifecycle.Retry, At: s.now()}, s.now()); err != nil {
+			return fmt.Errorf("apply local past_due %s: %w", sub.ID, err)
+		}
 		if sub.GraceEndsAt == nil {
 			ge := graceEndsAt
 			sub.GraceEndsAt = &ge
@@ -1780,9 +1794,17 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 		if !samePeriodEnd(belief, sub.CurrentPeriodEndsAt) {
 			return nil // the caller decided on a period that has since moved (a renewal landed)
 		}
-		sub.Status = models.StatusUnverified
-		sub.GraceEndsAt = nil
-		sub.NextRetryAt = nil
+		var event lifecycle.Event = lifecycle.RenewalOverdue{}
+		if sub.Status == models.StatusPastDue {
+			event = lifecycle.DunningStale{}
+		}
+		applied, err := Transition(sub, event, s.now())
+		if err != nil {
+			return fmt.Errorf("apply local unverified %s: %w", sub.ID, err)
+		}
+		if len(applied) == 0 {
+			return nil
+		}
 		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
 			return fmt.Errorf("apply local unknown: update subscription %s: %w", sub.ID, err)
 		}
@@ -2033,14 +2055,14 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			return nil
 		}
 
-		// Update subscription status - Wave 18: expired = cancelled (never rebill again)
+		// The provider ended it (expired = cancelled, never rebilled again).
 		now := s.now()
-		subscription.Status = models.StatusCancelled
-		subscription.CancelledAt = &now
-		expired := models.CancelTypeExpired
-		subscription.CancelType = &expired
+		if _, err := Transition(subscription, lifecycle.ProviderCancelled{At: now}, now); err != nil {
+			return fmt.Errorf("expire membership %s: %w", subscription.ID, err)
+		}
+		// Access is revoked now below, so the row ends now too.
 		subscription.EndedAt = &now
-		subscription.ClearRetrySchedule()
+		subscription.CancelledAt = &now
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{

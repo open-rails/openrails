@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"net/http"
 	"time"
 
@@ -395,16 +396,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
 
-	// Update subscription status in database
-	cancelType := models.CancelTypeUser
-	subscription.Status = models.StatusCancelled
-	subscription.CancelledAt = &now
-	subscription.CancelType = &cancelType
-	subscription.ClearRetrySchedule()
-	if feedback != "" {
-		subscription.CancelFeedback = &feedback
-	}
-
 	// #691 closure: a user cancel is PROOF — write the access end on disk NOW, at
 	// the known period end (resumable runway; a dead system cannot extend a
 	// cancelled sub). Immediate when no future paid period remains.
@@ -417,10 +408,25 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := db.NewWithPgxTx(tx)
-		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, s.clock)
-		if err := txSubSvc.Update(ctx, subscription); err != nil {
+		// Decide on the locked row, never on the snapshot read above.
+		locked, err := NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subscription.ID)
+		if err != nil {
+			return fmt.Errorf("lock subscription: %w", err)
+		}
+		if !providerCancellable(locked.Status) {
+			return ErrSubscriptionNotActive
+		}
+		if _, err := Transition(locked, lifecycle.Cancel{Kind: lifecycle.CancelUser, At: now}, now); err != nil {
+			return fmt.Errorf("cancel subscription %s: %w", locked.ID, err)
+		}
+		if feedback != "" {
+			locked.CancelFeedback = &feedback
+		}
+		locked.DeletionScheduledAt = subscription.DeletionScheduledAt
+		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, locked, now); err != nil {
 			return fmt.Errorf("failed to update subscription status: %w", err)
 		}
+		subscription = locked
 		txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
 		if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
 			return fmt.Errorf("failed to bound subscription access windows: %w", err)

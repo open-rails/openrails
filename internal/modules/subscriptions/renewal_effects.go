@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -17,7 +18,9 @@ import (
 type renewalEffects struct {
 	PeriodStart, PeriodEnd                      time.Time
 	RevokeRemoved, Downgrade, PreserveLifecycle bool
-	ProductName                                 string
+	// Reinstate reactivates a decided cancellation on an explicit override.
+	Reinstate   bool
+	ProductName string
 }
 
 // applyRenewalEffects owns the local projection for both observed provider
@@ -25,10 +28,21 @@ type renewalEffects struct {
 // grants are idempotent, so a webhook-first payment row can be completed here.
 func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects renewalEffects) (*models.NotificationQueue, error) {
 	if !effects.PreserveLifecycle {
-		sub.Status = models.StatusActive
-		sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &effects.PeriodStart, &effects.PeriodEnd
-		sub.CancelledAt, sub.CancelType, sub.CancelFeedback, sub.EndedAt = nil, nil, nil, nil
-		sub.ClearRetrySchedule()
+		// The payment fact decides through the state machine (#1091).
+		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
+		if effects.Reinstate && sub.Status == models.StatusCancelled {
+			event = lifecycle.Reinstate{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
+		}
+		applied, err := Transition(sub, event, s.now())
+		if err != nil {
+			return nil, fmt.Errorf("renew subscription %s: %w", sub.ID, err)
+		}
+		if len(applied) > 0 {
+			// The paid window is the charge's own period, never moved backwards.
+			sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &effects.PeriodStart, &effects.PeriodEnd
+			sub.CancelFeedback = nil
+			sub.ClearRetrySchedule()
+		}
 	}
 	if err := NewSubscriptionRepo(d).Update(ctx, sub); err != nil {
 		return nil, fmt.Errorf("update renewed subscription: %w", err)
