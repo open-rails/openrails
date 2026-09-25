@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -16,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/retry"
 )
 
 // MerchantDeclaration configures the one merchant served by an embedded runtime.
@@ -45,9 +48,11 @@ func validateMerchantDeclaration(declaration *MerchantDeclaration) error {
 	return nil
 }
 
-func configureMerchant(ctx context.Context, application *app.App, declaration *MerchantDeclaration) error {
+// configureMerchant reports whether a Solana Transit signer still awaits Vault
+// (see upsertMerchantConfig); confirmSigner completes it in the background.
+func configureMerchant(ctx context.Context, application *app.App, declaration *MerchantDeclaration) (bool, error) {
 	if declaration == nil {
-		return nil
+		return false, nil
 	}
 	// Reject a provider identity owned by another merchant before provisioning
 	// the new directory entry. The write boundary repeats this check for races.
@@ -58,28 +63,51 @@ func configureMerchant(ctx context.Context, application *app.App, declaration *M
 		case err == nil:
 			selectedID = selected.ID.UUID()
 		case !errors.Is(err, merchants.ErrMerchantNotFound):
-			return err
+			return false, err
 		}
 		environment := config.ExpectedProviderEnvironment(application.Runtime.Config.IsTestMode())
 		for _, psp := range declaration.PSPs {
 			if err := merchants.AssertPSPUnowned(ctx, gen.New(application.Runtime.DB.DataPool()), selectedID, psp.Rail, environment, psp.AccountID); err != nil {
-				return err
+				return false, err
 			}
 		}
 	}
-	id, err := upsertMerchantConfig(ctx, application, declaration.Slug, declaration.Config)
+	id, pending, err := upsertMerchantConfig(ctx, application, declaration.Slug, declaration.Config, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if declaration.MetadataApplication != nil {
 		if _, err := service.ApplyMerchantMetadata(merchant.WithID(ctx, id), application.Runtime.DB, *declaration.MetadataApplication); err != nil {
-			return err
+			return false, err
 		}
 	}
 	for _, psp := range declaration.PSPs {
 		if _, err := hosttools.DeclarePSP(ctx, application, id, psp); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return pending, nil
+}
+
+// confirmSigner re-runs the declaration once Vault authenticates, arming a
+// deferred Solana Transit PSP or re-deriving a stored identity from Vault,
+// with capped full-jitter backoff until it succeeds.
+func confirmSigner(application *app.App, declaration *MerchantDeclaration) {
+	rt := application.Runtime
+	rt.Go("solana transit signer", func(ctx context.Context) {
+		err := retry.Forever(ctx, func(ctx context.Context) error {
+			if err := rt.MerchantSecretBackend.State(); err != nil {
+				return err
+			}
+			_, _, err := upsertMerchantConfig(ctx, application, declaration.Slug, declaration.Config, false)
+			return err
+		}, func(attempt int, err error) {
+			if attempt == 0 {
+				log.WithError(err).Warn("openrails embed: Solana Transit signer awaits Vault; retrying in the background")
+			}
+		})
+		if err == nil {
+			log.Info("openrails embed: Solana Transit signer confirmed by Vault")
+		}
+	})
 }

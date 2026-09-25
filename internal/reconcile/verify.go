@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -215,7 +216,7 @@ func (v *Verifier) runBatch(mid merchant.ID, ids []uuid.UUID) {
 	defer func() { <-v.sem }()
 	for attempt := 0; ; attempt++ {
 		ctx, cancel := context.WithTimeout(v.ctx, verifyReadTimeout)
-		err := v.verifyBatch(ctx, mid, ids)
+		err := recovered(func() error { return v.verifyBatch(ctx, mid, ids) })
 		cancel()
 		if err == nil || v.ctx.Err() != nil {
 			return
@@ -243,7 +244,7 @@ func (v *Verifier) runBulk(mid merchant.ID) {
 	defer func() { <-v.sem }()
 	ctx, cancel := context.WithTimeout(v.ctx, bulkReadTimeout)
 	defer cancel()
-	if err := v.bulkRead(ctx, mid); err != nil {
+	if err := recovered(func() error { return v.bulkRead(ctx, mid) }); err != nil {
 		log.WithError(err).WithField("merchant_id", mid.String()).Warn("verify: bulk read failed; it resumes from its checkpoint on the next pass")
 	}
 }
@@ -279,7 +280,7 @@ func (v *Verifier) Listen(ctx context.Context) {
 	}
 	channel := pgx.Identifier{unverifiedChannel + v.DB.DataPool().Schema()}.Sanitize()
 	for ctx.Err() == nil {
-		if err := v.listenOnce(ctx, channel); err != nil && ctx.Err() == nil {
+		if err := recovered(func() error { return v.listenOnce(ctx, channel) }); err != nil && ctx.Err() == nil {
 			log.WithError(err).Warn("verify: unverified notifications interrupted; reconnecting")
 			select {
 			case <-ctx.Done():
@@ -469,4 +470,15 @@ func (v *Verifier) endBulk(mid merchant.ID) {
 	if again {
 		v.flush(mid)
 	}
+}
+
+// recovered turns a panic in a provider read into an error, so one bad
+// response never takes the process down.
+func recovered(fn func() error) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("verify: panic: %v\n%s", p, debug.Stack())
+		}
+	}()
+	return fn()
 }

@@ -89,11 +89,12 @@ func TestBuildGuardsAndDefaults(t *testing.T) {
 		s, err := BuildTransit(ctx, cfg)
 		require.NoError(t, err)
 		require.Nil(t, s.SolanaTransit, "disabled vault opens no transit client")
-		require.NoError(t, s.Ping(ctx), "a store without a vault client has no separate liveness")
+		require.NoError(t, s.Probe(ctx), "a store without a vault client has no separate liveness")
+		require.NoError(t, s.State())
 		s.Close()
 	}
 	var nilStore *Store
-	require.NoError(t, nilStore.Ping(ctx))
+	require.NoError(t, nilStore.Probe(ctx))
 	nilStore.Close()
 
 	require.Equal(t, "secret", resolveVaultKVMount(nil))

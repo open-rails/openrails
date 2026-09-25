@@ -130,7 +130,7 @@ require (
 	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
 	github.com/riverqueue/river/rivershared v0.47.0 // indirect
 	github.com/riverqueue/river/rivertype v0.47.0
-	github.com/sendgrid/rest v2.6.9+incompatible // indirect
+	github.com/sendgrid/rest v2.6.9+incompatible
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect

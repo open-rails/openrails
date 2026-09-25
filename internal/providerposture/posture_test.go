@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +38,7 @@ func TestOnlyExpectedVerdictArms(t *testing.T) {
 		{Live, fixed(Live, blip), false},
 	} {
 		k := Key{Rail: "nmi", Credential: Fingerprint("k"), Expect: tc.expect}
-		s := NewRegistry(time.Minute).Verify(context.Background(), k, tc.check)
+		s := NewRegistry(func(int) time.Duration { return time.Minute }).Verify(context.Background(), k, tc.check)
 		require.Equal(t, tc.armed, s.Armed(), "expect %s got %s", tc.expect, s.Verdict)
 		if tc.armed {
 			require.NoError(t, s.Error())
@@ -45,13 +46,13 @@ func TestOnlyExpectedVerdictArms(t *testing.T) {
 			require.ErrorIs(t, s.Error(), ErrDisarmed)
 		}
 	}
-	s := NewRegistry(time.Minute).Verify(context.Background(), Key{}, fixed(Unknown, blip))
+	s := NewRegistry(func(int) time.Duration { return time.Minute }).Verify(context.Background(), Key{}, fixed(Unknown, blip))
 	require.ErrorIs(t, s.Error(), blip, "the provider's reason is kept")
 }
 
 func TestRegistryVerifiesOnceAndRetriesOnlyUnknownAfterBackoff(t *testing.T) {
 	now := time.Unix(0, 0)
-	r := NewRegistry(time.Minute)
+	r := NewRegistry(func(int) time.Duration { return time.Minute })
 	r.Now = func() time.Time { return now }
 	var calls atomic.Int64
 	verdict := Unknown
@@ -85,7 +86,7 @@ func TestRegistryVerifiesOnceAndRetriesOnlyUnknownAfterBackoff(t *testing.T) {
 }
 
 func TestRegistrySingleflightsConcurrentFirstUse(t *testing.T) {
-	r := NewRegistry(time.Minute)
+	r := NewRegistry(func(int) time.Duration { return time.Minute })
 	var calls atomic.Int64
 	check := func(context.Context) (Verdict, error) {
 		calls.Add(1)
@@ -111,7 +112,7 @@ func TestRegistrySingleflightsConcurrentFirstUse(t *testing.T) {
 }
 
 func TestKeyBindsEveryIdentityComponent(t *testing.T) {
-	r := NewRegistry(time.Minute)
+	r := NewRegistry(func(int) time.Duration { return time.Minute })
 	base := Key{Rail: "nmi", AccountID: "1", Endpoint: "e", Credential: Fingerprint("k")}
 	require.True(t, r.Verify(context.Background(), base, fixed(Simulated, nil)).Armed())
 	_, seen := r.Lookup(base)
@@ -131,12 +132,15 @@ func TestKeyBindsEveryIdentityComponent(t *testing.T) {
 	require.NotEqual(t, Fingerprint("ab", "c"), Fingerprint("a", "bc"), "parts are length-framed")
 }
 
-func TestTrackedReportsAndRecoversDisarmedKeys(t *testing.T) {
+func TestTrackedReportsCachedStateAndRecoversAfterBackoff(t *testing.T) {
 	now := time.Unix(0, 0)
-	r := NewRegistry(time.Minute)
+	var attempts []int
+	r := NewRegistry(func(n int) time.Duration { attempts = append(attempts, n); return time.Minute })
 	r.Now = func() time.Time { return now }
 	up := false
+	var calls atomic.Int64
 	check := func(context.Context) (Verdict, error) {
+		calls.Add(1)
 		if up {
 			return Simulated, nil
 		}
@@ -145,12 +149,27 @@ func TestTrackedReportsAndRecoversDisarmedKeys(t *testing.T) {
 	ctx := context.Background()
 	k := Key{Rail: "nmi", Credential: Fingerprint("c")}
 	var tracked Tracked
+	pspID := uuid.New()
 	r.Verify(ctx, k, check)
-	tracked.Add(k, check)
+	tracked.AddPSP(pspID, k, check)
 	tracked.Add(Key{Rail: "stripe", Credential: Fingerprint("d")}, fixed(Simulated, nil))
-	require.Len(t, tracked.Disarmed(ctx, r), 1)
+	require.Len(t, tracked.Unarmed(r), 1, "an unverified key is not reported; the unknown one is")
+	require.EqualValues(t, 1, calls.Load(), "reading state never probes")
+	status, ok := tracked.PSPStatus(r, pspID)
+	require.True(t, ok)
+	require.Equal(t, Unknown, status.Verdict)
+
 	up = true
-	require.Len(t, tracked.Disarmed(ctx, r), 1, "still inside the retry backoff")
+	require.Equal(t, Unknown, r.Refresh(ctx, k, check).Verdict, "still inside the retry backoff")
 	now = now.Add(time.Minute)
-	require.Empty(t, tracked.Disarmed(ctx, r), "a due retry re-arms without a restart")
+	require.True(t, r.Refresh(ctx, k, check).Armed(), "a due retry re-arms without a restart")
+	require.Empty(t, tracked.Unarmed(r))
+	require.Equal(t, []int{0}, attempts)
+
+	up = false
+	k2 := Key{Rail: "nmi", Credential: Fingerprint("e")}
+	for range 3 {
+		r.Verify(ctx, k2, check)
+	}
+	require.Equal(t, []int{0, 0, 1, 2}, attempts, "consecutive unknowns back off further")
 }

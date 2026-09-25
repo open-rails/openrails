@@ -653,6 +653,10 @@ type MerchantManifestReconcileOptions struct {
 	// discovery. Production uses the default resolver over provider read-only
 	// identity APIs.
 	IdentityResolver ManifestProviderIdentityResolver
+	// DeferPSP, when set, skips a PSP whose reconcile failed with an error it
+	// accepts (a provider that cannot answer now) instead of failing the
+	// whole reconcile; the caller retries it in the background.
+	DeferPSP func(rail string, err error) bool
 }
 
 type ManifestProviderIdentityResolver interface {
@@ -1156,6 +1160,10 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 			return err
 		}
 		if err := ReconcileManifestPSP(ctx, cfg, database, merchantID, slug, entry.key, entry.rail, entry.config, custodianID, secretStore, transit, opts); err != nil {
+			if opts.DeferPSP != nil && opts.DeferPSP(entry.rail, err) {
+				log.WithError(err).WithField("psp", entry.key).Warn("merchant bootstrap: PSP deferred until its provider answers")
+				continue
+			}
 			return err
 		}
 	}

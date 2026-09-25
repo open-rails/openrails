@@ -7,8 +7,9 @@ test account before OpenRails sends it a mutation.
 
 Once per loaded credential set, never per payment:
 
-- Runtime startup (`Runtime.VerifyProviderPosture`; standalone boot and
-  `embed.New`). Embedded runtimes verify only their configured merchant.
+- Runtime startup, in the background (`Runtime.StartProviderPosture`;
+  standalone boot and `embed.New`): construction never waits on a provider.
+  Embedded runtimes verify only their configured merchant.
 - Credential create/rotate through the merchant API (the write is rejected
   on anything but a simulated verdict).
 - The first mutation of a credential set this process has not verified yet
@@ -29,11 +30,12 @@ verified one.
 Only `simulated` arms. `live`, `mismatched`, `unknown` (unavailable,
 malformed) and `unsupported` disarm: mutations fail locally with
 `providerposture.ErrDisarmed` before any bytes are sent; reads work. The
-runtime still starts; `Ready()` fails its `psp_posture` dependency while a
-loaded PSP is disarmed, so a host that wants hard failure checks `Ready`.
-`unknown` is re-verified no sooner than 30s later (by `Ready` or the next
-mutation), so a network blip does not need a restart. `live` and
-`mismatched` hold until the credential is reloaded.
+runtime still starts and stays ready; `Ready()` lists `psp_posture` as a
+degraded optional dependency and the embedded `openrails_psp_posture` probe
+fails while a loaded PSP is unverified or disarmed. `unknown` is re-verified
+in the background and on the next mutation with capped full-jitter backoff
+(≤30s), so a provider outage never needs a restart. `live` and `mismatched`
+hold until the credential is reloaded.
 
 ## Signals (authoritative only; never hostname or label inference)
 

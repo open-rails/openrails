@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -123,6 +124,9 @@ func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug str
 	// store-armed credentials; without the merchants service every rail
 	// reports "no armed provider read" and no resolution can be accepted.
 	if err := application.Runtime.EnsureMerchantsService(ctx); err != nil {
+		return fmt.Errorf("arm merchant credentials: %w", err)
+	}
+	if err := application.Runtime.MerchantSecretBackend.Await(ctx, merchantsecrets.AwaitTimeout); err != nil {
 		return fmt.Errorf("arm merchant credentials: %w", err)
 	}
 	mid, err := resolveCLIMerchant(ctx, application.Runtime.DB, merchantSlug)

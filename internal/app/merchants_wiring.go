@@ -54,7 +54,6 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap)
 	r.ArmMerchantsService(svc, store)
 	r.MerchantSecretBackend = backend
-	r.MerchantSecretPing = backend.Ping
 	r.RouteCapabilities = &routesurface.RuntimeCapabilities{SolanaCanSign: backend.SolanaCanSign, SecretWrite: backend.SecretWrite}
 	r.ArmSolanaRecurringServices(store, backend.SolanaTransit)
 	return nil

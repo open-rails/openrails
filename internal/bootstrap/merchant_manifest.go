@@ -295,6 +295,9 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, opts MerchantManifestReconcileOptions) (merchants.MerchantSecretStore, solana.TransitClient, error) {
 	if opts.SecretStore != nil {
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
+		if err == nil {
+			err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
 		}
@@ -303,12 +306,18 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		log.Info("merchant bootstrap: snapshot credentials validate in memory and are not persisted")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
+		if err == nil {
+			err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
 		}
 		return merchants.NewMemorySecretStore(), transitStore.SolanaTransit, nil
 	}
 	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
+	if err == nil {
+		err = secretBackend.Await(ctx, merchantsecrets.AwaitTimeout)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("merchant bootstrap: build secret store: %w", err)
 	}

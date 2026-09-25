@@ -404,6 +404,9 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		merchantsSvc = svc
 	} else {
 		backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool())
+		if err == nil {
+			err = backend.Await(ctx, merchantsecrets.AwaitTimeout)
+		}
 		if err != nil {
 			cleanup()
 			return nil, nil, fmt.Errorf("pull-provider: merchant secret store unavailable, so no rail can be armed: %w", err)
@@ -467,6 +470,9 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		}
 	}
 	transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
+	if err == nil {
+		err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("pull-provider: %w", err)
 	}

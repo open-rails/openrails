@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sendgrid/rest"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	log "github.com/sirupsen/logrus"
@@ -26,10 +28,17 @@ import (
 
 var errUserEmailUnavailable = errors.New("user email unavailable")
 
+// sendTimeout bounds one SendGrid call, so a hung provider never stalls the
+// webhook or lifecycle path that sends the email.
+const sendTimeout = 10 * time.Second
+
 // EmailService handles all email notifications including subscription-related emails.
 // It wraps the SendGrid SDK and has domain knowledge for building subscription/payment emails.
 type EmailService struct {
-	client       *sendgrid.Client
+	// request is the immutable mail-send template; each send copies it, so
+	// concurrent sends never share a body.
+	request      *rest.Request
+	http         *rest.Client
 	profileStore *merchantconfig.Store
 	clock        clockwork.Clock
 
@@ -65,9 +74,14 @@ func NewEmailService(sendgridCfg *config.SendGridConfig, profileStore *merchantc
 		return nil, fmt.Errorf("sendgrid api_key is required")
 	}
 
-	client := sendgrid.NewSendClient(apiKey)
-
-	return &EmailService{client: client, profileStore: profileStore, clock: timeutil.FirstClock(clocks...)}, nil
+	request := sendgrid.GetRequest(apiKey, "/v3/mail/send", "")
+	request.Method = rest.Post
+	return &EmailService{
+		request:      &request,
+		http:         &rest.Client{HTTPClient: &http.Client{Timeout: sendTimeout}},
+		profileStore: profileStore,
+		clock:        timeutil.FirstClock(clocks...),
+	}, nil
 }
 
 func (s *EmailService) SetClock(c clockwork.Clock) {
@@ -111,7 +125,7 @@ func (s *EmailService) now() time.Time {
 
 // IsEnabled returns true when delivery is possible.
 func (s *EmailService) IsEnabled() bool {
-	return s != nil && s.client != nil
+	return s != nil && s.request != nil
 }
 
 // SendEmail sends a basic email using the configured provider.
@@ -322,7 +336,11 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 }
 
 func (s *EmailService) send(ctx context.Context, msg *mail.SGMailV3) error {
-	res, err := s.client.SendWithContext(ctx, msg)
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	request := *s.request
+	request.Body = mail.GetRequestBody(msg)
+	res, err := s.http.SendWithContext(ctx, request)
 	if err != nil {
 		return fmt.Errorf("sendgrid email send failed: %w", err)
 	}

@@ -69,9 +69,13 @@ vault:
   # token                                # dev/e2e or a sidecar-managed token (env VAULT_TOKEN)
 ```
 
-The minted token is held in memory only. A background supervisor renews it up to Vault's max TTL
-and **re-authenticates** when renewal is no longer possible (#751); auth health feeds readiness
-alongside a live reachability re-check of the KV mount.
+The minted token is held in memory only. Login never blocks startup: a background supervisor logs
+in, renews up to Vault's max TTL and **re-authenticates** when renewal is no longer possible (#751),
+retrying with capped full-jitter backoff forever. Until it succeeds, Transit/KV operations fail fast
+with `vault.ErrUnavailable` (Solana signing answers 503) and readiness stays green. A Transit signer
+whose PSP is already stored keeps its identity while Vault is down; on a first boot only that PSP
+waits and is provisioned once Vault answers. Embedded hosts register the `openrails_vault` probe
+from `Runtime.Probes()`.
 
 ## Minimal policies
 

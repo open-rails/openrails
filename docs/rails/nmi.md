@@ -143,7 +143,7 @@ one verdict;
 see `docs/design/provider-sandbox-posture.md`. A false, unknown or unavailable
 verdict disarms the PSP: every NMI mutation is refused with
 `providerposture.ErrDisarmed`, reads still work, and `Ready()` reports
-`psp_posture` until a retry succeeds.
+`psp_posture` as degraded until a background retry succeeds.
 
 Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
 only into Collect.js fields. The former live E2E harness has been removed;

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
 // MONEY-3: exact rational conversion with one final ceiling, across ISO scales.
@@ -106,16 +109,80 @@ func TestExchangeAPICanceledContextIsDetectable(t *testing.T) {
 	}
 }
 
-// The Redis cache fails closed without a client rather than inventing a rate.
-func TestRedisCachedProviderFailsClosedWithoutRedis(t *testing.T) {
+// The Redis cache fails closed when no fresh rate exists anywhere rather than
+// inventing one.
+func TestRedisCachedProviderFailsClosedWithoutARate(t *testing.T) {
 	p := NewRedisCachedProvider(nil, NewMockProvider(nil), 0)
 	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-		t.Fatal("missing redis must refuse")
+		t.Fatal("an unquotable pair must refuse")
 	}
 	if q, err := p.Quote(context.Background(), "usd", "USD"); err != nil || q.Rate != 1 {
 		t.Fatalf("same currency: %+v %v", q, err)
 	}
-	if p.Refresh(context.Background(), []string{"EUR", "USD"}) == nil {
-		t.Fatal("refresh without redis must fail")
+}
+
+type flakyProvider struct {
+	calls atomic.Int64
+	down  atomic.Bool
+	fail  atomic.Int64 // calls to fail before answering
+}
+
+func (f *flakyProvider) Quote(_ context.Context, from, to string) (*Quote, error) {
+	n := f.calls.Add(1)
+	if f.down.Load() || n <= f.fail.Load() {
+		return nil, errors.New("upstream down")
+	}
+	return &Quote{FromCurrency: from, ToCurrency: to, Rate: 1.25, AsOf: time.Now()}, nil
+}
+
+func (f *flakyProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
+	return f.Quote(ctx, currency, "USD")
+}
+
+// Redis is an accelerator: while it is unreachable, quotes come from the
+// in-memory rates and the refresher keeps retrying the publish.
+func TestRedisCachedProviderServesMemoryWhileRedisIsDown(t *testing.T) {
+	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	upstream := &flakyProvider{}
+	p := NewRedisCachedProvider(rdb, upstream, time.Hour)
+	ctx := context.Background()
+
+	if err := p.Refresh(ctx, []string{"EUR", "USD"}); err == nil {
+		t.Fatal("the redis publish must report the outage")
+	}
+	fetched := upstream.calls.Load()
+	upstream.down.Store(true)
+	q, err := p.Quote(ctx, "EUR", "USD")
+	if err != nil || q.Rate != 1.25 {
+		t.Fatalf("quote from memory: %+v %v", q, err)
+	}
+	if upstream.calls.Load() != fetched {
+		t.Fatal("a fresh in-memory rate needs no upstream call")
+	}
+	if p.LastRefresh().IsZero() {
+		t.Fatal("a complete fetch is a successful refresh even when redis is down")
+	}
+}
+
+// A failed refresh is retried with backoff, not after the next 2h interval.
+func TestRedisCachedProviderRetriesFailedRefresh(t *testing.T) {
+	upstream := &flakyProvider{}
+	upstream.fail.Store(1)
+	p := NewRedisCachedProvider(nil, upstream, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	p.Start(ctx, []string{"EUR", "USD"}, 2*time.Hour)
+	t.Cleanup(p.Stop)
+	deadline := time.Now().Add(10 * time.Second)
+	for p.LastRefresh().IsZero() {
+		if time.Now().After(deadline) {
+			t.Fatal("the failed refresh was not retried")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	upstream.down.Store(true)
+	if q, err := p.Quote(ctx, "USD", "EUR"); err != nil || q.Rate != 1.25 {
+		t.Fatalf("retried pair: %+v %v", q, err)
 	}
 }

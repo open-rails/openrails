@@ -121,6 +121,9 @@ func dependencyStatus(deps []app.ReadinessDependency) map[string]any {
 			continue
 		}
 		entry := map[string]any{"available": false}
+		if d.Optional {
+			entry["degraded"] = true
+		}
 		if d.Err != nil {
 			entry["last_error"] = d.Err.Error()
 		}

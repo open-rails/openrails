@@ -158,7 +158,7 @@ func optsValue[T any](opts *Options, pick func(*Options) T) T {
 // boot ensures missing identities and reloads host-owned snapshot credentials.
 // Existing metadata and archive decisions survive restart. The conventional
 // path is optional; an explicitly supplied path must exist.
-// It then verifies every loaded sandbox PSP credential once (disarming, never
+// It then verifies every loaded PSP credential in the background (disarming, never
 // refusing boot); nmiProbeV5BaseURL is the test-only posture probe seam.
 func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path, nmiProbeV5BaseURL string) error {
 	slugs, err := reconcileBootMerchantManifest(ctx, cfg, application, path)
@@ -178,7 +178,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		}
 	}
 	rt.NMIPostureV5BaseURL = nmiProbeV5BaseURL
-	rt.VerifyProviderPosture(ctx, declared...)
+	rt.StartProviderPosture(declared...)
 	return nil
 }
 

@@ -40,6 +40,7 @@ type KVv2Adapter struct {
 	// NewKVv2Adapter) is a valid no-op — tests and one-off root/dedicated-
 	// container clients never need it.
 	onPermissionDenied func(error)
+	sup                *Supervisor
 }
 
 // NewKVv2Adapter builds a KV-v2 adapter for the given mount (e.g. "secret").
@@ -57,6 +58,7 @@ func NewKVv2Adapter(client *vaultapi.Client, mount string) *KVv2Adapter {
 func (a *KVv2Adapter) WithReauthTrigger(sup *Supervisor) *KVv2Adapter {
 	if sup != nil {
 		a.onPermissionDenied = sup.NotifyPermissionDenied
+		a.sup = sup
 	}
 	return a
 }
@@ -96,6 +98,9 @@ func (a *KVv2Adapter) ReadSecretVersion(ctx context.Context, path string, versio
 	query := map[string][]string{}
 	if version > 0 {
 		query["version"] = []string{strconv.Itoa(version)}
+	}
+	if err := a.sup.AuthState(); err != nil {
+		return nil, 0, fmt.Errorf("vault kv read: %w", err)
 	}
 	sec, err := a.client.Logical().ReadWithDataWithContext(ctx, a.dataPath(path), query)
 	if err != nil {
@@ -155,6 +160,9 @@ func (a *KVv2Adapter) writeSecret(ctx context.Context, path string, data map[str
 	if expectedVersion != nil {
 		body["options"] = map[string]any{"cas": *expectedVersion}
 	}
+	if err := a.sup.AuthState(); err != nil {
+		return 0, fmt.Errorf("vault kv write: %w", err)
+	}
 	sec, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), body)
 	if err != nil {
 		a.notifyErr(err)
@@ -168,6 +176,9 @@ func (a *KVv2Adapter) writeSecret(ctx context.Context, path string, data map[str
 
 // DeleteSecret purges ALL versions via the metadata endpoint (idempotent).
 func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
+	if err := a.sup.AuthState(); err != nil {
+		return fmt.Errorf("vault kv delete: %w", err)
+	}
 	if _, err := a.client.Logical().DeleteWithContext(ctx, a.metadataPath(path)); err != nil {
 		a.notifyErr(err)
 		return fmt.Errorf("vault kv delete: %w", err)
@@ -183,6 +194,9 @@ func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
 // status surfaces would see only "psps/" and report every
 // credential unconfigured.
 func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, error) {
+	if err := a.sup.AuthState(); err != nil {
+		return nil, fmt.Errorf("vault kv list: %w", err)
+	}
 	return a.listSecrets(ctx, strings.TrimSuffix(path, "/"), "", 0)
 }
 

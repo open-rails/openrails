@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -341,6 +342,8 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		r.ErrorJSON(http.StatusConflict, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutSessionValidation):
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
+	case errors.Is(err, vault.ErrUnavailable):
+		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable, "payment signer is temporarily unavailable"))
 	default:
 		writeRefusal(r, err, "checkout session request failed")
 	}

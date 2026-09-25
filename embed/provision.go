@@ -2,12 +2,21 @@ package embed
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"sync/atomic"
 
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/goccy/go-yaml"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -32,14 +41,17 @@ type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
 type PSPSignerConfig = boot.PSPSignerConfig
 
 // upsertMerchantConfig reconciles the constructor's merchant declaration before
-// HTTP routes or workers can observe a partially configured runtime.
-func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m MerchantConfig) (merchant.ID, error) {
+// HTTP routes or workers can observe a partially configured runtime. With
+// tolerateVault, a Solana vault_transit signer whose Vault is unavailable
+// reuses the identity stored for it, or (none stored yet) leaves only that PSP
+// unprovisioned; the returned flag says Vault must still confirm it.
+func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m MerchantConfig, tolerateVault bool) (merchant.ID, bool, error) {
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
-		return merchant.ID{}, fmt.Errorf("openrails embed: app database not initialized")
+		return merchant.ID{}, false, fmt.Errorf("openrails embed: app database not initialized")
 	}
 	conf := a.Config
 	if conf == nil || conf.DB == nil {
-		return merchant.ID{}, fmt.Errorf("openrails embed: config/db is required")
+		return merchant.ID{}, false, fmt.Errorf("openrails embed: config/db is required")
 	}
 	database := a.Runtime.DB
 
@@ -48,17 +60,17 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 		var err error
 		directory, err = merchants.NewDirectoryService(database.DataPool())
 		if err != nil {
-			return merchant.ID{}, err
+			return merchant.ID{}, false, err
 		}
 	}
 	bound := a.Runtime.ConfiguredMerchant()
 	if !bound.IsZero() {
 		selected, err := directory.GetBySlug(ctx, merchant.NormalizeSlug(slug))
 		if err != nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: engine is already bound to merchant %s; cannot resolve supplied name %q: %w", bound, slug, err)
+			return merchant.ID{}, false, fmt.Errorf("openrails embed: engine is already bound to merchant %s; cannot resolve supplied name %q: %w", bound, slug, err)
 		}
 		if selected.ID != bound {
-			return merchant.ID{}, fmt.Errorf("openrails embed: one embedded engine serves one merchant; refusing second merchant %q (%s), bound to %s", slug, selected.ID, bound)
+			return merchant.ID{}, false, fmt.Errorf("openrails embed: one embedded engine serves one merchant; refusing second merchant %q (%s), bound to %s", slug, selected.ID, bound)
 		}
 		slug = selected.Slug
 	}
@@ -75,31 +87,91 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 		Merchant:   m,
 		Options:    boot.MerchantManifestReconcileOptions{Insert: true, StripeClients: a.Runtime.StripeClients},
 	}
+	var fallback *storedSignerTransit
 	switch {
 	case conf.SecretStoreBackend() == config.SecretBackendSnapshot:
 		// Load the host-owned snapshot into this process. Metadata initialization
 		// is create-only; authorized edits and archived accounts survive restarts.
 		if a.Runtime == nil || a.Runtime.ManifestSecrets == nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: snapshot credentials require the runtime snapshot plane")
+			return merchant.ID{}, false, fmt.Errorf("openrails embed: snapshot credentials require the runtime snapshot plane")
 		}
 		req.SecretStore = a.Runtime.ManifestSecrets.Seeder()
 		backend := a.Runtime.MerchantSecretBackend
 		if backend == nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: credential backend must be initialized before provisioning")
+			return merchant.ID{}, false, fmt.Errorf("openrails embed: credential backend must be initialized before provisioning")
 		}
 		req.SolanaTransit = backend.SolanaTransit
+		if tolerateVault && backend.SolanaTransit != nil {
+			fallback = &storedSignerTransit{TransitClient: backend.SolanaTransit, db: database, directory: directory, slug: slug,
+				environment: config.ExpectedProviderEnvironment(conf.IsTestMode())}
+			req.SolanaTransit = fallback
+			req.Options.DeferPSP = func(_ string, err error) bool { return errors.Is(err, vault.ErrUnavailable) }
+		}
 	case len(m.PSPs) > 0 || len(m.Custodians) > 0:
-		return merchant.ID{}, fmt.Errorf("openrails embed: provider credential declarations require a host snapshot; use the Client payment-provider publication operation for managed credentials")
+		return merchant.ID{}, false, fmt.Errorf("openrails embed: provider credential declarations require a host snapshot; use the Client payment-provider publication operation for managed credentials")
 	}
 
 	tn, err := boot.ProvisionMerchant(ctx, req)
 	if err != nil {
-		return merchant.ID{}, fmt.Errorf("openrails embed: upsert merchant config: %w", err)
+		return merchant.ID{}, false, fmt.Errorf("openrails embed: upsert merchant config: %w", err)
 	}
 	if a.Runtime.ConfiguredMerchant().IsZero() {
 		a.Runtime.SetConfiguredMerchant(tn.ID)
 	}
-	return tn.ID, nil
+	return tn.ID, fallback != nil && fallback.unavailable.Load(), nil
+}
+
+// storedSignerTransit answers a Transit public-key read that Vault cannot
+// serve right now from the Solana identity already stored for that key.
+type storedSignerTransit struct {
+	solanaint.TransitClient
+	db          *db.DB
+	directory   *merchants.Service
+	slug        string
+	environment string
+	unavailable atomic.Bool
+}
+
+func (t *storedSignerTransit) PublicKey(ctx context.Context, key string) ([]byte, error) {
+	pub, err := t.TransitClient.PublicKey(ctx, key)
+	if err == nil || !errors.Is(err, vault.ErrUnavailable) {
+		return pub, err
+	}
+	t.unavailable.Store(true)
+	if account, ok := t.stored(ctx, key); ok {
+		log.WithField("key", key).Warn("openrails embed: Vault unavailable; Solana signer uses its stored identity until Vault confirms it")
+		return account.Bytes(), nil
+	}
+	return nil, err
+}
+
+func (t *storedSignerTransit) stored(ctx context.Context, key string) (solanago.PublicKey, bool) {
+	m, err := t.directory.GetBySlug(ctx, merchant.NormalizeSlug(t.slug))
+	if err != nil {
+		return solanago.PublicKey{}, false
+	}
+	rail := "solana"
+	var account string
+	_ = t.db.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
+		rows, err := t.db.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: m.ID.UUID(), Rail: &rail})
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			var evidence struct {
+				Signer struct{ Mode, Key string } `json:"signer"`
+			}
+			if row.Archived || row.Environment != t.environment || json.Unmarshal(row.Evidence, &evidence) != nil {
+				continue
+			}
+			if evidence.Signer.Mode == "vault_transit" && evidence.Signer.Key == key {
+				account = row.AccountID
+			}
+		}
+		return nil
+	})
+	pub, err := solanago.PublicKeyFromBase58(account)
+	return pub, account != "" && err == nil
 }
 
 // ParseMerchantConfig parses a single merchant YAML document into a MerchantConfig.
