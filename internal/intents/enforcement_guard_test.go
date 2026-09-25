@@ -109,6 +109,9 @@ var providerWriteSurface = map[string]string{
 	"ProbeCredentials":             "read", // #812: bounded transaction-search probe; creates nothing
 	"ProbeSalesByOrderID":          "read",
 	"ProbeSalesBySubscriptionID":   "read",
+	"ReadSchedules":                "read",
+	"SalesForSchedules":            "read",
+	"SalesPage":                    "read",
 	"ReadOrderAttempts":            "read",
 	"ReadOrderAttemptsSince":       "read",
 	"ReadVaultTransactions":        "read",
