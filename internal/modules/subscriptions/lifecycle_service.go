@@ -15,6 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -2262,83 +2263,32 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			return ""
 		}
-		// parkUnknown is ApplyLocalUnknown's shape applied inside this tx: the
-		// row leaves the dunning queue without losing the customer's access.
-		// awaitingStatus is where a stopped subscription waits. An engine
-		// obligation is ours to decide: it waits past_due for the customer's
-		// new card (or the operator), never in the provider-verification
-		// cohort, which has nothing to probe for it.
-		awaitingStatus := models.StatusUnverified
-		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
-			awaitingStatus = models.StatusPastDue
+		// The state machine decides the status (#1091); this flow owns the
+		// attempt count and the next attempt time.
+		periodStart := time.Time{}
+		if subscription.CurrentPeriodEndsAt != nil {
+			periodStart = subscription.CurrentPeriodEndsAt.UTC()
 		}
 		heldTerminal := ""
-		parkUnknown := func(why string) {
-			heldTerminal = why
-			subscription.Status = awaitingStatus
-			subscription.GraceEndsAt = nil
-			subscription.NextRetryAt = nil
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id":    subscription.ID,
-				"failure_reason":     normalize.FromPtr(params.FailureReason),
-				"terminal_certainty": params.TerminalCertainty,
-				"refusal":            why,
-			}).Warn("Terminal cancellation REFUSED; parking subscription as unknown (entitlements intact, no provider delete queued)")
-		}
-
-		// or#870 bucket 2 — THEIR card, fixable (expired, bad CVC, do-not-honor,
-		// call issuer...). Retrying cannot succeed and burns attempts against the
-		// issuer, but the customer fixes it in a minute. So: stop charging NOW,
-		// keep the subscription alive and its entitlements intact
-		// (awaiting_method projects standing access), and notify them to update
-		// the payment method; a replaced method resumes dunning. NOT a terminal outcome — no cancel, no revoke, no
-		// certainty leg required, and emphatically no touching of their stored
-		// card. This is where recoverable revenue lives.
-		if params.Decline == collection.DeclineFixPaymentMethod {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.CustomerID,
-				"failure_code":    normalize.FromPtr(params.FailureCode),
-			}).Warn("or#870 bucket 2: payment method needs the customer's attention; charging STOPS, access and the stored card are untouched")
-			subscription.Status = models.StatusAwaitingMethod
-			subscription.GraceEndsAt = nil
-			subscription.NextRetryAt = nil
+		var event lifecycle.Event
+		switch params.Decline {
+		case collection.DeclineFixPaymentMethod:
+			// or#870 bucket 2 — the customer's card, fixable. Charging stops,
+			// access and the stored card are untouched, and a replaced card
+			// resumes dunning. Not terminal: no certainty leg needed.
+			event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.FixMethod, At: now}
 			needsPaymentMethodUpdate = true
-		} else if params.Decline == collection.DeclineNonRecoverable && terminalRefusal(params.TerminalCertainty) != "" {
-			// Bucket 3 with the #836 kill switch closed (or no certainty leg
-			// named): the mandate is gone, so continuing to charge is wrong, but
-			// cancelling is forbidden. Park as `unknown` — access intact, out of
-			// the dunning queue, no rail action queued.
-			parkUnknown(terminalRefusal(params.TerminalCertainty))
-		} else if params.Decline == collection.DeclineNonRecoverable {
-			// or#870 bucket 3 — the issuer withdrew the recurring mandate, or the
-			// instrument is permanently dead. Cancel now with no grace and no
-			// further retries; the deferred rail-side SCHEDULE delete below stops
-			// NMI rebilling forever. The stored payment method is not touched.
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-				"user_id":         subscription.CustomerID,
-				"failure_code":    normalize.FromPtr(params.FailureCode),
-			}).Warn("or#870 bucket 3: non-recoverable decline; cancelling the subscription at the rail (stored payment method left intact)")
-			expired := models.CancelTypeExpired
-			reason := normalize.FromPtr(params.FailureReason)
-			if reason == "" {
-				reason = "transaction_failure"
+		case collection.DeclineNonRecoverable:
+			// or#870 bucket 3 — the mandate is gone. Cancel at the rail, unless
+			// the kill switch or a missing certainty leg holds the outcome.
+			if heldTerminal = terminalRefusal(params.TerminalCertainty); heldTerminal != "" {
+				event = lifecycle.TerminalHeld{}
+			} else {
+				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.NonRecoverable, At: now}
 			}
-			subscription.Status = models.StatusCancelled
-			subscription.CancelledAt = &now
-			subscription.CancelType = &expired
-			subscription.CancelFeedback = &reason
-			subscription.EndedAt = &now
-			subscription.ClearRetrySchedule()
-		} else {
-			// Update subscription status - failed payment = past_due (still trying to recover)
-			subscription.Status = models.StatusPastDue
-
-			// #359: the dunning cadence is a hardcoded function of the price's
-			// billing cycle (monthly: 5 failures total, progressive retries at
-			// +2d/+5d/+9d/+13d; weekly-ish: retries at +1d/+2d; daily-ish: the
-			// first failure is terminal). See collection.RetryOffsets.
+		default:
+			// Bucket 1 — keep the schedule. The dunning cadence is a function of
+			// the billing cycle (collection.RetryOffsets).
 			cycleHours := 0
 			if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 				accepted := params.Prepared
@@ -2368,7 +2318,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				unknownCycle = subscription.MerchantID
 				return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 			}
-
 			terminal := params.Terminal
 			if !terminal {
 				subscription.LastRetryAt = &now
@@ -2378,41 +2327,45 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				} else {
 					*subscription.RetryAttempts++
 				}
-				// maxFailures == 1 (sub-4-day cycles) makes the FIRST failure
-				// terminal: straight to cancel + revoke + scheduled NMI delete.
+				// A cycle with no retries (under 4 days) ends on its first decline.
 				terminal = *subscription.RetryAttempts >= maxFailures
 			}
-
-			// Terminal (the schedule's max failures reached, or a caller-declared
-			// terminal): cancel — but only through the certainty + kill-switch
-			// gate. Refused ⇒ park as `unknown`. Otherwise schedule the next retry
-			// at the schedule's gap for this failure count (relative to now, so a
-			// late worker run never schedules into the past).
 			leg := params.TerminalCertainty
 			if !params.Terminal {
 				leg = scheduleExhaustionLeg()
 			}
-			if refusal := terminalRefusal(leg); terminal && refusal != "" {
-				parkUnknown(refusal)
-			} else if terminal {
-				expired := models.CancelTypeExpired
-				reason := normalize.FromPtr(params.FailureReason)
-				if reason == "" {
-					reason = "transaction_failure"
-				}
-				subscription.Status = models.StatusCancelled
-				subscription.CancelledAt = &now
-				subscription.CancelType = &expired
-				subscription.CancelFeedback = &reason
-				subscription.EndedAt = &now
-				subscription.ClearRetrySchedule()
-			} else {
+			switch {
+			case terminal && terminalRefusal(leg) != "":
+				heldTerminal = terminalRefusal(leg)
+				event = lifecycle.TerminalHeld{}
+			case terminal:
+				event = lifecycle.DunningExhausted{At: now}
+			default:
+				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
 				nextRetry, _, err := collection.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
 				if err != nil {
 					return err
 				}
 				subscription.NextRetryAt = &nextRetry
 			}
+		}
+		if heldTerminal != "" {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id":    subscription.ID,
+				"failure_reason":     normalize.FromPtr(params.FailureReason),
+				"terminal_certainty": params.TerminalCertainty,
+				"refusal":            heldTerminal,
+			}).Warn("Terminal cancellation REFUSED; the subscription waits with access intact and no provider delete queued")
+		}
+		if _, err := Transition(subscription, event, now); err != nil {
+			return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
+		}
+		if subscription.Status == models.StatusCancelled {
+			reason := normalize.FromPtr(params.FailureReason)
+			if reason == "" {
+				reason = "transaction_failure"
+			}
+			subscription.CancelFeedback = &reason
 		}
 
 		// (#691: no grace windows are appended while dunning runs past the paid
