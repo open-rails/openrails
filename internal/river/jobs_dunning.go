@@ -395,7 +395,7 @@ func (w *DunningWorker) processSubscription(
 			cycleHours = collection.BillingCycleHoursOf(p)
 		}
 	}
-	policy, err := subscriptions.DunningPolicy(ctx, w.DB)
+	policy, err := subscriptions.CasePolicy(ctx, w.DB, sub)
 	if err != nil {
 		return dunningOutcomeFailed, err
 	}

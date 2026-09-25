@@ -62,6 +62,9 @@ func Transition(sub *models.Subscription, ev lifecycle.Event, now time.Time) ([]
 			}
 		}
 	}
+	if next.Status == lifecycle.Active || next.Status == lifecycle.Cancelled {
+		sub.DunningPolicy = nil // the dunning case is over
+	}
 	switch next.Status {
 	case lifecycle.Cancelled, lifecycle.Unverified:
 		sub.NextRetryAt, sub.GraceEndsAt = nil, nil
