@@ -21,6 +21,10 @@ type CheckoutRailOption struct {
 	// PublicConfig holds browser-safe values: the PSP's public keys, and for
 	// Solana token_symbol, token_name and network.
 	PublicConfig map[string]string `json:"public_config,omitempty"`
+	// Status is CheckoutPSPTemporarilyUnavailable when the option's PSP could
+	// not be checked just now; it has no driver. RetryAfter is in seconds.
+	Status     string `json:"status,omitempty"`
+	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
 // CheckoutConfig lists the merchant's armed PSPs and the public values a
@@ -73,7 +77,16 @@ type CheckoutPSPConfig struct {
 	Checkout bool `json:"checkout"`
 	// Config holds whitelisted public values, such as a tokenization key.
 	Config map[string]string `json:"config,omitempty"`
+	// Status is CheckoutPSPTemporarilyUnavailable when the PSP's credentials
+	// could not be checked just now: it is listed without Config, and the
+	// document is not cacheable. Empty is available. RetryAfter is in seconds.
+	Status     string `json:"status,omitempty"`
+	RetryAfter int    `json:"retry_after,omitempty"`
 }
+
+// CheckoutPSPTemporarilyUnavailable marks a PSP (or rail option) whose
+// credentials could not be checked just now; retry after RetryAfter seconds.
+const CheckoutPSPTemporarilyUnavailable = "temporarily_unavailable"
 
 type CheckoutCustomerIdentity struct {
 	ID            string `json:"id"`

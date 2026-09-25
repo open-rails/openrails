@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
+	log "github.com/sirupsen/logrus"
 )
 
 // checkoutConfigMaxAge is how long a browser may reuse this document. Arming a
@@ -53,6 +54,13 @@ func GetCheckoutConfig(r *httprequest.Request) {
 	// so a shared cache can still revalidate; the neutral request transport has
 	// no bodyless-response primitive, so this handler does not itself answer 304
 	// (a revalidation gets a normal 200 with the same ETag, which is correct).
+	// A document listing a temporarily unavailable PSP is never cached: the
+	// next request may find it available.
+	if degraded(body) {
+		r.SetHeader("Cache-Control", "no-store")
+		r.SuccessJSON(body)
+		return
+	}
 	sum := sha256.Sum256(encoded)
 	r.SetHeader("Cache-Control", checkoutConfigMaxAge)
 	r.SetHeader("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
@@ -80,11 +88,13 @@ func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, boo
 	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
 	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env, pspArmed(r.State.RailConfigs))
 	if err != nil {
+		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("checkout config: PSPs could not be loaded")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load checkout configuration")
 		return merchants.PublicCheckoutConfig{}, false
 	}
 	solana, err := solanaCheckoutConfig(r)
 	if err != nil {
+		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("checkout config: Solana acceptance could not be loaded")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load solana checkout configuration")
 		return merchants.PublicCheckoutConfig{}, false
 	}
@@ -123,6 +133,10 @@ func advertiseCheckoutOptions(options []openrails.CheckoutRailOption, cfg mercha
 		option.PublicConfig = nil
 		psp, ok := byID[option.PSPID]
 		if !ok {
+			continue
+		}
+		if psp.Status != "" {
+			option.Status, option.RetryAfter = psp.Status, psp.RetryAfter
 			continue
 		}
 		public := maps.Clone(psp.Config)
@@ -187,4 +201,13 @@ func solanaClusterName(network string) string {
 		return "mainnet-beta"
 	}
 	return network
+}
+
+func degraded(cfg merchants.PublicCheckoutConfig) bool {
+	for _, psp := range cfg.PSPs {
+		if psp.Status != "" {
+			return true
+		}
+	}
+	return false
 }

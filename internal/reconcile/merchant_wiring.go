@@ -324,11 +324,16 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID
 		if b.testMode() {
 			network = "devnet"
 		}
+		// A sandbox run's loopback RPC replaces the public one here as it does
+		// for the runtime's own Solana clients (hermetic CI never reaches devnet).
+		endpoint := b.Config.SandboxSolanaRPCURL()
 		rpc := solanaint.NewRPCClientWithConfig(solanaint.RPCClientConfig{
-			RPCProvider: settings.RPCProvider,
-			RPCAPIKey:   settings.RPCAPIKey,
-			Network:     network,
-			ReadOnly:    true,
+			Endpoint:        endpoint,
+			LoopbackFixture: endpoint != "",
+			RPCProvider:     settings.RPCProvider,
+			RPCAPIKey:       settings.RPCAPIKey,
+			Network:         network,
+			ReadOnly:        true,
 		})
 		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
 		// #714 discovery lanes: the declared account_id IS the merchant wallet.

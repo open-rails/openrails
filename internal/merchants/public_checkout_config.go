@@ -2,10 +2,12 @@ package merchants
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/custodians"
@@ -224,7 +226,7 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 	// or#880's registry).
 	declared, err := s.ListCustodians(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list custodians: %w", err)
 	}
 	byID := make(map[uuid.UUID]CustodianScope, len(declared))
 	for _, c := range declared {
@@ -232,10 +234,34 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 	}
 	out := make([]PublicPSPConfig, 0, len(scopes))
 	for _, scope := range scopes {
+		var custodian *CustodianScope
+		if scope.CustodianID != nil {
+			if c, ok := byID[*scope.CustodianID]; ok {
+				custodian = &c
+			}
+		}
 		if armed != nil {
 			ok, err := armed(ctx, scope)
-			if err != nil {
+			if err != nil && storeFailure(err) {
 				return nil, fmt.Errorf("resolve %s account %s: %w", scope.Rail, scope.AccountID, err)
+			}
+			if err != nil {
+				// One PSP's credential check failing never takes the others
+				// down: it is listed as temporarily unavailable, without the
+				// values a browser would drive it with.
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+					"merchant_id": id.String(),
+					"rail":        scope.Rail,
+					"psp":         scope.Key,
+				}).Warn("public checkout config: PSP credentials could not be checked; listed as temporarily unavailable")
+				cfg, _, _ := PublicPSPConfigFor(scope, custodian)
+				if cfg.PSPID == "" {
+					cfg.PSPID, cfg.Rail, cfg.Key = scope.ID.String(), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
+				}
+				cfg.Config = nil
+				cfg.Status, cfg.RetryAfter = openrails.CheckoutPSPTemporarilyUnavailable, checkoutRetryAfterSeconds
+				out = append(out, cfg)
+				continue
 			}
 			if !ok {
 				log.WithContext(ctx).WithFields(log.Fields{
@@ -244,12 +270,6 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 					"psp":         scope.Key,
 				}).Info("public checkout config: declared PSP is not armed")
 				continue
-			}
-		}
-		var custodian *CustodianScope
-		if scope.CustodianID != nil {
-			if c, ok := byID[*scope.CustodianID]; ok {
-				custodian = &c
 			}
 		}
 		cfg, reason, ok := PublicPSPConfigFor(scope, custodian)
@@ -332,4 +352,17 @@ func CheckoutDriver(psp PublicPSPConfig, mode string) string {
 		return ""
 	}
 	return driver
+}
+
+// checkoutRetryAfterSeconds is when a browser should ask again for a PSP
+// whose credentials could not be checked.
+const checkoutRetryAfterSeconds = 30
+
+// storeFailure is an error of OpenRails' own database or of the request
+// itself: the document cannot be built at all, so it stays a 5xx.
+func storeFailure(err error) bool {
+	var pgErr *pgconn.PgError
+	var connectErr *pgconn.ConnectError
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.As(err, &pgErr) || errors.As(err, &connectErr) || pgconn.Timeout(err)
 }
