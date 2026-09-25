@@ -83,9 +83,9 @@ type Subscription struct {
 	RetryAttempts *int       `json:"retry_attempts"` // Number of retry attempts (nullable for new subscriptions)
 	// TransientRetries counts quick retries after processor try-again answers
 	// in the current dunning case; they are not dunning failures.
-	TransientRetries int `json:"transient_retries"`
-	NextRetryAt   *time.Time `json:"next_retry_at"`  // When to try next rebill
-	GraceEndsAt   *time.Time `json:"grace_ends_at"`  // Optional grace window end during dunning (rail-specific)
+	TransientRetries int        `json:"transient_retries"`
+	NextRetryAt      *time.Time `json:"next_retry_at"` // When to try next rebill
+	GraceEndsAt      *time.Time `json:"grace_ends_at"` // Optional grace window end during dunning (rail-specific)
 
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message
