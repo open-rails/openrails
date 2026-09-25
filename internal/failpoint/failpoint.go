@@ -19,6 +19,12 @@ const (
 	BeforeComplete Point = "before-complete"
 	// ClaimLost fires when a lease heartbeat finds its claim gone.
 	ClaimLost Point = "claim-lost"
+	// Committed fires after an operation's transaction commits, before it
+	// returns.
+	Committed Point = "committed"
+	// BeforeRepair fires after convergence detected a finding and before its
+	// repair re-checks the premise under the row lock.
+	BeforeRepair Point = "before-repair"
 )
 
 // Site is one hit: the point, the operation and its subscription.

@@ -795,6 +795,16 @@ type OpenrailsMoneySetting struct {
 	CollectionPaymentMethodID *uuid.UUID
 }
 
+// #1094: the in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
+type OpenrailsNmiBulkCheckpoint struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Since      time.Time
+	Until      time.Time
+	NextPage   int32
+	StartedAt  time.Time
+}
+
 // Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
 type OpenrailsNotification struct {
 	ID            uuid.UUID
@@ -1346,6 +1356,16 @@ type OpenrailsSubscriptionStatusTransition struct {
 	// cancel_type on the subscription at transition time (meaningful for to_status=cancelled).
 	CancelType *string
 	OccurredAt time.Time
+}
+
+// #1094: one row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.
+type OpenrailsSubscriptionVerification struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	Since          time.Time
+	Reads          int32
+	LastReadAt     *time.Time
+	LastError      *string
 }
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.

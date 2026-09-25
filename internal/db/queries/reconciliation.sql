@@ -524,39 +524,42 @@ SELECT COALESCE((
       AND source_domain = sqlc.arg(source_domain)::text
 ), false) AS fully_reconciled;
 
--- #665: the ONE lapsed-cohort scan. Selects candidate rows — active past the
--- period end, or past_due with grace elapsed and no retry scheduled — together
--- with their #664 evidence legs; the decider (reconcile.Decide) chooses the
--- transition in Go. No WHERE-clause complements to keep in sync: cohort
--- exclusivity is structural (one query, one total decision function).
--- Evidence leg:
---   renewal_payment_after_end — a completed payment at/after the period end
---                              (billing DID happen; the advance path owns it)
--- name: ListLapsedSubscriptionsWithEvidence :many
-SELECT s.id, s.status, s.rail, s.collection_policy,
-       s.rail_subscription_id,
-       s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
-       (s.current_period_ends_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.payments p
-            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-              AND p.deleted_at IS NULL
-              AND p.status = 'completed'
-              AND p.purchased_at >= s.current_period_ends_at
-       ))::bool AS renewal_payment_after_end
+-- LIFE life.subscription.renewal_overdue (#1096): an active subscription a
+-- provider bills whose paid period ended before overdue_before with no
+-- renewal payment recorded. A clock reading only: the repair asks the
+-- provider (RenewalOverdue -> unverified). Oldest lapse first, capped (or#837).
+-- name: ListOverdueRenewals :many
+SELECT s.id, s.rail, s.current_period_ends_at
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND s.deleted_at IS NULL
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND (
-        (s.status = 'active' AND s.current_period_ends_at IS NOT NULL
-         AND s.current_period_ends_at < sqlc.arg(now)::timestamptz)
-     OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
-         AND s.grace_ends_at < sqlc.arg(now)::timestamptz AND s.next_retry_at IS NULL)
-      )
--- or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
--- gets a BOUNDED pass that drains from the front instead of one scan whose
--- size is the book; the transitions it applies remove rows from the cohort.
+  AND s.deleted_at IS NULL
+  AND s.status = 'active'
+  AND s.collection_policy <> 'engine'
+  AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+        AND p.deleted_at IS NULL AND p.status = 'completed'
+        AND p.purchased_at >= s.current_period_ends_at
+  )
 ORDER BY s.current_period_ends_at, s.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- LIFE life.subscription.grace_exhausted (#1096): a provider-billed
+-- subscription past_due whose grace ended with no attempt scheduled. The
+-- repair asks the provider (DunningStale -> unverified). Capped (or#837).
+-- name: ListDunningPastGrace :many
+SELECT s.id, s.current_period_ends_at, s.grace_ends_at
+FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'past_due'
+  AND s.collection_policy <> 'engine'
+  AND s.next_retry_at IS NULL
+  AND s.grace_ends_at < sqlc.arg(now)::timestamptz
+ORDER BY s.grace_ends_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
@@ -947,3 +950,77 @@ UPDATE openrails.reconciliation_findings
    AND finding_type = sqlc.arg(finding_type)::text
    AND subject_key = sqlc.arg(subject_key)::text
    AND status IN ('reconcile_required', 'requires_review');
+
+-- name: ResolveClearedFindings :execrows
+-- Open findings of the given standing types that the latest merchant-wide
+-- converge no longer reports (keep = type || chr(31) || subject) have cleared.
+UPDATE openrails.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+       notified_at = NULL, notified_severity = NULL, updated_at = now()
+ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+   AND finding_type = ANY(sqlc.arg(finding_types)::text[])
+   AND status IN ('reconcile_required', 'requires_review')
+   AND NOT ((finding_type || chr(31) || subject_key) = ANY(sqlc.arg(keep)::text[]));
+
+-- LIFE life.unverified.* (#1094/#1096): unverified subscriptions with the
+-- instant they became unverified, oldest first, capped (or#837).
+-- name: ListUnverifiedSubscriptions :many
+SELECT s.id, s.psp_id, s.rail,
+       COALESCE(v.since, s.updated_at)::timestamptz AS since,
+       COALESCE(v.reads, 0)::int AS reads, v.last_read_at
+FROM openrails.subscriptions s
+LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'unverified'
+ORDER BY 4, s.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- LIFE life.dunning.funnel (#1096): live subscriptions by lifecycle state and
+-- the age of the oldest unverified entry (0 when none).
+-- name: CountSubscriptionFunnel :one
+SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
+       count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,
+       count(*) FILTER (WHERE s.status = 'awaiting_method')::bigint AS awaiting_method,
+       count(*) FILTER (WHERE s.status = 'unverified')::bigint AS unverified,
+       COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(COALESCE(v.since, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
+FROM openrails.subscriptions s
+LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND s.deleted_at IS NULL
+  AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified');
+
+-- life.dunning.funnel: provider operations whose outcome is unknown (a charge
+-- that may or may not have happened), with the oldest one's age.
+-- name: CountUnknownOperations :one
+SELECT count(*)::bigint AS open_count,
+       COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(created_at))), 0)::bigint AS oldest_age_seconds
+FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND status = 'unknown_needs_verify';
+
+-- life.dunning.funnel: recorded subscription decline codes since a cutoff,
+-- classified in Go (collection.ClassifyDeclineDetail) to count unmapped ones.
+-- name: ListSubscriptionDeclineCodes :many
+SELECT p.rail, p.failure_code::text AS failure_code, count(*)::bigint AS declines
+FROM openrails.payments p
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND p.subscription_id IS NOT NULL
+  AND p.deleted_at IS NULL
+  AND p.status = 'failed'
+  AND p.failure_code IS NOT NULL
+  AND p.created_at >= sqlc.arg(since)::timestamptz
+GROUP BY p.rail, p.failure_code
+ORDER BY p.rail, p.failure_code;
+
+-- A LIFE repair's premise, re-checked under the row lock: a completed payment
+-- for the subscription (at or after since, when given).
+-- name: SubscriptionHasCompletedPayment :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.payments p
+    WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND p.subscription_id = sqlc.arg(subscription_id)::uuid
+      AND p.deleted_at IS NULL AND p.status = 'completed'
+      AND (sqlc.narg(since)::timestamptz IS NULL OR p.purchased_at >= sqlc.narg(since)::timestamptz)
+)::bool AS paid;

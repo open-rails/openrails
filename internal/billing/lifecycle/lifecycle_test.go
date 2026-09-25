@@ -33,7 +33,8 @@ func TestTransitions(t *testing.T) {
 		{name: "initial payment starts", from: Snapshot{Status: Pending, Owner: Engine}, event: InitialPaid{t0, t1}, want: Active, through: t1,
 			effects: []Effect{GrantPeriod{t0, t1}, Notify{NoticeStarted}}},
 		{name: "replayed initial payment", from: snap(Active, Engine), event: InitialPaid{t0, t1}, want: Active, through: t1},
-		{name: "initial failure abandons", from: Snapshot{Status: Pending, Owner: Engine}, event: InitialFailed{}, want: Cancelled},
+		{name: "initial failure abandons", from: Snapshot{Status: Pending, Owner: Engine}, event: InitialFailed{half}, want: Cancelled},
+		{name: "initial failure needs its instant", from: Snapshot{Status: Pending, Owner: Engine}, event: InitialFailed{}, err: ErrInvalid},
 
 		{name: "renewal extends", from: snap(Active, Engine), event: RenewalPaid{t1, t2}, want: Active, through: t2,
 			effects: []Effect{GrantPeriod{t1, t2}, Notify{NoticeRenewed}}},
@@ -133,6 +134,15 @@ func TestTransitions(t *testing.T) {
 			require.Equal(t, tc.effects, effects)
 		})
 	}
+}
+
+// An abandoned first payment ends at the instant it was decided.
+func TestInitialFailedEndsAtItsInstant(t *testing.T) {
+	t.Parallel()
+	next, _, err := Apply(Snapshot{Status: Pending, Owner: NMISchedule}, InitialFailed{half})
+	require.NoError(t, err)
+	require.Equal(t, CancelAbandoned, next.CancelKind)
+	require.Equal(t, half, next.EndedAt)
 }
 
 // A chargeback on an already cancelled subscription still ends paid access now.

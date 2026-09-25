@@ -90,8 +90,8 @@ type Event interface{ event() string }
 // InitialPaid is the first payment: the subscription starts.
 type InitialPaid struct{ PeriodStart, PeriodEnd time.Time }
 
-// InitialFailed is a first payment that did not complete.
-type InitialFailed struct{}
+// InitialFailed is a first payment that did not complete, decided at At.
+type InitialFailed struct{ At time.Time }
 
 // RenewalPaid is a payment fact for the period [PeriodStart, PeriodEnd).
 type RenewalPaid struct{ PeriodStart, PeriodEnd time.Time }
@@ -242,10 +242,13 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		return s, []Effect{GrantPeriod{ev.PeriodStart, ev.PeriodEnd}, Notify{NoticeStarted}}, nil
 
 	case InitialFailed:
+		if ev.At.IsZero() {
+			return s, nil, invalid(e, "decision instant required")
+		}
 		if s.Status != Pending {
 			return s, nil, illegal(s, e)
 		}
-		s.Status, s.CancelKind = Cancelled, CancelAbandoned
+		s.Status, s.CancelKind, s.EndedAt = Cancelled, CancelAbandoned, ev.At
 		return s, nil, nil
 
 	case RenewalPaid:

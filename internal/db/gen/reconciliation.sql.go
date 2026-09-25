@@ -436,6 +436,74 @@ func (q *Queries) CountOpenReconciliationFindingsByTypeSeverity(ctx context.Cont
 	return items, nil
 }
 
+const countSubscriptionFunnel = `-- name: CountSubscriptionFunnel :one
+SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
+       count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,
+       count(*) FILTER (WHERE s.status = 'awaiting_method')::bigint AS awaiting_method,
+       count(*) FILTER (WHERE s.status = 'unverified')::bigint AS unverified,
+       COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(COALESCE(v.since, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
+FROM openrails.subscriptions s
+LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+WHERE s.merchant_id = $2::uuid
+  AND s.deleted_at IS NULL
+  AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified')
+`
+
+type CountSubscriptionFunnelParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+type CountSubscriptionFunnelRow struct {
+	Active                     int64
+	PastDue                    int64
+	AwaitingMethod             int64
+	Unverified                 int64
+	OldestUnverifiedAgeSeconds int64
+}
+
+// LIFE life.dunning.funnel (#1096): live subscriptions by lifecycle state and
+// the age of the oldest unverified entry (0 when none).
+func (q *Queries) CountSubscriptionFunnel(ctx context.Context, arg CountSubscriptionFunnelParams) (CountSubscriptionFunnelRow, error) {
+	row := q.db.QueryRow(ctx, countSubscriptionFunnel, arg.Now, arg.MerchantID)
+	var i CountSubscriptionFunnelRow
+	err := row.Scan(
+		&i.Active,
+		&i.PastDue,
+		&i.AwaitingMethod,
+		&i.Unverified,
+		&i.OldestUnverifiedAgeSeconds,
+	)
+	return i, err
+}
+
+const countUnknownOperations = `-- name: CountUnknownOperations :one
+SELECT count(*)::bigint AS open_count,
+       COALESCE(EXTRACT(EPOCH FROM ($1::timestamptz - min(created_at))), 0)::bigint AS oldest_age_seconds
+FROM openrails.rail_intents
+WHERE merchant_id = $2::uuid
+  AND status = 'unknown_needs_verify'
+`
+
+type CountUnknownOperationsParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+}
+
+type CountUnknownOperationsRow struct {
+	OpenCount        int64
+	OldestAgeSeconds int64
+}
+
+// life.dunning.funnel: provider operations whose outcome is unknown (a charge
+// that may or may not have happened), with the oldest one's age.
+func (q *Queries) CountUnknownOperations(ctx context.Context, arg CountUnknownOperationsParams) (CountUnknownOperationsRow, error) {
+	row := q.db.QueryRow(ctx, countUnknownOperations, arg.Now, arg.MerchantID)
+	var i CountUnknownOperationsRow
+	err := row.Scan(&i.OpenCount, &i.OldestAgeSeconds)
+	return i, err
+}
+
 const countUnknownSubsPastPaidThrough = `-- name: CountUnknownSubsPastPaidThrough :one
 SELECT COUNT(*)::bigint AS pressure_count,
        COALESCE(MAX(EXTRACT(EPOCH FROM ($1::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
@@ -1140,6 +1208,61 @@ func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg List
 	return items, nil
 }
 
+const listDunningPastGrace = `-- name: ListDunningPastGrace :many
+SELECT s.id, s.current_period_ends_at, s.grace_ends_at
+FROM openrails.subscriptions s
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'past_due'
+  AND s.collection_policy <> 'engine'
+  AND s.next_retry_at IS NULL
+  AND s.grace_ends_at < $3::timestamptz
+ORDER BY s.grace_ends_at, s.id
+LIMIT $4::int
+`
+
+type ListDunningPastGraceParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+	RowLimit   int32
+}
+
+type ListDunningPastGraceRow struct {
+	ID                  uuid.UUID
+	CurrentPeriodEndsAt *time.Time
+	GraceEndsAt         *time.Time
+}
+
+// LIFE life.subscription.grace_exhausted (#1096): a provider-billed
+// subscription past_due whose grace ended with no attempt scheduled. The
+// repair asks the provider (DunningStale -> unverified). Capped (or#837).
+func (q *Queries) ListDunningPastGrace(ctx context.Context, arg ListDunningPastGraceParams) ([]ListDunningPastGraceRow, error) {
+	rows, err := q.db.Query(ctx, listDunningPastGrace,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDunningPastGraceRow
+	for rows.Next() {
+		var i ListDunningPastGraceRow
+		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt, &i.GraceEndsAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDunningStalledSubscriptions = `-- name: ListDunningStalledSubscriptions :many
 SELECT id, (COALESCE(retry_attempts, 0) >= 1 AND last_retry_at IS NOT NULL)::bool AS attempt_recorded
 FROM openrails.subscriptions
@@ -1188,90 +1311,57 @@ func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListD
 	return items, nil
 }
 
-const listLapsedSubscriptionsWithEvidence = `-- name: ListLapsedSubscriptionsWithEvidence :many
-SELECT s.id, s.status, s.rail, s.collection_policy,
-       s.rail_subscription_id,
-       s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
-       (s.current_period_ends_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.payments p
-            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-              AND p.deleted_at IS NULL
-              AND p.status = 'completed'
-              AND p.purchased_at >= s.current_period_ends_at
-       ))::bool AS renewal_payment_after_end
+const listOverdueRenewals = `-- name: ListOverdueRenewals :many
+SELECT s.id, s.rail, s.current_period_ends_at
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $1::uuid
-  AND s.deleted_at IS NULL
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND (
-        (s.status = 'active' AND s.current_period_ends_at IS NOT NULL
-         AND s.current_period_ends_at < $3::timestamptz)
-     OR (s.status = 'past_due' AND s.grace_ends_at IS NOT NULL
-         AND s.grace_ends_at < $3::timestamptz AND s.next_retry_at IS NULL)
-      )
+  AND s.deleted_at IS NULL
+  AND s.status = 'active'
+  AND s.collection_policy <> 'engine'
+  AND s.current_period_ends_at < $3::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+        AND p.deleted_at IS NULL AND p.status = 'completed'
+        AND p.purchased_at >= s.current_period_ends_at
+  )
 ORDER BY s.current_period_ends_at, s.id
 LIMIT $4::int
 `
 
-type ListLapsedSubscriptionsWithEvidenceParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
-	RowLimit   int32
+type ListOverdueRenewalsParams struct {
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
+	OverdueBefore time.Time
+	RowLimit      int32
 }
 
-type ListLapsedSubscriptionsWithEvidenceRow struct {
-	ID                     uuid.UUID
-	Status                 OpenrailsSubscriptionStatus
-	Rail                   string
-	CollectionPolicy       string
-	RailSubscriptionID     string
-	CurrentPeriodEndsAt    *time.Time
-	GraceEndsAt            *time.Time
-	NextRetryAt            *time.Time
-	RetryAttempts          *int32
-	RenewalPaymentAfterEnd bool
+type ListOverdueRenewalsRow struct {
+	ID                  uuid.UUID
+	Rail                string
+	CurrentPeriodEndsAt *time.Time
 }
 
-// #665: the ONE lapsed-cohort scan. Selects candidate rows — active past the
-// period end, or past_due with grace elapsed and no retry scheduled — together
-// with their #664 evidence legs; the decider (reconcile.Decide) chooses the
-// transition in Go. No WHERE-clause complements to keep in sync: cohort
-// exclusivity is structural (one query, one total decision function).
-// Evidence leg:
-//
-//	renewal_payment_after_end — a completed payment at/after the period end
-//	                           (billing DID happen; the advance path owns it)
-//
-// or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
-// gets a BOUNDED pass that drains from the front instead of one scan whose
-// size is the book; the transitions it applies remove rows from the cohort.
-func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg ListLapsedSubscriptionsWithEvidenceParams) ([]ListLapsedSubscriptionsWithEvidenceRow, error) {
-	rows, err := q.db.Query(ctx, listLapsedSubscriptionsWithEvidence,
+// LIFE life.subscription.renewal_overdue (#1096): an active subscription a
+// provider bills whose paid period ended before overdue_before with no
+// renewal payment recorded. A clock reading only: the repair asks the
+// provider (RenewalOverdue -> unverified). Oldest lapse first, capped (or#837).
+func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
+	rows, err := q.db.Query(ctx, listOverdueRenewals,
 		arg.MerchantID,
 		arg.CustomerID,
-		arg.Now,
+		arg.OverdueBefore,
 		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListLapsedSubscriptionsWithEvidenceRow
+	var items []ListOverdueRenewalsRow
 	for rows.Next() {
-		var i ListLapsedSubscriptionsWithEvidenceRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Status,
-			&i.Rail,
-			&i.CollectionPolicy,
-			&i.RailSubscriptionID,
-			&i.CurrentPeriodEndsAt,
-			&i.GraceEndsAt,
-			&i.NextRetryAt,
-			&i.RetryAttempts,
-			&i.RenewalPaymentAfterEnd,
-		); err != nil {
+		var i ListOverdueRenewalsRow
+		if err := rows.Scan(&i.ID, &i.Rail, &i.CurrentPeriodEndsAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1623,6 +1713,52 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 	return items, nil
 }
 
+const listSubscriptionDeclineCodes = `-- name: ListSubscriptionDeclineCodes :many
+SELECT p.rail, p.failure_code::text AS failure_code, count(*)::bigint AS declines
+FROM openrails.payments p
+WHERE p.merchant_id = $1::uuid
+  AND p.subscription_id IS NOT NULL
+  AND p.deleted_at IS NULL
+  AND p.status = 'failed'
+  AND p.failure_code IS NOT NULL
+  AND p.created_at >= $2::timestamptz
+GROUP BY p.rail, p.failure_code
+ORDER BY p.rail, p.failure_code
+`
+
+type ListSubscriptionDeclineCodesParams struct {
+	MerchantID uuid.UUID
+	Since      time.Time
+}
+
+type ListSubscriptionDeclineCodesRow struct {
+	Rail        string
+	FailureCode string
+	Declines    int64
+}
+
+// life.dunning.funnel: recorded subscription decline codes since a cutoff,
+// classified in Go (collection.ClassifyDeclineDetail) to count unmapped ones.
+func (q *Queries) ListSubscriptionDeclineCodes(ctx context.Context, arg ListSubscriptionDeclineCodesParams) ([]ListSubscriptionDeclineCodesRow, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionDeclineCodes, arg.MerchantID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSubscriptionDeclineCodesRow
+	for rows.Next() {
+		var i ListSubscriptionDeclineCodesRow
+		if err := rows.Scan(&i.Rail, &i.FailureCode, &i.Declines); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnjustifiedEntitlementWindows = `-- name: ListUnjustifiedEntitlementWindows :many
 SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
        e.source_type, e.source_id, e.start_at, e.end_at,
@@ -1815,6 +1951,64 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 			&i.CurrentPeriodStartsAt,
 			&i.CurrentPeriodEndsAt,
 			&i.RailSubscriptionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnverifiedSubscriptions = `-- name: ListUnverifiedSubscriptions :many
+SELECT s.id, s.psp_id, s.rail,
+       COALESCE(v.since, s.updated_at)::timestamptz AS since,
+       COALESCE(v.reads, 0)::int AS reads, v.last_read_at
+FROM openrails.subscriptions s
+LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'unverified'
+ORDER BY 4, s.id
+LIMIT $3::int
+`
+
+type ListUnverifiedSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	RowLimit   int32
+}
+
+type ListUnverifiedSubscriptionsRow struct {
+	ID         uuid.UUID
+	PspID      uuid.UUID
+	Rail       string
+	Since      time.Time
+	Reads      int32
+	LastReadAt *time.Time
+}
+
+// LIFE life.unverified.* (#1094/#1096): unverified subscriptions with the
+// instant they became unverified, oldest first, capped (or#837).
+func (q *Queries) ListUnverifiedSubscriptions(ctx context.Context, arg ListUnverifiedSubscriptionsParams) ([]ListUnverifiedSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listUnverifiedSubscriptions, arg.MerchantID, arg.CustomerID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnverifiedSubscriptionsRow
+	for rows.Next() {
+		var i ListUnverifiedSubscriptionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PspID,
+			&i.Rail,
+			&i.Since,
+			&i.Reads,
+			&i.LastReadAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2523,6 +2717,32 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 	return result.RowsAffected(), nil
 }
 
+const resolveClearedFindings = `-- name: ResolveClearedFindings :execrows
+UPDATE openrails.reconciliation_findings
+   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+       notified_at = NULL, notified_severity = NULL, updated_at = now()
+ WHERE merchant_id = $1::uuid
+   AND finding_type = ANY($2::text[])
+   AND status IN ('reconcile_required', 'requires_review')
+   AND NOT ((finding_type || chr(31) || subject_key) = ANY($3::text[]))
+`
+
+type ResolveClearedFindingsParams struct {
+	MerchantID   uuid.UUID
+	FindingTypes []string
+	Keep         []string
+}
+
+// Open findings of the given standing types that the latest merchant-wide
+// converge no longer reports (keep = type || chr(31) || subject) have cleared.
+func (q *Queries) ResolveClearedFindings(ctx context.Context, arg ResolveClearedFindingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveClearedFindings, arg.MerchantID, arg.FindingTypes, arg.Keep)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolveStandingFinding = `-- name: ResolveStandingFinding :execrows
 UPDATE openrails.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
@@ -2545,6 +2765,31 @@ func (q *Queries) ResolveStandingFinding(ctx context.Context, arg ResolveStandin
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const subscriptionHasCompletedPayment = `-- name: SubscriptionHasCompletedPayment :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.payments p
+    WHERE p.merchant_id = $1::uuid
+      AND p.subscription_id = $2::uuid
+      AND p.deleted_at IS NULL AND p.status = 'completed'
+      AND ($3::timestamptz IS NULL OR p.purchased_at >= $3::timestamptz)
+)::bool AS paid
+`
+
+type SubscriptionHasCompletedPaymentParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	Since          *time.Time
+}
+
+// A LIFE repair's premise, re-checked under the row lock: a completed payment
+// for the subscription (at or after since, when given).
+func (q *Queries) SubscriptionHasCompletedPayment(ctx context.Context, arg SubscriptionHasCompletedPaymentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, subscriptionHasCompletedPayment, arg.MerchantID, arg.SubscriptionID, arg.Since)
+	var paid bool
+	err := row.Scan(&paid)
+	return paid, err
 }
 
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
