@@ -22,6 +22,14 @@ for (const [name, key, mode] of [
       await request.get("/__test/health")
     ).json()) as Catalog
     const user = await createUser(request)
+    // A server error is printed with its body, so a failure names its cause.
+    page.on("response", async (response) => {
+      if (response.status() >= 500) {
+        console.error(
+          `${response.status()} ${response.url()}: ${await response.text()}`
+        )
+      }
+    })
     await page.goto(`/checkout.html#price=${catalog[key]}&customer=${user.id}`)
 
     const offer = await page.evaluate(
