@@ -101,6 +101,23 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	if err != nil {
 		return out, err
 	}
+	if !applied && d.Kind != TransitionNone {
+		// Another writer moved the row (a park, a decline) after it was read:
+		// decide once more on the current row from the same provider truth.
+		cur, err := subscriptions.NewSubscriptionRepo(database).GetByID(ctx, sub.ID)
+		if err != nil {
+			return out, fmt.Errorf("converge subscription: reload %s: %w", sub.ID, err)
+		}
+		if d.stale(cur) {
+			*sub = *cur
+			d = Decide(SubscriptionStateOf(sub), EvidenceBundle{Snapshot: snap, EvidenceFloor: floor}, now, dunningWindow)
+			d.Declared, d.Backfill = snap.Provider == ProviderDeclared, snapshotChargesFor(sub, snap)
+			out.Decision = d
+			if applied, err = ApplyDecision(ctx, database, lc, sub, d, now); err != nil {
+				return out, err
+			}
+		}
+	}
 	out.Applied = applied
 	if applied && d.Reason == reasonRenewedBeforeDecline {
 		// The renewed row now ends where the later decline's period begins.

@@ -12,7 +12,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/embed"
 )
 
 // rowStates is every NMI subscription's status and period end, by schedule.
@@ -142,7 +146,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	// Armed, the next pass reads the few rows left in one batch: NMI ended
 	// the gone schedules; the silent ones stay unverified.
 	w.armDestructive()
-	w.pull()
+	w.pullWithin(3 * time.Minute) // the pull also mirrors the whole 1,000-schedule roster
 	states = w.rowStates()
 	for _, r := range gone {
 		require.Equal(t, "cancelled", states[r.schedule].status, r.source)
@@ -221,4 +225,16 @@ func readBody(r *http.Request) string {
 	raw, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	return string(raw)
+}
+
+// pullWithin is pull for a large book: it waits up to d for the pass.
+func (w *world) pullWithin(d time.Duration) {
+	w.t.Helper()
+	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: embed.QueueBilling})
+	require.NoError(w.t, err)
+	require.Eventually(w.t, func() bool {
+		job, err := w.jobs.JobGet(w.t.Context(), res.Job.ID)
+		return err == nil && job.State == rivertype.JobStateCompleted
+	}, d, 100*time.Millisecond, "the provider refresh")
+	w.settle()
 }
