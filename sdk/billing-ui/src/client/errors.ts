@@ -34,6 +34,15 @@ export class BillingError extends Error {
 export const isBillingError = (value: unknown): value is BillingError =>
   value instanceof BillingError
 
+/**
+ * A server failure (HTTP 5xx) from any client or host source that carries a
+ * numeric `status`. It is surfaced at once, never retried behind the caller.
+ */
+export const isServerError = (value: unknown): boolean => {
+  const status = (value as { status?: unknown } | null)?.status
+  return typeof status === "number" && status >= 500 && status < 600
+}
+
 export function localError(code: string, message: string): BillingError {
   return new BillingError(0, { type: "local", code, message })
 }
@@ -64,8 +73,13 @@ export async function readBillingError(res: Response): Promise<BillingError> {
     }
   }
   return new BillingError(res.status, {
-    type: "",
-    code: typeof err === "string" && err ? err : "unknown_error",
+    type: res.status >= 500 ? "api_error" : "",
+    code:
+      typeof err === "string" && err
+        ? err
+        : res.status >= 500
+          ? "server_error"
+          : "unknown_error",
     message: `HTTP ${res.status}`,
   })
 }

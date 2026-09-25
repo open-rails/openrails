@@ -26,6 +26,16 @@ func writePaymentMethodStale(r *httprequest.Request) {
 		"This saved payment method can no longer be used. Add the card again."))
 }
 
+// writePaymentMethodRequired renders openrails.CodePaymentMethodRequired: a
+// charge must name its payment method; none is implied.
+func writePaymentMethodRequired(r *httprequest.Request) {
+	param := "payment_method_id"
+	e := api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, openrails.CodePaymentMethodRequired,
+		"Choose a payment method: name a saved payment_method_id or send a new card payment_token.")
+	e.Param = &param
+	r.APIError(e)
+}
+
 // paymentRefusalError maps an NMI failure code (localization id or numeric
 // response code) onto the refusal envelope. Card categories are a 402
 // card_declined the customer can answer with another card; gateway and

@@ -769,7 +769,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	// plan enrolls through the subscriber's wallet below.
 	if engineEnrollment {
 		if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
-			return nil, fmt.Errorf("%w: engine enrollment requires an NMI card token or a saved NMI or Stripe method", ErrCheckoutSessionValidation)
+			return nil, fmt.Errorf("%w: engine enrollment requires an NMI card token or a saved NMI or Stripe method", ErrPaymentMethodRequired)
 		}
 	}
 
@@ -1300,8 +1300,11 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 func (s *CheckoutSessionService) validateNMIInput(ctx context.Context, payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
 	hasToken := strings.TrimSpace(payment.PaymentToken) != ""
 	hasMethod := strings.TrimSpace(payment.PaymentMethodID) != ""
-	if hasToken == hasMethod {
-		return fmt.Errorf("%w: provide either payment_token or payment_method_id", ErrCheckoutSessionValidation)
+	if !hasToken && !hasMethod {
+		return ErrPaymentMethodRequired
+	}
+	if hasToken && hasMethod {
+		return fmt.Errorf("%w: provide either payment_token or payment_method_id, not both", ErrCheckoutSessionValidation)
 	}
 	if hasMethod {
 		pmID, err := openrails.ParsePaymentMethodID(payment.PaymentMethodID)

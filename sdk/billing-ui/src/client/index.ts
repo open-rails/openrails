@@ -4,6 +4,7 @@ export {
   CANCEL_FEEDBACK_MIN,
   createBillingClient,
   isWalletRejection,
+  RETRY_BUDGET_MS,
   WalletRejectedError,
   type BillingClient,
   type BillingClientOptions,
@@ -14,6 +15,7 @@ export {
 export {
   BillingError,
   isBillingError,
+  isServerError,
   readBillingError,
   toBillingError,
   type BillingErrorBody,

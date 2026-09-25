@@ -248,7 +248,7 @@ func RetryAdminInvoiceCollection(r *httprequest.Request) {
 		return
 	}
 	if body.PaymentMethodID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "payment_method_id is required")
+		writePaymentMethodRequired(r)
 		return
 	}
 	// Do not gate on the read snapshot: a successful retry replay is valid even

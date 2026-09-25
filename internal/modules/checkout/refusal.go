@@ -17,6 +17,10 @@ import (
 // charged; the card must be collected again.
 var ErrPaymentMethodStale = errors.New("saved payment method can no longer be charged")
 
+// ErrPaymentMethodRequired is a card checkout that names neither a saved
+// method nor a new card token. The customer's default card is never implied.
+var ErrPaymentMethodRequired = fmt.Errorf("%w: payment_method_id or payment_token is required", ErrCheckoutSessionValidation)
+
 // terminalCheckoutError turns a failed_terminal checkout intent into the typed
 // refusal its evidence proves. A provider decline becomes a
 // paymentmethods.PaymentMethodError carrying the verbatim failure code; a

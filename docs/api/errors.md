@@ -31,6 +31,7 @@ with another instrument in a new checkout session. The code says what happened,
 | --- | --- | --- | --- | --- |
 | `card_declined` | `card_error` | 402 | the provider declined the presented card | `decline_reason` (normalized: `insufficient_funds`, `expired_card`, `cvv_avs`, `card_declined`, `fraud_suspected`, ...), `failure_code` (provider's verbatim code) |
 | `payment_method_stale` | `card_error` | 402 | the saved payment method named by the request can no longer be charged for this customer and processor; collect the card again | — |
+| `payment_method_required` | `invalid_request_error` | 400 | the charge named neither a saved `payment_method_id` nor a new card `payment_token`; OpenRails never charges an implied card such as the default | `param`: `payment_method_id` |
 | `payment_provider_rejected` | `api_error` | 502 | the provider rejected the charge for a gateway or merchant-configuration reason; another card will not help | `decline_reason`, `failure_code` |
 
 Classification uses only provider facts (response and localization codes), never
