@@ -124,7 +124,12 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
-			l := importLegacy(t, w, "nmi", tp)
+			// The book names no recurring agreement and no sale of the schedule,
+			// so there is no anchor to take over (or to dun) with.
+			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
+				book.Transactions[0].RailSubscriptionID = ""
+			})
+			require.Contains(t, w.openFindings("life.import.no_recurring_anchor"), l.railSub)
 			_, err := w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement)
 			_, err = w.client[tp].GetEngineTakeover(t.Context(), l.sub)
