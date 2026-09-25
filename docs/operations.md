@@ -466,7 +466,7 @@ retract, `mismatch` → adjust) and a **remediation class**: AUTO (idempotent
 local write, applied immediately), ADMIN (queued for human approval),
 OPERATOR (surfaced with a runbook; never auto-fires). Representative types:
 `pull.charge.missing`, `pull.subscription.duplicate`, `derive.grant.missing`,
-`life.subscription.period_overdue`, `life.provider_intent.stuck`,
+`life.subscription.dunning_overdue`, `life.provider_intent.stuck`,
 `consistency.duplicate.provider_charge`.
 
 Finding states: `reconcile_required` (open, engine may still converge it —

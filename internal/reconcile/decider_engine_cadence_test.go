@@ -19,8 +19,8 @@ func TestEngineSubscriptionsNeverReachSnapshotLaw(t *testing.T) {
 		for _, lapsed := range []time.Duration{time.Minute, cadence / 2, cadence, 3 * cadence} {
 			for _, status := range []string{"active", "unknown"} {
 				end := now.Add(-lapsed)
-				sub := SubscriptionState{CollectionPolicy: models.CollectionPolicyEngine, Status: status, Rail: "nmi", HasPaymentMethod: true, PeriodEnd: &end}
-				d := Decide(sub, EvidenceBundle{Snapshot: snap, Charge: ChargeEvidence{PaymentOpenedCurrentPeriod: true}, WatermarkNewerThanPeriodEnd: true}, now, 0)
+				sub := SubscriptionState{CollectionPolicy: models.CollectionPolicyEngine, Status: status, Rail: "nmi", PeriodEnd: &end}
+				d := Decide(sub, EvidenceBundle{Snapshot: snap, Charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}}, now, 0)
 				if d.Kind != TransitionNone || d.Reason != "engine_collection_owned" {
 					t.Fatalf("cadence %s lapsed %s %s: decision %s (%s), want none/engine_collection_owned", cadence, lapsed, status, d.Kind, d.Reason)
 				}

@@ -148,7 +148,7 @@ func TestDecideSnapshotLaw(t *testing.T) {
 			if status == "" {
 				status = "unknown"
 			}
-			sub := SubscriptionState{Status: status, Rail: "nmi", HasPaymentMethod: true, RailSubscriptionID: "rs", PeriodStart: c.start, PeriodEnd: c.end}
+			sub := SubscriptionState{Status: status, Rail: "nmi", RailSubscriptionID: "rs", PeriodStart: c.start, PeriodEnd: c.end}
 
 			d := Decide(sub, ev, decideNow, 0)
 			require.Equal(t, c.want, d.Kind, "reason=%q certainty=%q", d.Reason, d.Certainty)
@@ -184,12 +184,10 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 		name       string
 		status     string
 		rail       string
-		noPM       bool
 		policy     models.CollectionPolicy
 		end, grace *time.Time
 		retry      bool
 		charge     ChargeEvidence
-		watermark  bool
 
 		want      TransitionKind
 		reason    string
@@ -198,14 +196,10 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 	}{
 		{name: "active inside its period", status: "active", end: rel(oneDay), want: TransitionNone},
 		{name: "recorded renewal payment belongs to the advance path", status: "active", end: rel(-5 * oneDay),
-			charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true, PaymentOpenedCurrentPeriod: true}, want: TransitionNone, reason: "renewal_payment_recorded"},
-		{name: "ours to bill with an opened payment dunning", status: "active", end: rel(-5 * oneDay),
-			charge: ChargeEvidence{PaymentOpenedCurrentPeriod: true}, want: TransitionPastDue, reason: "period_overdue_ownership_evidence"},
-		{name: "ours to bill with a fresh watermark dunning", status: "active", end: rel(-5 * oneDay), watermark: true, want: TransitionPastDue},
-		{name: "a provider-billed rail is never ours", status: "active", rail: "ccbill", end: rel(-5 * oneDay),
-			charge: ChargeEvidence{PaymentOpenedCurrentPeriod: true}, want: TransitionParkUnknown, reason: "no_ownership_evidence"},
-		{name: "a vault-less NMI row is never ours", status: "active", noPM: true, end: rel(-5 * oneDay), watermark: true, want: TransitionParkUnknown},
-		{name: "a provider-owned schedule is never ours", status: "active", policy: models.CollectionPolicyProvider, end: rel(-5 * oneDay), watermark: true, want: TransitionParkUnknown},
+			charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}, want: TransitionNone, reason: "renewal_payment_recorded"},
+		{name: "a lapse without a seen decline never opens dunning", status: "active", end: rel(-5 * oneDay), want: TransitionParkUnknown, reason: "no_decline_observed"},
+		{name: "a provider-billed rail parks too", status: "active", rail: "ccbill", end: rel(-5 * oneDay), want: TransitionParkUnknown, reason: "no_decline_observed"},
+		{name: "a provider-owned schedule parks too", status: "active", policy: models.CollectionPolicyProvider, end: rel(-5 * oneDay), want: TransitionParkUnknown},
 		{name: "lapse inside the grace debounce waits", status: "active", end: rel(-oneDay), want: TransitionNone, reason: "within_grace_slack"},
 		{name: "stalled dunning parks", status: "past_due", end: rel(-20 * oneDay), grace: rel(-time.Hour), want: TransitionParkUnknown, reason: "dunning_stalled_past_grace"},
 		{name: "a scheduled retry keeps dunning", status: "past_due", end: rel(-20 * oneDay), grace: rel(-time.Hour), retry: true, want: TransitionNone},
@@ -221,9 +215,9 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 			want: TransitionCancel, certainty: collection.CertaintyDunningExhausted},
 		{name: "attempts without a policy max are not exhaustion", status: "past_due", end: rel(-30 * oneDay), grace: rel(-time.Hour),
 			charge: ChargeEvidence{RetryAttempts: 5, LastAttemptAt: decideNow}, want: TransitionParkUnknown, reason: "dunning_stalled_past_grace"},
-		{name: "unknown waits for the provider", status: "unknown", end: rel(-30 * oneDay), watermark: true, want: TransitionNone, reason: "awaiting_provider_verification"},
+		{name: "unknown waits for the provider", status: "unknown", end: rel(-30 * oneDay), want: TransitionNone, reason: "awaiting_provider_verification"},
 		{name: "engine cadence belongs to the accepted operation", status: "active", policy: models.CollectionPolicyEngine, end: rel(-100 * oneDay),
-			charge: ChargeEvidence{PaymentOpenedCurrentPeriod: true}, watermark: true, want: TransitionNone, reason: "engine_collection_owned"},
+			charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}, want: TransitionNone, reason: "engine_collection_owned"},
 		{name: "engine stalled dunning is not the sweep's to park", status: "past_due", policy: models.CollectionPolicyEngine, end: rel(-100 * oneDay), grace: rel(-time.Hour),
 			want: TransitionNone, reason: "engine_collection_owned"},
 		{name: "engine terminal charge evidence still cancels", status: "past_due", policy: models.CollectionPolicyEngine, end: rel(-100 * oneDay), grace: rel(-time.Hour),
@@ -231,7 +225,7 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sub := SubscriptionState{Status: c.status, Rail: "nmi", HasPaymentMethod: !c.noPM, CollectionPolicy: models.CollectionPolicyProviderDunning,
+			sub := SubscriptionState{Status: c.status, Rail: "nmi", CollectionPolicy: models.CollectionPolicyProviderDunning,
 				PeriodEnd: c.end, GraceEndsAt: c.grace, NextRetryScheduled: c.retry}
 			if c.rail != "" {
 				sub.Rail = c.rail
@@ -239,7 +233,7 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 			if c.policy != "" {
 				sub.CollectionPolicy = c.policy
 			}
-			d := Decide(sub, EvidenceBundle{Charge: c.charge, WatermarkNewerThanPeriodEnd: c.watermark, EvidenceFloor: floor}, decideNow, 0)
+			d := Decide(sub, EvidenceBundle{Charge: c.charge, EvidenceFloor: floor}, decideNow, 0)
 			require.Equal(t, c.want, d.Kind, "reason=%q", d.Reason)
 			if c.reason != "" {
 				require.Equal(t, c.reason, d.Reason)
@@ -260,7 +254,7 @@ func TestDecideStaleRosterDateNeverCancels(t *testing.T) {
 		snap := &RemoteSnapshot{Provider: ProviderNMI, FetchedAt: decideNow, Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
 			Subscriptions: []RemoteSubscription{*rosterSub(SubscriptionStatusPastDue, end)}}
 		for _, status := range []string{"active", "past_due", "unknown"} {
-			d := Decide(SubscriptionState{Status: status, Rail: "nmi", HasPaymentMethod: true, RailSubscriptionID: "rs", PeriodEnd: end},
+			d := Decide(SubscriptionState{Status: status, Rail: "nmi", RailSubscriptionID: "rs", PeriodEnd: end},
 				EvidenceBundle{Snapshot: snap}, decideNow, 0)
 			require.Equal(t, TransitionParkUnknown, d.Kind, "stale %dd / %s: %s", staleDays, status, d.Reason)
 		}
@@ -293,7 +287,6 @@ func TestDecideInvariants(t *testing.T) {
 	}
 	charges := []ChargeEvidence{
 		{},
-		{PaymentOpenedCurrentPeriod: true},
 		{RenewalPaymentAfterPeriodEnd: true},
 		{NonRetryableDecline: true, LastAttemptAt: decideNow.Add(-oneDay)},
 		{NonRetryableDecline: true, LastAttemptAt: decideNow.Add(-30 * oneDay)},
@@ -310,65 +303,63 @@ func TestDecideInvariants(t *testing.T) {
 							for si, s := range snaps {
 								for ci, charge := range charges {
 									for _, floor := range []time.Time{{}, decideNow.Add(-7 * oneDay)} {
-										for _, watermark := range []bool{false, true} {
-											sub := SubscriptionState{Status: status, Rail: rail, HasPaymentMethod: true, CollectionPolicy: policy,
-												RailSubscriptionID: "rs", PeriodEnd: end, GraceEndsAt: grace, NextRetryScheduled: retry}
-											ev := EvidenceBundle{Snapshot: s, Charge: charge, WatermarkNewerThanPeriodEnd: watermark, EvidenceFloor: floor}
-											d := Decide(sub, ev, decideNow, 0)
-											where := func() string {
-												return fmt.Sprintf("sub=%+v snap=%d charge=%d floor=%v watermark=%v -> %s/%s", sub, si, ci, floor, watermark, d.Kind, d.Reason)
-											}
+										sub := SubscriptionState{Status: status, Rail: rail, CollectionPolicy: policy,
+											RailSubscriptionID: "rs", PeriodEnd: end, GraceEndsAt: grace, NextRetryScheduled: retry}
+										ev := EvidenceBundle{Snapshot: s, Charge: charge, EvidenceFloor: floor}
+										d := Decide(sub, ev, decideNow, 0)
+										where := func() string {
+											return fmt.Sprintf("sub=%+v snap=%d charge=%d floor=%v -> %s/%s", sub, si, ci, floor, d.Kind, d.Reason)
+										}
 
-											if !liveStatus[status] && d.Kind != TransitionNone {
-												t.Fatalf("terminal/pending row moved: %s", where())
+										if !liveStatus[status] && d.Kind != TransitionNone {
+											t.Fatalf("terminal/pending row moved: %s", where())
+										}
+										if s == nil && charge == (ChargeEvidence{}) && d.Kind != TransitionNone && d.Kind != TransitionParkUnknown {
+											t.Fatalf("#664 evidence-less bundle acted: %s", where())
+										}
+										if s == nil && (d.Kind == TransitionRenew || d.Kind == TransitionAdoptPeriodEnd) {
+											t.Fatalf("period moved without provider truth: %s", where())
+										}
+										if d.EvidenceFloored && d.Kind != TransitionParkUnknown {
+											t.Fatalf("floored decision is not a park: %s", where())
+										}
+										if d.Kind != TransitionCancel && d.Certainty != "" {
+											t.Fatalf("certainty on a non-cancel: %s", where())
+										}
+										switch d.Kind {
+										case TransitionCancel:
+											if !slices.Contains(certainties, d.Certainty) {
+												t.Fatalf("#821 cancel without a named leg: %s", where())
 											}
-											if s == nil && charge == (ChargeEvidence{}) && !watermark && d.Kind != TransitionNone && d.Kind != TransitionParkUnknown {
-												t.Fatalf("#664 evidence-less bundle acted: %s", where())
+											if f := ev.evidenceFloor(); !f.IsZero() && (d.EvidenceAt.IsZero() || d.EvidenceAt.Before(f)) {
+												t.Fatalf("#835 cancel evidence %v below floor %v: %s", d.EvidenceAt, f, where())
 											}
-											if s == nil && (d.Kind == TransitionRenew || d.Kind == TransitionAdoptPeriodEnd) {
-												t.Fatalf("period moved without provider truth: %s", where())
+											if s == nil && charge.certaintyLeg() == "" {
+												t.Fatalf("first-party cancel without a certainty leg: %s", where())
 											}
-											if d.EvidenceFloored && d.Kind != TransitionParkUnknown {
-												t.Fatalf("floored decision is not a park: %s", where())
+										case TransitionRenew:
+											if !slices.ContainsFunc(s.Transactions, func(x RemoteTransaction) bool {
+												return x.SubscriptionID == "rs" && x.Type == TransactionTypeSale && x.Success
+											}) {
+												t.Fatalf("renewed without a verified charge: %s", where())
 											}
-											if d.Kind != TransitionCancel && d.Certainty != "" {
-												t.Fatalf("certainty on a non-cancel: %s", where())
+										case TransitionAdoptPeriodEnd:
+											if d.NewPeriodEnd == nil || !d.NewPeriodEnd.After(decideNow) {
+												t.Fatalf("adopted a non-future boundary: %s", where())
 											}
-											switch d.Kind {
-											case TransitionCancel:
-												if !slices.Contains(certainties, d.Certainty) {
-													t.Fatalf("#821 cancel without a named leg: %s", where())
-												}
-												if f := ev.evidenceFloor(); !f.IsZero() && (d.EvidenceAt.IsZero() || d.EvidenceAt.Before(f)) {
-													t.Fatalf("#835 cancel evidence %v below floor %v: %s", d.EvidenceAt, f, where())
-												}
-												if s == nil && charge.certaintyLeg() == "" {
-													t.Fatalf("first-party cancel without a certainty leg: %s", where())
-												}
-											case TransitionRenew:
-												if !slices.ContainsFunc(s.Transactions, func(x RemoteTransaction) bool {
-													return x.SubscriptionID == "rs" && x.Type == TransactionTypeSale && x.Success
-												}) {
-													t.Fatalf("renewed without a verified charge: %s", where())
-												}
-											case TransitionAdoptPeriodEnd:
-												if d.NewPeriodEnd == nil || !d.NewPeriodEnd.After(decideNow) {
-													t.Fatalf("adopted a non-future boundary: %s", where())
-												}
-											case TransitionPastDue:
-												if d.GraceEndsAt.IsZero() {
-													t.Fatalf("dunning entered without a grace marker: %s", where())
-												}
+										case TransitionPastDue:
+											if d.GraceEndsAt.IsZero() {
+												t.Fatalf("dunning entered without a grace marker: %s", where())
 											}
-											if s != nil && len(s.Transactions) > 1 {
-												rev := *s
-												rev.Transactions = slices.Clone(s.Transactions)
-												slices.Reverse(rev.Transactions)
-												ev.Snapshot = &rev
-												r := Decide(sub, ev, decideNow, 0)
-												if r.Kind != d.Kind || r.Reason != d.Reason || r.Certainty != d.Certainty || !r.EvidenceAt.Equal(d.EvidenceAt) {
-													t.Fatalf("transaction order changed the decision (%s/%s): %s", r.Kind, r.Reason, where())
-												}
+										}
+										if s != nil && len(s.Transactions) > 1 {
+											rev := *s
+											rev.Transactions = slices.Clone(s.Transactions)
+											slices.Reverse(rev.Transactions)
+											ev.Snapshot = &rev
+											r := Decide(sub, ev, decideNow, 0)
+											if r.Kind != d.Kind || r.Reason != d.Reason || r.Certainty != d.Certainty || !r.EvidenceAt.Equal(d.EvidenceAt) {
+												t.Fatalf("transaction order changed the decision (%s/%s): %s", r.Kind, r.Reason, where())
 											}
 										}
 									}

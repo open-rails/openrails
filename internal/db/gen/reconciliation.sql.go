@@ -1141,7 +1141,8 @@ func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg List
 }
 
 const listDunningStalledSubscriptions = `-- name: ListDunningStalledSubscriptions :many
-SELECT id FROM openrails.subscriptions
+SELECT id, (COALESCE(retry_attempts, 0) >= 1 AND last_retry_at IS NOT NULL)::bool AS attempt_recorded
+FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
@@ -1158,23 +1159,28 @@ type ListDunningStalledSubscriptionsParams struct {
 	Now        time.Time
 }
 
+type ListDunningStalledSubscriptionsRow struct {
+	ID              uuid.UUID
+	AttemptRecorded bool
+}
+
 // LIFE plane (life.subscription.dunning_overdue): an OpenRails-dunned NMI
 // schedule past_due in grace with NO retry scheduled. Engine rows own their
 // schedule (past_due without a retry is their awaiting-new-card state);
 // provider-owned rows are retried by the provider or not at all.
-func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListDunningStalledSubscriptionsParams) ([]uuid.UUID, error) {
+func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListDunningStalledSubscriptionsParams) ([]ListDunningStalledSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listDunningStalledSubscriptions, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ListDunningStalledSubscriptionsRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListDunningStalledSubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.AttemptRecorded); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1184,30 +1190,15 @@ func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListD
 
 const listLapsedSubscriptionsWithEvidence = `-- name: ListLapsedSubscriptionsWithEvidence :many
 SELECT s.id, s.status, s.rail, s.collection_policy,
-       (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
-       (s.current_period_starts_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.payments p
-            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-              AND p.deleted_at IS NULL
-              AND p.status = 'completed'
-              AND p.purchased_at >= s.current_period_starts_at
-       ))::bool AS payment_opened_period,
        (s.current_period_ends_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.payments p
             WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
               AND p.deleted_at IS NULL
               AND p.status = 'completed'
               AND p.purchased_at >= s.current_period_ends_at
-       ))::bool AS renewal_payment_after_end,
-       (s.current_period_ends_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.rail_refresh_watermarks w
-            WHERE w.merchant_id = s.merchant_id
-              AND w.rail = s.rail
-              AND w.psp_id = s.psp_id
-              AND w.watermark_at > s.current_period_ends_at
-       ))::bool AS watermark_newer_than_period_end
+       ))::bool AS renewal_payment_after_end
 FROM openrails.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
@@ -1230,19 +1221,16 @@ type ListLapsedSubscriptionsWithEvidenceParams struct {
 }
 
 type ListLapsedSubscriptionsWithEvidenceRow struct {
-	ID                          uuid.UUID
-	Status                      OpenrailsSubscriptionStatus
-	Rail                        string
-	CollectionPolicy            string
-	HasPaymentMethod            bool
-	RailSubscriptionID          string
-	CurrentPeriodEndsAt         *time.Time
-	GraceEndsAt                 *time.Time
-	NextRetryAt                 *time.Time
-	RetryAttempts               *int32
-	PaymentOpenedPeriod         bool
-	RenewalPaymentAfterEnd      bool
-	WatermarkNewerThanPeriodEnd bool
+	ID                     uuid.UUID
+	Status                 OpenrailsSubscriptionStatus
+	Rail                   string
+	CollectionPolicy       string
+	RailSubscriptionID     string
+	CurrentPeriodEndsAt    *time.Time
+	GraceEndsAt            *time.Time
+	NextRetryAt            *time.Time
+	RetryAttempts          *int32
+	RenewalPaymentAfterEnd bool
 }
 
 // #665: the ONE lapsed-cohort scan. Selects candidate rows — active past the
@@ -1250,14 +1238,10 @@ type ListLapsedSubscriptionsWithEvidenceRow struct {
 // with their #664 evidence legs; the decider (reconcile.Decide) chooses the
 // transition in Go. No WHERE-clause complements to keep in sync: cohort
 // exclusivity is structural (one query, one total decision function).
-// Evidence legs:
+// Evidence leg:
 //
-//	payment_opened_period    — a completed payment opened the current period
-//	                           (ownership: OpenRails billed/observed it)
 //	renewal_payment_after_end — a completed payment at/after the period end
 //	                           (billing DID happen; the advance path owns it)
-//	watermark_newer_than_period_end — provider truth synced since the lapse
-//	                           and saw no renewal (ownership)
 //
 // or#837: oldest lapse first, capped. A merchant with a huge lapsed cohort
 // gets a BOUNDED pass that drains from the front instead of one scan whose
@@ -1281,15 +1265,12 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 			&i.Status,
 			&i.Rail,
 			&i.CollectionPolicy,
-			&i.HasPaymentMethod,
 			&i.RailSubscriptionID,
 			&i.CurrentPeriodEndsAt,
 			&i.GraceEndsAt,
 			&i.NextRetryAt,
 			&i.RetryAttempts,
-			&i.PaymentOpenedPeriod,
 			&i.RenewalPaymentAfterEnd,
-			&i.WatermarkNewerThanPeriodEnd,
 		); err != nil {
 			return nil, err
 		}

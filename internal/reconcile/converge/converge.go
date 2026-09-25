@@ -120,7 +120,7 @@ type ConvergeEngine struct {
 	DB  *db.DB
 	Now func() time.Time
 	// lifecycle is the shared subscription local-state core. The LIFE pass's
-	// terminal repairs (grace_exhausted / pending_stale / period_overdue) route
+	// terminal repairs (grace_exhausted / pending_stale) route
 	// through it instead of bespoke SQL appliers, so a converged cancellation is
 	// identical to a user-driven one (status flip, the #264 Solana cranker
 	// cascade, as-of entitlement revoke) — minus the durable side-effects, which

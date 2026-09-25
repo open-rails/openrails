@@ -433,3 +433,35 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 	require.Zero(t, w.nmi.saleAttempts())
 	require.Equal(t, charges, stripeOwned.engineCharges())
 }
+
+// A lapsed provider_dunning schedule with no decline seen is never charged by
+// OpenRails: NMI may have billed it unobserved. When NMI's renewal arrives
+// late, the period is paid exactly once.
+func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.armDestructive()
+	l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
+		book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+	})
+	w.converge()
+	end := l.periodEnd()
+	for _, step := range []time.Duration{end.Sub(w.clock.Now()) + time.Hour, 49 * time.Hour} {
+		w.advance(step)
+		w.converge()
+		w.runRenewals()
+		sub := w.subscription(embedded, l.sub)
+		require.NotEqual(t, "past_due", sub.Status, "a lapse is not a decline")
+		require.Nil(t, sub.NextRetryAt)
+		require.Zero(t, w.nmi.saleAttempts(), "OpenRails never charges without a seen decline")
+	}
+
+	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(true)))
+	w.runRenewals()
+	sub := w.subscription(embedded, l.sub)
+	require.Equal(t, "active", sub.Status)
+	require.True(t, sub.CurrentPeriodEndsAt.After(end))
+	require.Zero(t, w.nmi.saleAttempts())
+	require.Len(t, w.nmi.ledger(""), 2, "the initial and NMI's renewal, nothing more")
+	require.Len(t, completed(w.payments(embedded, l.c.id)), 2)
+}

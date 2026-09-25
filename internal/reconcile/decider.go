@@ -75,7 +75,6 @@ type SubscriptionState struct {
 	CollectionPolicy   models.CollectionPolicy
 	Status             string // openrails.subscription_status
 	Rail               string
-	HasPaymentMethod   bool // payment_method_id IS NOT NULL
 	RailSubscriptionID string
 	PeriodStart        *time.Time // current_period_starts_at: bounds the period's cadence
 	PeriodEnd          *time.Time // current_period_ends_at
@@ -86,10 +85,6 @@ type SubscriptionState struct {
 // ChargeEvidence is the first-party billing evidence (openrails.payments +
 // dunning bookkeeping) a plane can attach.
 type ChargeEvidence struct {
-	// PaymentOpenedCurrentPeriod: a completed payment with purchased_at >=
-	// current_period_starts_at — OpenRails billed (or observed) the current
-	// period, so the rebill is ours to dun (#664 ownership leg).
-	PaymentOpenedCurrentPeriod bool
 	// RenewalPaymentAfterPeriodEnd: a completed payment at/after the lapsed
 	// period end — billing DID happen; the renewal/advance path owns the row.
 	RenewalPaymentAfterPeriodEnd bool
@@ -139,10 +134,6 @@ type EvidenceBundle struct {
 	// Snapshot is provider truth. Nil = no provider fetch happened.
 	Snapshot *RemoteSnapshot
 	Charge   ChargeEvidence
-	// WatermarkNewerThanPeriodEnd: the rail refresh watermark for the sub's
-	// (provider, account) is newer than the lapsed period end — provider truth
-	// synced since the lapse and saw no renewal (#664 ownership leg).
-	WatermarkNewerThanPeriodEnd bool
 	// EvidenceFloor (#835) is the instant this deployment first completed a
 	// provider pull for this merchant
 	// (openrails.merchant_destructive_policy.first_pull_completed_at). Evidence
@@ -282,11 +273,10 @@ func DunsDecline(sub *models.Subscription, d Decision) bool {
 //     decides conclusively: verified renewal charge → renew; roster alive with
 //     future boundary without a decline → adopt end (never lifting past_due); declared failure → past_due within the
 //     window, cancel beyond; roster dead / absent-from-exhaustive → cancel.
-//  2. First-party evidence (the #664 LIFE law): a lapsed active row with
-//     ownership evidence (payment opened period, or watermark newer than the
-//     period end) on an ours-to-bill rail → dunning; with a renewal payment
-//     recorded → no-op (the advance path owns it); otherwise parked after
-//     PeriodGrace. A stalled past_due row (grace elapsed, no retry) parks
+//  2. First-party evidence (the #664 LIFE law): a lapsed active row with a
+//     renewal payment recorded → no-op (the advance path owns it); otherwise
+//     parked after PeriodGrace. A lapse is never dunning: only a seen decline
+//     opens it (the provider may have billed, unobserved). A stalled past_due row (grace elapsed, no retry) parks
 //     unless a certainty leg (non-retryable decline / dunning exhausted)
 //     justifies the terminal cancel.
 //  3. Nothing → no-op. An `unknown` row without a snapshot stays unknown.
@@ -598,22 +588,15 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 		if sub.PeriodEnd == nil || !sub.PeriodEnd.Before(now) {
 			return Decision{Kind: TransitionNone}
 		}
-		// Rail heuristics survive only as a negative signal (#664): ccbill /
-		// vault-less nmi / stripe / solana are provider-auto-billed, never ours
-		// to charge. The positive "ours" signal is evidence, never rail.
-		// A provider-owned schedule is never ours to bill, whatever instrument
-		// the mirror holds: a missing renewal notice parks it for verification.
-		oursToBill := sub.Rail == string(models.RailNMI) && sub.HasPaymentMethod && sub.CollectionPolicy == models.CollectionPolicyProviderDunning
-		ownership := ev.Charge.PaymentOpenedCurrentPeriod || ev.WatermarkNewerThanPeriodEnd
 		if ev.Charge.RenewalPaymentAfterPeriodEnd {
 			// Billing DID happen — the renewal/advance path owns the row.
 			return Decision{Kind: TransitionNone, Reason: "renewal_payment_recorded"}
 		}
-		if oursToBill && ownership {
-			return Decision{Kind: TransitionPastDue, GraceEndsAt: sub.PeriodEnd.Add(PeriodGrace), Reason: "period_overdue_ownership_evidence"}
-		}
+		// No decline seen: the provider may have billed a renewal we have not
+		// observed yet. Dunning here could charge the period twice; the
+		// provider probe resolves the parked row.
 		if now.Sub(*sub.PeriodEnd) > PeriodGrace {
-			return Decision{Kind: TransitionParkUnknown, Reason: "no_ownership_evidence"}
+			return Decision{Kind: TransitionParkUnknown, Reason: "no_decline_observed"}
 		}
 		return Decision{Kind: TransitionNone, Reason: "within_grace_slack"}
 

@@ -498,14 +498,13 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// past_due with grace elapsed and no retry scheduled) carrying its evidence
 	// legs; the ONE decider (reconcile.Decide) chooses the transition and the
 	// repair applies it through the shared lifecycle (reconcile.ApplyDecision).
-	// LIFE carries no provider snapshot, so the decider can only enter dunning
-	// (ownership evidence) or PARK as `unknown` (access intact) — convergence
+	// LIFE carries no provider snapshot, so the decider can only PARK as
+	// `unknown` (access intact); only a seen decline opens dunning — convergence
 	// never terminally cancels; FailMembership + provider-confirmed outcomes
 	// own that. #691: grace here is a PACING marker only — an auto-renew sub's
 	// entitlement window is STANDING, so none of these transitions touch
 	// access. Finding vocabulary is unchanged:
-	//   active + ownership evidence  → life.subscription.period_overdue
-	//   active, no evidence          → life.subscription.needs_verification
+	//   active, no renewal recorded  → life.subscription.needs_verification
 	//   past_due, dunning stalled    → life.subscription.grace_exhausted
 	lapsed, err := q.ListLapsedSubscriptionsWithEvidence(ctx, gen.ListLapsedSubscriptionsWithEvidenceParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now, RowLimit: convergeScanCap,
@@ -523,27 +522,19 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			CollectionPolicy:   models.CollectionPolicy(row.CollectionPolicy),
 			Status:             string(row.Status),
 			Rail:               row.Rail,
-			HasPaymentMethod:   row.HasPaymentMethod,
 			RailSubscriptionID: row.RailSubscriptionID,
 			PeriodEnd:          row.CurrentPeriodEndsAt,
 			GraceEndsAt:        row.GraceEndsAt,
 			NextRetryScheduled: row.NextRetryAt != nil,
 		}
 		d := reconcile.Decide(state, reconcile.EvidenceBundle{
-			Charge: reconcile.ChargeEvidence{
-				PaymentOpenedCurrentPeriod:   row.PaymentOpenedPeriod,
-				RenewalPaymentAfterPeriodEnd: row.RenewalPaymentAfterEnd,
-			},
-			WatermarkNewerThanPeriodEnd: row.WatermarkNewerThanPeriodEnd,
-			EvidenceFloor:               floor,
+			Charge:        reconcile.ChargeEvidence{RenewalPaymentAfterPeriodEnd: row.RenewalPaymentAfterEnd},
+			EvidenceFloor: floor,
 		}, now, 0)
 
 		var ftype, severity string
 		evidence := map[string]any{"subscription_id": openrails.SubscriptionID(row.ID).String(), "cause": d.Reason}
 		switch d.Kind {
-		case reconcile.TransitionPastDue:
-			ftype, severity = "life.subscription.period_overdue", "medium"
-			evidence["grace_ends_at"] = d.GraceEndsAt
 		case reconcile.TransitionParkUnknown:
 			if row.Status == gen.OpenrailsSubscriptionStatus(models.StatusPastDue) {
 				ftype, severity = "life.subscription.grace_exhausted", "high"
@@ -659,7 +650,8 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 
 	// life.subscription.dunning_overdue — an OpenRails-dunned NMI schedule
 	// (provider_dunning) past_due within grace with no retry scheduled. The
-	// dunning schedule picks the time; this pass never does.
+	// dunning schedule picks the time; this pass never does. Without a recorded
+	// decline there is nothing to resume from: surfaced for the operator.
 	dunningStalled, err := q.ListDunningStalledSubscriptions(ctx, gen.ListDunningStalledSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
@@ -667,7 +659,19 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		return nil, fmt.Errorf("life: scan dunning-stalled subscriptions: %w", err)
 	}
 	for i := range dunningStalled {
-		subID := dunningStalled[i]
+		subID := dunningStalled[i].ID
+		if !dunningStalled[i].AttemptRecorded {
+			out = append(out, ConvergeFinding{
+				Type:       "life.subscription.dunning_without_decline",
+				Shape:      ShapeMismatch,
+				Class:      ClassAdmin,
+				Severity:   "high",
+				SubjectKey: "subscription:" + subID.String(),
+				Provider:   "self",
+				Evidence:   map[string]any{"subscription_id": openrails.SubscriptionID(subID).String()},
+			})
+			continue
+		}
 		out = append(out, ConvergeFinding{
 			Type:       "life.subscription.dunning_overdue",
 			Shape:      ShapeMissing,

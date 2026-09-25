@@ -1722,15 +1722,15 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 
 // ResumeStalledDunning restores the retry of an OpenRails-dunned NMI schedule
 // (provider_dunning) that is past_due with no attempt scheduled: the
-// schedule's next step after its last attempt (the missed charge when none
-// was recorded), never earlier, clamped to grace. Past grace, or with the
-// schedule spent, it does nothing: grace_exhausted owns the row. Reports
-// whether a retry was scheduled.
+// schedule's next step after its last recorded decline, clamped to grace.
+// Without a recorded decline, past grace, or with the schedule spent, it does
+// nothing. Reports whether a retry was scheduled.
 func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context, dbb *db.DB, subscriptionID uuid.UUID) (bool, error) {
 	resumed := false
 	err := withLockedSubscription(ctx, dbb, &models.Subscription{ID: subscriptionID}, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
 		now := s.now()
-		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil || sub.CurrentPeriodEndsAt == nil {
+		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil ||
+			sub.RetryAttempts == nil || *sub.RetryAttempts < 1 || sub.LastRetryAt == nil {
 			return nil
 		}
 		if sub.GraceEndsAt != nil && !sub.GraceEndsAt.After(now) {
@@ -1740,14 +1740,7 @@ func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context,
 		if err != nil {
 			return fmt.Errorf("resume dunning %s: load price: %w", sub.ID, err)
 		}
-		failures, last := 1, *sub.CurrentPeriodEndsAt
-		if sub.RetryAttempts != nil && *sub.RetryAttempts > 1 {
-			failures = *sub.RetryAttempts
-		}
-		if sub.LastRetryAt != nil {
-			last = *sub.LastRetryAt
-		}
-		next, ok, err := collection.NextAttemptAt(collection.BillingCycleHoursOf(price), failures, last)
+		next, ok, err := collection.NextAttemptAt(collection.BillingCycleHoursOf(price), *sub.RetryAttempts, *sub.LastRetryAt)
 		if err != nil && !errors.Is(err, collection.ErrUnknownCycle) {
 			return err
 		}

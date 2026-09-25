@@ -529,39 +529,20 @@ SELECT COALESCE((
 -- with their #664 evidence legs; the decider (reconcile.Decide) chooses the
 -- transition in Go. No WHERE-clause complements to keep in sync: cohort
 -- exclusivity is structural (one query, one total decision function).
--- Evidence legs:
---   payment_opened_period    — a completed payment opened the current period
---                              (ownership: OpenRails billed/observed it)
+-- Evidence leg:
 --   renewal_payment_after_end — a completed payment at/after the period end
 --                              (billing DID happen; the advance path owns it)
---   watermark_newer_than_period_end — provider truth synced since the lapse
---                              and saw no renewal (ownership)
 -- name: ListLapsedSubscriptionsWithEvidence :many
 SELECT s.id, s.status, s.rail, s.collection_policy,
-       (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
-       (s.current_period_starts_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.payments p
-            WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
-              AND p.deleted_at IS NULL
-              AND p.status = 'completed'
-              AND p.purchased_at >= s.current_period_starts_at
-       ))::bool AS payment_opened_period,
        (s.current_period_ends_at IS NOT NULL AND EXISTS (
             SELECT 1 FROM openrails.payments p
             WHERE p.subscription_id = s.id AND p.merchant_id = s.merchant_id
               AND p.deleted_at IS NULL
               AND p.status = 'completed'
               AND p.purchased_at >= s.current_period_ends_at
-       ))::bool AS renewal_payment_after_end,
-       (s.current_period_ends_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM openrails.rail_refresh_watermarks w
-            WHERE w.merchant_id = s.merchant_id
-              AND w.rail = s.rail
-              AND w.psp_id = s.psp_id
-              AND w.watermark_at > s.current_period_ends_at
-       ))::bool AS watermark_newer_than_period_end
+       ))::bool AS renewal_payment_after_end
 FROM openrails.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
@@ -649,7 +630,8 @@ LIMIT sqlc.arg(max_rows)::int;
 -- schedule (past_due without a retry is their awaiting-new-card state);
 -- provider-owned rows are retried by the provider or not at all.
 -- name: ListDunningStalledSubscriptions :many
-SELECT id FROM openrails.subscriptions
+SELECT id, (COALESCE(retry_attempts, 0) >= 1 AND last_retry_at IS NOT NULL)::bool AS attempt_recorded
+FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
