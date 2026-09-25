@@ -564,9 +564,10 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	//    Emit the cancel-shaped decision and let gateCancelCertainty decide: it
 	//    survives only on a first-party certainty leg, otherwise it parks.
 	if remoteSub != nil && remoteSub.Status == SubscriptionStatusPastDue {
-		if periodEnd.After(now) {
+		if periodEnd.After(now) && snap.Provider != ProviderDeclared {
 			// A paid-through row: OpenRails' own recovery charge does not move
 			// NMI's date, so a stale roster date is no failure of this period.
+			// A declared book's dunning state is the operator's own word.
 			base.Reason = "roster_past_due_within_paid_period"
 			return base
 		}
@@ -655,6 +656,9 @@ func renewPaidPeriods(txns []RemoteTransaction, cutoff, declinedAt time.Time, st
 }
 
 const reasonRenewedBeforeDecline = "verified_renewal_before_decline"
+
+// ProviderDeclared names the snapshot a declared legacy import synthesizes.
+const ProviderDeclared Provider = "declared"
 
 func laterOf(a, b time.Time) time.Time {
 	if a.After(b) {
