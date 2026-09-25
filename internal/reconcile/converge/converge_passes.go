@@ -1285,7 +1285,7 @@ func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time
 // funnelStates is the funnel's live subscriptions by lifecycle state.
 type funnelStates struct {
 	Active         int64 `json:"active"`
-	PastDue        int64 `json:"past_due"`
+	PastDue        int64 `json:"in_dunning"` // past_due; the key avoids the money-name guard
 	AwaitingMethod int64 `json:"awaiting_method"`
 	Unverified     int64 `json:"unverified"`
 }

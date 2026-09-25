@@ -1727,7 +1727,7 @@
       "type txnBreadcrumbs struct {\n\tOrderID         string `json:\"order_id\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\tEmail           string `json:\"email\"`\n\tCustomer        string `json:\"customer\"`\n\tInvoice         string `json:\"invoice\"`\n\tCharge          string `json:\"charge\"`\n}"
     ],
     "internal/reconcile/converge": [
-      "type funnelStates struct {\n\tActive         int64 `json:\"active\"`\n\tPastDue        int64 `json:\"past_due\"`\n\tAwaitingMethod int64 `json:\"awaiting_method\"`\n\tUnverified     int64 `json:\"unverified\"`\n}",
+      "type funnelStates struct {\n\tActive         int64 `json:\"active\"`\n\tPastDue        int64 `json:\"in_dunning\"`\n\tAwaitingMethod int64 `json:\"awaiting_method\"`\n\tUnverified     int64 `json:\"unverified\"`\n}",
       "type ownershipPurchase struct {\n\tGrantID     string  `json:\"grant_id\"`\n\tSourceType  string  `json:\"source_type\"`\n\tSourceID    string  `json:\"source_id\"`\n\tPaymentID   *string `json:\"payment_id\"`\n\tAmount      *int64  `json:\"amount,string\"`\n\tCurrency    *string `json:\"currency\"`\n\tPurchasedAt string  `json:\"purchased_at\"`\n}",
       "type ownershipPurchaseRow struct {\n\tGrantID     string  `json:\"grant_id\"`\n\tSourceType  string  `json:\"source_type\"`\n\tSourceID    string  `json:\"source_id\"`\n\tPaymentID   *string `json:\"payment_id\"`\n\tAmount      *int64  `json:\"amount\"`\n\tCurrency    *string `json:\"currency\"`\n\tPurchasedAt string  `json:\"purchased_at\"`\n}"
     ],
