@@ -239,3 +239,28 @@ func (w *world) pullWithin(d time.Duration) {
 	}, d, 100*time.Millisecond, "the provider refresh")
 	w.settle()
 }
+
+// A renewal NMI voided paid nothing (#1102): the verifier never renews a
+// period on it. The member stays unverified, access held, for review, while
+// the same read renews a member whose renewal stands.
+func TestNMIVoidedRenewalIsNoPayment(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	tier := w.bookTier("tier", 999, 30)
+	paid := w.clock.Now().Add(-2 * day)
+	b := w.newLegacyBook()
+	kept := b.add(&bookRow{source: "book-kept", tier: tier, c: w.newCustomer(), paid: paid, declared: true})
+	voided := b.add(&bookRow{source: "book-voided", tier: tier, c: w.newCustomer(), paid: paid, declared: true})
+	w.nmi.RenewSchedule(kept.schedule, true)
+	w.nmi.Void(w.nmi.RenewSchedule(voided.schedule, true).TransactionID)
+	result, err := w.client[embedded].ImportBilling(t.Context(), b.book)
+	require.NoError(t, err)
+	require.Len(t, result.Imported, 2, "%+v", result.Reasons)
+
+	require.Eventually(t, func() bool { return w.rowStates()[kept.schedule].status == "active" }, time.Minute, 100*time.Millisecond, "the standing renewal is read")
+	w.settle()
+	states := w.rowStates()
+	require.True(t, states[kept.schedule].end.After(w.clock.Now()), "the standing renewal pays a period")
+	require.Equal(t, "unverified", states[voided.schedule].status, "a voided renewal is no payment")
+	require.False(t, states[voided.schedule].end.After(w.clock.Now()), "a voided renewal extends nothing")
+}

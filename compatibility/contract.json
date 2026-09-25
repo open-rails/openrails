@@ -991,6 +991,7 @@
       "func (m *Mock) Validations(vault string) []Validation",
       "func (m *Mock) Vault(id string) *Vault",
       "func (m *Mock) Vaults() []Vault",
+      "func (m *Mock) Void(txID string)",
       "func (s Sale) Approved() bool",
       "func New(opts Options) *Mock",
       "func NewUnstarted(opts Options) *Mock",

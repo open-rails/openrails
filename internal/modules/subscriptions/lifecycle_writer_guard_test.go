@@ -19,17 +19,16 @@ import (
 // supersedes a membership, a refund that revokes access, an engine takeover.
 // Adding a writer means adding it here, in review.
 var lifecycleDecisionWriters = map[string]bool{
-	"internal/modules/subscriptions/upgrade.go:CompleteUpgradeTx":                    true,
-	"internal/modules/subscriptions/admin_service.go:ExtendSubscriptionByDuration":   true,
-	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":         true,
-	"internal/intents/refund.go:revokeMembershipAccess":                              true,
-	"internal/intents/nmi_engine_takeover.go:commit":                                 true,
-	"internal/modules/subscriptions/transition.go:Transition":                        true,
-	"internal/modules/subscriptions/lifecycle_service.go:createMembershipCore":       true,
-	"internal/modules/subscriptions/lifecycle_service.go:ResolveUnknownSubscription": true,
-	"internal/modules/subscriptions/admin_service.go:UpdateSubscription":             true,
-	"internal/modules/subscriptions/upgrade.go:SupersedeForUpgradeTx":                true,
-	"internal/modules/webhooks/provider_refund_access.go:apply":                      true,
+	"internal/modules/subscriptions/upgrade.go:CompleteUpgradeTx":                  true,
+	"internal/modules/subscriptions/admin_service.go:ExtendSubscriptionByDuration": true,
+	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":       true,
+	"internal/intents/refund.go:revokeMembershipAccess":                            true,
+	"internal/intents/nmi_engine_takeover.go:commit":                               true,
+	"internal/modules/subscriptions/transition.go:Transition":                      true,
+	"internal/modules/subscriptions/lifecycle_service.go:createMembershipCore":     true,
+	"internal/modules/subscriptions/admin_service.go:UpdateSubscription":           true,
+	"internal/modules/subscriptions/upgrade.go:SupersedeForUpgradeTx":              true,
+	"internal/modules/webhooks/provider_refund_access.go:apply":                    true,
 }
 
 func TestLifecycleDecisionWriters(t *testing.T) {

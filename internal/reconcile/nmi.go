@@ -307,9 +307,19 @@ func parseNMITransactionPage(raw string) (nmiTransactionResponse, error) {
 }
 
 func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
+	actions := make([]nmi.TransactionAction, 0, len(t.Actions))
+	for _, a := range t.Actions {
+		actions = append(actions, nmi.TransactionAction{Type: a.ActionType, Success: a.Success, Amount: a.Amount})
+	}
+	// A voided or fully refunded sale paid nothing: its sale is neither a
+	// payment nor a decline. Its refunds stay visible to the refund plane.
+	reversed := nmi.SaleReversed(t.Condition, actions)
 	var out []RemoteTransaction
 	for _, a := range t.Actions {
 		txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
+		if ok && reversed && txnType == TransactionTypeSale {
+			continue
+		}
 		if !ok {
 			// settle/check/void/etc. — settlement plumbing, not a
 			// charge-level event the diff engine consumes.
