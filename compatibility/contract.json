@@ -691,6 +691,7 @@
       "func (r *Runtime) HTTPRequiresRoot() bool",
       "func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error)",
       "func (r *Runtime) HasExternalRiverClient() bool",
+      "func (r *Runtime) Probes() []Probe",
       "func (r *Runtime) Ready(ctx context.Context) error",
       "func (r *Runtime) RiverJobs() riverhelpers.Contribution",
       "func (r *Runtime) RunWorkers(ctx context.Context) error",
@@ -722,6 +723,7 @@
       "type PSPConfig = boot.PSPConfig",
       "type PSPDeclaration = hosttools.PSPDeclaration",
       "type PSPSignerConfig = boot.PSPSignerConfig",
+      "type Probe struct {\n\tName string\n\n\tCheck func(context.Context) error\n}",
       "type ProviderCredentialSnapshot struct {\n\tMerchantID  merchant.ID\n\tRail        string\n\tAccountID   string\n\tCredentials map[string]string\n}",
       "type ProviderRailAccountConfig = boot.ProviderRailAccountConfig",
       "type RiverOwnership struct {\n}",
@@ -810,6 +812,7 @@
     "embed/operator": [
       "func (o *Operator) TransitionProviderCredentials(ctx context.Context, id merchant.ID, rail string, params CredentialTransitionParams, source *embed.Runtime) (*openrails.PaymentProviderConfig, error)",
       "func (r *Operator) ApplyCatalog(ctx context.Context, merchantID merchant.ID, params *openrails.CatalogApplyParams) (*openrails.CatalogApplicationReceipt, error)",
+      "func (r *Operator) ApproveSolanaSigner(ctx context.Context, merchantID merchant.ID, key string) error",
       "func (r *Operator) Converge(ctx context.Context, merchantID merchant.ID) (ConvergeResult, error)",
       "func (r *Operator) DeclarePSP(ctx context.Context, merchantID merchant.ID, declaration embed.PSPDeclaration) (uuid.UUID, error)",
       "func (r *Operator) PullProvider(ctx context.Context, opts PullProviderOptions) error",
@@ -2069,9 +2072,11 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "hosttools": "github.com/open-rails/openrails/internal/hosttools",
+      "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "openrails": "github.com/open-rails/openrails",
+      "retry": "github.com/open-rails/openrails/internal/retry",
       "service": "github.com/open-rails/openrails/internal/service",
       "strings": "strings",
       "uuid": "github.com/google/uuid"
@@ -2119,6 +2124,11 @@
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants"
     },
+    "embed/operator/solana_signer.go": {
+      "context": "context",
+      "fmt": "fmt",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant"
+    },
     "embed/operator/tooling.go": {
       "context": "context",
       "embed": "github.com/open-rails/openrails/embed",
@@ -2130,13 +2140,23 @@
     },
     "embed/provision.go": {
       "app": "github.com/open-rails/openrails/internal/app",
+      "atomic": "sync/atomic",
       "boot": "github.com/open-rails/openrails/internal/merchantbootstrap",
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
       "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "go-yaml": "github.com/goccy/go-yaml",
+      "json": "encoding/json",
+      "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
-      "merchants": "github.com/open-rails/openrails/internal/merchants"
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
+      "solanago": "github.com/gagliardetto/solana-go",
+      "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
+      "time": "time",
+      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
     },
     "embed/psp_declaration.go": {
       "hosttools": "github.com/open-rails/openrails/internal/hosttools"
@@ -2627,7 +2647,8 @@
       "recurring": "github.com/open-rails/openrails/internal/modules/solana/recurring",
       "strconv": "strconv",
       "strings": "strings",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
     },
     "internal/http/handlers/customer_billing_policy.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -2892,7 +2913,8 @@
       "sort": "sort",
       "strconv": "strconv",
       "strings": "strings",
-      "time": "time"
+      "time": "time",
+      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
     },
     "internal/http/handlers/subscription_lifecycle.go": {
       "db": "github.com/open-rails/openrails/internal/db",
@@ -2989,6 +3011,7 @@
       "log": "github.com/sirupsen/logrus",
       "money": "github.com/open-rails/openrails/internal/modules/money",
       "redis": "github.com/redis/go-redis/v9",
+      "retry": "github.com/open-rails/openrails/internal/retry",
       "strings": "strings",
       "sync": "sync",
       "time": "time"
@@ -5525,16 +5548,16 @@
   },
   "boundary_sources_sha256": {
     "embed/controlplane/controlplane.go": "29eb50ff752f0b7fe03896ab333a34a4360897ef7a071fa0b215a669430d65a8",
-    "embed/embed.go": "cca414d5e6bb0b486ce5cdd54723537ca226d9a5b45a24ca65c90731a0cf3f7a",
+    "embed/embed.go": "a0a1f0b989ca58eccf42384234cce3337dabe5123571eeb4f182cec7ced4fc7a",
     "embed/transport.go": "9d8695d0fcacdb9a2f71c1f89acf4200b2581273e8238e03df27c8d45e4c6fc3",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
     "examples/embedded/main.go": "946fdbc0e1208593e1542c7a06ebf71cb7543d197268ef55e01ae204eb18f0b9",
-    "internal/app/runtime.go": "7fc6befbd02118c3cd91236697fce9670274e9db4aa8082870f06588a3d9d537",
+    "internal/app/runtime.go": "fa58b883b31e3585d69906a989df45ec72131ea40a5883a251df74b3d7203437",
     "internal/auth/delegated.go": "d0cc54d53043dbf70fca244031bf96921a7e737175f513f0a50747b36525725f",
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",
     "internal/auth/provider.go": "bca5b1e71635a8ac9d0f7fdb3324de353a6eea81d35815384ba49e9e2aeca915",
     "internal/auth/verifier.go": "fff455adc5824ad634c19e9dbe0073fb8649ca73b97001de1241c740ec101d26",
-    "internal/bootstrap/serverboot/serverboot.go": "8174048b1a66d78888910b63a5437fa9aea535c9e16c363a32923eaa96616c9c",
+    "internal/bootstrap/serverboot/serverboot.go": "401d527b0917ff410ec9a0b8ba07d903d70b3c185fbbd8d96ea222ffb1f8a6d6",
     "internal/controlplane/api_key.go": "b489b70f84468ca600fe471e23626306bf18c477197861abf72538587c1f9918",
     "internal/controlplane/authority.go": "7cb16d51d953f090c73bec3e59c9729443a8b53d8cf767ce75c09f868224369a",
     "internal/controlplane/bootstrap.go": "ea9d197d62b3535d9b687e40f0c34457a807b97c333f2debb7a06a270f1b78af",
@@ -5593,7 +5616,7 @@
     "internal/http/handlers/catalogs.go": "a5e333a2e8daf5c7c2f9f36546715600ffa431f0e59c57aaa9d53cc63fc4d6f3",
     "internal/http/handlers/change_tier.go": "b0db30105783ac3d7c88395dcc700cd322b3fe559f4f42191d793be3ebf27a8a",
     "internal/http/handlers/checkout_config.go": "54c97d9a1cdb1fb8c4121acad6d6aecfdc3f66d18965e4069fddcd0254c4853a",
-    "internal/http/handlers/checkout_session.go": "5561954d5318fab4402c33c44bc6834c0e01d128681e622978159748c96f213a",
+    "internal/http/handlers/checkout_session.go": "fcd68ba69aedd08102c4909e3fdc7aaebcd1e59f0a3f51c56ef41067d46109b2",
     "internal/http/handlers/currencies.go": "bbd9ca69f19792125a1df03ef1ac5f425637f3ac025cbdab5f574cf7f8f36e9e",
     "internal/http/handlers/customer_billing_policy.go": "57b6b55f867af6f3528434b1a22060cf7d5e397bd74fdf63190e0797c5133dc5",
     "internal/http/handlers/customer_payment.go": "2026933f069c038fc41676212a8350838cfc76d0ae6176092b0bb1df94470815",
@@ -5632,10 +5655,10 @@
     "internal/http/handlers/service_delinquency.go": "84f534d3d795b972762e065a42e653136b58da11cb51da911c90ed2b6f9e8788",
     "internal/http/handlers/service_host_events.go": "55abeafde5f4e1547509cc72ef3d110edff90811671f8aa2ae714734bd574e8a",
     "internal/http/handlers/service_payment_settlement.go": "2c2bcd10a5ffbbd3f403026c588477d433b04f14b30e35e765b59cc97c0921e2",
-    "internal/http/handlers/solana_error.go": "769d12bf9b716c876b411d74d6ff018002dad27dbcf5c20e839bbff30f06bcf4",
+    "internal/http/handlers/solana_error.go": "d6e846041f2619e6b5f1250517fc4b6b54bcaf4c00caf4db3f7a6c320d003e42",
     "internal/http/handlers/solana_pay.go": "159a37489617aad9c8d470cc365811627e0b2dc5880df5456d2c5cd8c91c88d1",
     "internal/http/handlers/solana_recurring.go": "5aa058379fac53564dea03186d8c45525e88cec1a763f371d951f02b16218427",
-    "internal/http/handlers/solana_supported_tokens.go": "af80e0052a6dc910322256291996a273adf8c3342b6091c2dd5a273dbf6cba42",
+    "internal/http/handlers/solana_supported_tokens.go": "13c601799625b3b6d45d2642752ff6d0a61fe6278b17aa84448b128127ba1e81",
     "internal/http/handlers/stripe_engine_authentication.go": "9862f395366fa0b4a846a1ef1b4d31abc3d121d434d7009b0a6153be846e0531",
     "internal/http/handlers/stripe_method_setup.go": "2ad62cd87266a4753189bdb6a7104e4c223eb7951e213a3fa2f89bb663ebcc18",
     "internal/http/handlers/subscription_lifecycle.go": "e6a343fe5b61417449686bac055912b3ef477696ffb00ae55ff78ca3fbba90d2",
@@ -5648,6 +5671,7 @@
     "internal/http/handlers/webhook_stripe_thin.go": "096859bc50a8557bf78414a9c2e6251c852e1b52e1511303b04caae3de95e58f",
     "internal/http/inprocess/stream_transport.go": "2c1a977df25c9e055f74984425aab7cabd891bee6a417b4e43b373eada5d44f8",
     "internal/http/inprocess/transport.go": "01ede9847314179e65f4f18eed7c35ad15207605df19554f4225bb45aa01ead2",
+    "internal/http/metrics.go": "6c62e573ad5880798919fcf2559eca84cd07cc0f8e3d326c078db1f15be86926",
     "internal/http/middleware/admin_ratelimit.go": "63833b4014087af6fe033d55bf4d5dbe083a232efd46e235b06f9239314198c7",
     "internal/http/middleware/delegated_neutral.go": "3f7db2326e89e15d79d40d715837d09ec9cdb0ec29eb52743b84b0cbef04f11b",
     "internal/http/middleware/http_base.go": "1a6c971f9c353e0c2f3cc7f682bfb72c52ae57e2f12554c68d69348d81da1d3a",
@@ -5675,7 +5699,7 @@
     "internal/http/routes_admin_console.go": "49ef2a933c0603c774ffaa567fe79fdf2576a19f9f9a5e80d2e5e6980300ef50",
     "internal/http/routes_controlplane.go": "2ad52099584ea836cb9007739f335f241824bf07d9757a4def2be6a66d55c412",
     "internal/http/routes_platform.go": "342d3927eacfa12c8c8d1b8a7876c151e4815cdc30698d6baaf8685f5746e848",
-    "internal/http/routes_public.go": "b24974188849363a9729246ef536e9f653517f1be0e510ecda1775a60f4c2e4f",
+    "internal/http/routes_public.go": "fc3890d363bacaf60b0352db88656e18c63c1e68cc89af0899bafc918ba3aa06",
     "internal/http/routes_self.go": "7034160e9b7dc5dd85d3f98d410901efd191987cda20e69979596d058c872652",
     "internal/http/routesurface/provider_routes.go": "701c581ca4b351845111d24bbc972f05af3f779e58271b3e644d7cb43cba6b30",
     "internal/http/server.go": "39e26c4147c6f6fb78618eacbd0166f64383effcd1a5fb56a8da18449d878ece",
