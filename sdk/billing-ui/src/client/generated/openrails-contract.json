@@ -503,6 +503,11 @@
           "name": "exp_year",
           "type": "number",
           "optional": true
+        },
+        {
+          "name": "default",
+          "type": "boolean",
+          "optional": true
         }
       ]
     },
