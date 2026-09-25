@@ -80,7 +80,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 		require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the challenge stays open for the whole allowance")
 		w.advance(2 * time.Second)
 		require.False(t, e.c.entitled(e.ent), "access ends at period end + %s even while the challenge is open", grace)
-		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the abandoned challenge resolves as a decline")
+		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned challenge waits for a new card")
 		require.False(t, e.c.entitled(e.ent))
 		require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
 		require.True(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.Equal(end))

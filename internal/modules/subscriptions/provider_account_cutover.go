@@ -102,7 +102,7 @@ func PlanProviderAccountCutover(req ProviderAccountCutoverRequest) ProviderAccou
 	case !rails.IsNMI(req.Rail):
 		return blocked(ProviderAccountCutoverRailUnsupported,
 			fmt.Sprintf("rail %q has no durable payment-source update; only NMI subscriptions can change their billing card", req.Rail))
-	case req.Status != models.StatusActive && req.Status != models.StatusPastDue:
+	case req.Status != models.StatusActive && req.Status != models.StatusPastDue && req.Status != models.StatusAwaitingMethod:
 		return blocked(ProviderAccountCutoverSubscriptionNotRebilling,
 			fmt.Sprintf("subscription is %s; only active or past_due subscriptions rebill", req.Status))
 	case !req.HasRailSubscription:

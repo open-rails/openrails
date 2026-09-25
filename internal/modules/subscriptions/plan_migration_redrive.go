@@ -159,7 +159,7 @@ func (s *PlanMigrationService) redriveRow(ctx context.Context, row *models.Subsc
 		logger.Debug("redrive: subscription not found; leaving row blocked")
 		return redriveOutcomeSkipped, nil
 	}
-	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
 		// Left the migratable cohort (cancelled etc.) — the row stays blocked
 		// as the honest ledger of what never happened.
 		return redriveOutcomeSkipped, nil

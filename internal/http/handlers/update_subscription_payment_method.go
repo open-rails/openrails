@@ -91,7 +91,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
+	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod {
 		r.ErrorJSON(http.StatusBadRequest, "Cannot update payment method for cancelled subscriptions")
 		return
 	}

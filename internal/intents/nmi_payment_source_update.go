@@ -147,7 +147,7 @@ func (h *NMIPaymentSourceUpdateHandler) CheckRelevance(ctx context.Context, inte
 		}
 		return Relevance{}, err
 	}
-	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
 		return SupersededBy(fmt.Sprintf("subscription no longer rebilling (status=%s); payment-source update moot", sub.Status)), nil
 	}
 	cur := sub.PaymentMethodID
@@ -387,21 +387,29 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 // finalize points the local subscription at the new payment method — only
 // ever called AFTER the provider side is confirmed. Idempotent; a subscription
 // row gone out-of-band leaves nothing to finalize.
+// A subscription waiting for a new card resumes dunning on it.
 func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentSourceUpdatePayload) error {
-	repo := subscriptions.NewSubscriptionRepo(h.DB)
-	sub, err := repo.GetByID(ctx, *intent.SubscriptionID)
-	if err != nil {
-		if db.IsNotFound(err) {
+	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		repo := subscriptions.NewSubscriptionRepo(h.DB.NewWithPgxTx(tx))
+		sub, err := repo.GetByIDForUpdate(ctx, *intent.SubscriptionID)
+		if err != nil {
+			if db.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if sub.PaymentMethodID != nil && *sub.PaymentMethodID == p.NewPaymentMethodID {
 			return nil
 		}
-		return err
-	}
-	if sub.PaymentMethodID != nil && *sub.PaymentMethodID == p.NewPaymentMethodID {
-		return nil
-	}
-	newID := p.NewPaymentMethodID
-	sub.PaymentMethodID = &newID
-	return repo.UpdateAt(ctx, sub, h.now())
+		now := h.now()
+		newID := p.NewPaymentMethodID
+		sub.PaymentMethodID = &newID
+		if sub.Status == models.StatusAwaitingMethod {
+			sub.Status = models.StatusPastDue
+			sub.NextRetryAt = &now
+		}
+		return repo.UpdateAt(ctx, sub, now)
+	})
 }
 
 // ErrPaymentSourceUpdateProcessing: the durable swap intent could not confirm
