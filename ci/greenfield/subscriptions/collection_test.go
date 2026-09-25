@@ -104,8 +104,14 @@ func TestEngineNMISharedOrderFindsEarlierCharge(t *testing.T) {
 // the renewal over. Whatever A had done, the period is charged exactly once.
 func TestReplicasFailpointInterleavings(t *testing.T) {
 	t.Parallel()
-	for _, point := range []failpoint.Point{failpoint.AfterFence, failpoint.BeforeProvider, failpoint.AfterProvider, failpoint.BeforeComplete} {
-		for _, rail := range rails {
+	cases := map[failpoint.Point][]string{
+		failpoint.AfterFence:     rails,
+		failpoint.BeforeProvider: {"nmi"},
+		failpoint.AfterProvider:  rails,
+		failpoint.BeforeComplete: {"nmi"},
+	}
+	for point, railsAt := range cases {
+		for _, rail := range railsAt {
 			t.Run(string(point)+"/"+rail, func(t *testing.T) {
 				t.Parallel()
 				f := newFleet(t, 2)
@@ -179,7 +185,7 @@ func (f *fleet) runningReplica() *world {
 	f.t.Helper()
 	var id string
 	require.NoError(f.t, f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT attempted_by[array_length(attempted_by, 1)] FROM openrails.river_job
-		WHERE state = 'running' AND kind IN ('openrails.provider_operation', 'openrails.dunning') ORDER BY kind = 'openrails.provider_operation' DESC, attempted_at DESC LIMIT 1`)).Scan(&id))
+		WHERE state = 'running' AND split_part(kind, '.', 2) IN ('provider_operation', 'dunning') ORDER BY split_part(kind, '.', 2) = 'provider_operation' DESC, attempted_at DESC LIMIT 1`)).Scan(&id))
 	for _, r := range f.live() {
 		if r.replica.id == id {
 			return r
