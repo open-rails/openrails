@@ -195,15 +195,28 @@ func WithRateLimitOverrides(overrides map[string]ratelimit.Limit) Option {
 	}
 }
 
-// WithRedis wires a Redis client into the AuthKit engine's ephemeral store
-// (embedded.Deps.Redis) — #753. authhttp.New reuses this SAME client for its
-// own OIDC/SIWS state caches and rate limiter, so this one call satisfies both
-// layers' Redis needs. Without Redis, the host must explicitly permit the
-// in-memory ephemeral store through AuthConfig.AllowMemory (ak#305/#314).
+// WithRedis shares AuthKit's rate-limit windows across replicas through this
+// client (authhttp.Config.Redis). AuthKit keeps no other state in Redis.
+// Without Redis, the host must explicitly accept per-process limits through
+// AuthConfig.AllowMemory (single replica only).
 func WithRedis(rd *redis.Client) Option {
 	return func(o *options) {
 		o.redis = rd
 	}
+}
+
+// chooseRateLimits makes AuthKit's one limiter choice: shared through Redis,
+// or per process only when the operator declared a single-process deployment.
+func chooseRateLimits(httpCfg *authhttp.Config, rd *redis.Client, allowMemory bool) error {
+	switch {
+	case rd != nil:
+		httpCfg.Redis = rd
+	case allowMemory:
+		httpCfg.PerProcessRateLimits = true
+	default:
+		return errors.New("controlplane: AuthKit rate limits need Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
+	}
+	return nil
 }
 
 // clientIPPosture resolves the authhttp client-IP declaration (ak#299): host
@@ -416,13 +429,10 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 		Frontend: resolveFrontendConfig(issuer, options.frontend),
 		APIKeys:  authcore.APIKeysConfig{Prefix: APIKeyPrefix},
 		// ak#314: authkit has no environment classifier; the dev-rig
-		// relaxations are explicit flags, all off by default. OpenRails keeps
-		// explicit local exceptions and passes them onto
-		// them here: the in-memory ephemeral store (no Redis), private-network
-		// JWKS for the local sandbox issuer, and missing senders (the engine
-		// hands codes back instead of delivering). Omitted permissions remain
-		// fail-closed: Redis required, public JWKS only, senders required.
-		Ephemeral:    authcore.EphemeralConfig{AllowMemory: auth.AllowMemory},
+		// relaxations are explicit flags, all off by default: private-network
+		// JWKS for the local sandbox issuer and missing senders (the engine
+		// hands codes back instead of delivering). Ephemeral auth state lives
+		// in Postgres (authkit v0.141).
 		Applications: authcore.ApplicationsConfig{AllowPrivateNetworkJWKS: auth.AllowPrivateNetworkJWKS},
 		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
 		// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
@@ -455,7 +465,6 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	deps := authcore.Deps{
 		River:    authcore.RiverFromHost(),
 		Postgres: pool,
-		Redis:    options.redis,
 		Email:    options.email,
 		SMS:      options.sms,
 		NameAdmission: func(ctx context.Context, request authkit.NameAdmissionRequest) error {
@@ -486,6 +495,9 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 		return nil, err
 	}
 	httpCfg.RateLimits = options.rateLimitOverrides
+	if err := chooseRateLimits(&httpCfg, options.redis, auth.AllowMemory); err != nil {
+		return nil, err
+	}
 
 	cp2 := &ControlPlane{
 		cfg: cfg, hosted: options.hosted, merchantCreation: options.merchantCreation,
@@ -501,6 +513,11 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	}
 	cp2.authClient = authRuntime
 	cp2.client = authRuntime.Client()
+	// AuthKit checks scoped machine and delegated permissions against the live
+	// bound group, so the delegated verifier needs the engine as its checker.
+	if cp2.delegatedVerifier != nil {
+		cp2.delegatedVerifier.WithPermissionChecker(cp2.client, issuer)
+	}
 	defer func() {
 		if retErr != nil {
 			authRuntime.Close()

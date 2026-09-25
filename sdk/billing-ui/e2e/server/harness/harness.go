@@ -89,7 +89,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	signer := solanago.NewWallet().PrivateKey
 	auth, err := embedded.New(embedded.Config{
 		Schema: AuthSchema,
-		HTTP:   authhttp.Config{DirectPeerIP: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1"}},
+		HTTP:   authhttp.Config{DirectPeerIP: true, PerProcessRateLimits: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1"}},
 		Token: embedded.TokenConfig{
 			Issuer:            baseURL,
 			IssuedAudiences:   []string{Audience},
@@ -99,8 +99,8 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			NativeUserMode: embedded.RegistrationModeOpen,
 			Verification:   embedded.RegistrationVerificationNone,
 		},
-		Keys:      embedded.KeysConfig{AllowEphemeralDevKeys: true},
-		Ephemeral: embedded.EphemeralConfig{AllowMemory: true},
+		Keys: embedded.KeysConfig{AllowEphemeralDevKeys: true},
+
 		TwoFactor: embedded.TwoFactorConfig{Mode: embedded.TwoFactorDisabled},
 	}, embedded.Deps{Postgres: pool})
 	if err != nil {

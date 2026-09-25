@@ -52,6 +52,16 @@ func (s *proofAuthority) ResolveRemoteApplicationAuthority(context.Context, stri
 func (s *proofAuthority) ResolveAPIKeyDetailed(context.Context, string, string) (coreauth.ResolvedAPIKey, error) {
 	return coreauth.ResolvedAPIKey{}, errors.New("no API key")
 }
+
+// GroupInstanceByID reports the bound group live (AuthKit re-checks scoped
+// machine permissions against it).
+func (s *proofAuthority) GroupInstanceByID(_ context.Context, id string) (coreauth.GroupInstance, error) {
+	if id != s.group.ID {
+		return coreauth.GroupInstance{}, coreauth.ErrGroupNotFound
+	}
+	return s.group, nil
+}
+
 func (s *proofAuthority) GroupInstanceForSlug(context.Context, coreauth.GroupRef) (coreauth.GroupInstance, error) {
 	return s.group, nil
 }
@@ -92,7 +102,8 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		}
 		used[key] = true
 		return true, nil
-	}, func(r *http.Request) string { return origin + r.URL.EscapedPath() })).WithService(authority)
+	}, func(r *http.Request) string { return origin + r.URL.EscapedPath() })).WithService(authority).
+		WithPermissionChecker(authority, "https://authority.test")
 	require.NoError(t, verifier.LoadRemoteApplications(t.Context(), authority, []string{"billing"}))
 	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: verifier, Authority: func(context.Context, billingauth.Requirement) (billingauth.Authority, error) {
 		return billingauth.Authority{Scope: auth.Scope{Authority: "https://authority.test", ID: groupID}, Permission: permissions.MerchantCatalogRead}, nil
