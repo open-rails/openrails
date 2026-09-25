@@ -57,6 +57,9 @@ func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in g
 	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	if err := intents.NewStore(h.DB).RequireClaim(ctx, in.ID, h.now()); err != nil {
+		return intents.Ambiguous("nothing sent: " + err.Error())
+	}
 	result, err := service.CreateEnginePayment(ctx, params)
 	if hitErr := h.hit(ctx, in, failpoint.AfterProvider); hitErr != nil {
 		return intents.Ambiguous(hitErr.Error())

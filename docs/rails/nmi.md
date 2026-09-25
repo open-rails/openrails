@@ -231,9 +231,13 @@ covering the time since the first submission, so NMI refuses it if the
 original charged but was not yet searchable. Any unreadable or contradictory
 read means no resend and a `life.submission.unresolved` finding.
 
-A replica paused past its lease while holding a submission (not crashed) can
-still send after another replica's resend; that late request is caught only
-by the account's own duplicate window, so keep NMI's duplicate check on.
+Immediately before every charge request (engine renewals on NMI and Stripe,
+dunning recoveries), the executor re-reads its claim on a fresh connection:
+the same claim, with a lease still running. A lost claim sends nothing and
+returns the operation to verification. This narrows, but cannot close, the
+window of a replica that stalls after that check (NMI has no remote fence):
+such a late request is caught only by the account's own duplicate window, so
+keep NMI's duplicate check on.
 
 A submitted charge with no receipt is settled from NMI's record under its
 order: after five minutes with no transaction it ends not executed. If the
