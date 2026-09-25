@@ -314,9 +314,10 @@ func TestExpiryAndGC(t *testing.T) {
 }
 
 // Two replicas' dedup services see one delivery storm for one event: its
-// effects run once. A retryable failure releases the event to the next
-// redelivery on any replica; a crash after the effects committed is
-// recognised from webhook_events after the dead claim lapses.
+// effects run once and every duplicate answers the owner's outcome. A
+// retryable failure releases the event to the next redelivery on any replica;
+// a crash after the effects committed is recognised from webhook_events once
+// the dead claim lapses.
 func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -353,9 +354,7 @@ func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	wg.Wait()
 	require.EqualValues(t, 1, applied.Load(), "one delivery applies the event")
 	for _, err := range errs {
-		if err != nil {
-			require.ErrorContains(t, err, "already in progress", "a concurrent duplicate is refused for redelivery, never applied")
-		}
+		require.NoError(t, err, "a concurrent duplicate waits for the owner and answers its outcome")
 	}
 	for replica := range 2 {
 		require.NoError(t, deliver(replica, "evt_storm", slow))
@@ -386,7 +385,6 @@ func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	_, err = e.admin.Exec(t.Context(), e.q(`INSERT INTO openrails.webhook_events (merchant_id, op, event_id) VALUES ($1, $2, 'evt_crash')`), e.merchant, webhookOp(source))
 	require.NoError(t, err)
 	count := func(ctx context.Context) error { crashed.Add(1); return nil }
-	require.ErrorContains(t, deliver(1, "evt_crash", count), "already in progress", "the dead replica's claim holds until its lease lapses")
 	e.clock.Advance(webhooks.WebhookClaimLease)
 	require.NoError(t, deliver(1, "evt_crash", count))
 	require.Zero(t, crashed.Load(), "the applied fact wins over the reclaimed delivery")

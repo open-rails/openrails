@@ -24,6 +24,9 @@ const (
 	WebhookClaimLease     = 2 * time.Minute
 	WebhookClaimTTL       = 24 * time.Hour
 	WebhookEventRetention = 90 * 24 * time.Hour
+
+	webhookDuplicateWait = 10 * time.Second
+	webhookDuplicatePoll = 50 * time.Millisecond
 )
 
 // DeduplicationService dedups webhook deliveries across replicas (#1099).
@@ -194,9 +197,9 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 		log.WithContext(ctx).WithFields(fields).Warn("no merchant on context: processing webhook without dedupe protection")
 		return s.run(ctx, nil, nil, processingFunc)
 	}
-	claim, rec, err := s.claims.Begin(ctx, op, trimmedEventID)
+	claim, rec, err := s.claim(ctx, op, trimmedEventID)
 	if err != nil {
-		return fmt.Errorf("failed to claim webhook: %w", err)
+		return err
 	}
 	if claim == nil {
 		if rec.Status == idempotency.StatusSucceeded {
@@ -222,6 +225,31 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 		return nil
 	}
 	return s.run(ctx, claim, mark, processingFunc)
+}
+
+// claim claims the delivery. A duplicate that arrives while another replica
+// processes the event waits for that outcome, briefly: the provider treats
+// any 2xx as delivered, so answering before the owner succeeds could lose the
+// event, and answering 5xx would only schedule a needless redelivery.
+func (s *DeduplicationService) claim(ctx context.Context, op, eventID string) (*idempotency.Claim, *idempotency.Record, error) {
+	deadline := time.NewTimer(webhookDuplicateWait)
+	defer deadline.Stop()
+	for {
+		claim, rec, err := s.claims.Begin(ctx, op, eventID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to claim webhook: %w", err)
+		}
+		if claim != nil || rec.Status != idempotency.StatusProcessing {
+			return claim, rec, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-deadline.C:
+			return nil, rec, nil
+		case <-time.After(webhookDuplicatePoll):
+		}
+	}
 }
 
 // run executes the handler under an owned claim (nil = no dedupe) and records
