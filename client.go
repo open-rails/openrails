@@ -248,6 +248,9 @@ type MerchantSettings struct {
 	ArrearsGraceDays        *int                   `json:"arrears_grace_days,omitempty"`
 	ArrearsDelinquencyFloor *int64                 `json:"arrears_delinquency_floor,omitempty,string"`
 	CheckoutRouting         *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
+	// DunningPolicy replaces the built-in dunning schedule. Nil keeps the
+	// stored policy; the built-in one applies until a merchant declares one.
+	DunningPolicy *DunningPolicy `json:"dunning_policy,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".
@@ -468,4 +471,21 @@ type CreditLimitRequest struct {
 	CustomerID        string `json:"customer_id"`
 	Currency          string `json:"currency"`
 	CreditLimitAmount int64  `json:"credit_limit_amount,string"`
+}
+
+// DunningPolicy is a merchant's retry schedule for declined renewals. Tiers
+// are ordered by billing cycle: the first tier whose MaxCycleHours exceeds a
+// subscription's cycle applies, and the last tier (MaxCycleHours 0) takes
+// every longer cycle. RetryAfterHours are measured from the first decline.
+// TransientRetryMinutes is the quick ladder for processor try-again answers,
+// which does not count as dunning failures.
+type DunningPolicy struct {
+	Tiers                 []DunningTier `json:"tiers"`
+	TransientRetryMinutes []int         `json:"transient_retry_minutes,omitempty"`
+}
+
+// DunningTier is the retry schedule for cycles shorter than MaxCycleHours.
+type DunningTier struct {
+	MaxCycleHours   int   `json:"max_cycle_hours,omitempty"`
+	RetryAfterHours []int `json:"retry_after_hours,omitempty"`
 }

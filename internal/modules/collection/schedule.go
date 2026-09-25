@@ -94,23 +94,13 @@ var (
 // HOURS. An empty schedule means no retries — the first failure is terminal.
 // Callers must not mutate the returned slice.
 func RetryOffsets(cycleHours int) ([]time.Duration, error) {
-	switch {
-	case cycleHours <= 0:
-		return nil, &UnknownCycleError{CycleHours: cycleHours}
-	case cycleHours < MinRetryCycleHours:
-		return nil, nil
-	case cycleHours < MonthlyCycleHours:
-		return offsetsWeekly, nil
-	default:
-		return offsetsMonthly, nil
-	}
+	return DefaultPolicy.RetryOffsets(cycleHours)
 }
 
 // MaxFailures returns how many consecutive failures (counting the initial
 // one) a billing cycle tolerates before collection goes terminal.
 func MaxFailures(cycleHours int) (int, error) {
-	offsets, err := RetryOffsets(cycleHours)
-	return len(offsets) + 1, err
+	return DefaultPolicy.MaxFailures(cycleHours)
 }
 
 // NextRetryIn returns how long after the failures-th consecutive failure
@@ -119,25 +109,14 @@ func MaxFailures(cycleHours int) (int, error) {
 // degrade gracefully when the worker is late — the next retry is always
 // relative to the failure that just happened, never in the past.
 func NextRetryIn(cycleHours, failures int) (time.Duration, error) {
-	offsets, err := RetryOffsets(cycleHours)
-	if err != nil || failures < 1 || failures > len(offsets) {
-		return 0, err
-	}
-	if failures == 1 {
-		return offsets[0], nil
-	}
-	return offsets[failures-1] - offsets[failures-2], nil
+	return DefaultPolicy.NextRetryIn(cycleHours, failures)
 }
 
 // NextAttemptAt is the schedule's next attempt after the failures-th
 // consecutive failure (1-based) made at lastAttempt. ok is false when that
 // failure spent the schedule. Every consumer takes retry times from here.
 func NextAttemptAt(cycleHours, failures int, lastAttempt time.Time) (next time.Time, ok bool, err error) {
-	gap, err := NextRetryIn(cycleHours, failures)
-	if err != nil || gap == 0 {
-		return time.Time{}, false, err
-	}
-	return lastAttempt.Add(gap), true, nil
+	return DefaultPolicy.NextAttemptAt(cycleHours, failures, lastAttempt)
 }
 
 // Window returns the DERIVED staleness window (#344, #359): how long past the
@@ -151,15 +130,7 @@ func NextAttemptAt(cycleHours, failures int, lastAttempt time.Time) (next time.T
 // and never a whole cycle: an hourly membership gets 30 minutes, a daily one
 // 12 hours. Window(cycle) < cycle for every known cycle.
 func Window(cycleHours int) (time.Duration, error) {
-	offsets, err := RetryOffsets(cycleHours)
-	if err != nil {
-		return 0, err
-	}
-	slack := windowSlack(time.Duration(cycleHours) * time.Hour)
-	if len(offsets) == 0 {
-		return slack, nil
-	}
-	return offsets[len(offsets)-1] + slack, nil
+	return DefaultPolicy.Window(cycleHours)
 }
 
 func windowSlack(cycle time.Duration) time.Duration {
@@ -202,8 +173,5 @@ var TransientLadder = []time.Duration{5 * time.Minute, 30 * time.Minute}
 // NextTransientAttempt is when the used+1-th transient retry runs, or false
 // when the ladder is spent.
 func NextTransientAttempt(used int, at time.Time) (time.Time, bool) {
-	if used < 0 || used >= len(TransientLadder) {
-		return time.Time{}, false
-	}
-	return at.Add(TransientLadder[used]), true
+	return DefaultPolicy.NextTransientAttempt(used, at)
 }

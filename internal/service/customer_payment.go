@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/collection"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -219,7 +218,11 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}
-	window, err := collection.Window(*cycle)
+	policy, err := subscriptions.DunningPolicy(ctx, s.rt.DB)
+	if err != nil {
+		return nil, err
+	}
+	window, err := policy.Window(*cycle)
 	if err != nil {
 		return nil, err
 	}
