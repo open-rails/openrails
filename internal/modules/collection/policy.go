@@ -14,6 +14,10 @@ import (
 type Policy struct {
 	Tiers     []Tier
 	Transient []time.Duration
+	// SuspendAccess ends access with the paid period while a declined renewal
+	// is retried. The default keeps access until a confirmed outcome (Paul,
+	// 2026-09-25); uncertainty alone never ends it.
+	SuspendAccess bool
 }
 
 // Tier is the schedule for billing cycles shorter than MaxCycle.

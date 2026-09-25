@@ -482,7 +482,17 @@ type CreditLimitRequest struct {
 type DunningPolicy struct {
 	Tiers                 []DunningTier `json:"tiers"`
 	TransientRetryMinutes []int         `json:"transient_retry_minutes,omitempty"`
+	// AccessDuringDunning is DunningAccessKeep (default: members keep access
+	// until a confirmed outcome ends it) or DunningAccessSuspend (access ends
+	// with the paid period while a declined renewal is retried).
+	AccessDuringDunning string `json:"access_during_dunning,omitempty"`
 }
+
+// Dunning access policies.
+const (
+	DunningAccessKeep    = "keep"
+	DunningAccessSuspend = "suspend"
+)
 
 // DunningTier is the retry schedule for cycles shorter than MaxCycleHours.
 type DunningTier struct {

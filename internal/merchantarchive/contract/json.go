@@ -334,7 +334,7 @@ var jsonRules = map[string]jsonRule{
 	"merchant_configurations.config": object(map[string]jsonRule{
 		"profile": profileJSON, "collection_threshold": nullable(integerValue), "monthly_floor": nullable(integerValue), "billing_period_boundary": textValue, "arrears_grace_days": nullable(integerValue), "arrears_delinquency_floor": nullable(integerValue), "delegated_invoker_wasted_spend_windows": array(budgetWindow), "alert_email": textValue, "reprice_notice_window_days": nullable(integerValue), "renewal_receipt_min_interval_hours": nullable(integerValue), "provider_refund_access": textValue,
 		"checkout_routing": array(object(map[string]jsonRule{"match": object(map[string]jsonRule{"currency": textValue, "product": textValue, "price": textValue, "mode": textValue, "country": textValue}), "prefer": array(textValue)})),
-		"dunning_policy":   object(map[string]jsonRule{"tiers": array(object(map[string]jsonRule{"max_cycle_hours": integerValue, "retry_after_hours": array(integerValue)})), "transient_retry_minutes": array(integerValue)}),
+		"dunning_policy":   object(map[string]jsonRule{"tiers": array(object(map[string]jsonRule{"max_cycle_hours": integerValue, "retry_after_hours": array(integerValue)})), "transient_retry_minutes": array(integerValue), "access_during_dunning": textValue}),
 	}),
 	"psps.evidence":                    object(map[string]jsonRule{"settings": pspSettingsJSON, "public_config": object(map[string]jsonRule{"publishable_key": textValue, "tokenization_key": textValue}), "signer": object(map[string]jsonRule{"mode": textValue, "key": textValue})}),
 	"price_psp_bindings.configuration": emptyObject,

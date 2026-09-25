@@ -45,3 +45,32 @@ func TestMerchantDunningPolicy(t *testing.T) {
 	require.Equal(t, "cancelled", w.subscription(embedded, e.sub).Status, "the policy's last retry ends it")
 	require.Equal(t, 4, e.providerAttempts(), "initial charge plus three renewal attempts")
 }
+
+// Access during dunning is policy: by default a member keeps access while a
+// declined renewal is retried; "suspend" ends it with the paid period and a
+// recovered renewal restores it.
+func TestDunningAccessPolicy(t *testing.T) {
+	t.Parallel()
+	for _, access := range []string{openrails.DunningAccessKeep, openrails.DunningAccessSuspend} {
+		t.Run(access, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			policy := &openrails.DunningPolicy{Tiers: []openrails.DunningTier{{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 120, 216, 312}}}, AccessDuringDunning: access}
+			require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), openrails.MerchantSettings{DunningPolicy: policy}))
+			e := enroll(t, w, "stripe", embedded)
+			e.setDecline(visa.Last4, "insufficient_funds", "202")
+			e.toPeriodEnd()
+			w.runRenewals()
+			sub := w.subscription(embedded, e.sub)
+			require.Equal(t, "past_due", sub.Status)
+			w.advance(24 * time.Hour)
+			require.Equal(t, access == openrails.DunningAccessKeep, e.c.entitled(e.ent), "access during dunning follows the policy")
+
+			e.setDecline(visa.Last4, "", "")
+			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+			w.runRenewals()
+			require.Equal(t, "active", w.subscription(embedded, e.sub).Status)
+			require.True(t, e.c.entitled(e.ent), "the recovered renewal restores access")
+		})
+	}
+}

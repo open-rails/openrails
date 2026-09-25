@@ -28,6 +28,13 @@ func PolicyOf(declared *openrails.DunningPolicy) (collection.Policy, error) {
 	for _, m := range declared.TransientRetryMinutes {
 		p.Transient = append(p.Transient, time.Duration(m)*time.Minute)
 	}
+	switch declared.AccessDuringDunning {
+	case "", openrails.DunningAccessKeep:
+	case openrails.DunningAccessSuspend:
+		p.SuspendAccess = true
+	default:
+		return collection.Policy{}, fmt.Errorf("dunning_policy: access_during_dunning must be %q or %q", openrails.DunningAccessKeep, openrails.DunningAccessSuspend)
+	}
 	if err := p.Validate(); err != nil {
 		return collection.Policy{}, fmt.Errorf("dunning_policy: %w", err)
 	}
