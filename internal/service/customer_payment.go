@@ -205,7 +205,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	if sub.CollectionPolicy != models.CollectionPolicyProviderDunning || method.Custodian != models.CustodianPSP || method.StoredCredentialRecurringRef == "" {
+	if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP || method.StoredCredentialRecurringRef == "" {
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}

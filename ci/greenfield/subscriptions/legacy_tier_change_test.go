@@ -52,7 +52,7 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	subs, err := w.client[tp].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 1)
-	require.Equal(t, "provider_dunning", subs.Data[0].CollectionPolicy)
+	require.Equal(t, "nmi_schedule", subs.Data[0].CollectionPolicy)
 	l := &legacy{w: w, rail: "nmi", tp: tp, c: c, price: price.Price, railSub: railSub, sub: subs.Data[0].ID, ent: price.ent, railCust: vault}
 	require.True(t, c.entitled(price.ent))
 	return l

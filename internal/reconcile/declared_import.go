@@ -205,13 +205,9 @@ func ImportDeclaredSubscriptions(
 			block("duplicate SourceID in batch")
 			continue
 		}
-		if f.CollectionPolicy == "" {
-			f.CollectionPolicy = models.CollectionPolicyProvider
-		}
-		if f.CollectionPolicy != models.CollectionPolicyProvider && !(f.CollectionPolicy == models.CollectionPolicyProviderDunning && f.Rail == "nmi") {
-			block("declared provider book has unsupported collection policy; engine history requires canonical archive restore")
-			continue
-		}
+		// The rail decides: every NMI schedule is dunned by OpenRails. Engine
+		// history uses canonical archive restore, never this import.
+		f.CollectionPolicy = models.ProviderCollectionPolicy(f.Rail)
 		if f.RailSubscriptionID == "" || f.Rail == "" {
 			block("rail and rail_subscription_id are required (synthesize a stable id for rail-less legacy rows)")
 			continue

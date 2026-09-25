@@ -72,7 +72,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	for _, sub := range subs.Data {
 		if sub.RailSubscriptionID == l.railSub {
 			l.sub = sub.ID
-			require.Equal(t, "provider_dunning", sub.CollectionPolicy, "every NMI schedule is dunned by OpenRails")
+			require.Equal(t, "nmi_schedule", sub.CollectionPolicy, "every NMI schedule is dunned by OpenRails")
 		}
 	}
 	require.False(t, l.sub.IsZero())
@@ -201,7 +201,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 			if !r.ends {
 				require.True(t, w.nmi.ScheduleLive(l.railSub), "NMI still owns the schedule")
 			}
-			require.Equal(t, "provider_dunning", w.subscription(tp, l.sub).CollectionPolicy)
+			require.Equal(t, "nmi_schedule", w.subscription(tp, l.sub).CollectionPolicy)
 			require.Empty(t, w.nmi.Unexpected())
 		})
 	}

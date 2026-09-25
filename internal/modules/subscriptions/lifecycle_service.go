@@ -1738,7 +1738,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 }
 
 // ResumeStalledDunning restores the retry of an OpenRails-dunned NMI schedule
-// (provider_dunning) that is past_due with no attempt scheduled: the
+// (nmi_schedule) that is past_due with no attempt scheduled: the
 // schedule's next step after its last recorded decline, clamped to grace.
 // Without a recorded decline, past grace, or with the schedule spent, it does
 // nothing. Reports whether a retry was scheduled.
@@ -1746,7 +1746,7 @@ func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context,
 	resumed := false
 	err := withLockedSubscription(ctx, dbb, &models.Subscription{ID: subscriptionID}, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
 		now := s.now()
-		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil ||
+		if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil ||
 			sub.RetryAttempts == nil || *sub.RetryAttempts < 1 || sub.LastRetryAt == nil {
 			return nil
 		}
@@ -2380,7 +2380,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				// unless NMI's own schedule charges again next cycle: then that
 				// charge is the retry, and OpenRails schedules none.
 				terminal = *subscription.RetryAttempts >= maxFailures &&
-					!(maxFailures == 1 && subscription.CollectionPolicy == models.CollectionPolicyProviderDunning)
+					!(maxFailures == 1 && subscription.CollectionPolicy == models.CollectionPolicyNMISchedule)
 			}
 			leg := params.TerminalCertainty
 			if !params.Terminal {
@@ -2491,8 +2491,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// default the member keeps access until a confirmed outcome (a payment,
 		// a non-recoverable decline, a spent schedule); under "suspend" access
 		// ends with the paid period.
-		if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCancelled && entSvc != nil {
-			if err := s.engineDunningAccess(ctx, db, entSvc, subscription, now); err != nil {
+		if subscription.Status != models.StatusCancelled && entSvc != nil {
+			if err := s.dunningAccess(ctx, db, entSvc, subscription, now); err != nil {
 				return err
 			}
 		}
@@ -2679,6 +2679,30 @@ func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceSer
 		return time.Time{}, err
 	}
 	return sub.CurrentPeriodEndsAt.UTC().Add(window), nil
+}
+
+// dunningAccess applies the merchant's access policy to a membership entering
+// dunning. Engine members keep access through an open-ended grace, or lose it
+// with the paid period. A provider-scheduled member keeps its standing window,
+// or, under suspend, has it bounded at the paid period; a recovery reopens it.
+func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return s.engineDunningAccess(ctx, d, ent, sub, now)
+	}
+	if sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
+		return nil
+	}
+	policy, err := DunningPolicy(ctx, d)
+	if err != nil {
+		return err
+	}
+	if !policy.SuspendAccess || sub.CurrentPeriodEndsAt == nil {
+		return nil
+	}
+	if err := ent.BoundSubscriptionAccess(ctx, sub.ID, *sub.CurrentPeriodEndsAt); err != nil {
+		return fmt.Errorf("suspend access through dunning for %s: %w", sub.ID, err)
+	}
+	return nil
 }
 
 // engineDunningAccess applies the merchant's access policy to an engine

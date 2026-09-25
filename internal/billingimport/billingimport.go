@@ -24,7 +24,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -262,7 +261,6 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return err
 			}
 			f := reconcile.DeclaredSubscriptionFact{
-				CollectionPolicy:   models.CollectionPolicy(s.CollectionPolicy),
 				SourceID:           s.SourceID,
 				Customer:           s.Customer.UUID(),
 				PriceID:            s.Price.UUID(),
@@ -475,13 +473,12 @@ func productEntitlementKeys(raw []byte) []string {
 // its card has no recurring stored-credential anchor.
 const FindingNoRecurringAnchor = "life.import.no_recurring_anchor"
 
-// dunNMISchedule makes an imported NMI schedule OpenRails-dunned. NMI never
-// retries a declined renewal, so OpenRails dunning is its only retry. A card
-// without a recurring anchor takes the schedule's first approved sale (its
-// recurring signup); without one the schedule stays provider-collected and an
-// operator finding names it.
+// dunNMISchedule records the recurring anchor OpenRails dunning charges an
+// imported NMI schedule's retries against (NMI never retries). A card without
+// one takes the schedule's first approved sale (its recurring signup); without
+// that an operator finding names the schedule OpenRails cannot retry.
 func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f *reconcile.DeclaredSubscriptionFact, firstSale map[string]reconcile.RemoteTransaction) error {
-	if !strings.EqualFold(f.Rail, "nmi") || f.RailSubscriptionID == "" || f.CollectionPolicy == models.CollectionPolicyEngine || f.CancelKind != reconcile.DeclaredCancelNone {
+	if !strings.EqualFold(f.Rail, "nmi") || f.RailSubscriptionID == "" || f.CancelKind != reconcile.DeclaredCancelNone {
 		return nil
 	}
 	if f.PaymentMethodID != nil {
@@ -497,7 +494,6 @@ func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f
 			anchor = sale.TransactionID
 		}
 		if anchor != "" {
-			f.CollectionPolicy = models.CollectionPolicyProviderDunning
 			return nil
 		}
 	}

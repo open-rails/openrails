@@ -61,8 +61,8 @@ func ValidateValues(p Profile, values []*string) error {
 		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil || binding == nil {
 			return fmt.Errorf("subscription lacks a valid collection policy or binding")
 		}
-		if *policy == "provider_dunning" && *rail != "nmi" {
-			return fmt.Errorf("provider dunning requires NMI")
+		if (*policy == "nmi_schedule") != (*rail == "nmi" && *policy != "engine") {
+			return fmt.Errorf("nmi_schedule is the policy of every provider-scheduled NMI subscription")
 		}
 		if *policy == "engine" && !((*rail == "nmi" || *rail == "stripe") && *binding == "" || *rail == "solana") {
 			return fmt.Errorf("engine collection has contradictory schedule binding")

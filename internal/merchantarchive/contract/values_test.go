@@ -127,8 +127,9 @@ func TestSubscriptionCollectionOwnership(t *testing.T) {
 	}
 	checkRows(t, []rowCase{
 		{"provider schedule", "subscriptions", sub("provider", "stripe", "sub_1"), true},
-		{"nmi dunning", "subscriptions", sub("provider_dunning", "nmi", "sub-1"), true},
-		{"stripe dunning", "subscriptions", sub("provider_dunning", "stripe", "sub_1"), false},
+		{"nmi schedule", "subscriptions", sub("nmi_schedule", "nmi", "sub-1"), true},
+		{"stripe nmi schedule", "subscriptions", sub("nmi_schedule", "stripe", "sub_1"), false},
+		{"nmi provider", "subscriptions", sub("provider", "nmi", "sub-1"), false},
 		{"engine nmi unbound", "subscriptions", sub("engine", "nmi", ""), true},
 		{"engine nmi with provider schedule", "subscriptions", sub("engine", "nmi", "sub-1"), false},
 		{"engine solana", "subscriptions", sub("engine", "solana", "pda"), true},

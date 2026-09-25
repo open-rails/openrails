@@ -28,7 +28,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// TypeNMIEngineTakeover moves one NMI-owned (provider or provider_dunning)
+// TypeNMIEngineTakeover moves one NMI-owned (nmi_schedule)
 // subscription to OpenRails engine billing at its next period boundary E:
 // the NMI schedule is deleted at least EngineTakeoverMargin before E (NMI
 // bills by date, so it cannot have billed E), the legacy row ends with access
@@ -129,7 +129,7 @@ func (h *NMIEngineTakeover) freeze(ctx context.Context, d *db.DB, sub *models.Su
 		return p, ineligible("only NMI subscriptions can be taken over")
 	case sub.CollectionPolicy == models.CollectionPolicyEngine:
 		return p, ineligible("subscription is already billed by OpenRails")
-	case sub.CollectionPolicy != models.CollectionPolicyProvider && sub.CollectionPolicy != models.CollectionPolicyProviderDunning:
+	case sub.CollectionPolicy != models.CollectionPolicyNMISchedule:
 		return p, ineligible("unsupported collection policy %q", sub.CollectionPolicy)
 	case sub.Status != models.StatusActive:
 		return p, ineligible("only an active subscription can be taken over (status %s)", sub.Status)
@@ -337,7 +337,7 @@ func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req openr
 	}
 	now := h.now()
 	rows, err := h.DB.Qx(ctx).Query(ctx, `SELECT s.id, s.current_period_ends_at FROM openrails.subscriptions s
-		WHERE s.merchant_id=$1 AND s.rail='nmi' AND s.collection_policy IN ('provider','provider_dunning') AND s.status='active'
+		WHERE s.merchant_id=$1 AND s.rail='nmi' AND s.collection_policy='nmi_schedule' AND s.status='active'
 		  AND s.deleted_at IS NULL AND s.rail_subscription_id<>'' AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
 		  AND s.current_period_ends_at > $2 AND ($3::uuid IS NULL OR s.price_id=$3::uuid)
 		  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=s.merchant_id AND i.subscription_id=s.id

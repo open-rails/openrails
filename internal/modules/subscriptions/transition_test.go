@@ -19,7 +19,7 @@ func TestTransitionWritesTheDecidedRow(t *testing.T) {
 	row := func(status models.SubscriptionStatus) *models.Subscription {
 		attempts, retry := 2, end.Add(48*time.Hour)
 		s, e := start, end
-		return &models.Subscription{Status: status, Rail: models.RailNMI, CollectionPolicy: models.CollectionPolicyProviderDunning,
+		return &models.Subscription{Status: status, Rail: models.RailNMI, CollectionPolicy: models.CollectionPolicyNMISchedule,
 			CurrentPeriodStartsAt: &s, CurrentPeriodEndsAt: &e, RetryAttempts: &attempts, NextRetryAt: &retry, GraceEndsAt: &retry}
 	}
 

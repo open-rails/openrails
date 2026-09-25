@@ -98,7 +98,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		}
 		// Only an NMI schedule whose recovery OpenRails qualified to own is
 		// rebilled here; engine and provider-owned periods are never charged.
-		if sub.CollectionPolicy != models.CollectionPolicyProviderDunning {
+		if sub.CollectionPolicy != models.CollectionPolicyNMISchedule {
 			return ErrRebillUnsupported
 		}
 		retryable := sub.Status == models.StatusPastDue || (customer && sub.Status == models.StatusAwaitingMethod)
@@ -152,7 +152,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != sub.Rail {
 			return errors.New("rebill method is not owned by this customer and provider account")
 		}
-		if customer && (!rails.IsNMI(sub.Rail) || sub.CollectionPolicy != models.CollectionPolicyProviderDunning || method.Custodian != models.CustodianPSP) {
+		if customer && (!rails.IsNMI(sub.Rail) || sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP) {
 			return ErrRebillUnsupported
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(terms.Currency, terms.Amount)

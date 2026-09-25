@@ -17,7 +17,7 @@ import (
 )
 
 func providerDunning(book *openrails.DeclaredBilling) {
-	book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+	declareRecurringAnchor(book)
 }
 
 // A paid-through row whose NMI date went stale (OpenRails' own recovery
