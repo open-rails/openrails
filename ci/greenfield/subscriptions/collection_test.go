@@ -191,6 +191,75 @@ func TestReplicasStalledExecutorSendsNothing(t *testing.T) {
 	}
 }
 
+// The stalled executor's lease heartbeat still runs while another executor
+// holds the renewal. It renews only its own claim: the other executor's lease
+// is left as it was, the stalled run marks its claim lost and sends nothing.
+func TestReplicasStalledHeartbeatLeavesOthersLease(t *testing.T) {
+	t.Parallel()
+	f := newFleet(t, 2)
+	e := enroll(t, f.replicas[0], "nmi", embedded)
+	end := f.periodEnd(e)
+	f.toDue(e)
+	sub := uuid.MustParse(subUUID(e.sub))
+	var op uuid.UUID
+	var theirs time.Time
+	var takeOnce, lostOnce sync.Once
+	taken, lost, resume := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	remove := failpoint.Set(func(ctx context.Context, s failpoint.Site) error {
+		if s.Subscription != sub || s.Kind != "subscription_collection" {
+			return nil
+		}
+		switch s.Point {
+		case failpoint.ClaimLost:
+			lostOnce.Do(func() { close(lost) })
+		case failpoint.BeforeProvider:
+			first := false
+			takeOnce.Do(func() {
+				first = true
+				op, theirs = s.Operation, f.base.clock.Now().Add(2*time.Minute).UTC().Truncate(time.Microsecond)
+				if _, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE openrails.rail_intents
+					SET attempts = attempts + 1, claimed_until = $2 WHERE id = $1 AND status = 'in_flight'`), op, theirs); err != nil {
+					t.Errorf("take over the claim: %v", err)
+				}
+				close(taken)
+			})
+			if first {
+				select {
+				case <-resume:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
+		return nil
+	})
+	defer remove()
+	before := f.submissions(e)
+	f.startPasses()
+	select {
+	case <-taken:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the renewal never reached the provider call")
+	}
+	f.advance(40 * time.Second) // one heartbeat of the stalled run
+	select {
+	case <-lost:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the stalled run's heartbeat never ran")
+	}
+	var until time.Time
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claimed_until FROM openrails.rail_intents WHERE id = $1`), op).Scan(&until))
+	require.True(t, theirs.Equal(until), "the other executor's lease is untouched: %s != %s", until, theirs)
+	close(resume)
+
+	f.until(func() bool { return f.periodEnd(e).After(end) }, "the renewal completes")
+	f.advance(time.Hour)
+	f.wake()
+	f.passes()
+	require.Equal(t, before+1, f.submissions(e), "the stalled run sent nothing")
+	f.requireExactlyOnce(e, 1, -1)
+}
+
 // paused holds the first hit of a failpoint for one subscription's renewal
 // until release or until its executor's context ends.
 type paused struct {

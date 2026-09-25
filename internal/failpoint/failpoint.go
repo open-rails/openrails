@@ -17,6 +17,8 @@ const (
 	BeforeProvider Point = "before-provider"
 	AfterProvider  Point = "after-provider"
 	BeforeComplete Point = "before-complete"
+	// ClaimLost fires when a lease heartbeat finds its claim gone.
+	ClaimLost Point = "claim-lost"
 )
 
 // Site is one hit: the point, the operation and its subscription.

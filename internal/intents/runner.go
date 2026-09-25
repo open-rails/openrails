@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -23,7 +24,7 @@ type ledger interface {
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
 	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error)
 	ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error)
-	RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (bool, error)
+	RenewClaim(ctx context.Context, id uuid.UUID, status string, attempts int32, now, leaseUntil time.Time) (bool, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
@@ -258,9 +259,9 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 			return
 		}
 	}
-	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
+	ctx, stopBeat := r.renewClaimWhile(ctx, logEntry, intent)
 	defer stopBeat() // A panic must not keep an abandoned claim alive.
-	outcome := handler.Execute(withClaim(ctx, intent), intent)
+	outcome := handler.Execute(ctx, intent)
 	stopBeat()
 	r.record(ctx, logEntry, stats, handler, intent, outcome, outcome.Reason, false)
 }
@@ -381,22 +382,24 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 			continue
 		}
 		// Verification is read-only: no mode gate.
-		stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
-		outcome := handler.Verify(withClaim(ctx, intent), intent)
+		verifyCtx, stopBeat := r.renewClaimWhile(ctx, logEntry, intent)
+		outcome := handler.Verify(verifyCtx, intent)
 		stopBeat()
 		r.apply(ctx, logEntry, &stats, handler, intent, outcome, true)
 	}
 	return stats, nil
 }
 
-// renewClaimWhile beats the intent's lease every lease/4 until the returned
-// stop is called — the same shape as the webhook pending-lease heartbeat
-// (#678). A beat that finds the lease already lapsed is logged loudly: the
-// handler keeps running (a provider call cannot be un-made), and the outcome
-// it produces is still recorded — the per-type verify-before-write of whoever
-// claimed the row next is the remaining guard, exactly as before the beat.
-// Renewal failures (DB unreachable) are logged and retried on the next beat.
-func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, id uuid.UUID) func() {
+// renewClaimWhile attaches the run's claim to ctx and beats its lease every
+// lease/4 until the returned stop is called (the webhook pending-lease
+// heartbeat shape, #678). A beat renews only the claim this run holds; one that
+// matches nothing means the lease lapsed or another executor claimed the row,
+// so the claim is marked lost and every later provider charge of this run is
+// refused (RequireClaim). The handler's outcome is still recorded, guarded by
+// the next executor's verify-before-write. Renewal errors (DB unreachable) are
+// logged and retried on the next beat.
+func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in gen.OpenrailsRailIntent) (context.Context, func()) {
+	ctx, held := withClaim(ctx, in)
 	lease := r.lease()
 	hbCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -411,20 +414,29 @@ func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, id uu
 			case <-ticker.Chan():
 			}
 			now := r.now()
-			renewed, err := r.Store.RenewClaim(hbCtx, id, now, now.Add(lease))
+			renewed, err := r.Store.RenewClaim(hbCtx, in.ID, in.Status, in.Attempts, now, now.Add(lease))
 			switch {
 			case err != nil && hbCtx.Err() == nil:
 				logEntry.WithError(err).Warn("intent lease renewal failed; retrying next beat")
 			case err == nil && !renewed:
-				logEntry.Error("intent lease lapsed while the handler was still running; another executor may now hold it (its verify-before-write is the guard)")
+				held.lose()
+				logEntry.Warn("intent claim no longer held by this run; it sends nothing further")
+				_ = failpoint.Hit(hbCtx, failpoint.Site{Point: failpoint.ClaimLost, Kind: in.IntentType, Operation: in.ID, Subscription: subscriptionOf(in)})
 				return
 			}
 		}
 	}()
-	return func() {
+	return ctx, func() {
 		cancel()
 		<-done
 	}
+}
+
+func subscriptionOf(in gen.OpenrailsRailIntent) uuid.UUID {
+	if in.SubscriptionID == nil {
+		return uuid.Nil
+	}
+	return *in.SubscriptionID
 }
 
 func (r *Runner) newTicker(d time.Duration) clockwork.Ticker {
@@ -688,10 +700,10 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRai
 	h := r.Registry.Lookup(in.IntentType)
 	out := Ambiguous("no verifier registered")
 	logger := log.WithContext(ctx).WithField("intent_id", in.ID)
-	stop := r.renewClaimWhile(ctx, logger, in.ID)
+	verifyCtx, stop := r.renewClaimWhile(ctx, logger, in)
 	defer stop()
 	if h != nil {
-		out = h.Verify(withClaim(ctx, in), in)
+		out = h.Verify(verifyCtx, in)
 	}
 	stop()
 	var stats Stats

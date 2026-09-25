@@ -70,7 +70,7 @@ func (f *fakeLedger) ClaimUnknownByID(context.Context, uuid.UUID, time.Time, tim
 	return gen.OpenrailsRailIntent{}, false, nil
 }
 func (f *fakeLedger) ReleaseUnknownClaim(context.Context, uuid.UUID) (bool, error) { return false, nil }
-func (f *fakeLedger) RenewClaim(context.Context, uuid.UUID, time.Time, time.Time) (bool, error) {
+func (f *fakeLedger) RenewClaim(context.Context, uuid.UUID, string, int32, time.Time, time.Time) (bool, error) {
 	return true, nil
 }
 func (f *fakeLedger) ExpireOverdue(context.Context, time.Time) (int64, error) { return 0, nil }

@@ -172,13 +172,15 @@ RETURNING next_attempt_at;
 -- beats this every lease/4, so claimed_until measures SILENCE from a dead
 -- executor rather than how long a provider call may take. Renewal is refused
 -- once the lease has lapsed — by then another executor may hold the row, and a
--- late beat must not steal it back. Returns rows affected (0 = lost).
+-- late beat must not steal it back. Only the claim's own (status, attempts)
+-- fencing token renews. Returns rows affected (0 = lost).
 -- name: RenewRailIntentClaim :execrows
 UPDATE openrails.rail_intents
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
 WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
-  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND status = sqlc.arg(status)::text
+  AND attempts = sqlc.arg(attempts)::int
   AND claimed_until IS NOT NULL
   AND claimed_until > sqlc.arg(now)::timestamptz;
 
