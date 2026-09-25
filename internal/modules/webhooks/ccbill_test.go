@@ -175,29 +175,16 @@ func TestBoundCCBillPeriodEndFailsClosed(t *testing.T) {
 	}
 }
 
-func TestShouldIgnoreCCBillRenewalFailure(t *testing.T) {
+func TestCCBillDeclinedPeriod(t *testing.T) {
 	t.Parallel()
-	start := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	before, after := start.Add(-time.Hour), start.Add(time.Hour)
-	active := &models.Subscription{Status: models.StatusActive, CurrentPeriodStartsAt: &start}
-	for _, tc := range []struct {
-		sub     *models.Subscription
-		at      *time.Time
-		ignored bool
-		reason  string
-	}{
-		{sub: &models.Subscription{Status: models.StatusCancelled}, ignored: true, reason: "cancelled_subscription"},
-		{sub: active, at: &start, ignored: true, reason: "stale_renewal_failure"},
-		{sub: active, at: &before, ignored: true, reason: "stale_renewal_failure"},
-		{sub: active, at: &after},
-		{sub: active},
-		{sub: nil, at: &after},
-		{sub: &models.Subscription{Status: models.StatusPastDue, CurrentPeriodStartsAt: &start}, at: &before},
-	} {
-		ignored, reason := shouldIgnoreCCBillRenewalFailure(tc.sub, tc.at)
-		require.Equal(t, tc.ignored, ignored)
-		require.Equal(t, tc.reason, reason)
-	}
+	paid := time.Date(2026, 5, 1, 7, 30, 0, 0, time.UTC)
+	sameDay, dayBefore, later := time.Date(2026, 5, 1, 23, 59, 59, 0, time.UTC), time.Date(2026, 4, 30, 23, 59, 59, 0, time.UTC), time.Date(2026, 5, 3, 23, 59, 59, 0, time.UTC)
+	sub := &models.Subscription{CurrentPeriodEndsAt: &paid}
+	require.Equal(t, paid, ccbillDeclinedPeriod(sub, &sameDay), "the unpaid period")
+	require.Equal(t, paid, ccbillDeclinedPeriod(sub, &later), "a retry of the unpaid period")
+	require.Equal(t, paid, ccbillDeclinedPeriod(sub, nil))
+	require.Equal(t, dayBefore, ccbillDeclinedPeriod(sub, &dayBefore), "a period already paid")
+	require.True(t, ccbillDeclinedPeriod(&models.Subscription{}, &later).IsZero())
 }
 
 func TestCCBillErrorRetryClassification(t *testing.T) {

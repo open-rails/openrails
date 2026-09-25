@@ -165,27 +165,9 @@ func TestActiveMembersRosterRejectsPartialBatches(t *testing.T) {
 	}
 }
 
-func TestDataLinkStatusAndPaidThrough(t *testing.T) {
+func TestDataLinkActiveStatus(t *testing.T) {
 	for status, want := range map[string]bool{"1": true, "Y": true, "yes": true, " ACTIVE ": true, "a": true, "0": false, "cancelled": false, "": false, "inactive": false} {
 		require.Equal(t, want, IsDataLinkActiveStatus(status), status)
-	}
-	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		record CCBillRecord
-		want   time.Time
-		ok     bool
-	}{
-		{CCBillRecord{ExpiryDate: "2026-06-03"}, time.Date(2026, 6, 3, 23, 59, 59, 0, time.UTC), true},
-		{CCBillRecord{ExpiryDate: "06/03/2026"}, time.Date(2026, 6, 3, 23, 59, 59, 0, time.UTC), true},
-		{CCBillRecord{ExpiryDate: "2026-05-01", RebillDate: "2026-06-10T08:00:00Z"}, time.Time{}, false},
-		{CCBillRecord{ExpiryDate: "garbage", RebillDate: "2026-05-25"}, time.Time{}, false},
-		{CCBillRecord{RebillDate: "2026-06-10"}, time.Time{}, false},
-		{CCBillRecord{ExpiryDate: "2026-05-01"}, time.Time{}, false},
-		{CCBillRecord{}, time.Time{}, false},
-	} {
-		got, ok := DataLinkPaidThrough(tc.record, now)
-		require.Equal(t, tc.ok, ok, "%+v", tc.record)
-		require.Equal(t, tc.want, got, "%+v", tc.record)
 	}
 }
 

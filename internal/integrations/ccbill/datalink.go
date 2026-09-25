@@ -13,7 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 type DataLinkClient struct {
@@ -289,25 +288,6 @@ func IsDataLinkActiveStatus(status string) bool {
 	default:
 		return false
 	}
-}
-
-// DataLinkPaidThrough is the member's future paid-through instant: the
-// expiry date only. A rebill date is when CCBill will next try to charge, which
-// it keeps in the future through a failed renewal, so it is never evidence of
-// payment.
-func DataLinkPaidThrough(record CCBillRecord, now time.Time) (time.Time, bool) {
-	if now.IsZero() {
-		now = time.Now()
-	}
-	parsed, err := timeutil.ParseFirstUTC(strings.TrimSpace(record.ExpiryDate), "2006-01-02", "01/02/2006", time.RFC3339)
-	if err != nil {
-		return time.Time{}, false
-	}
-	paidThrough := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC)
-	if !paidThrough.After(now.UTC()) {
-		return time.Time{}, false
-	}
-	return paidThrough, true
 }
 
 func (c *DataLinkClient) ValidateConfig() error {
