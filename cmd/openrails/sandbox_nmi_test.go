@@ -1,6 +1,11 @@
 package main
 
 import (
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
+
 	"bytes"
 	"context"
 	"io"
@@ -18,7 +23,8 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 	out := &syncBuffer{}
 	// Through the real root: its config pre-run must not apply (no config here).
 	cmd := newRootCmd()
-	cmd.SetArgs([]string{"sandbox", "nmi-gateway", "--listen", "127.0.0.1:0", "--config", t.TempDir() + "/none.yaml"})
+	cmd.SetArgs([]string{"sandbox", "nmi-gateway", "--listen", "127.0.0.1:0", "--config", t.TempDir() + "/none.yaml",
+		"--plan", "premium_new=23.00:30"})
 	cmd.SetOut(out)
 	done := make(chan error, 1)
 	go func() { done <- cmd.ExecuteContext(ctx) }()
@@ -41,6 +47,27 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 	if !strings.Contains(string(body), "<test_mode_status>enabled</test_mode_status>") {
 		t.Fatalf("qualification probe answered %d %q", resp.StatusCode, body)
 	}
+
+	// The catalog reference check reads the seeded plan through the real client.
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "fake"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.V5BaseURL = base
+	plan, err := client.GetRecurringPlanDetailByID(ctx, "premium_new", "usd")
+	if err != nil || !plan.Found || plan.ID != "premium_new" || plan.AmountCents != 2300 || plan.DayFrequency != 30 || plan.Payments == nil || *plan.Payments != 0 {
+		t.Fatalf("seeded plan %+v, err %v: want premium_new, 2300 cents every 30 days, open-ended", plan, err)
+	}
+	if missing, err := client.GetRecurringPlanDetailByID(ctx, "absent", "usd"); err != nil || missing.Found {
+		t.Fatalf("absent plan %+v, err %v: want not found", missing, err)
+	}
+	if err := client.AddRecurringPlan(ctx, "created", "Created", 999, "usd", 7, 0); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := client.GetRecurringPlanDetailByID(ctx, "created", "usd"); err != nil || created.AmountCents != 999 || created.DayFrequency != 7 {
+		t.Fatalf("plan created through the provider workflow %+v, err %v", created, err)
+	}
+
 	cancel()
 	select {
 	case err := <-done:
@@ -53,13 +80,13 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 }
 
 func TestSandboxNMIGatewayRefusesNonLoopback(t *testing.T) {
-	for _, addr := range []string{"0.0.0.0:0", "localhost:0", ":0"} {
+	for _, args := range [][]string{{"--listen", "0.0.0.0:0"}, {"--listen", "localhost:0"}, {"--listen", ":0"}, {"--plan", "no-terms"}, {"--plan", "p=abc:30"}} {
 		cmd := newRootCmd()
-		cmd.SetArgs([]string{"sandbox", "nmi-gateway", "--listen", addr})
+		cmd.SetArgs(append([]string{"sandbox", "nmi-gateway"}, args...))
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
-		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "loopback") {
-			t.Fatalf("--listen %s: err %v, want a loopback refusal", addr, err)
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "--") {
+			t.Fatalf("%v: err %v, want a flag refusal", args, err)
 		}
 	}
 }

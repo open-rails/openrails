@@ -36,6 +36,7 @@ type Gateway struct {
 	seq    int
 	vaults map[string]*vault
 	sales  []Sale
+	plans  map[string]obj
 }
 
 func New() *Gateway {
@@ -45,7 +46,22 @@ func New() *Gateway {
 }
 
 // NewUnstarted is a gateway the caller serves (the sandbox CLI command).
-func NewUnstarted() *Gateway { return &Gateway{vaults: map[string]*vault{}} }
+func NewUnstarted() *Gateway { return &Gateway{vaults: map[string]*vault{}, plans: map[string]obj{}} }
+
+// AddPlan stores a Recurring Plan billing amount (decimal, e.g. "23.00")
+// every dayFrequency days, open-ended: a plan the account already has.
+func (g *Gateway) AddPlan(id, amount string, dayFrequency int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.addPlan(id, id, amount, dayFrequency)
+}
+
+func (g *Gateway) addPlan(id, name, amount string, dayFrequency int) obj {
+	p := obj{"object": "plan", "id": id, "plan_name": name, "plan_amount": amount, "plan_payments": "0",
+		"day_frequency": fmt.Sprint(dayFrequency), "month_frequency": "", "day_of_month": ""}
+	g.plans[id] = p
+	return p
+}
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) { g.serve(w, r) }
 
@@ -75,7 +91,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if strings.HasPrefix(r.URL.Path, "/customers") || strings.HasPrefix(r.URL.Path, "/payments") {
+	if strings.HasPrefix(r.URL.Path, "/customers") || strings.HasPrefix(r.URL.Path, "/payments") || strings.HasPrefix(r.URL.Path, "/plans") {
 		status, out := g.v5(r.Method, strings.Split(strings.Trim(r.URL.Path, "/"), "/"), body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -187,6 +203,28 @@ func (g *Gateway) v5(method string, seg []string, body []byte) (int, any) {
 				return 200, obj{"object": "transaction", "id": s.TransactionID, "response": response, "response_code": s.Code, "amount": s.Amount, "currency": s.Currency, "customer_vault_id": s.Vault,
 					"actions": []obj{{"id": s.TransactionID, "type": "sale", "amount": s.Amount, "success": s.Approved, "response": response, "response_code": s.Code}}}
 			}
+		}
+		return 404, notFound
+	case seg[0] == "plans" && len(seg) == 1 && method == http.MethodGet:
+		out := make([]obj, 0, len(g.plans))
+		for _, p := range g.plans {
+			out = append(out, p)
+		}
+		return 200, obj{"plans": out, "has_more": false}
+	case seg[0] == "plans" && len(seg) == 1 && method == http.MethodPost:
+		var in struct {
+			ID           string          `json:"id"`
+			PlanName     string          `json:"plan_name"`
+			PlanAmount   json.RawMessage `json:"plan_amount"`
+			DayFrequency int             `json:"day_frequency"`
+		}
+		if json.Unmarshal(body, &in) != nil || strings.TrimSpace(in.ID) == "" || g.plans[in.ID] != nil {
+			return 400, obj{"type": "invalid", "message": "bad or duplicate plan"}
+		}
+		return 200, g.addPlan(in.ID, in.PlanName, strings.Trim(string(in.PlanAmount), `"`), in.DayFrequency)
+	case seg[0] == "plans" && len(seg) == 2 && method == http.MethodGet:
+		if p, ok := g.plans[seg[1]]; ok {
+			return 200, p
 		}
 		return 404, notFound
 	case seg[0] == "payments" && len(seg) == 2 && seg[1] == "auth":
