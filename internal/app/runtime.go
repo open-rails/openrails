@@ -179,11 +179,6 @@ type Runtime struct {
 	// decision-time rail credential/armed-state read resolves the ctx
 	// merchant's psps row + scoped secrets through it.
 	RailConfigs railresolve.Source
-	// CCBillDataLinkEndpoint overrides the DataLink endpoint on store-armed
-	// CCBill intent clients (test seam; empty = real endpoint). Read at
-	// registry build time — IntentRunner() rebuilds per call, so mutation
-	// takes effect for synchronous ledger execution immediately.
-	CCBillDataLinkEndpoint string
 
 	SolanaPayService         *solanamodule.SolanaPayService
 	SolanaPayPoller          *solanamodule.SolanaPayPoller

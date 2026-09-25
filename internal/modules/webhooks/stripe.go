@@ -1018,22 +1018,15 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 			}).Error("Failed to record Stripe dispute reversal; continuing entitlement revocation")
 		}
 	}
-	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil {
-		rail := models.RailStripe
-		reason := fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
-		// A membership already cancelled is not this dispute's cancellation to undo.
-		if s.SubscriptionService != nil {
-			if sub, err := s.SubscriptionService.GetByID(ctx, *original.SubscriptionID); err == nil && sub.Status == models.StatusCancelled {
-				reason = fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
+	if original.SubscriptionID != nil && s.SubscriptionLifecycleService != nil && s.DB != nil {
+		feedback := func(sub *models.Subscription) string {
+			// A membership already cancelled is not this dispute's cancellation to undo.
+			if sub.Status == models.StatusCancelled {
+				return fmt.Sprintf("STRIPE DISPUTE %s after cancellation: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 			}
+			return fmt.Sprintf("STRIPE DISPUTE %s: %s status=%s", disputeID, strings.TrimSpace(dispute.Reason), strings.TrimSpace(dispute.Status))
 		}
-		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-			SubscriptionID: original.SubscriptionID,
-			Rail:           &rail,
-			CancelType:     models.CancelTypeChargeback,
-			CancelFeedback: &reason,
-			RevokeAccess:   true,
-		}); err != nil {
+		if err := revokeStripeMembership(ctx, s.DB, s.SubscriptionLifecycleService, *original.SubscriptionID, models.CancelTypeChargeback, feedback, nil); err != nil {
 			return fmt.Errorf("cancel subscription after stripe dispute: %w", err)
 		}
 	} else if original.SubscriptionID == nil && s.DB != nil {

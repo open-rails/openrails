@@ -176,6 +176,19 @@ session; the response's `next_action` carries the redirect URL. `success_url` an
 required for the hosted flow. Completion arrives via `checkout.session.completed`
 (and the async-payment variants) on the webhook.
 
+### Subscriptions Stripe bills
+
+Stripe runs the retries of the subscriptions it owns, and OpenRails mirrors its
+status. `unpaid`, `paused`, and a `past_due` subscription whose open invoice has
+no further payment attempt grant no access. A `past_due` subscription Stripe is
+still retrying keeps access until Stripe cancels it or stops retrying.
+
+A dispute or a provider refund that revokes access also queues a durable
+`stripe_cancel_subscription` intent in the same transaction. It reads the
+subscription first: a paid-up one is set to `cancel_at_period_end`, a delinquent
+one is ended at once so its open invoice stops retrying. Failures retry, and an
+abandoned intent raises `life.provider_intent.abandoned`.
+
 ### Sandbox testing
 
 Set `test_mode: sandbox` and declare the PSP with a test key (`sk_test_…` /

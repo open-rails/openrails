@@ -124,8 +124,9 @@ rate_limits:
 # Loopback-only provider gateway for sandbox qualification: every store-armed
 # NMI client (checkout sales, invoice collection, payment-method updates and
 # their verify reads) talks to nmi_gateway_url; Stripe requests use
-# stripe_api_url through the same guarded transport, and Solana RPC reads
-# and submissions use solana_rpc_url. Store
+# stripe_api_url through the same guarded transport, Solana RPC reads
+# and submissions use solana_rpc_url, and CCBill DataLink uses
+# ccbill_datalink_url. Store
 # credentials are sent there, so the host must be a loopback IP literal
 # (127.0.0.0/8 or ::1; no hostnames, no userinfo) and the posture sandbox;
 # anything else refuses to boot. Process config only, never a merchant setting.
@@ -133,6 +134,7 @@ rate_limits:
 #   nmi_gateway_url: http://127.0.0.1:9091
 #   stripe_api_url: http://127.0.0.1:9092
 #   solana_rpc_url: http://127.0.0.1:9093
+#   ccbill_datalink_url: http://127.0.0.1:9094
 
 captcha:
   provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha

@@ -177,8 +177,9 @@ func TestDataLinkStatusAndPaidThrough(t *testing.T) {
 	}{
 		{CCBillRecord{ExpiryDate: "2026-06-03"}, time.Date(2026, 6, 3, 23, 59, 59, 0, time.UTC), true},
 		{CCBillRecord{ExpiryDate: "06/03/2026"}, time.Date(2026, 6, 3, 23, 59, 59, 0, time.UTC), true},
-		{CCBillRecord{ExpiryDate: "2026-05-01", RebillDate: "2026-06-10T08:00:00Z"}, time.Date(2026, 6, 10, 23, 59, 59, 0, time.UTC), true},
-		{CCBillRecord{ExpiryDate: "garbage", RebillDate: "2026-05-25"}, time.Date(2026, 5, 25, 23, 59, 59, 0, time.UTC), true},
+		{CCBillRecord{ExpiryDate: "2026-05-01", RebillDate: "2026-06-10T08:00:00Z"}, time.Time{}, false},
+		{CCBillRecord{ExpiryDate: "garbage", RebillDate: "2026-05-25"}, time.Time{}, false},
+		{CCBillRecord{RebillDate: "2026-06-10"}, time.Time{}, false},
 		{CCBillRecord{ExpiryDate: "2026-05-01"}, time.Time{}, false},
 		{CCBillRecord{}, time.Time{}, false},
 	} {

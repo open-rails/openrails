@@ -55,6 +55,9 @@ type StripeLivenessRecord struct {
 	// and failed. A draft (not yet finalized) or an open invoice with no
 	// attempt yet is a renewal in progress, not a decline.
 	LatestInvoiceCollectionFailed bool
+	// LatestInvoiceRetryExhausted: the invoice is open and Stripe has no
+	// further payment attempt scheduled.
+	LatestInvoiceRetryExhausted bool
 }
 
 // StripeLivenessProber probes one remote Stripe subscription. Interface so
@@ -120,12 +123,13 @@ type stripeLivenessSubscriptionEnvelope struct {
 				} `json:"payment"`
 			} `json:"data"`
 		} `json:"payments"`
-		AttemptCount  int64  `json:"attempt_count"`
-		AmountPaid    int64  `json:"amount_paid"`
-		AmountDue     int64  `json:"amount_due"`
-		Currency      string `json:"currency"`
-		Created       int64  `json:"created"`
-		BillingReason string `json:"billing_reason"`
+		AttemptCount       int64  `json:"attempt_count"`
+		NextPaymentAttempt int64  `json:"next_payment_attempt"`
+		AmountPaid         int64  `json:"amount_paid"`
+		AmountDue          int64  `json:"amount_due"`
+		Currency           string `json:"currency"`
+		Created            int64  `json:"created"`
+		BillingReason      string `json:"billing_reason"`
 	} `json:"latest_invoice"`
 }
 
@@ -180,6 +184,7 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 		rec.LatestInvoiceBillingReason = strings.TrimSpace(inv.BillingReason)
 		status := strings.ToLower(strings.TrimSpace(inv.Status))
 		rec.LatestInvoiceCollectionFailed = !rec.LatestInvoicePaid && (status == "uncollectible" || (status == "open" && inv.AttemptCount > 0))
+		rec.LatestInvoiceRetryExhausted = !rec.LatestInvoicePaid && status == "open" && inv.NextPaymentAttempt == 0
 		if inv.Created > 0 {
 			rec.LatestInvoiceCreated = time.Unix(inv.Created, 0).UTC()
 		}
