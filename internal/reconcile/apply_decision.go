@@ -180,17 +180,26 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 			cur.CancelFeedback = &feedback
 		}
 		if err := repo.UpdateAt(ctx, cur, now); err != nil {
+			if errors.Is(err, subscriptions.ErrSubscriptionMoved) {
+				return errDecisionMoved // the next read decides afresh
+			}
 			return fmt.Errorf("apply decision: update %s: %w", cur.ID, err)
 		}
 		*sub, applied = *cur, true
 		return nil
 	})
+	if errors.Is(err, errDecisionMoved) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
 	lc.DispatchNotifications(ctx, notices)
 	return applied, nil
 }
+
+// errDecisionMoved rolls back a decision whose row another writer moved.
+var errDecisionMoved = errors.New("apply decision: the subscription moved")
 
 func paidThroughOf(sub *models.Subscription) time.Time {
 	if sub.CurrentPeriodEndsAt == nil {

@@ -1,4 +1,4 @@
--- parent: 13 sha256:18afceee7ee689bbc33dfdf23b9072976b40b57c54fabc1bb4cd5617cb6e060c
+-- parent: 14 sha256:0e79ef4d4b5e9f3d7c0b4fde7f5bc17f27586bc39b06dda1497c2c01997ddc60
 -- #1091 part C: a subscription's lifecycle fields (status, paid period,
 -- cancellation) change only in a lifecycle decision, which advances
 -- lifecycle_rev by exactly one against the revision it read. Any other write
