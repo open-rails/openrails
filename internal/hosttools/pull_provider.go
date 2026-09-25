@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/intents"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
@@ -194,7 +195,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			bindings[provider] = binding
 		}
 
-		eng := reconcile.NewEngine(rt.DB, rt.Config, fetchers)
+		eng := newPullEngine(rt, fetchers)
 		res, runErr := eng.Run(ctx, reconcile.RunParams{
 			Mode:      mode,
 			Mutations: &reconcile.LocalMutationPolicy{Insert: opts.Insert, Overwrite: opts.Overwrite},
@@ -928,4 +929,13 @@ func prunePlanApplied(logs []pullProviderPruneLog) bool {
 		}
 	}
 	return false
+}
+
+// newPullEngine is the CLI pull's engine. A terminal decision queues its
+// provider cancel exactly as the worker's pull does: system origin, on the
+// same automation rate ceiling.
+func newPullEngine(rt *pullProviderRuntime, fetchers map[reconcile.Provider]reconcile.RailFetcher) *reconcile.Engine {
+	cancels := intents.NewProviderCancelScheduler(rt.DB, intents.NewRateCeiling(rt.DB), intents.OriginSystem,
+		"terminal lifecycle outcome; the provider schedule must stop billing")
+	return reconcile.NewEngine(rt.DB, rt.Config, fetchers, cancels)
 }

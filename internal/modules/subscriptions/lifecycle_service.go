@@ -147,6 +147,12 @@ func (s *SubscriptionLifecycleService) SetProviderCancelScheduler(c ProviderCanc
 	s.providerCancel = c
 }
 
+// ProviderCancelScheduler is the scheduler terminal outcomes queue their
+// provider cancel on; nil when none is wired.
+func (s *SubscriptionLifecycleService) ProviderCancelScheduler() ProviderCancelScheduler {
+	return s.providerCancel
+}
+
 // now returns the current time from the service's clock
 func (s *SubscriptionLifecycleService) now() time.Time {
 	if s.clock != nil {
