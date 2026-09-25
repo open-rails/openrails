@@ -186,3 +186,84 @@ func TestRedisCachedProviderRetriesFailedRefresh(t *testing.T) {
 		t.Fatalf("retried pair: %+v %v", q, err)
 	}
 }
+
+type scriptedProvider struct {
+	calls atomic.Int64
+	gate  chan struct{}
+	asOf  time.Time
+	err   error
+}
+
+func (s *scriptedProvider) Quote(_ context.Context, from, to string) (*Quote, error) {
+	s.calls.Add(1)
+	if s.gate != nil {
+		<-s.gate
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	asOf := s.asOf
+	if asOf.IsZero() {
+		asOf = time.Now()
+	}
+	return &Quote{FromCurrency: from, ToCurrency: to, Rate: 1.25, AsOf: asOf}, nil
+}
+
+func (s *scriptedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
+	return s.Quote(ctx, currency, "USD")
+}
+
+// A lagging upstream file is not a fresh rate, however recently it was fetched.
+func TestRedisCachedProviderRejectsStaleUpstreamRates(t *testing.T) {
+	p := NewRedisCachedProvider(nil, &scriptedProvider{asOf: time.Now().Add(-5 * 24 * time.Hour)}, time.Hour)
+	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
+		t.Fatal("a rate published days ago must not quote")
+	}
+	if err := p.Refresh(context.Background(), []string{"EUR", "USD"}); err == nil {
+		t.Fatal("refresh must report a stale upstream")
+	}
+}
+
+// Concurrent misses for one pair make one upstream call.
+func TestRedisCachedProviderSingleFlightsInlineFetch(t *testing.T) {
+	upstream := &scriptedProvider{gate: make(chan struct{})}
+	p := NewRedisCachedProvider(nil, upstream, time.Hour)
+	errs := make(chan error, 8)
+	for range 8 {
+		go func() { _, err := p.Quote(context.Background(), "EUR", "USD"); errs <- err }()
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(upstream.gate)
+	for range 8 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := upstream.calls.Load(); n != 1 {
+		t.Fatalf("upstream calls = %d, want 1", n)
+	}
+}
+
+// An upstream failure is remembered briefly, so a burst of quotes does not
+// hammer a provider that just failed.
+func TestRedisCachedProviderNegativeCachesUpstreamFailure(t *testing.T) {
+	upstream := &scriptedProvider{err: errors.New("upstream down")}
+	p := NewRedisCachedProvider(nil, upstream, time.Hour)
+	p.negativeTTL = 200 * time.Millisecond
+	for range 3 {
+		if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
+			t.Fatal("want failure")
+		}
+	}
+	if n := upstream.calls.Load(); n != 1 {
+		t.Fatalf("upstream calls = %d, want 1 inside the negative window", n)
+	}
+	time.Sleep(250 * time.Millisecond)
+	upstream.err = nil
+	if _, err := p.Quote(context.Background(), "EUR", "USD"); err != nil {
+		t.Fatal(err)
+	}
+	if n := upstream.calls.Load(); n != 2 {
+		t.Fatalf("upstream calls = %d, want 2 after the window", n)
+	}
+}

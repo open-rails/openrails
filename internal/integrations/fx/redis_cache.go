@@ -41,7 +41,32 @@ type RedisCachedProvider struct {
 	cancel context.CancelFunc
 	last   time.Time
 	memory map[string]redisRate
+	// inline fetches are single-flight per pair; a failure is remembered for
+	// negativeTTL so a burst of quotes does not hammer a failing upstream.
+	inflight    map[string]*fetchCall
+	failed      map[string]failedFetch
+	negativeTTL time.Duration
 }
+
+type fetchCall struct {
+	done chan struct{}
+	rate redisRate
+	err  error
+}
+
+type failedFetch struct {
+	until time.Time
+	err   error
+}
+
+const (
+	// maxRateAge rejects an upstream rate published longer ago than this: a
+	// lagging CDN file is not a fresh rate, whenever it was fetched.
+	maxRateAge = 48 * time.Hour
+	// inlineFetchTimeout bounds one inline upstream read.
+	inlineFetchTimeout = 10 * time.Second
+	defaultNegativeTTL = 30 * time.Second
+)
 
 func NewRedisCachedProvider(rdb redis.Cmdable, provider Provider, ttl time.Duration) *RedisCachedProvider {
 	if provider == nil {
@@ -50,7 +75,8 @@ func NewRedisCachedProvider(rdb redis.Cmdable, provider Provider, ttl time.Durat
 	if ttl <= 0 {
 		ttl = 3 * time.Hour
 	}
-	return &RedisCachedProvider{rdb: rdb, provider: provider, ttl: ttl, memory: map[string]redisRate{}}
+	return &RedisCachedProvider{rdb: rdb, provider: provider, ttl: ttl, memory: map[string]redisRate{},
+		inflight: map[string]*fetchCall{}, failed: map[string]failedFetch{}, negativeTTL: defaultNegativeTTL}
 }
 
 func (p *RedisCachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency string) (*Quote, error) {
@@ -74,7 +100,7 @@ func (p *RedisCachedProvider) Quote(ctx context.Context, fromCurrency, toCurrenc
 	if rate, ok := p.memoryRate(fromCurrency, toCurrency); ok {
 		return rate.quote(), nil
 	}
-	rate, err := p.fetch(ctx, fromCurrency, toCurrency, time.Now().UTC())
+	rate, err := p.fetchInline(ctx, fromCurrency, toCurrency)
 	if err != nil {
 		return nil, fmt.Errorf("FX rate unavailable for %s -> %s: %w", fromCurrency, toCurrency, err)
 	}
@@ -116,11 +142,51 @@ func (p *RedisCachedProvider) memoryRate(from, to string) (redisRate, bool) {
 	return rate, ok && rate.fresh(from, to, time.Now().UTC())
 }
 
+// fetchInline is the request-path upstream read: single-flight per pair,
+// bounded, negatively cached, and abandoned when the caller's ctx ends.
+func (p *RedisCachedProvider) fetchInline(ctx context.Context, from, to string) (redisRate, error) {
+	key := redisRateKey(from, to)
+	p.mu.Lock()
+	if f, ok := p.failed[key]; ok && time.Now().Before(f.until) {
+		p.mu.Unlock()
+		return redisRate{}, f.err
+	}
+	call := p.inflight[key]
+	if call == nil {
+		call = &fetchCall{done: make(chan struct{})}
+		p.inflight[key] = call
+		go func() {
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineFetchTimeout)
+			defer cancel()
+			call.rate, call.err = p.fetch(fctx, from, to, time.Now().UTC())
+			p.mu.Lock()
+			delete(p.inflight, key)
+			if call.err != nil {
+				p.failed[key] = failedFetch{until: time.Now().Add(p.negativeTTL), err: call.err}
+			} else {
+				delete(p.failed, key)
+			}
+			p.mu.Unlock()
+			close(call.done)
+		}()
+	}
+	p.mu.Unlock()
+	select {
+	case <-call.done:
+		return call.rate, call.err
+	case <-ctx.Done():
+		return redisRate{}, ctx.Err()
+	}
+}
+
 // fetch reads one pair from the upstream provider into memory.
 func (p *RedisCachedProvider) fetch(ctx context.Context, from, to string, now time.Time) (redisRate, error) {
 	q, err := p.provider.Quote(ctx, from, to)
 	if err != nil {
 		return redisRate{}, err
+	}
+	if q.AsOf.IsZero() || now.Sub(q.AsOf) > maxRateAge {
+		return redisRate{}, fmt.Errorf("upstream rate %s -> %s is stale (as of %s)", from, to, q.AsOf.Format(time.RFC3339))
 	}
 	rate := redisRate{
 		FromCurrency: normalizeCurrency(from),
@@ -133,6 +199,7 @@ func (p *RedisCachedProvider) fetch(ctx context.Context, from, to string, now ti
 	}
 	p.mu.Lock()
 	p.memory[redisRateKey(from, to)] = rate
+	delete(p.failed, redisRateKey(from, to))
 	p.mu.Unlock()
 	return rate, nil
 }
