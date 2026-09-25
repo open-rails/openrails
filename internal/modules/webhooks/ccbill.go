@@ -1219,7 +1219,7 @@ func (s *CCBillWebhookService) handleUserReactivation(ctx context.Context) error
 		}
 		changed, n, err := s.ccbillMirrorTransition(ctx, d, sub, lifecycle.Resume{At: s.now().UTC()}, ccbillNotice{})
 		if errors.Is(err, lifecycle.ErrIllegal) {
-			return raiseCCBillFinding(ctx, d, sub, CCBillReactivationUnappliedFinding,
+			return raiseCCBillFinding(ctx, d, sub, ccbillReactivationUnappliedFinding,
 				"CCBill reactivated a membership with no paid period left. Access returns with CCBill's next RenewalSuccess; confirm the charge in CCBill.",
 				map[string]any{"transaction_id": data.TransactionID, "next_renewal_date": data.NextRenewalDate, "cancel_type": subscriptions.NormalizeCancelType(sub.CancelType)})
 		}

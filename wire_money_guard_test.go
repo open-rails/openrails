@@ -192,7 +192,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/modules/webhooks/ccbill.go:func handleChargeback \"chargeback_amount_cents\"":                  notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleRefund \"refund_amount_cents\"":                          notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleRenewalSuccessInternal \"amount_cents\"":                 notHTTPStoredMetadata,
-	"internal/modules/webhooks/ccbill.go:func handleRenewalSuccessInternal \"subscription_expected_amount\"": notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"billed_amount_cents\"":                  notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"expected_amount_cents\"":                notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"billed_amount_cents\"":            notHTTPLogContext,
