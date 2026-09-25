@@ -787,7 +787,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 
 		// Find subscription by the original rail subscription ID and then transition it.
-		subscription, err := subService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), originalSubscriptionID)
+		subscription, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), originalSubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for original rail subscription ID: %s", originalSubscriptionID)
@@ -1147,7 +1147,7 @@ func (s *CCBillWebhookService) handleBillingDateChange(ctx context.Context) erro
 		subService := subscriptions.NewSubscriptionService(txdb, priceService, productService, nil, s.Clock)
 
 		// Find subscription by rail subscription ID
-		sub, err := subService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
+		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
@@ -1355,7 +1355,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
 		// Find subscription by rail subscription ID
-		sub, err := subService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
+		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return fmt.Errorf("subscription not found for rail subscription ID: %s", pSubscriptionID)
@@ -1668,7 +1668,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		paymentService := payments.NewPaymentService(txdb, s.Clock)
 
 		// Find subscription by rail subscription ID
-		sub, err := subService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), pSubscriptionID)
+		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), pSubscriptionID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				// #675: the chargeback may race the sale webhook — retryable error
@@ -1985,7 +1985,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock)
 		entSvc.SetClock(s.Clock)
 
-		sub, err := subService.GetByPSPSubscriptionID(ctx, string(models.RailCCBill), ccBillSubID)
+		sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailCCBill), ccBillSubID)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
 		}

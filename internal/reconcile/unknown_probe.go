@@ -207,7 +207,7 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	}
 	sub := RemoteSubscription{
 		RailSubscriptionID: railSubID,
-		Status:             normalizeStripeStatus(rec.Status),
+		Status:             stripeRemoteStatus(rec.Status, rec.LatestInvoiceRetryExhausted),
 		RawStatus:          rec.Status,
 		CustomerID:         rec.CustomerID,
 		PlanID:             rec.PriceID,
@@ -240,7 +240,9 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 	// backfilled failed attempt and the eventual success never collide. Only
 	// recorded when Stripe gives the invoice's own created time (#651: no
 	// fabricated instants).
-	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 &&
+	// A dead subscription's failed invoice is not a decline in progress: it
+	// would hold the row in dunning against Stripe's final word.
+	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 && sub.Status != SubscriptionStatusExpired &&
 		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
 		snap.Transactions = append(snap.Transactions, RemoteTransaction{
 			TransactionID:  "failed:" + rec.LatestInvoiceTransactionID,

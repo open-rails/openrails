@@ -279,6 +279,7 @@ func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid merchant.ID
 		dl.ReadOnly = b.readOnly()
 		if b.Endpoints.CCBillDataLinkBaseURL != "" {
 			dl.BaseURL = b.Endpoints.CCBillDataLinkBaseURL
+			dl.LoopbackFixture = true
 		}
 		out.Fetchers[ProviderCCBill] = keyedFetcher{RailFetcher: NewCCBillFetcher(dl), key: scope.AccountID}
 		out.Probers[ProviderCCBill] = &CCBillSubscriptionProber{Client: dl}

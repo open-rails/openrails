@@ -136,6 +136,14 @@ func TestStripeSnapshotFromLiveness(t *testing.T) {
 				require.Equal(t, "failed:ch_x", snap.Transactions[0].TransactionID, "never collides with the eventual success")
 				require.Equal(t, TransactionTypeDecline, snap.Transactions[0].Type)
 			}},
+		{name: "unpaid at Stripe grants nothing", want: TransitionCancel, gone: true,
+			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "unpaid", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
+				LatestInvoiceCollectionFailed: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x", LatestInvoiceCreated: periodEnd.Add(time.Hour)}},
+		{name: "paused at Stripe grants nothing", want: TransitionCancel, gone: true,
+			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "paused", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd}},
+		{name: "past_due Stripe stopped retrying grants nothing", want: TransitionCancel, gone: true,
+			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
+				LatestInvoiceCollectionFailed: true, LatestInvoiceRetryExhausted: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x", LatestInvoiceCreated: periodEnd.Add(time.Hour)}},
 		{name: "an undated failed collection is not evidence", want: TransitionPastDue,
 			rec: subscriptions.StripeLivenessRecord{Found: true, Status: "past_due", CurrentPeriodStart: earlier, CurrentPeriodEnd: periodEnd,
 				LatestInvoiceCollectionFailed: true, LatestInvoiceAmountDue: 999, LatestInvoiceTransactionID: "ch_x"}},

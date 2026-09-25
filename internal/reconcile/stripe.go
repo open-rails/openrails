@@ -214,13 +214,13 @@ func (f *StripeFetcher) listRaw(ctx context.Context, path string, params FetchPa
 	return all, nil
 }
 
-// listSubscriptions pages /v1/subscriptions?status=all with the price and
-// default payment method expanded. A SubscriptionID filter short-circuits to
+// listSubscriptions pages /v1/subscriptions?status=all with the price,
+// default payment method and latest invoice expanded. A SubscriptionID filter short-circuits to
 // the single-object GET. Note: /v1/subscriptions does not date-filter on
 // created here — the subscription roster is point-in-time state, not events.
 func (f *StripeFetcher) listSubscriptions(ctx context.Context, params FetchParams) ([]json.RawMessage, error) {
 	if params.SubscriptionID != "" {
-		body, err := f.get(ctx, "/v1/subscriptions/"+url.PathEscape(params.SubscriptionID)+"?expand[]=default_payment_method")
+		body, err := f.get(ctx, "/v1/subscriptions/"+url.PathEscape(params.SubscriptionID)+"?expand[]=default_payment_method&expand[]=latest_invoice")
 		if err != nil {
 			return nil, err
 		}
@@ -230,6 +230,7 @@ func (f *StripeFetcher) listSubscriptions(ctx context.Context, params FetchParam
 	extra := url.Values{}
 	extra.Set("status", "all")
 	extra.Add("expand[]", "data.default_payment_method")
+	extra.Add("expand[]", "data.latest_invoice")
 	// No created window for the roster: pass only the customer filter.
 	return f.listRaw(ctx, "/v1/subscriptions", FetchParams{CustomerID: params.CustomerID}, extra)
 }
@@ -287,6 +288,7 @@ type stripeSubscriptionJSON struct {
 		} `json:"data"`
 	} `json:"items"`
 	DefaultPaymentMethod json.RawMessage `json:"default_payment_method"`
+	LatestInvoice        json.RawMessage `json:"latest_invoice"`
 }
 
 type stripePaymentMethodJSON struct {
@@ -298,21 +300,41 @@ type stripePaymentMethodJSON struct {
 	} `json:"card"`
 }
 
-// normalizeStripeStatus maps Stripe subscription statuses onto the normalized
-// enum.
-func normalizeStripeStatus(s string) SubscriptionStatus {
-	switch s {
+// stripeRemoteStatus maps a Stripe-owned subscription's status. Stripe runs
+// the retries of the subscriptions it owns, so its word is final: unpaid and
+// paused grant nothing, and past_due is live only while Stripe will still
+// retry the open invoice.
+func stripeRemoteStatus(status string, retryExhausted bool) SubscriptionStatus {
+	switch status {
 	case "active", "trialing":
 		return SubscriptionStatusActive
 	case "canceled":
 		return SubscriptionStatusCancelled
-	case "incomplete_expired":
+	case "incomplete_expired", "unpaid", "paused":
 		return SubscriptionStatusExpired
-	case "past_due", "unpaid":
+	case "past_due":
+		if retryExhausted {
+			return SubscriptionStatusExpired
+		}
 		return SubscriptionStatusPastDue
-	default: // incomplete, paused, anything new
+	default: // incomplete, anything new
 		return SubscriptionStatusUnknown
 	}
+}
+
+// stripeInvoiceRetryExhausted reports an expanded latest invoice that is open
+// with no further payment attempt scheduled: Stripe has stopped retrying. An
+// unexpanded (string) invoice proves nothing.
+func stripeInvoiceRetryExhausted(raw json.RawMessage) bool {
+	var inv struct {
+		ID                 string `json:"id"`
+		Status             string `json:"status"`
+		NextPaymentAttempt int64  `json:"next_payment_attempt"`
+	}
+	if len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &inv) != nil || inv.ID == "" {
+		return false
+	}
+	return inv.Status == "open" && inv.NextPaymentAttempt == 0
 }
 
 func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *RemotePaymentMethod) {
@@ -321,7 +343,7 @@ func normalizeStripeSubscription(obj json.RawMessage) (RemoteSubscription, *Remo
 
 	sub := RemoteSubscription{
 		RailSubscriptionID: s.ID,
-		Status:             normalizeStripeStatus(s.Status),
+		Status:             stripeRemoteStatus(s.Status, stripeInvoiceRetryExhausted(s.LatestInvoice)),
 		RawStatus:          s.Status,
 		CustomerID:         s.Customer,
 		Currency:           strings.ToUpper(s.Currency),

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -70,6 +71,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		NotificationService: r.NotificationService,
 		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
 		NMIClients:          r.NMIClients,
+		PullEndpoints:       reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: r.Config.SandboxCCBillDataLinkURL()},
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}
@@ -301,7 +303,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// state at drain time — NMI via the ONE #725 builder, CCBill DataLink and
 	// Stripe via the #788 rail resolution seam.
 	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 (unarmed rail parks)
-	ccbillCancel.DataLinkBaseURL = r.CCBillDataLinkEndpoint
+	ccbillCancel.DataLinkBaseURL = r.Config.SandboxCCBillDataLinkURL()
 	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, clock) // retain unresolved pre-qualification refunds
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
 	rebill.DeferDelete = newIntentDeferredDeleteScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
@@ -313,6 +315,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		ccbillCancel,
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
+		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients),
 		ccbillRefund,
 		rebill,
 		// Invoice collection rides the ledger like every other money mover; the

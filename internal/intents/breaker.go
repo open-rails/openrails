@@ -40,6 +40,10 @@ var destructiveIntentTypes = map[string]struct{}{
 	// vaulted card a subscription bills destroys nothing (both vaults survive;
 	// swap back any time), so it doesn't fit the #679 mass-destruction threat
 	// model and must not burn the destructive budget.
+	//
+	// TypeStripeCancelSubscription is NOT listed either: it only follows a
+	// revoke of access, and holding it would leave Stripe billing a member
+	// who has none.
 }
 
 // IsDestructiveIntentType reports whether the type is breaker-gated.

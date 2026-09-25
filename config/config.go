@@ -247,6 +247,10 @@ type ProviderSandboxConfig struct {
 	// SolanaRPCURL replaces every merchant's Solana RPC endpoint under the same
 	// rule. Env: PROVIDER_SANDBOX_SOLANA_RPC_URL.
 	SolanaRPCURL string `koanf:"solana_rpc_url,omitempty"`
+	// CCBillDataLinkURL replaces the CCBill DataLink endpoint for every
+	// store-armed DataLink client under the same rule. Env:
+	// PROVIDER_SANDBOX_CCBILL_DATALINK_URL.
+	CCBillDataLinkURL string `koanf:"ccbill_datalink_url,omitempty"`
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
@@ -279,6 +283,14 @@ func (cfg *Config) SandboxSolanaRPCURL() string {
 	return strings.TrimSpace(cfg.ProviderSandbox.SolanaRPCURL)
 }
 
+// SandboxCCBillDataLinkURL is the configured loopback DataLink, or empty.
+func (cfg *Config) SandboxCCBillDataLinkURL() string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProviderSandbox.CCBillDataLinkURL)
+}
+
 // ValidateLoopbackGatewayURL accepts only a literal loopback destination: an
 // absolute http(s) URL, no userinfo, whose host is an IP literal that
 // net.IP.IsLoopback classifies. A hostname is never enough (no DNS).
@@ -301,7 +313,7 @@ func ValidateLoopbackGatewayURL(raw string) error {
 }
 
 func validateProviderSandbox(cfg *Config) error {
-	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL(), "solana_rpc_url": cfg.SandboxSolanaRPCURL()} {
+	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL(), "solana_rpc_url": cfg.SandboxSolanaRPCURL(), "ccbill_datalink_url": cfg.SandboxCCBillDataLinkURL()} {
 		if gateway == "" {
 			continue
 		}

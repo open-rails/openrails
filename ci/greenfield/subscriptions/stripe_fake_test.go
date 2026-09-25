@@ -78,6 +78,7 @@ type stripeFake struct {
 	lose      int
 	lost      int
 	listDown  bool
+	subsDown  bool
 }
 
 func newStripeFake() *stripeFake {
@@ -109,7 +110,8 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		f.lose--
 		f.lost++
 	}
-	down := f.listDown && r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents"
+	down := f.listDown && r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents" ||
+		f.subsDown && r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/subscriptions/")
 	f.mu.Unlock()
 	if lost {
 		return nil, errors.New("connection reset before Stripe received the request")
@@ -549,6 +551,7 @@ func (f *stripeFake) invoiceLocked(subID string, amount int64, paid bool) obj {
 		inv["payments"] = obj{"object": "list", "data": []obj{{"object": "invoice_payment", "status": "paid", "payment": obj{"type": "payment_intent", "payment_intent": pi["id"], "charge": ch["id"]}}}}
 	} else {
 		inv["status"], inv["amount_paid"], inv["attempt_count"] = "open", int64(0), int64(1)
+		inv["next_payment_attempt"] = time.Now().Add(72 * time.Hour).Unix()
 		inv["payments"] = obj{"object": "list", "data": []obj{}}
 	}
 	s["latest_invoice"] = inv

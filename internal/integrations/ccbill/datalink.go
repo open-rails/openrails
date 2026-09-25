@@ -291,21 +291,23 @@ func IsDataLinkActiveStatus(status string) bool {
 	}
 }
 
+// DataLinkPaidThrough is the member's future paid-through instant: the
+// expiry date only. A rebill date is when CCBill will next try to charge, which
+// it keeps in the future through a failed renewal, so it is never evidence of
+// payment.
 func DataLinkPaidThrough(record CCBillRecord, now time.Time) (time.Time, bool) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	for _, raw := range []string{record.ExpiryDate, record.RebillDate} {
-		parsed, err := timeutil.ParseFirstUTC(strings.TrimSpace(raw), "2006-01-02", "01/02/2006", time.RFC3339)
-		if err != nil {
-			continue
-		}
-		paidThrough := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC)
-		if paidThrough.After(now.UTC()) {
-			return paidThrough, true
-		}
+	parsed, err := timeutil.ParseFirstUTC(strings.TrimSpace(record.ExpiryDate), "2006-01-02", "01/02/2006", time.RFC3339)
+	if err != nil {
+		return time.Time{}, false
 	}
-	return time.Time{}, false
+	paidThrough := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC)
+	if !paidThrough.After(now.UTC()) {
+		return time.Time{}, false
+	}
+	return paidThrough, true
 }
 
 func (c *DataLinkClient) ValidateConfig() error {

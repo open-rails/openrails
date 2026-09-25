@@ -81,6 +81,15 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 			return p.revokeSubscription(ctx, d, locked, original, now)
 		})
 	}
+	if live && p.Lifecycle != nil && intents.StripeOwned(sub) {
+		// Stripe keeps billing until told otherwise: the remote cancel is
+		// queued with the revoke.
+		return true, revokeStripeMembership(ctx, p.DB, p.Lifecycle, sub.ID, models.CancelTypeMerchant,
+			func(*models.Subscription) string { return reason },
+			func(ctx context.Context, d *db.DB, locked *models.Subscription) error {
+				return p.revokeSubscription(ctx, d, locked, original, now)
+			})
+	}
 	if live && p.Lifecycle != nil {
 		if err := p.Lifecycle.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
 			SubscriptionID: &sub.ID, Rail: &rail, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: true,

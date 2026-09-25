@@ -74,7 +74,7 @@ func TestDestructiveClassificationAndBudget(t *testing.T) {
 		TypeCCBillCancelSubscription, TypeHyperSwitchMethodDelete, TypeNMIDeleteSubscription,
 		TypeNMIEngineTakeover, TypeNMIProviderCutover, TypeNMIPaymentMethodDelete,
 	}, DestructiveIntentTypes(), "sorted, complete breaker-gated set")
-	for _, typ := range []string{subscriptions.TypeManualRebill, TypeNMIPaymentSourceUpdate, TypeNMIRefund, TypeStripeRefund} {
+	for _, typ := range []string{subscriptions.TypeManualRebill, TypeNMIPaymentSourceUpdate, TypeNMIRefund, TypeStripeRefund, TypeStripeCancelSubscription} {
 		assert.False(t, IsDestructiveIntentType(typ), typ)
 	}
 	for active, want := range map[int64]int64{0: 25, 100: 25, 2_499: 25, 2_500: 25, 2_600: 26, 100_000: 1_000} {
