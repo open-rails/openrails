@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/goccy/go-yaml"
@@ -105,8 +106,8 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 			fallback = &signerTransit{TransitClient: backend.SolanaTransit, db: database, directory: directory, slug: slug,
 				environment: config.ExpectedProviderEnvironment(conf.IsTestMode()), tolerate: tolerateVault, onChange: a.Runtime.ReportSignerKeyChange}
 			req.SolanaTransit = fallback
-			if tolerateVault {
-				req.Options.DeferPSP = func(_ string, err error) bool { return errors.Is(err, vault.ErrUnavailable) }
+			req.Options.DeferPSP = func(_ string, err error) bool {
+				return errors.Is(err, vault.ErrSignerUnapproved) || (tolerateVault && errors.Is(err, vault.ErrUnavailable))
 			}
 		}
 	case len(m.PSPs) > 0 || len(m.Custodians) > 0:
@@ -124,9 +125,11 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 }
 
 // signerTransit checks every Transit public-key read against the Solana
-// identities already stored for that key: a different key is reported (it is
-// still provisioned, as a new identity), and with tolerate a read Vault
-// cannot serve right now is answered from the stored identity.
+// identities stored for that key. A different key fails closed: the change is
+// recorded on the stored PSP rows, the Solana rail refuses until an operator
+// approves it (ApproveSolanaSigner), and the new identity is not provisioned.
+// With tolerate, a read Vault cannot serve right now is answered from the
+// stored identity.
 type signerTransit struct {
 	solanaint.TransitClient
 	db          *db.DB
@@ -143,43 +146,52 @@ func (t *signerTransit) PublicKey(ctx context.Context, key string) ([]byte, erro
 	if err != nil && (!t.tolerate || !errors.Is(err, vault.ErrUnavailable)) {
 		return nil, err
 	}
-	mid, stored := t.stored(ctx, key)
+	mid, rows := storedSigners(ctx, t.db, t.directory, t.slug, t.environment, key)
 	if err != nil {
 		t.unavailable.Store(true)
-		if len(stored) == 0 {
+		if len(rows) == 0 {
 			return nil, err
 		}
 		log.WithField("key", key).Warn("openrails embed: Vault unavailable; Solana signer uses its stored identity until Vault confirms it")
-		return stored[len(stored)-1].Bytes(), nil
+		return rows[len(rows)-1].identity.Bytes(), nil
 	}
-	if len(pub) != 32 || len(stored) == 0 {
+	if len(pub) != 32 || len(rows) == 0 {
 		return pub, nil
 	}
 	current := solanago.PublicKeyFromBytes(pub)
-	for _, s := range stored {
-		if s.Equals(current) {
+	for _, r := range rows {
+		if r.identity.Equals(current) {
 			return pub, nil
 		}
 	}
-	previous := stored[len(stored)-1]
+	previous := rows[len(rows)-1].identity
 	log.WithFields(log.Fields{"merchant_id": mid.String(), "key": key, "stored_public_key": previous.String(), "transit_public_key": current.String()}).
-		Error("openrails embed: Vault Transit key changed; a new Solana PSP identity is provisioned for it")
-	if t.onChange != nil {
-		t.onChange(fmt.Errorf("solana signer %q changed from %s to %s", key, previous, current))
+		Error("openrails embed: Vault Transit key changed; the Solana rail is refused until an operator approves the new identity")
+	if err := markSignerChange(ctx, t.db, mid, rows, current.String()); err != nil {
+		return nil, fmt.Errorf("record solana signer change: %w", err)
 	}
-	return pub, nil
+	if t.onChange != nil {
+		t.onChange(fmt.Errorf("solana signer %q changed from %s to %s; awaiting approval", key, previous, current))
+	}
+	return nil, fmt.Errorf("solana signer %q: %w", key, vault.ErrSignerUnapproved)
 }
 
-// stored returns the merchant and the identities stored for key, oldest first.
-func (t *signerTransit) stored(ctx context.Context, key string) (merchant.ID, []solanago.PublicKey) {
-	m, err := t.directory.GetBySlug(ctx, merchant.NormalizeSlug(t.slug))
+type storedSigner struct {
+	row      gen.OpenrailsPsp
+	identity solanago.PublicKey
+}
+
+// storedSigners returns the merchant and its active Solana PSPs signed by the
+// Transit key, oldest first.
+func storedSigners(ctx context.Context, database *db.DB, directory *merchants.Service, slug, environment, key string) (merchant.ID, []storedSigner) {
+	m, err := directory.GetBySlug(ctx, merchant.NormalizeSlug(slug))
 	if err != nil {
 		return merchant.ID{}, nil
 	}
 	rail := "solana"
-	var out []solanago.PublicKey
-	_ = t.db.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
-		rows, err := t.db.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: m.ID.UUID(), Rail: &rail})
+	var out []storedSigner
+	_ = database.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
+		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: m.ID.UUID(), Rail: &rail})
 		if err != nil {
 			return err
 		}
@@ -187,19 +199,97 @@ func (t *signerTransit) stored(ctx context.Context, key string) (merchant.ID, []
 			var evidence struct {
 				Signer struct{ Mode, Key string } `json:"signer"`
 			}
-			if row.Archived || row.Environment != t.environment || json.Unmarshal(row.Evidence, &evidence) != nil {
+			if row.Archived || row.Environment != environment || json.Unmarshal(row.Evidence, &evidence) != nil {
 				continue
 			}
 			if evidence.Signer.Mode != "vault_transit" || evidence.Signer.Key != key {
 				continue
 			}
 			if pub, err := solanago.PublicKeyFromBase58(row.AccountID); err == nil {
-				out = append(out, pub)
+				out = append(out, storedSigner{row: row, identity: pub})
 			}
 		}
 		return nil
 	})
 	return m.ID, out
+}
+
+// markSignerChange records the unapproved public key on the stored rows (or
+// clears it with ""), optionally archiving them.
+func markSignerChange(ctx context.Context, database *db.DB, mid merchant.ID, rows []storedSigner, publicKey string, archive ...bool) error {
+	return database.RunInMerchantScope(ctx, mid, "solana signer change", func(ctx context.Context) error {
+		for _, r := range rows {
+			var evidence map[string]any
+			if err := json.Unmarshal(r.row.Evidence, &evidence); err != nil || evidence == nil {
+				evidence = map[string]any{}
+			}
+			if publicKey == "" {
+				delete(evidence, "signer_change")
+			} else {
+				evidence["signer_change"] = map[string]any{"public_key": publicKey, "detected_at": time.Now().UTC().Format(time.RFC3339)}
+			}
+			raw, err := json.Marshal(evidence)
+			if err != nil {
+				return err
+			}
+			archived := r.row.Archived || (len(archive) > 0 && archive[0])
+			environment := r.row.Environment
+			if _, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
+				ID: r.row.ID, MerchantID: r.row.MerchantID, Rail: r.row.Rail, Environment: &environment, AccountID: r.row.AccountID,
+				Key: r.row.Key, Archived: &archived, Evidence: raw, LastVerifiedAt: r.row.LastVerifiedAt, CustodianID: r.row.CustodianID,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// approveSolanaSigner accepts the identity Vault now reports for key: the
+// stored identities awaiting it are drained (archived) and the declaration is
+// re-applied, provisioning the approved one. It refuses when nothing is
+// pending for exactly the key Vault reports.
+func approveSolanaSigner(ctx context.Context, a *app.App, declaration *MerchantDeclaration, mid merchant.ID, key string) error {
+	if declaration == nil {
+		return fmt.Errorf("openrails embed: no merchant declaration to approve a signer for")
+	}
+	backend := a.Runtime.MerchantSecretBackend
+	if backend == nil || backend.SolanaTransit == nil {
+		return fmt.Errorf("openrails embed: no Vault Transit signer is configured")
+	}
+	pub, err := backend.SolanaTransit.PublicKey(ctx, key)
+	if err != nil {
+		return fmt.Errorf("read the Transit key: %w", err)
+	}
+	approved := solanago.PublicKeyFromBytes(pub).String()
+	directory, err := merchants.NewDirectoryService(a.Runtime.DB.DataPool())
+	if err != nil {
+		return err
+	}
+	m, err := directory.Get(ctx, mid)
+	if err != nil {
+		return err
+	}
+	environment := config.ExpectedProviderEnvironment(a.Config.IsTestMode())
+	_, rows := storedSigners(ctx, a.Runtime.DB, directory, m.Slug, environment, key)
+	var pending []storedSigner
+	for _, r := range rows {
+		if merchants.SignerChange(r.row.Evidence) == approved {
+			pending = append(pending, r)
+		}
+	}
+	if len(pending) == 0 {
+		return fmt.Errorf("openrails embed: no signer change awaiting approval for key %q reporting %s", key, approved)
+	}
+	if err := markSignerChange(ctx, a.Runtime.DB, mid, pending, "", true); err != nil {
+		return err
+	}
+	if _, _, err := upsertMerchantConfig(ctx, a, declaration.Slug, declaration.Config, false); err != nil {
+		return err
+	}
+	a.Runtime.ReportSignerKeyChange(nil)
+	log.WithFields(log.Fields{"merchant_id": mid.String(), "key": key, "public_key": approved}).Warn("openrails embed: operator approved a new Solana signer identity")
+	return nil
 }
 
 // ParseMerchantConfig parses a single merchant YAML document into a MerchantConfig.

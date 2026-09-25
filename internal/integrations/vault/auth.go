@@ -62,6 +62,12 @@ const reauthSecretIDEnvVar = "VAULT_SECRET_ID"
 // login succeeds.
 var ErrNotAuthenticated = fmt.Errorf("%w: not authenticated", ErrUnavailable)
 
+// ErrSignerUnapproved means a Transit signer's key no longer matches the
+// Solana identity stored for it (a rotated key, or the wrong Vault address,
+// namespace or mount). The Solana rail refuses (503) until an operator
+// approves the new identity.
+var ErrSignerUnapproved = fmt.Errorf("%w: Solana signer identity changed and awaits operator approval", ErrUnavailable)
+
 // Login builds the process Vault client (NOT per-merchant: merchant isolation
 // is the (tenant, name) addressing) without touching the network. The returned
 // Supervisor logs in, renews and re-authenticates in the background with

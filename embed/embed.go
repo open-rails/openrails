@@ -241,6 +241,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 	r.svc = svc
+	declaration := opts.Merchant
+	application.Runtime.ApproveSolanaSigner = func(ctx context.Context, mid merchant.ID, key string) error {
+		return approveSolanaSigner(ctx, application, declaration, mid, key)
+	}
 	if signerPending {
 		confirmSigner(application, opts.Merchant)
 	}

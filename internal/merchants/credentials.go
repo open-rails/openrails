@@ -201,6 +201,7 @@ type pspSecretScope struct {
 	custodianID        *uuid.UUID
 	// webhookOverlapUntil bounds webhook_signing_secret_previous (SEC-29).
 	webhookOverlapUntil time.Time
+	signerChange        string
 }
 
 // applyEvidence unpacks the PSP row's evidence document: the manifest-supplied
@@ -212,6 +213,21 @@ func (s *pspSecretScope) applyEvidence(raw []byte) {
 	s.credentialRefs = CredentialRefs(raw)
 	s.retiredCredentials = unmarshalProviderEvidence(raw).RetiredCredentials
 	s.webhookOverlapUntil = webhookOverlapExpiry(raw)
+	s.signerChange = SignerChange(raw)
+}
+
+// SignerChange is the unapproved public key a Transit signer now reports for
+// this PSP, recorded in its evidence; empty when none is pending.
+func SignerChange(raw []byte) string {
+	var evidence struct {
+		SignerChange struct {
+			PublicKey string `json:"public_key"`
+		} `json:"signer_change"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
+		return ""
+	}
+	return strings.TrimSpace(evidence.SignerChange.PublicKey)
 }
 
 func (s pspSecretScope) secretName(key string) (string, error) {
@@ -272,6 +288,7 @@ func (s pspSecretScope) exported() PSPScope {
 		CredentialRefs:     s.credentialRefs,
 		RetiredCredentials: s.retiredCredentials,
 		CustodianID:        s.custodianID,
+		SignerChange:       s.signerChange,
 	}
 }
 

@@ -36,9 +36,10 @@ type Probe struct {
 // "openrails_vault" (only when the runtime logs in to Vault itself) is a live
 // token self-lookup. "openrails_psp_posture" reads cached verdicts and fails
 // while any loaded PSP is unverified or disarmed.
-// "openrails_solana_signer_identity" (with Vault) fails from the moment a
-// Transit signer key no longer matches its stored Solana identity until the
-// process restarts: the new key is provisioned as a new PSP, so alert on it.
+// "openrails_solana_signer_identity" (with Vault) fails while a Transit
+// signer key no longer matches its stored Solana identity; the Solana rail
+// refuses (503) until an operator approves the new identity
+// (operator.ApproveSolanaSigner). Alert on it.
 // Redis is the host's own client and is not listed.
 func (r *Runtime) Probes() []Probe {
 	if r == nil || r.app == nil || r.app.Runtime == nil {

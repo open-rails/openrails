@@ -341,6 +341,8 @@ type PSPScope struct {
 	CredentialVersions map[string]int
 	CredentialRefs     map[string]SecretRef
 	RetiredCredentials map[string]bool
+	// SignerChange is a pending, unapproved Transit signer public key (Solana).
+	SignerChange string
 }
 
 // SecretRef returns the exact published name and physical backend version.

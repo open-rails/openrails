@@ -21,9 +21,11 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/embed/operator"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/vaultfake"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const transitKey = "greenfield-solana"
@@ -232,33 +234,59 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	require.Equal(t, want, solanago.PublicKeyFromBytes(pub).String())
 }
 
-// A Vault Transit key replaced behind OpenRails' back is still provisioned as a
-// new Solana identity, but loudly: an ERROR log names both public keys and the
-// signer identity probe fails so the host alerts.
-func TestTransitKeyChangeIsProvisionedAndAlerts(t *testing.T) {
+// A Vault Transit key replaced behind OpenRails' back (or a wrong Vault
+// address, namespace or mount) fails closed: the ERROR log names both public
+// keys, the signer identity probe fails, and the Solana rail answers
+// unavailable until an operator approves the new identity. Approval is
+// durable across restarts.
+func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
 	fake := vaultfake.New("greenfield-root")
 	t.Cleanup(fake.Close)
 	slug := "rotate-" + uuid.NewString()[:8]
+	boot := func() (*embed.Runtime, *openrails.Client) {
+		rt := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
+		client, err := rt.Client()
+		require.NoError(t, err)
+		return rt, client
+	}
+	solanaRows := func(account string) (active, archived int) {
+		rows, err := f.pool.Query(t.Context(), "SELECT archived FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND account_id = $1", account)
+		require.NoError(t, err)
+		defer rows.Close()
+		for rows.Next() {
+			var a bool
+			require.NoError(t, rows.Scan(&a))
+			if a {
+				archived++
+			} else {
+				active++
+			}
+		}
+		return active, archived
+	}
+	railConfig := func(rt *embed.Runtime, mid merchant.ID) error {
+		_, err := app.HostGraph(rt).Runtime.RailConfigs.RailConfig(merchant.WithID(t.Context(), mid), "solana", "")
+		return err
+	}
 	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 
-	first := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
-	client, err := first.Client()
-	require.NoError(t, err)
+	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
+	mid, _, err := operator.New(first).ResolveMerchant(t.Context(), slug)
+	require.NoError(t, err)
 	require.NoError(t, first.Close(context.Background()))
 
 	fake.Rotate(transitKey)
 	rotated := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 	logs := logtest.NewGlobal()
 	t.Cleanup(logs.Reset)
-	second := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
+	second, client := boot()
 	require.Eventually(t, func() bool { return probe(t, second, "openrails_solana_signer_identity") != nil }, 30*time.Second, 50*time.Millisecond)
 	require.ErrorContains(t, probe(t, second, "openrails_solana_signer_identity"), rotated)
 	waitReady(t, second)
-
 	var logged bool
 	for _, e := range logs.AllEntries() {
 		if e.Level == logrus.ErrorLevel && e.Data["stored_public_key"] == old && e.Data["transit_public_key"] == rotated && e.Data["key"] == transitKey {
@@ -266,10 +294,21 @@ func TestTransitKeyChangeIsProvisionedAndAlerts(t *testing.T) {
 		}
 	}
 	require.True(t, logged, "the key change is logged at ERROR with both public keys")
+	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
+	active, _ := solanaRows(rotated)
+	require.Zero(t, active, "an unapproved identity never receives money")
 
-	require.Eventually(t, func() bool {
-		var n int
-		err := f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND account_id = $1", rotated).Scan(&n)
-		return err == nil && n == 1
-	}, 30*time.Second, 50*time.Millisecond, "the new key is still provisioned")
+	require.NoError(t, operator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
+	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))
+	require.NoError(t, railConfig(second, mid))
+	active, _ = solanaRows(rotated)
+	require.Equal(t, 1, active, "the approved identity is provisioned")
+	oldActive, oldArchived := solanaRows(old)
+	require.Equal(t, [2]int{0, 1}, [2]int{oldActive, oldArchived}, "the previous identity drains")
+	require.NoError(t, second.Close(context.Background()))
+
+	third, client := boot()
+	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
+	require.NoError(t, probe(t, third, "openrails_solana_signer_identity"), "approval survives a restart")
+	require.NoError(t, railConfig(third, mid))
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -250,6 +251,9 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 			WebhookSigningSecret: signing,
 		}
 	case models.RailSolana:
+		if scope.SignerChange != "" {
+			return nil, fmt.Errorf("solana account %s: signer now reports %s: %w", scope.AccountID, scope.SignerChange, vault.ErrSignerUnapproved)
+		}
 		settings, err := config.ParseSolanaAccountSettings(scope.Settings)
 		if err != nil {
 			return nil, err
