@@ -539,8 +539,10 @@ func (f *stripeFake) legacySubscription(customerRef, methodRef, price string, am
 // invoiceLocked cuts the subscription's latest invoice; paid moves money.
 func (f *stripeFake) invoiceLocked(subID string, amount int64, paid bool) obj {
 	s := f.subs[subID]
+	price := s["items"].(obj)["data"].([]obj)[0]["price"].(obj)["id"]
 	inv := obj{"object": "invoice", "id": f.id("in"), "customer": s["customer"], "currency": "usd", "amount_due": amount, "created": time.Now().Unix(), "billing_reason": "subscription_cycle",
-		"parent": obj{"type": "subscription_details", "subscription_details": obj{"subscription": subID}}}
+		"parent": obj{"type": "subscription_details", "subscription_details": obj{"subscription": subID}},
+		"lines":  obj{"object": "list", "data": []obj{{"object": "line_item", "amount": amount, "pricing": obj{"type": "price_details", "price_details": obj{"price": price}}}}}}
 	if paid {
 		pi := obj{"object": "payment_intent", "id": f.id("pi"), "amount": amount, "amount_received": amount, "currency": "usd", "customer": s["customer"], "payment_method": s["default_payment_method"], "status": "succeeded", "livemode": false, "metadata": map[string]string{}}
 		ch := obj{"object": "charge", "id": f.id("ch"), "amount": amount, "amount_captured": amount, "currency": "usd", "customer": s["customer"], "payment_method": s["default_payment_method"], "payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "livemode": false}
@@ -556,6 +558,21 @@ func (f *stripeFake) invoiceLocked(subID string, amount int64, paid bool) obj {
 	}
 	s["latest_invoice"] = inv
 	return inv
+}
+
+// portalPriceChange is the customer switching price in Stripe's portal: the
+// item moves at once and Stripe invoices the proration, left open here.
+func (f *stripeFake) portalPriceChange(subID, price string, amount, proration int64) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.subs[subID]
+	s["items"].(obj)["data"].([]obj)[0]["price"] = obj{"id": price, "unit_amount": amount, "currency": "usd"}
+	inv := f.invoiceLocked(subID, proration, false)
+	inv["billing_reason"] = "subscription_update"
+	raw, _ := json.Marshal(s)
+	out := obj{}
+	_ = json.Unmarshal(raw, &out)
+	return out
 }
 
 // providerRenew is Stripe billing its own subscription for the next period.

@@ -183,6 +183,12 @@ status. `unpaid`, `paused`, and a `past_due` subscription whose open invoice has
 no further payment attempt grant no access. A `past_due` subscription Stripe is
 still retrying keeps access until Stripe cancels it or stops retrying.
 
+A portal cancel at period end and a portal resume are mirrored as the member's
+own cancel and resume; a subscription whose paid period is over is not resumed
+by Stripe's status alone. A price change takes effect only once Stripe's paid
+invoice bills the new price: an upgrade whose invoice is still open grants
+nothing.
+
 A dispute or a provider refund that revokes access also queues a durable
 `stripe_cancel_subscription` intent in the same transaction. It reads the
 subscription first: a paid-up one is set to `cancel_at_period_end`, a delinquent

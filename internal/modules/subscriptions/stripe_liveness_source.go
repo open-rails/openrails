@@ -58,6 +58,9 @@ type StripeLivenessRecord struct {
 	// LatestInvoiceRetryExhausted: the invoice is open and Stripe has no
 	// further payment attempt scheduled.
 	LatestInvoiceRetryExhausted bool
+	// LatestInvoicePriceIDs are the Stripe prices the latest invoice bills:
+	// a price change is paid only by an invoice for the new price.
+	LatestInvoicePriceIDs []string
 }
 
 // StripeLivenessProber probes one remote Stripe subscription. Interface so
@@ -130,6 +133,17 @@ type stripeLivenessSubscriptionEnvelope struct {
 		Currency           string `json:"currency"`
 		Created            int64  `json:"created"`
 		BillingReason      string `json:"billing_reason"`
+		// Lines carry the billed price under pricing.price_details on the
+		// pinned version.
+		Lines struct {
+			Data []struct {
+				Pricing struct {
+					PriceDetails struct {
+						Price string `json:"price"`
+					} `json:"price_details"`
+				} `json:"pricing"`
+			} `json:"data"`
+		} `json:"lines"`
 	} `json:"latest_invoice"`
 }
 
@@ -185,6 +199,11 @@ func parseStripeLivenessSubscription(body []byte) (StripeLivenessRecord, error) 
 		status := strings.ToLower(strings.TrimSpace(inv.Status))
 		rec.LatestInvoiceCollectionFailed = !rec.LatestInvoicePaid && (status == "uncollectible" || (status == "open" && inv.AttemptCount > 0))
 		rec.LatestInvoiceRetryExhausted = !rec.LatestInvoicePaid && status == "open" && inv.NextPaymentAttempt == 0
+		for _, line := range inv.Lines.Data {
+			if price := strings.TrimSpace(line.Pricing.PriceDetails.Price); price != "" {
+				rec.LatestInvoicePriceIDs = append(rec.LatestInvoicePriceIDs, price)
+			}
+		}
 		if inv.Created > 0 {
 			rec.LatestInvoiceCreated = time.Unix(inv.Created, 0).UTC()
 		}
