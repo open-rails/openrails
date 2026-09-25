@@ -1,0 +1,227 @@
+package reconcile
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/internal/billing/lifecycle"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/normalize"
+)
+
+// ApplyDecision moves subscription state for one decider transition (#665)
+// through the lifecycle state machine (#1091): the row is locked, re-checked
+// against the row the decision was made on, and the decision's event is
+// applied with Transition and ApplyEffects in one transaction. Only a payment
+// fact renews and only a decline fact opens dunning. Returns whether a
+// transition was attempted.
+func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
+	if database == nil || lc == nil || sub == nil {
+		return false, fmt.Errorf("apply decision: db, lifecycle and subscription are required")
+	}
+	if d.Kind == TransitionNone || d.stale(sub) {
+		return false, nil
+	}
+	switch d.Kind {
+	case TransitionParkUnknown:
+		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+			return false, nil
+		}
+		return true, lc.ApplyLocalUnknown(ctx, database, sub)
+
+	case TransitionPastDue:
+		if sub.Status != models.StatusActive && sub.Status != models.StatusUnverified {
+			return false, nil // a recorded decline already dunned the period
+		}
+		if d.Decline == nil && !d.Declared && subscriptions.OwnerOf(sub) != lifecycle.Provider {
+			// A stalled provider date is no decline: the row is verified
+			// instead of dunned (#1089 §1).
+			if sub.Status != models.StatusActive {
+				return false, nil
+			}
+			return true, lc.ApplyLocalUnknown(ctx, database, sub, models.StatusActive)
+		}
+		duns := DunsDecline(sub, d)
+		applied, err := transition(ctx, database, lc, sub, d, now, duns)
+		if err != nil || !applied || !duns {
+			return applied, err
+		}
+		return applyDunnedDecline(ctx, lc, sub, d)
+
+	case TransitionRenew:
+		if d.NewPeriodEnd == nil {
+			return false, nil
+		}
+		return transition(ctx, database, lc, sub, d, now, false)
+
+	case TransitionAdoptPeriodEnd:
+		if sub.Status != models.StatusUnverified {
+			return false, nil
+		}
+		return transition(ctx, database, lc, sub, d, now, false)
+
+	case TransitionCancel:
+		return transition(ctx, database, lc, sub, d, now, false)
+	}
+	return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)
+}
+
+// eventFor is the lifecycle event a decision asserts about the locked row.
+// Only a payment renews; a live schedule without one (Adopt) only confirms
+// an unverified row whose paid period is still running, and never moves it.
+func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Event {
+	switch d.Kind {
+	case TransitionPastDue:
+		at := now
+		if d.Decline != nil && !d.Decline.OccurredAt.IsZero() {
+			at = d.Decline.OccurredAt
+		}
+		return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.Retry, At: at}
+	case TransitionRenew:
+		start := paidThroughOf(cur)
+		if start.IsZero() {
+			start = now
+			if d.NewPeriodStart != nil && d.NewPeriodStart.Before(*d.NewPeriodEnd) {
+				start = d.NewPeriodStart.UTC()
+			}
+		}
+		return lifecycle.RenewalPaid{PeriodStart: start, PeriodEnd: d.NewPeriodEnd.UTC()}
+	case TransitionAdoptPeriodEnd:
+		return lifecycle.ProviderConfirmedCurrent{At: now}
+	default:
+		at := d.EvidenceAt
+		if at.IsZero() {
+			at = now
+		}
+		switch {
+		case d.RemoteGone && subscriptions.OwnerOf(cur) == lifecycle.Provider:
+			// A provider that owns the schedule decides its access: its
+			// confirmed end is immediate.
+			return lifecycle.Cancel{Kind: lifecycle.CancelProvider, Immediate: true, At: at}
+		case d.RemoteGone:
+			return lifecycle.ProviderCancelled{At: at} // NMI ended the schedule; paid time is kept
+		case d.Certainty == collection.CertaintyNonRetryableDecline:
+			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
+		default:
+			return lifecycle.DunningExhausted{At: at}
+		}
+	}
+}
+
+// applyDunnedDecline hands a seen decline of an OpenRails-dunned NMI schedule
+// to FailMembership, the dunning writer, which counts and classifies it,
+// schedules the next attempt (never "now") and tells the customer. A decline
+// already counted is ignored.
+func applyDunnedDecline(ctx context.Context, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision) (bool, error) {
+	if sub.NextRetryAt != nil || (sub.LastRetryAt != nil && !d.Decline.OccurredAt.After(*sub.LastRetryAt)) {
+		return false, nil
+	}
+	code := normalize.Trim(d.Decline.DeclineCode)
+	return true, lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
+		Rail:            sub.Rail,
+		SubscriptionID:  &sub.ID,
+		FailureCode:     normalize.OptionalString(code),
+		Decline:         collection.ClassifyDecline(string(sub.Rail), code),
+		AttemptRecorded: true,
+	})
+}
+
+// transition applies one event to the locked row and carries out its
+// effects in the same transaction; notifications go out after commit.
+func transition(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time, quiet bool) (bool, error) {
+	var notices []*models.NotificationQueue
+	applied := false
+	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := database.NewWithPgxTx(tx)
+		repo := subscriptions.NewSubscriptionRepo(txdb)
+		cur, err := repo.GetByIDForUpdate(ctx, sub.ID)
+		if err != nil {
+			return fmt.Errorf("apply decision: lock %s: %w", sub.ID, err)
+		}
+		if d.stale(cur) {
+			return nil
+		}
+		before := subscriptions.SnapshotOf(cur)
+		ev := eventFor(d, cur, now)
+		effects, err := subscriptions.Transition(cur, ev, now)
+		if err != nil {
+			if errors.Is(err, lifecycle.ErrIllegal) || errors.Is(err, lifecycle.ErrInvalid) || errors.Is(err, lifecycle.ErrTerminal) {
+				log.WithContext(ctx).WithError(err).WithFields(log.Fields{"subscription_id": cur.ID, "reason": d.Reason}).
+					Warn("apply decision: the lifecycle refused the event; the row is unchanged")
+				return nil
+			}
+			return err
+		}
+		if len(effects) == 0 && subscriptions.SnapshotOf(cur) == before {
+			return nil
+		}
+		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
+			return err
+		}
+		if _, renewed := ev.(lifecycle.RenewalPaid); renewed {
+			if err := lc.ApplyScheduledTier(ctx, txdb, cur); err != nil {
+				return err
+			}
+		}
+		if cur.Status == models.StatusPastDue && cur.GraceEndsAt == nil && !d.GraceEndsAt.IsZero() {
+			grace := d.GraceEndsAt // dunning's pacing marker
+			cur.GraceEndsAt = &grace
+		}
+		if cur.Status == models.StatusCancelled && before.Status != lifecycle.Cancelled {
+			feedback := "provider-confirmed: " + d.Reason
+			cur.CancelFeedback = &feedback
+		}
+		if err := repo.UpdateAt(ctx, cur, now); err != nil {
+			if errors.Is(err, subscriptions.ErrSubscriptionMoved) {
+				return errDecisionMoved // the next read decides afresh
+			}
+			return fmt.Errorf("apply decision: update %s: %w", cur.ID, err)
+		}
+		*sub, applied = *cur, true
+		return nil
+	})
+	if errors.Is(err, errDecisionMoved) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	lc.DispatchNotifications(ctx, notices)
+	return applied, nil
+}
+
+// errDecisionMoved rolls back a decision whose row another writer moved.
+var errDecisionMoved = errors.New("apply decision: the subscription moved")
+
+func paidThroughOf(sub *models.Subscription) time.Time {
+	if sub.CurrentPeriodEndsAt == nil {
+		return time.Time{}
+	}
+	return sub.CurrentPeriodEndsAt.UTC()
+}
+
+// customerNotices keeps a mirrored transition's effects, except: the end of
+// access notice, which the converge NOTIFY pass sends once for every ending
+// (#789); every notice when the decision replays declared history; and a
+// provider cancel for a schedule the provider already ended.
+func customerNotices(effects []lifecycle.Effect, silent, gone bool) []lifecycle.Effect {
+	out := effects[:0:0]
+	for _, e := range effects {
+		if n, ok := e.(lifecycle.Notify); ok && (silent || n.Kind == lifecycle.NoticeEnded) {
+			continue
+		}
+		if _, ok := e.(lifecycle.QueueProviderCancel); ok && gone {
+			continue // nothing left to cancel at the provider
+		}
+		out = append(out, e)
+	}
+	return out
+}

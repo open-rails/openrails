@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,10 +96,12 @@ type nmiFake struct {
 	hide int
 	// clock stamps transactions; the world's engine clock.
 	clock func() time.Time
+	// reads counts provider reads by kind ("query:<report_type>", "v5:<resource>").
+	reads map[string]int
 }
 
 func newNMIFake() *nmiFake {
-	return &nmiFake{tokens: map[string]card{}, vaults: map[string]*nmiVault{}, schedules: map[string]*nmiSchedule{}, plans: map[string]obj{}, clock: time.Now}
+	return &nmiFake{tokens: map[string]card{}, vaults: map[string]*nmiVault{}, schedules: map[string]*nmiSchedule{}, plans: map[string]obj{}, clock: time.Now, reads: map[string]int{}}
 }
 
 func (f *nmiFake) now() time.Time { return f.clock().UTC() }
@@ -134,6 +137,7 @@ func (f *nmiFake) RoundTrip(r *http.Request) (*http.Response, error) {
 	var body []byte
 	if r.Body != nil {
 		body, _ = io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body)) // gates may read the form
 	}
 	f.mu.Lock()
 	var g *gate
@@ -195,6 +199,10 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 		rec.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodGet {
 			f.writes = append(f.writes, providerCall{Method: r.Method, Path: p[i+3:]})
+		} else if seg := strings.Split(strings.TrimPrefix(p[i+4:], "/"), "/"); len(seg) > 1 {
+			f.reads["v5:"+seg[0]+"/{id}"]++
+		} else {
+			f.reads["v5:"+seg[0]]++
 		}
 		status, out := f.v5(r.Method, strings.Split(strings.TrimPrefix(p[i+4:], "/"), "/"), body)
 		raw, _ := json.Marshal(out)
@@ -205,6 +213,9 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 	form, _ := url.ParseQuery(string(body))
 	for k, v := range r.URL.Query() {
 		form[k] = v
+	}
+	if strings.HasSuffix(p, "/query.php") {
+		f.reads["query:"+form.Get("report_type")]++
 	}
 	switch {
 	case strings.HasSuffix(p, "/transact.php") && form.Get("type") == "validate":
@@ -219,16 +230,24 @@ func (f *nmiFake) serve(r *http.Request, body []byte) *httptest.ResponseRecorder
 	case strings.HasSuffix(p, "/transact.php") && form.Get("recurring") == "add_subscription":
 		f.writes = append(f.writes, providerCall{Method: r.Method, Path: "transact.php", Form: form})
 		_, _ = rec.WriteString(f.addSubscription(form))
-	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "recurring" && f.schedules[form.Get("subscription_id")] != nil:
-		s := f.schedules[form.Get("subscription_id")]
+	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "recurring":
+		// NMI deletes a cancelled schedule: the report no longer lists it.
 		rec.Header().Set("Content-Type", "text/xml")
-		_, _ = fmt.Fprintf(rec, "<nm_response><subscription><subscription_id>%s</subscription_id><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date><plan><plan_id>%s</plan_id></plan></subscription></nm_response>",
-			s.ID, s.Order, s.Order, s.NextBilling.Format("2006-01-02"), s.Plan)
+		_, _ = rec.WriteString("<nm_response>")
+		for _, id := range strings.Split(form.Get("subscription_id"), ",") {
+			if s := f.schedules[id]; s != nil && !s.Deleted {
+				_, _ = fmt.Fprintf(rec, "<subscription><subscription_id>%s</subscription_id><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date><plan><plan_id>%s</plan_id></plan></subscription>",
+					s.ID, s.Order, s.Order, s.NextBilling.Format("2006-01-02"), s.Plan)
+			}
+		}
+		_, _ = rec.WriteString("</nm_response>")
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction" && f.queryDown:
 		rec.WriteHeader(http.StatusServiceUnavailable)
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "transaction":
 		rec.Header().Set("Content-Type", "text/xml")
-		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id"), form.Get("subscription_id"), form.Get("customer_vault_id")))
+		limit, _ := strconv.Atoi(form.Get("result_limit"))
+		page, _ := strconv.Atoi(form.Get("page_number"))
+		_, _ = rec.WriteString(f.search(form.Get("order_id"), form.Get("transaction_id"), form.Get("subscription_id"), form.Get("customer_vault_id"), limit, page))
 	case strings.HasSuffix(p, "/query.php") && form.Get("report_type") == "test_mode_status":
 		rec.Header().Set("Content-Type", "text/xml")
 		_, _ = rec.WriteString("<nm_response><test_mode_status>enabled</test_mode_status></nm_response>")
@@ -564,34 +583,45 @@ func (f *nmiFake) addSubscription(form url.Values) string {
 	return fmt.Sprintf("response=1&responsetext=Subscription+added&subscription_id=%s&orderid=%s&response_code=100", s.ID, form.Get("orderid"))
 }
 
-func (f *nmiFake) search(orderID, transactionID, scheduleID, vault string) string {
-	var b strings.Builder
-	b.WriteString("<nm_response>")
+// search is the transaction report: sales then validations, paged by
+// result_limit/page_number (off when zero). subscription_id takes a
+// comma-separated list; like NMI's, the report names no schedule.
+func (f *nmiFake) search(orderID, transactionID, scheduleIDs, vault string, limit, page int) string {
+	var entries []string
+	schedules := map[string]bool{}
+	for _, id := range strings.Split(scheduleIDs, ",") {
+		if id != "" {
+			schedules[id] = true
+		}
+	}
 	for _, s := range append(append([]*nmiSale{}, f.sales...), f.declined...) {
-		if s.Hidden || (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (scheduleID != "" && s.ScheduleID != scheduleID) || (vault != "" && s.Vault != vault) {
+		if s.Hidden || (orderID != "" && s.OrderID != orderID) || (transactionID != "" && s.TransactionID != transactionID) || (len(schedules) > 0 && !schedules[s.ScheduleID]) || (vault != "" && s.Vault != vault) {
 			continue
 		}
 		success, code := "1", "100"
 		if s.Declined != "" {
 			success, code = "0", s.Declined
 		}
-		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
-			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, success, code, s.At.Format("20060102150405"))
+		entries = append(entries, fmt.Sprintf("<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
+			s.TransactionID, s.OrderID, s.Vault, s.Currency, s.Amount, success, code, s.At.Format("20060102150405")))
 	}
 	for _, v := range f.validations {
 		order := v.Form.Get("orderid")
-		if (orderID != "" && order != orderID) || (transactionID != "" && v.TransactionID != transactionID) || scheduleID != "" || (vault != "" && v.Vault != vault) {
+		if (orderID != "" && order != orderID) || (transactionID != "" && v.TransactionID != transactionID) || len(schedules) > 0 || (vault != "" && v.Vault != vault) {
 			continue
 		}
 		success, code := "1", "100"
 		if !v.Approved {
 			success, code = "0", v.Card.Decline
 		}
-		fmt.Fprintf(&b, "<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>USD</currency><action><amount>0.00</amount><action_type>validate</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
-			v.TransactionID, order, v.Vault, success, code, v.At.Format("20060102150405"))
+		entries = append(entries, fmt.Sprintf("<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><customer_vault_id>%s</customer_vault_id><currency>USD</currency><action><amount>0.00</amount><action_type>validate</action_type><success>%s</success><response_code>%s</response_code><date>%s</date></action></transaction>",
+			v.TransactionID, order, v.Vault, success, code, v.At.Format("20060102150405")))
 	}
-	b.WriteString("</nm_response>")
-	return b.String()
+	if limit > 0 {
+		from := min(max(page-1, 0)*limit, len(entries))
+		entries = entries[from:min(from+limit, len(entries))]
+	}
+	return "<nm_response>" + strings.Join(entries, "") + "</nm_response>"
 }
 
 // setDecline changes the issuer's answer for the card in every vault
@@ -1056,4 +1086,15 @@ func (f *nmiFake) lastDeclined() *nmiSale {
 		return nil
 	}
 	return f.declined[len(f.declined)-1]
+}
+
+// readCounts is a copy of the provider reads served so far, by kind.
+func (f *nmiFake) readCounts() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]int, len(f.reads))
+	for k, v := range f.reads {
+		out[k] = v
+	}
+	return out
 }

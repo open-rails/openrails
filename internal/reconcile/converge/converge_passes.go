@@ -574,6 +574,12 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
+	unverified, err := p.unverifiedFindings(ctx, scope, now)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, unverified...)
+
 	paidPending, err := q.ListPaidPendingSubscriptions(ctx, gen.ListPaidPendingSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-paidPendingAfter),
 		RowLimit: convergeScanCap,
@@ -1154,4 +1160,85 @@ func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeF
 		RecommendedAction: prose,
 		// surface-only: cancelling/refunding a purchase is an operator decision.
 	}, nil
+}
+
+// unverifiedUnresolvedAfter is how long a row may stay unverified before it is
+// escalated to the operator (#1089 §11: unverified is never a dead end).
+const unverifiedUnresolvedAfter = 72 * time.Hour
+
+// unverifiedFindings reports the unverified backlog per account
+// (life.unverified.backlog: count and oldest age, every pass, so the operator
+// can watch it converge) and escalates each row unresolved past
+// unverifiedUnresolvedAfter (life.unverified.unresolved).
+func (p *lifePass) unverifiedFindings(ctx context.Context, scope Scope, now time.Time) ([]ConvergeFinding, error) {
+	rows, err := p.e.DB.Qx(ctx).Query(ctx, `SELECT s.id, s.psp_id, s.rail, COALESCE(v.since, s.updated_at), COALESCE(v.reads, 0), v.last_read_at
+		FROM openrails.subscriptions s
+		LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+		WHERE s.merchant_id = $1 AND s.status = 'unverified' AND s.deleted_at IS NULL
+		  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+		ORDER BY 4
+		LIMIT $3`, scope.Merchant.UUID(), scope.Customer, convergeScanCap)
+	if err != nil {
+		return nil, fmt.Errorf("life: scan unverified subscriptions: %w", err)
+	}
+	defer rows.Close()
+	type backlog struct {
+		count  int
+		oldest time.Time
+	}
+	accounts := map[uuid.UUID]*backlog{}
+	var out []ConvergeFinding
+	for rows.Next() {
+		var (
+			id, psp  uuid.UUID
+			rail     string
+			since    time.Time
+			reads    int
+			lastRead *time.Time
+		)
+		if err := rows.Scan(&id, &psp, &rail, &since, &reads, &lastRead); err != nil {
+			return nil, err
+		}
+		b := accounts[psp]
+		if b == nil {
+			b = &backlog{oldest: since}
+			accounts[psp] = b
+		}
+		b.count++
+		if since.Before(b.oldest) {
+			b.oldest = since
+		}
+		if now.Sub(since) < unverifiedUnresolvedAfter {
+			continue
+		}
+		evidence := map[string]any{"subscription_id": openrails.SubscriptionID(id).String(), "rail": rail, "unverified_since": since.UTC(), "reads": reads}
+		if lastRead != nil {
+			evidence["last_read_at"] = lastRead.UTC()
+		}
+		out = append(out, ConvergeFinding{
+			Type: "life.unverified.unresolved", Shape: ShapeMismatch, Class: ClassAdmin, Severity: SeverityHigh,
+			SubjectKey: "subscription:" + id.String(), Provider: "self", Evidence: evidence,
+			RecommendedAction: fmt.Sprintf("Subscription %s has been unverified since %s: provider reads found no payment, decline or cancellation to settle it. Access is held. Check the schedule at %s and record the outcome.",
+				openrails.SubscriptionID(id), since.UTC().Format(time.RFC3339), rail),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !scope.IsGlobal() {
+		return out, nil
+	}
+	for psp, b := range accounts {
+		age := max(now.Sub(b.oldest), 0)
+		severity := SeverityLow
+		if age >= unverifiedUnresolvedAfter {
+			severity = SeverityMedium
+		}
+		out = append(out, ConvergeFinding{
+			Type: "life.unverified.backlog", Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
+			SubjectKey: "psp:" + psp.String(), Provider: "self",
+			Evidence: map[string]any{"psp_id": psp.String(), "count": b.count, "oldest_since": b.oldest.UTC(), "oldest_age_seconds": int64(age.Seconds())},
+		})
+	}
+	return out, nil
 }

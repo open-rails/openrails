@@ -119,9 +119,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		"backfilled":           res.Backfilled,
 	}).Info("stripe converge: decided from fetched truth")
 
-	return sub.CustomerID, afterConvergeTransition(ctx, convergeDeps{
-		NotificationService: s.NotificationService,
-	}, sub, res)
+	return sub.CustomerID, nil
 }
 
 // createFromFetchedRecord is the signup/first-invoice leg: a Stripe checkout

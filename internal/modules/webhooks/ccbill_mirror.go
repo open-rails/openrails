@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -36,33 +35,27 @@ func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db
 	if !changed && len(effects) == 0 {
 		return false, nil, nil
 	}
-	if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
-		return false, nil, fmt.Errorf("persist ccbill %s for %s: %w", lifecycle.Name(ev), sub.ID, err)
-	}
-	ents := entitlements.NewEntitlementService(d, s.Clock)
+	// Access effects run through the shared executor; CCBill's notices keep
+	// their handler context and are created at delivery.
+	var access []lifecycle.Effect
 	var notes []*models.NotificationQueue
 	for _, e := range effects {
 		switch e := e.(type) {
-		case lifecycle.EndAccess:
-			sources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
-			if !e.At.After(now) {
-				sources = append(sources, models.EntitlementSourceSubscription)
-			}
-			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, notice.revoke, sources...); err != nil {
-				return false, nil, fmt.Errorf("end access for %s: %w", sub.ID, err)
-			}
-			if err := ents.BoundSubscriptionAccess(ctx, sub.ID, e.At); err != nil {
-				return false, nil, fmt.Errorf("bound access for %s: %w", sub.ID, err)
-			}
-		case lifecycle.ReopenAccess:
-			if err := ents.ResumeSubscriptionAccess(ctx, sub.ID); err != nil {
-				return false, nil, fmt.Errorf("reopen access for %s: %w", sub.ID, err)
-			}
 		case lifecycle.Notify:
 			if n := notice.build(sub, e.Kind); n != nil {
 				notes = append(notes, n)
 			}
+		case lifecycle.QueueProviderCancel:
+			// CCBill owns its schedule.
+		default:
+			access = append(access, e)
 		}
+	}
+	if _, err := s.lifecycleIn(d).ApplyEffects(ctx, d, sub, access, now, subscriptions.EffectOptions{RevokeReason: notice.revoke}); err != nil {
+		return false, nil, err
+	}
+	if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
+		return false, nil, fmt.Errorf("persist ccbill %s for %s: %w", lifecycle.Name(ev), sub.ID, err)
 	}
 	return true, notes, nil
 }

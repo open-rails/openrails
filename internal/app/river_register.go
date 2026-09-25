@@ -57,6 +57,14 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add provider refresh scheduler worker: %w", err)
 	}
+	if r.Verifier == nil {
+		r.Verifier = &reconcile.Verifier{
+			DB: r.DB, Clock: clock, DeferDelete: r.DeferredDeletes, Notifications: r.NotificationService,
+			Builder: reconcile.MerchantFetcherBuilder{StripeClients: r.StripeClients, Config: r.Config, Merchants: r.Merchants, DB: r.DB, NMIClients: r.NMIClients,
+				Endpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: r.Config.SandboxCCBillDataLinkURL()}},
+		}
+		r.Verifier.Start()
+	}
 	// The per-merchant body: bounded provider event pulls, the unknown-cohort
 	// reconcile (#632/#665 — the one per-subscription verification path; the
 	// #367 liveness worker is retired), CCBill DataLink, and scoped
@@ -72,6 +80,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Alerts:              r.AlertService, // #787: requires_review findings -> operator notifications
 		NMIClients:          r.NMIClients,
 		PullEndpoints:       reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: r.Config.SandboxCCBillDataLinkURL()},
+		Verifier:            r.Verifier,
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}

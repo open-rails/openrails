@@ -120,9 +120,7 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 		"backfilled":           res.Backfilled,
 	}).Info("nmi converge: decided from fetched truth")
 
-	return sub.CustomerID, afterConvergeTransition(ctx, convergeDeps{
-		NotificationService: s.NotificationService,
-	}, sub, res)
+	return sub.CustomerID, nil
 }
 
 // activatePendingFromProbe is the signup leg: a pending NMI subscription

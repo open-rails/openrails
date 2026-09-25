@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	vaultapi "github.com/hashicorp/vault/api"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,6 +47,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -268,6 +270,9 @@ type Runtime struct {
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
+	// Verifier reads unverified subscriptions from their provider as soon as
+	// they become unverified (#1094); started with the billing workers.
+	Verifier *reconcile.Verifier
 }
 
 // ConfiguredMerchant returns the current single-merchant binding. Zero means
@@ -321,6 +326,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 	// #895: stop the out-of-River progress detector first — it outlives the
 	// River client on purpose, so nothing else will cancel it.
 	r.stopRiverProgressMonitor()
+
+	if r.Verifier != nil {
+		r.Verifier.Close()
+	}
 
 	// Stop Solana Pay poller
 	if r.SolanaPayPoller != nil {
