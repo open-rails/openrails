@@ -13,7 +13,9 @@ import (
 // A batched transaction report names no schedule: sales are attributed by
 // vault, then order; a vault two rows share sends both to single reads.
 func TestAttribution(t *testing.T) {
-	sub := func(rail string) *models.Subscription { return &models.Subscription{ID: uuid.New(), RailSubscriptionID: rail} }
+	sub := func(rail string) *models.Subscription {
+		return &models.Subscription{ID: uuid.New(), RailSubscriptionID: rail}
+	}
 	a, b, c, d := sub("s-a"), sub("s-b"), sub("s-c"), sub("s-d")
 	vaults := map[uuid.UUID]string{a.ID: "v1", b.ID: "v2", c.ID: "v2"}
 	records := map[string]nmi.ScheduleRecord{"s-c": {OrderID: "order-c"}}

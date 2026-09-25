@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -88,9 +89,7 @@ func (v *Verifier) init() {
 		if v.Retries <= 0 {
 			v.Retries = defaultVerifyRetries
 		}
-		if v.Clock == nil {
-			v.Clock = clockwork.NewRealClock()
-		}
+		v.Clock = timeutil.FirstClock(v.Clock)
 		v.pending = map[merchant.ID]map[uuid.UUID]struct{}{}
 		v.inflight = map[uuid.UUID]struct{}{}
 		v.busy = map[merchant.ID]int{}
