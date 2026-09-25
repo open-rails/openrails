@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // Legacy schedules changed at NMI behind OpenRails' back. With the
@@ -20,16 +22,16 @@ func TestLegacyNMIDrift(t *testing.T) {
 	w := newWorld(t)
 	monthly := w.bookTier("monthly", 999, 30)
 	other := "lb_other_" + uuid.NewString()[:8]
-	w.nmi.legacyPlan(other, "14.99", 30, 0)
+	w.nmi.AddPlan(nmimock.Plan{ID: other, Name: "Legacy " + other, Amount: "14.99", Days: 30})
 	m := w.mirrorBook(remote, monthly, 6)
 	amount, plan, paused, vaultGone, deleted, clean := m[0], m[1], m[2], m[3], m[4], m[5]
 	writes := len(w.nmiWrites())
 
-	w.nmi.editSchedule(amount.railSub, func(s *nmiSchedule) { s.Amount = "14.99" })
-	w.nmi.editSchedule(plan.railSub, func(s *nmiSchedule) { s.Plan, s.Amount = other, "14.99" })
-	w.nmi.editSchedule(paused.railSub, func(s *nmiSchedule) { s.Paused = true })
-	w.nmi.removeVault(vaultGone.railCust)
-	w.nmi.providerCancel(deleted.railSub)
+	w.nmi.EditSchedule(amount.railSub, func(s *nmimock.Schedule) { s.Amount = "14.99" })
+	w.nmi.EditSchedule(plan.railSub, func(s *nmimock.Schedule) { s.Plan, s.Amount = other, "14.99" })
+	w.nmi.EditSchedule(paused.railSub, func(s *nmimock.Schedule) { s.Paused = true })
+	w.nmi.RemoveVault(vaultGone.railCust)
+	w.nmi.DeleteSchedule(deleted.railSub)
 	w.advance(time.Hour)
 
 	w.pull()
@@ -45,7 +47,7 @@ func TestLegacyNMIDrift(t *testing.T) {
 		require.Equal(t, "active", w.subscription(remote, l.sub).Status, "drift is reported, never acted on")
 		require.True(t, l.c.entitled(l.ent))
 	}
-	require.Equal(t, "14.99", w.nmi.scheduleState(amount.railSub).Amount, "the schedule is left as NMI holds it")
+	require.Equal(t, "14.99", w.nmi.Schedule(amount.railSub).Amount, "the schedule is left as NMI holds it")
 	require.Len(t, w.nmiWrites(), writes, "no NMI write, destructive or otherwise")
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }

@@ -9,8 +9,8 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/nmifake"
 	"github.com/open-rails/openrails/internal/solanafake"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 type Catalog struct {
@@ -315,7 +315,7 @@ func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, erro
 type CustomerBilling struct {
 	Subscriptions  []openrails.Subscription  `json:"subscriptions"`
 	PaymentMethods []openrails.PaymentMethod `json:"payment_methods"`
-	Sales          []nmifake.Sale            `json:"sales"`
+	Sales          []nmimock.Sale            `json:"sales"`
 	Vaults         int                       `json:"vaults"`
 }
 
@@ -328,5 +328,5 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	return CustomerBilling{Subscriptions: subs.Data, PaymentMethods: methods.Data, Sales: r.NMI.Sales(), Vaults: r.NMI.Vaults()}, nil
+	return CustomerBilling{Subscriptions: subs.Data, PaymentMethods: methods.Data, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
 }

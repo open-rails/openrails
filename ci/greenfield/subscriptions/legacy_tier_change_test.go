@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 const tierUpdateStuck = "life.tier_change.provider_update_stuck"
@@ -29,14 +30,14 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	end := w.clock.Now().Add(left).UTC().Truncate(24 * time.Hour)
 	start := end.Add(-time.Duration(cycle) * time.Hour)
 	amount := fmt.Sprintf("%d.%02d", cents/100, cents%100)
-	vault := w.nmi.legacyVault(visa)
-	railSub := w.nmi.legacyScheduleEvery(vault, price.plan, amount, cycle/24, 0, end)
-	sale := w.nmi.scheduleSale(railSub, start)
+	vault := w.nmi.AddVault(visa)
+	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: amount, Days: cycle / 24, Months: 0, NextBilling: end})
+	sale := w.nmi.AddScheduleSale(railSub, start)
 	customerID, err := openrails.ParseCustomerID(c.id)
 	require.NoError(t, err)
 	priceID, err := openrails.ParsePriceID(price.ID)
 	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.billingOf(vault)}
+	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
 	result, err := w.client[tp].ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
 		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
 		PaymentMethods: []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef,
@@ -60,8 +61,8 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 // scheduleWrites is every request that could create or remove an NMI
 // schedule: never sent by an in-place tier change.
 func (f *nmiFake) scheduleWrites() int {
-	adds := f.callsTo(http.MethodPost, "transact.php", func(v url.Values) bool { return v.Get("recurring") == "add_subscription" })
-	return len(adds) + len(f.callsTo(http.MethodPost, "/subscriptions", nil)) + len(f.callsTo(http.MethodDelete, "/subscriptions", nil))
+	adds := f.CallsTo(http.MethodPost, "transact.php", func(v url.Values) bool { return v.Get("recurring") == "add_subscription" })
+	return len(adds) + len(f.CallsTo(http.MethodPost, "/subscriptions", nil)) + len(f.CallsTo(http.MethodDelete, "/subscriptions", nil))
 }
 
 func (l *legacy) tierSales() []ledgerEntry { return l.w.nmi.ledger(l.railCust) }
@@ -104,13 +105,13 @@ func TestLegacyNMITierChange(t *testing.T) {
 			ledger := l.tierSales()
 			require.Len(t, ledger, sales+1, "exactly one proration sale")
 			require.Equal(t, preview.AmountDueNow/10_000, ledger[len(ledger)-1].Amount, "provider journal carries the quoted amount")
-			updates := w.nmi.scheduleUpdates(l.railSub)
+			updates := w.nmi.ScheduleUpdates(l.railSub)
 			require.Len(t, updates, 1, "the schedule is updated once")
 			require.Equal(t, next.plan, updates[0].Form.Get("plan_id"), "a named-plan schedule switches to the target's linked plan")
 			require.Empty(t, updates[0].Form.Get("plan_amount"))
-			require.Equal(t, "19.99", w.nmi.scheduleState(l.railSub).Amount)
-			require.Equal(t, next.plan, w.nmi.scheduleState(l.railSub).Plan)
-			require.True(t, w.nmi.scheduleState(l.railSub).NextBilling.Equal(end), "the next billing date does not move")
+			require.Equal(t, "19.99", w.nmi.Schedule(l.railSub).Amount)
+			require.Equal(t, next.plan, w.nmi.Schedule(l.railSub).Plan)
+			require.True(t, w.nmi.Schedule(l.railSub).NextBilling.Equal(end), "the next billing date does not move")
 			require.Zero(t, w.nmi.scheduleWrites(), "no second schedule, no delete")
 
 			sub := w.subscription(tp, l.sub)
@@ -124,7 +125,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, done.AmountDueNow, again.AmountDueNow)
 			require.Len(t, l.tierSales(), sales+1)
-			require.Len(t, w.nmi.scheduleUpdates(l.railSub), 1)
+			require.Len(t, w.nmi.ScheduleUpdates(l.railSub), 1)
 
 			w.pull()
 			require.Empty(t, w.openFindings("pull.subscription.drift"), "an OpenRails-initiated change is not drift")
@@ -142,7 +143,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.True(t, sub.CurrentPeriodEndsAt.After(end))
 			require.True(t, l.c.entitled(next.ent))
 			require.Zero(t, w.nmi.scheduleWrites())
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 
 		t.Run("downgrade/"+string(tp), func(t *testing.T) {
@@ -166,10 +167,10 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.Zero(t, done.AmountDueNow)
 			require.Len(t, l.tierSales(), sales, "nothing charged now")
-			updates := w.nmi.scheduleUpdates(l.railSub)
+			updates := w.nmi.ScheduleUpdates(l.railSub)
 			require.Len(t, updates, 1)
 			require.Equal(t, lower.plan, updates[0].Form.Get("plan_id"))
-			require.Equal(t, "4.99", w.nmi.scheduleState(l.railSub).Amount, "NMI bills the lower amount from its next renewal")
+			require.Equal(t, "4.99", w.nmi.Schedule(l.railSub).Amount, "NMI bills the lower amount from its next renewal")
 			sub := w.subscription(tp, l.sub)
 			require.Equal(t, old.ID, sub.PriceID, "the paid period keeps its tier")
 			require.NotNil(t, sub.ScheduledPriceID)
@@ -190,7 +191,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.True(t, l.c.entitled(lower.ent))
 			require.False(t, l.c.entitled(old.ent))
 			require.Zero(t, w.nmi.scheduleWrites())
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -207,15 +208,15 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			next := w.tierPrice(group, 2, 1999, monthHours, true)
 			l := w.legacyOnTier(tp, old, 999, monthHours, 10*day)
 			sales := len(l.tierSales())
-			w.nmi.setDecline(visa.Last4, "202")
+			w.nmi.SetDecline(visa.Last4, "202")
 			_, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
 			var status *openrails.StatusError
 			require.True(t, errors.As(err, &status), "%v", err)
 			require.Equal(t, http.StatusPaymentRequired, status.Status, "%v", err)
 			w.settle()
 			require.Len(t, l.tierSales(), sales)
-			require.Empty(t, w.nmi.scheduleUpdates(l.railSub))
-			require.Equal(t, "9.99", w.nmi.scheduleState(l.railSub).Amount)
+			require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
+			require.Equal(t, "9.99", w.nmi.Schedule(l.railSub).Amount)
 			sub := w.subscription(tp, l.sub)
 			require.Equal(t, old.ID, sub.PriceID)
 			require.Nil(t, sub.ScheduledPriceID)
@@ -241,7 +242,7 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 			next := w.tierPrice(group, 2, 1999, monthHours, true)
 			l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 			sales := len(l.tierSales())
-			w.nmi.failScheduleUpdates(row.fails)
+			w.nmi.FailScheduleUpdates(row.fails)
 			key := "up-" + uuid.NewString()
 			_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
@@ -250,14 +251,14 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 				w.until(func() bool { return len(w.openFindings(tierUpdateStuck)) > 0 }, "the stuck schedule update raises a finding")
 				require.Contains(t, w.openFindings(tierUpdateStuck), l.sub.UUID().String())
 				require.Len(t, l.tierSales(), sales+1, "one charge while the update is stuck")
-				require.Equal(t, "9.99", w.nmi.scheduleState(l.railSub).Amount)
+				require.Equal(t, "9.99", w.nmi.Schedule(l.railSub).Amount)
 				require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID, "the local change waits for NMI")
-				w.nmi.failScheduleUpdates(0)
+				w.nmi.FailScheduleUpdates(0)
 			}
 			w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the schedule update converges")
 			require.Len(t, l.tierSales(), sales+1, "exactly one charge")
-			require.Equal(t, "19.99", w.nmi.scheduleState(l.railSub).Amount)
-			require.GreaterOrEqual(t, len(w.nmi.scheduleUpdates(l.railSub)), 2, "the failed update was retried")
+			require.Equal(t, "19.99", w.nmi.Schedule(l.railSub).Amount)
+			require.GreaterOrEqual(t, len(w.nmi.ScheduleUpdates(l.railSub)), 2, "the failed update was retried")
 			require.Empty(t, w.openFindings(tierUpdateStuck), "the finding closes once NMI converges")
 			require.True(t, l.c.entitled(next.ent))
 			require.Zero(t, w.nmi.scheduleWrites())
@@ -304,7 +305,7 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 	require.LessOrEqual(t, refused, 1)
 	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "one tier change applies")
 	require.Len(t, l.tierSales(), sales+1, "one proration charge across replicas")
-	require.Len(t, w.nmi.scheduleUpdates(l.railSub), 1, "one schedule update")
+	require.Len(t, w.nmi.ScheduleUpdates(l.railSub), 1, "one schedule update")
 	require.Zero(t, w.nmi.scheduleWrites())
 }
 
@@ -326,7 +327,7 @@ func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales)
-	require.Empty(t, w.nmi.scheduleUpdates(l.railSub))
+	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
 	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
 }
 
@@ -360,7 +361,7 @@ func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales, "nothing charged")
-	require.Empty(t, w.nmi.scheduleUpdates(l.railSub), "nothing sent to NMI")
+	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub), "nothing sent to NMI")
 	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
 	require.True(t, l.c.entitled(old.ent))
 }
@@ -388,11 +389,11 @@ func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.Equal(t, preview.AmountDueNow, done.AmountDueNow)
 			require.Len(t, l.tierSales(), sales+1)
-			updates := w.nmi.scheduleUpdates(l.railSub)
+			updates := w.nmi.ScheduleUpdates(l.railSub)
 			require.Len(t, updates, 1)
 			require.Equal(t, "19.99", updates[0].Form.Get("plan_amount"))
 			require.Empty(t, updates[0].Form.Get("plan_id"))
-			state := w.nmi.scheduleState(l.railSub)
+			state := w.nmi.Schedule(l.railSub)
 			require.Equal(t, "19.99", state.Amount)
 			require.True(t, state.NextBilling.Equal(end))
 			require.Equal(t, next.ID, w.subscription(tp, l.sub).PriceID)
@@ -415,17 +416,17 @@ func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	w.nmi.customSchedule(l.railSub)
 	sales := len(l.tierSales())
-	w.nmi.failScheduleUpdates(1000)
+	w.nmi.FailScheduleUpdates(1000)
 	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
 	require.NoError(t, err)
 	w.settle()
 	w.until(func() bool { return len(w.openFindings(tierUpdateStuck)) > 0 }, "the stuck update raises a finding")
 	require.Len(t, l.tierSales(), sales+1)
 	// The schedule turns out to be on a named plan: NMI ignores plan_amount.
-	w.nmi.editSchedule(l.railSub, func(s *nmiSchedule) { s.Custom, s.Plan = false, old.plan })
-	w.nmi.failScheduleUpdates(0)
+	w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.Custom, s.Plan = false, old.plan })
+	w.nmi.FailScheduleUpdates(0)
 	w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the operation converges on the linked plan")
-	state := w.nmi.scheduleState(l.railSub)
+	state := w.nmi.Schedule(l.railSub)
 	require.Equal(t, next.plan, state.Plan)
 	require.Equal(t, "19.99", state.Amount)
 	require.Len(t, l.tierSales(), sales+1, "exactly one charge")

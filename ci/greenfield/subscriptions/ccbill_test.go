@@ -345,5 +345,5 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 
 // engineCharges counts every charge OpenRails submitted on any rail.
 func (w *world) engineCharges() int {
-	return len(w.stripe.mutations("/v1/payment_intents")) + w.nmi.saleAttempts()
+	return len(w.stripe.mutations("/v1/payment_intents")) + len(w.nmi.Attempts())
 }

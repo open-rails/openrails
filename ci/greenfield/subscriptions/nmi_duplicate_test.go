@@ -12,18 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // nmiDupWindow is the duplicate window the fake NMI applies in these rows.
 const nmiDupWindow = 20 * time.Second
-
-// seedRecent is another customer's charge of amount on the same card, just
-// processed at NMI.
-func (f *nmiFake) seedRecent(c card, amount string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.remember(c, amount)
-}
 
 func wireAmount(micros int64) string {
 	cents := micros / 10_000
@@ -47,8 +40,8 @@ func TestLegacyNMITierUpgradeDuplicateRefused(t *testing.T) {
 			w.nmi.customSchedule(l.railSub)
 			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
-			w.nmi.duplicateWindow(w.clock.Now, nmiDupWindow)
-			w.nmi.seedRecent(visa, wireAmount(preview.AmountDueNow))
+			w.nmi.SetDuplicateWindow(nmiDupWindow)
+			w.nmi.AddRecentCharge(visa, wireAmount(preview.AmountDueNow))
 			sales := len(l.tierSales())
 
 			key := "up-" + uuid.NewString()
@@ -58,7 +51,7 @@ func TestLegacyNMITierUpgradeDuplicateRefused(t *testing.T) {
 			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
 			requireCode(t, err, http.StatusConflict, openrails.CodePaymentDuplicateRefused)
 			require.Len(t, l.tierSales(), sales, "nothing was charged")
-			require.Empty(t, w.nmi.scheduleUpdates(l.railSub), "NMI's schedule is untouched")
+			require.Empty(t, w.nmi.ScheduleUpdates(l.railSub), "NMI's schedule is untouched")
 			require.Equal(t, old.ID, w.subscription(tp, l.sub).PriceID)
 			require.True(t, l.c.entitled(old.ent))
 
@@ -68,9 +61,9 @@ func TestLegacyNMITierUpgradeDuplicateRefused(t *testing.T) {
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.Len(t, l.tierSales(), sales+1, "exactly one charge")
-			require.Len(t, w.nmi.scheduleUpdates(l.railSub), 1)
+			require.Len(t, w.nmi.ScheduleUpdates(l.railSub), 1)
 			require.Equal(t, next.ID, w.subscription(tp, l.sub).PriceID)
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -89,9 +82,9 @@ func TestLegacyNMITierUpgradeLostDuplicateSettles(t *testing.T) {
 	w.nmi.customSchedule(l.railSub)
 	preview, err := w.client[embedded].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
 	require.NoError(t, err)
-	w.nmi.duplicateWindow(w.clock.Now, nmiDupWindow)
-	w.nmi.seedRecent(visa, wireAmount(preview.AmountDueNow))
-	w.nmi.dropResponses(1)
+	w.nmi.SetDuplicateWindow(nmiDupWindow)
+	w.nmi.AddRecentCharge(visa, wireAmount(preview.AmountDueNow))
+	w.nmi.DropSaleResponses(1)
 	sales := len(l.tierSales())
 
 	key := "up-" + uuid.NewString()
@@ -105,7 +98,7 @@ func TestLegacyNMITierUpgradeLostDuplicateSettles(t *testing.T) {
 	_, err = w.client[embedded].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
 	requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRefused)
 	require.Len(t, l.tierSales(), sales, "nothing was charged")
-	require.Empty(t, w.nmi.scheduleUpdates(l.railSub))
+	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
 	require.Empty(t, w.openFindings("life.tier_change.proration_unresolved"))
 	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
 }
@@ -122,8 +115,8 @@ func TestEngineTierUpgradeDuplicateRefused(t *testing.T) {
 	w.advance(w.subscription(embedded, sub).CurrentPeriodEndsAt.Sub(w.clock.Now()) - 360*time.Hour)
 	preview, err := w.client[embedded].PreviewTierChange(t.Context(), sub, openrails.ChangeTierRequest{PriceID: to.ID})
 	require.NoError(t, err)
-	w.nmi.duplicateWindow(w.clock.Now, nmiDupWindow)
-	w.nmi.seedRecent(visa, wireAmount(preview.AmountDueNow))
+	w.nmi.SetDuplicateWindow(nmiDupWindow)
+	w.nmi.AddRecentCharge(visa, wireAmount(preview.AmountDueNow))
 	charges := len(w.nmi.ledger(""))
 
 	_, err = w.client[embedded].ChangeTier(t.Context(), sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: to.ID})
@@ -147,17 +140,13 @@ func TestNMICardSaveDuplicateRefused(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
-	w.nmi.duplicateWindow(w.clock.Now, nmiDupWindow)
-	w.nmi.seedRecent(visa, "0.00")
-	w.nmi.mu.Lock()
-	before := len(w.nmi.vaults)
-	w.nmi.mu.Unlock()
-	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.tokenize(visa), "name_on_card": "Greenfield Payer"})
+	w.nmi.SetDuplicateWindow(nmiDupWindow)
+	w.nmi.AddRecentCharge(visa, "0.00")
+	before := len(w.nmi.Vaults())
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "Greenfield Payer"})
 	require.Equal(t, http.StatusConflict, status, "%v", body)
 	require.Equal(t, openrails.CodePaymentDuplicateRefused, errorCode(body), "%v", body)
-	w.nmi.mu.Lock()
-	after := len(w.nmi.vaults)
-	w.nmi.mu.Unlock()
+	after := len(w.nmi.Vaults())
 	require.Equal(t, before, after, "the refused card's vault is removed")
 	w.advance(nmiDupWindow + time.Second)
 	require.NotEmpty(t, c.saveCard("nmi", visa))
@@ -171,17 +160,17 @@ func TestTinyBookCancellationConverges(t *testing.T) {
 	w.armDestructive()
 	book := w.mirrorBook(embedded, w.bookTier("monthly", 999, 30), 4)
 	// Another schedule stays live at NMI, so the roster is non-empty.
-	vault := w.nmi.legacyVault(mastercard)
-	w.nmi.legacySchedule(vault, "legacy_plan_other", "9.99", w.clock.Now().Add(20*day))
+	vault := w.nmi.AddVault(mastercard)
+	w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "legacy_plan_other", Amount: "9.99", NextBilling: w.clock.Now().Add(20 * day)})
 	for _, l := range book {
-		w.nmi.providerCancel(l.railSub)
+		w.nmi.DeleteSchedule(l.railSub)
 	}
 	w.advance(time.Hour)
 	w.pull()
 	for _, l := range book {
 		require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
-		require.Zero(t, w.nmi.deletesOf(l.railSub))
+		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 	}
 	require.Empty(t, w.openFindings("pull.cancellation.capped"))
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }

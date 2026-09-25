@@ -25,6 +25,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // importLegacyEvery lands one NMI-owned membership whose legacy plan bills
@@ -37,7 +38,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	l := &legacy{w: w, rail: "nmi", tp: tp, ent: "content:legacy-" + uuid.NewString()[:6], c: c}
 	client := w.client[tp]
 	plan := "legacy_plan_" + uuid.NewString()[:8]
-	w.nmi.legacyPlan(plan, "9.99", days, 0)
+	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Legacy " + plan, Amount: "9.99", Days: days})
 	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := days * 24
@@ -47,14 +48,14 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	cycle := time.Duration(hours) * time.Hour
 	end := w.clock.Now().Add(2 * cycle / 3).UTC().Truncate(24 * time.Hour)
 	start := end.Add(-cycle)
-	l.railCust = w.nmi.legacyVault(visa)
-	l.railSub = w.nmi.legacyScheduleEvery(l.railCust, plan, "9.99", days, 0, end)
-	paid := w.nmi.scheduleSale(l.railSub, start)
+	l.railCust = w.nmi.AddVault(visa)
+	l.railSub = w.nmi.AddSchedule(nmimock.Schedule{Vault: l.railCust, Plan: plan, Amount: "9.99", Days: days, Months: 0, NextBilling: end})
+	paid := w.nmi.AddScheduleSale(l.railSub, start)
 	customerID, err := openrails.ParseCustomerID(c.id)
 	require.NoError(t, err)
 	priceID, err := openrails.ParsePriceID(l.price.ID)
 	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.billingOf(l.railCust)}
+	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
 	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
 		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
 		PaymentMethods: []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef,
@@ -82,10 +83,8 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 // charge schedule: sales (including rebill_subscription), subscription
 // enrollments and v5 payments.
 func (f *nmiFake) engineWrites(vault string) []providerCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	var out []providerCall
-	for _, c := range f.writes {
+	for _, c := range calls(f.Calls()) {
 		sale := c.Path == "transact.php" && (c.Form.Get("type") == "sale" || c.Form.Get("recurring") == "add_subscription") && (vault == "" || c.Form.Get("customer_vault_id") == vault)
 		v5 := vault == "" && strings.HasPrefix(c.Path, "/payments") && !strings.HasSuffix(c.Path, "/auth") && !strings.HasSuffix(c.Path, "/refund") && !strings.HasSuffix(c.Path, "/void")
 		if sale || v5 {
@@ -124,7 +123,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 	}
 	cycles := func(t *testing.T, w *world, l *legacy) {
 		for i := range 3 {
-			w.advanceTo(w.nmi.scheduleState(l.railSub).NextBilling.Add(time.Hour))
+			w.advanceTo(w.nmi.Schedule(l.railSub).NextBilling.Add(time.Hour))
 			w.runRenewals()
 			w.converge()
 			// NMI bills on its own clock; the second notice never arrives.
@@ -158,7 +157,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 		}},
 		{"crash_mid_convergence", 30, false, 0, func(t *testing.T, w *world, l *legacy) {
 			w.advanceTo(l.periodEnd().Add(time.Hour))
-			sale, _ := w.nmi.providerRenew(l.railSub, true)
+			sale := w.nmi.RenewSchedule(l.railSub, true)
 			g := w.nmi.hold(newGate(func(r *http.Request) bool {
 				return r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v5/subscriptions/"+l.railSub)
 			}, false))
@@ -176,7 +175,7 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 		}},
 		{"two_replicas", 30, false, 0, func(t *testing.T, w *world, l *legacy) {
 			e := enroll(t, w, "nmi", embedded)
-			engineVault := w.nmi.lastSale().Vault
+			engineVault := w.nmi.LastSale().Vault
 			second := w.startReplica()
 			for i := range 3 {
 				w.advanceTo(e.periodEnd().Add(time.Hour))
@@ -200,10 +199,10 @@ func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 			r.run(t, w, l)
 			require.Len(t, w.nmi.engineWrites(l.railCust), r.charges, "OpenRails charges the NMI-owned membership only to retry NMI's decline")
 			if !r.ends {
-				require.True(t, w.nmi.scheduleLive(l.railSub), "NMI still owns the schedule")
+				require.True(t, w.nmi.ScheduleLive(l.railSub), "NMI still owns the schedule")
 			}
 			require.Equal(t, "provider_dunning", w.subscription(tp, l.sub).CollectionPolicy)
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -220,7 +219,7 @@ func TestLegacyNMICoexistsWithEngine(t *testing.T) {
 			w := newWorld(t)
 			w.armDestructive()
 			e := enroll(t, w, "nmi", tp)
-			engineVault := w.nmi.lastSale().Vault
+			engineVault := w.nmi.LastSale().Vault
 			l := importLegacyEvery(t, w, tp, 30, e.c)
 			w.converge()
 			require.NotEqual(t, l.railCust, engineVault)
@@ -258,7 +257,7 @@ func TestLegacyNMICoexistsWithEngine(t *testing.T) {
 			require.Equal(t, 4, enginePaid)
 			require.GreaterOrEqual(t, legacyPaid, 4, "every notified NMI renewal is mirrored")
 			require.Empty(t, w.openFindings(duplicateCharge), "no duplicate across ownership modes")
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }

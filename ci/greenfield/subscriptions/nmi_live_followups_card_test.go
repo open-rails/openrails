@@ -14,24 +14,9 @@ import (
 	"github.com/open-rails/openrails/embed"
 )
 
-// validationsOf is every card verification NMI received for a vault.
-func (f *nmiFake) validationsOf(vault string) []nmiValidation {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []nmiValidation
-	for _, v := range f.validations {
-		if v.Vault == vault {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 // billingIDs is the vault's billing entries at NMI, primary first.
 func (f *nmiFake) billingIDs(vault string) []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v := f.vaults[vault]
+	v := f.Vault(vault)
 	if v == nil {
 		return nil
 	}
@@ -57,23 +42,23 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 			e := enroll(t, w, "nmi", tp)
 			before := w.storedCard(e.method)
 			require.NotEmpty(t, before.recurringRef)
-			verified := len(w.nmi.validationsOf(before.vault))
+			verified := len(w.nmi.Validations(before.vault))
 
 			// Refused: nothing changes, at NMI or locally.
 			refused := card{Brand: "mastercard", Last4: "0051", Decline: "200"}
-			status, body := e.c.call(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(refused),
+			status, body := e.c.call(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(refused),
 				"last_four": refused.Last4, "card_type": refused.Brand, "expiry_date": "12/35"})
 			require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
 			require.Equal(t, "card_declined", errorCode(body))
 			w.settle()
 			require.Equal(t, before, w.storedCard(e.method), "a refused replacement leaves the card and its agreement")
 			require.Equal(t, []string{before.billing}, w.nmi.billingIDs(before.vault), "the refused card is removed from the vault")
-			require.Len(t, w.nmi.validationsOf(before.vault), verified+1, "one verification for the refused card")
+			require.Len(t, w.nmi.Validations(before.vault), verified+1, "one verification for the refused card")
 
 			// Replaced: one new verification, adopted with the card.
 			e.replaceCard(mastercard)
 			after := w.storedCard(e.method)
-			all := w.nmi.validationsOf(before.vault)
+			all := w.nmi.Validations(before.vault)
 			require.Len(t, all, verified+2, "exactly one verification for the replacement card")
 			latest := all[len(all)-1]
 			require.True(t, latest.Approved)
@@ -96,13 +81,13 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 			w.runRenewals()
 			require.True(t, e.periodEnd().After(end))
 			require.Len(t, w.nmi.ledger(""), sales+1, "exactly one renewal")
-			renewal := w.nmi.lastSale()
+			renewal := w.nmi.LastSale()
 			require.Equal(t, mastercard.Last4, renewal.Card.Last4)
 			require.Equal(t, after.billing, renewal.BillingID)
 			require.Equal(t, "merchant", renewal.InitiatedBy)
 			require.Equal(t, "used", renewal.Indicator)
 			require.Equal(t, latest.TransactionID, renewal.Initial, "the MIT cites the agreement established on the card it charges")
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -136,9 +121,9 @@ func TestNMIRefreshRacingCardSave(t *testing.T) {
 	require.NotContains(t, mismatched, saved.vault, "a card saved during the refresh is held by NMI")
 	require.NotContains(t, mismatched, kept.vault)
 
-	w.nmi.removeVault(kept.vault)
+	w.nmi.RemoveVault(kept.vault)
 	w.pull()
 	require.Contains(t, w.openFindings("pull.payment_method.mismatch"), kept.vault, "a card removed at NMI is reported")
 	require.NotContains(t, w.openFindings("pull.payment_method.mismatch"), saved.vault)
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }

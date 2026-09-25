@@ -83,7 +83,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			_, missing := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString(), "currency": "USD"})
 			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
 			if rail == "nmi" {
-				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
+				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
 				refused(t, status, body, "replace Alice's card")
 			}
 			w.settle()

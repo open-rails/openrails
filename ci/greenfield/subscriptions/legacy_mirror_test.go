@@ -44,7 +44,7 @@ func (w *world) mirrorBook(tp topology, tier bookTier, n int) []*legacy {
 
 // nmiNext is the schedule's next billing date as NMI reports it (a date).
 func (l *legacy) nmiNext() time.Time {
-	return l.w.nmi.scheduleState(l.railSub).NextBilling.UTC().Truncate(24 * time.Hour)
+	return l.w.nmi.Schedule(l.railSub).NextBilling.UTC().Truncate(24 * time.Hour)
 }
 
 // requireMirrored asserts the local mirror of an NMI-billed membership:
@@ -58,7 +58,7 @@ func (l *legacy) requireMirrored(what string) {
 	require.Equal(t, "active", sub.Status, what)
 	require.True(t, l.nmiNext().Equal(*sub.CurrentPeriodEndsAt), "%s: period ends on NMI's next billing date (%s vs %s)", what, l.nmiNext(), sub.CurrentPeriodEndsAt)
 	require.True(t, l.c.entitled(l.ent), "%s: access is continuous", what)
-	require.Zero(t, l.w.nmi.saleAttempts(), "%s: OpenRails never charges", what)
+	require.Zero(t, len(l.w.nmi.Attempts()), "%s: OpenRails never charges", what)
 }
 
 // NMI's renewals reach the mirror through signed webhooks, delivered once,
@@ -101,8 +101,8 @@ func TestLegacyNMIMirrorWebhooks(t *testing.T) {
 			w.advance(time.Duration(cadence.days) * 6 * time.Hour)
 			require.Equal(t, http.StatusOK, w.deliver("nmi", notices[late]))
 			late.requireMirrored("late")
-			require.Zero(t, w.nmi.saleAttempts())
-			require.Zero(t, w.nmi.deletesOf(cancelled.railSub), "a schedule NMI ended is never deleted again")
+			require.Zero(t, len(w.nmi.Attempts()))
+			require.Zero(t, w.nmi.ScheduleDeletes(cancelled.railSub), "a schedule NMI ended is never deleted again")
 		})
 	}
 }
@@ -151,21 +151,21 @@ func TestLegacyNMIMirrorPull(t *testing.T) {
 			// NMI bills every due period meanwhile (three for a daily plan).
 			var notice obj
 			for _, l := range []*legacy{missed, both} {
-				for !l.w.nmi.scheduleState(l.railSub).NextBilling.After(w.clock.Now()) {
+				for !l.w.nmi.Schedule(l.railSub).NextBilling.After(w.clock.Now()) {
 					notice = l.providerRenewal(true)
 				}
 			}
 			require.Equal(t, http.StatusOK, w.deliver("nmi", notice))
 			both.requireMirrored("notified")
-			w.nmi.providerCancel(gone.railSub)
+			w.nmi.DeleteSchedule(gone.railSub)
 
 			w.converge()
 			w.pull()
 			missed.requireMirrored("missing webhook recovered by pull")
 			both.requireMirrored("notified and pulled")
 			require.Equal(t, "cancelled", w.subscription(tp, gone.sub).Status, "a schedule NMI deleted is mirrored by the pull")
-			require.Zero(t, w.nmi.deletesOf(gone.railSub))
-			require.Zero(t, w.nmi.saleAttempts())
+			require.Zero(t, w.nmi.ScheduleDeletes(gone.railSub))
+			require.Zero(t, len(w.nmi.Attempts()))
 		})
 	}
 }
@@ -201,7 +201,7 @@ func TestLegacyNMIMirrorPullKeepsDecline(t *testing.T) {
 			require.Equal(t, "past_due", sub.Status, "a pull without a charge never lifts a decline")
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "an unpaid period is never granted (%s vs %s)", sub.CurrentPeriodEndsAt, end)
 			require.Equal(t, charges, w.localCharges(tp, l.c.id))
-			require.Zero(t, w.nmi.saleAttempts())
+			require.Zero(t, len(w.nmi.Attempts()))
 		})
 	}
 }

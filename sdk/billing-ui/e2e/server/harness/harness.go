@@ -18,8 +18,8 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/nmifake"
 	"github.com/open-rails/openrails/internal/solanafake"
+	"github.com/open-rails/openrails/nmimock"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -36,7 +36,7 @@ const (
 	// ManagePrefix mounts the CustomerBillingManagement scope beside /v1/me.
 	ManagePrefix = "/v1/manage"
 	SolanaPSPKey = "solana"
-	// CardPSPKey is an armed NMI account on the loopback gateway (nmifake):
+	// CardPSPKey is an armed NMI account on the loopback gateway (nmimock):
 	// hosted checkout sells card subscriptions and one-time sales through it.
 	CardPSPKey = "cards"
 	// CardTokenizationKey is public; the browser's Collect.js is the test's.
@@ -51,7 +51,7 @@ type Runtime struct {
 	// Solana is the loopback chain the armed Solana PSP reads.
 	Solana *solanafake.Node
 	// NMI is the loopback gateway the armed card PSP charges.
-	NMI     *nmifake.Gateway
+	NMI     *nmimock.Mock
 	BaseURL string
 }
 
@@ -79,7 +79,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 // workers because customer cancel/resume are queued jobs.
 func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers bool) (_ *Runtime, err error) {
 	chain := solanafake.New()
-	gateway := nmifake.New()
+	gateway := nmimock.New(nmimock.Options{})
 	defer func() {
 		if err != nil {
 			chain.Close()

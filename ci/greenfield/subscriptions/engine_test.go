@@ -48,14 +48,14 @@ func (e *engineCase) providerAttempts() int {
 	if e.rail == "stripe" {
 		return e.w.stripe.attempts("")
 	}
-	return e.w.nmi.saleAttempts()
+	return len(e.w.nmi.Attempts())
 }
 
 func (e *engineCase) setDecline(last4, stripeCode, nmiCode string) {
 	if e.rail == "stripe" {
 		e.w.stripe.setDecline(last4, stripeCode)
 	} else {
-		e.w.nmi.setDecline(last4, nmiCode)
+		e.w.nmi.SetDecline(last4, nmiCode)
 	}
 }
 
@@ -132,7 +132,7 @@ func TestEngineHappyRenewals(t *testing.T) {
 			e.requireLedgerAgreement(paid)
 		}
 		require.Empty(t, w.stripe.unexpected())
-		require.Empty(t, w.nmi.unexpected())
+		require.Empty(t, w.nmi.Unexpected())
 	})
 }
 
@@ -334,7 +334,7 @@ func (e *engineCase) replaceCard(c card) {
 		e.method = method
 		return
 	}
-	e.c.must(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"provider": "nmi", "payment_token": e.w.nmi.tokenize(c), "last_four": c.Last4, "card_type": c.Brand, "expiry_date": "12/35"})
+	e.c.must(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"provider": "nmi", "payment_token": e.w.nmi.Tokenize(c), "last_four": c.Last4, "card_type": c.Brand, "expiry_date": "12/35"})
 	e.w.settle()
 }
 
@@ -343,7 +343,7 @@ func (e *engineCase) lastChargedCard() string {
 		ledger := e.w.stripe.ledger("")
 		return e.w.stripe.cardOf(ledger[len(ledger)-1].Method)
 	}
-	return e.w.nmi.lastSale().Card.Last4
+	return e.w.nmi.LastSale().Card.Last4
 }
 
 const (
@@ -684,7 +684,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		end := e.periodEnd()
 		e.toPeriodEnd()
 		before := len(w.nmi.saleOrders())
-		w.nmi.refuseDuplicates(1)
+		w.nmi.RefuseDuplicates(1)
 		w.runRenewals()
 		w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unexplained duplicate is an operator finding")
 		for range 6 {
@@ -701,7 +701,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		price := w.membership("content:members", 9_990_000)
 		c := w.newCustomer()
 		method := c.saveCard("nmi", visa)
-		w.nmi.refuseDuplicates(1)
+		w.nmi.RefuseDuplicates(1)
 		session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 			OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
 			IdempotencyKey: "enroll-dup", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
@@ -883,8 +883,8 @@ func TestEngineLostSubmission(t *testing.T) {
 		w := newWorld(t)
 		e := enroll(t, w, "nmi", embedded)
 		e.toPeriodEnd()
-		w.nmi.setDecline(visa.Last4, "202")
-		w.nmi.dropResponses(1)
+		w.nmi.SetDecline(visa.Last4, "202")
+		w.nmi.DropSaleResponses(1)
 		w.runRenewals()
 		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the recorded decline is adopted")
 		require.Equal(t, 2, e.providerAttempts(), "the declined renewal is not re-sent")
