@@ -35,11 +35,17 @@ func withClaim(ctx context.Context, in gen.OpenrailsRailIntent) (context.Context
 	return context.WithValue(ctx, claimKey{}, c), c
 }
 
+// ProviderCallHold is the lease a charge still needs when it starts: the
+// longest provider call (NMI's 25s mutation timeout) plus slack. No other
+// executor can claim the row until the call has returned or timed out.
+const ProviderCallHold = 30 * time.Second
+
 // RequireClaim re-reads the row on its own connection immediately before a
 // provider charge: the run must hold an executor claim (verification never
 // charges), its heartbeat must not have lost it, and the row must still carry
-// it with a lease past now. It narrows, not closes, the window of a stalled
-// executor: the provider has no remote fence.
+// it with a lease past now + ProviderCallHold, so the lease cannot lapse
+// while the call is in flight. The provider has no remote fence; this is the
+// bound on a stalled executor.
 func (s *Store) RequireClaim(ctx context.Context, id uuid.UUID, now time.Time) error {
 	c, ok := ctx.Value(claimKey{}).(*claim)
 	if !ok || c.id != id || c.status != StatusInFlight || c.lost.Load() {
@@ -57,7 +63,7 @@ func (s *Store) RequireClaim(ctx context.Context, id uuid.UUID, now time.Time) e
 	var held bool
 	if err := s.db.Qx(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM openrails.rail_intents
 		WHERE merchant_id = $1 AND id = $2 AND status = $3 AND attempts = $4 AND claimed_until > $5)`,
-		mid.UUID(), id, c.status, c.attempts, now.UTC()).Scan(&held); err != nil {
+		mid.UUID(), id, c.status, c.attempts, now.UTC().Add(ProviderCallHold)).Scan(&held); err != nil {
 		return err
 	}
 	if !held {

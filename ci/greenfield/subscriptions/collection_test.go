@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/nmimock"
 )
 
@@ -187,6 +188,56 @@ func TestReplicasStalledExecutorSendsNothing(t *testing.T) {
 			f.wake()
 			f.passes()
 			require.Equal(t, before+1, f.submissions(e), "the stalled executor sent nothing; one charge request in all")
+			f.requireExactlyOnce(e, 1, -1)
+		})
+	}
+}
+
+// An executor whose lease would lapse during the provider call sends nothing
+// (#1102): the charge needs its lease to outlast the longest call, so no other
+// executor can claim the row while the request is in flight. The renewal is
+// charged once, after the lease lapses, by the executor that claims it.
+func TestReplicasShortLeaseSendsNothing(t *testing.T) {
+	t.Parallel()
+	for _, rail := range rails {
+		t.Run(rail, func(t *testing.T) {
+			t.Parallel()
+			f := newFleet(t, 2)
+			e := enroll(t, f.replicas[0], rail, embedded)
+			end := f.periodEnd(e)
+			f.toDue(e)
+			sub := uuid.MustParse(subUUID(e.sub))
+			var once sync.Once
+			shortened := make(chan struct{})
+			remove := failpoint.Set(func(ctx context.Context, s failpoint.Site) error {
+				if s.Point != failpoint.BeforeProvider || s.Subscription != sub || s.Kind != "subscription_collection" {
+					return nil
+				}
+				once.Do(func() {
+					// Still this executor's claim, but it lapses mid-call.
+					_, err := f.base.pool.Exec(context.Background(), f.q(`UPDATE openrails.rail_intents
+						SET claimed_until = $2 WHERE id = $1 AND status = 'in_flight'`),
+						s.Operation, f.base.clock.Now().Add(intents.ProviderCallHold-time.Second))
+					if err != nil {
+						t.Errorf("shorten the lease: %v", err)
+					}
+					close(shortened)
+				})
+				return nil
+			})
+			defer remove()
+			before := f.submissions(e)
+			f.startPasses()
+			select {
+			case <-shortened:
+			case <-time.After(30 * time.Second):
+				t.Fatal("the renewal never reached the provider call")
+			}
+			f.advance(time.Hour)
+			f.wake()
+			f.passes()
+			f.until(func() bool { return f.periodEnd(e).After(end) }, "the next executor completes the renewal")
+			require.Equal(t, before+1, f.submissions(e), "the short-lease executor sent nothing; one charge request in all")
 			f.requireExactlyOnce(e, 1, -1)
 		})
 	}
