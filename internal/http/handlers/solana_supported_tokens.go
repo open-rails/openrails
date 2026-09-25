@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -112,7 +113,9 @@ func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig
 	}
 	proc, err := r.State.RailConfigs.RailConfig(r.Request.Context(), string(models.RailSolana), "")
 	if err != nil {
-		if errors.Is(err, railresolve.ErrRailNotArmed) {
+		// An unapproved signer change refuses the rail: advertise no Solana
+		// acceptance rather than failing the documents that carry it.
+		if errors.Is(err, railresolve.ErrRailNotArmed) || errors.Is(err, vault.ErrSignerUnapproved) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("resolve merchant solana account: %w", err)

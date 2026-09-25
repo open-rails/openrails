@@ -295,6 +295,9 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	}
 	require.True(t, logged, "the key change is logged at ERROR with both public keys")
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
+	psp, ok := checkoutPSP(t, client, "solana")
+	require.True(t, ok)
+	require.Equal(t, openrails.CheckoutPSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
 	active, _ := solanaRows(rotated)
 	require.Zero(t, active, "an unapproved identity never receives money")
 
