@@ -591,6 +591,21 @@ func (f *stripeFake) portalPriceChange(subID, price string, amount, proration in
 	return out
 }
 
+// portalPriceChangePaid is a portal price switch whose proration invoice
+// Stripe charged at once.
+func (f *stripeFake) portalPriceChangePaid(subID, price string, amount, proration int64) obj {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.subs[subID]
+	s["items"].(obj)["data"].([]obj)[0]["price"] = obj{"id": price, "unit_amount": amount, "currency": "usd"}
+	inv := f.invoiceLocked(subID, proration, true)
+	inv["billing_reason"] = "subscription_update"
+	raw, _ := json.Marshal(s)
+	out := obj{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
 // providerRenew is Stripe billing its own subscription for the next period.
 func (f *stripeFake) providerRenew(subID string, paid bool) obj {
 	f.mu.Lock()
