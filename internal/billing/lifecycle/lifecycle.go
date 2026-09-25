@@ -53,9 +53,8 @@ type Snapshot struct {
 	Owner  Owner
 	// PaidThrough is the end of the last paid period (current_period_ends_at).
 	PaidThrough time.Time
-	// CancelAtPeriodEnd is a scheduled, still reversible cancellation.
-	CancelAtPeriodEnd bool
-	// EndedAt is when access ended, set on cancellation.
+	// EndedAt is when access ends, set on cancellation. A period-end
+	// cancellation ends at PaidThrough and stays resumable until then.
 	EndedAt time.Time
 	// CancelKind records why a cancelled subscription ended.
 	CancelKind CancelKind
@@ -97,10 +96,12 @@ type InitialFailed struct{}
 // RenewalPaid is a payment fact for the period [PeriodStart, PeriodEnd).
 type RenewalPaid struct{ PeriodStart, PeriodEnd time.Time }
 
-// RenewalDeclined is a decline fact for the period starting at PeriodStart.
+// RenewalDeclined is a decline fact, observed at At, for the period starting
+// at PeriodStart.
 type RenewalDeclined struct {
 	PeriodStart time.Time
 	Bucket      Bucket
+	At          time.Time
 }
 
 // MethodReplaced is the customer replacing the card of an awaiting subscription.
@@ -108,6 +109,11 @@ type MethodReplaced struct{}
 
 // DunningExhausted is the dunning schedule spent after real declines.
 type DunningExhausted struct{ At time.Time }
+
+// TerminalHeld is a terminal outcome (a non-recoverable decline or a spent
+// schedule) the operator's kill switch or a missing certainty leg refused:
+// nothing more is charged, nothing is cancelled, access is kept.
+type TerminalHeld struct{}
 
 // RenewalOverdue is the clock passing PaidThrough with no fact for the next
 // period. It is not evidence; it only asks the provider.
@@ -124,12 +130,8 @@ type Cancel struct {
 	At        time.Time
 }
 
-// Resume reverses a period-end cancellation inside the paid period.
+// Resume reverses a user's period-end cancellation inside the paid period.
 type Resume struct{ At time.Time }
-
-// PeriodEnded is the clock reaching PaidThrough. It only completes a
-// period-end cancellation; renewal is decided by facts.
-type PeriodEnded struct{ At time.Time }
 
 func (InitialPaid) event() string       { return "initial_paid" }
 func (InitialFailed) event() string     { return "initial_failed" }
@@ -137,11 +139,11 @@ func (RenewalPaid) event() string       { return "renewal_paid" }
 func (RenewalDeclined) event() string   { return "renewal_declined" }
 func (MethodReplaced) event() string    { return "method_replaced" }
 func (DunningExhausted) event() string  { return "dunning_exhausted" }
+func (TerminalHeld) event() string      { return "terminal_held" }
 func (RenewalOverdue) event() string    { return "renewal_overdue" }
 func (ProviderCancelled) event() string { return "provider_cancelled" }
 func (Cancel) event() string            { return "cancel" }
 func (Resume) event() string            { return "resume" }
-func (PeriodEnded) event() string       { return "period_ended" }
 
 // Name is the event's stable name for the transition log.
 func Name(e Event) string { return e.event() }
@@ -163,6 +165,9 @@ type CloseDunning struct{}
 
 // QueueProviderCancel asks the provider to stop its schedule (durable intent).
 type QueueProviderCancel struct{}
+
+// ReopenAccess reopens access a period-end cancellation had bounded.
+type ReopenAccess struct{}
 
 // ProbeProvider reads the provider now to resolve an unverified row (§12).
 type ProbeProvider struct{}
@@ -186,6 +191,7 @@ func (EndAccess) effect() string           { return "end_access" }
 func (OpenDunning) effect() string         { return "open_dunning" }
 func (CloseDunning) effect() string        { return "close_dunning" }
 func (QueueProviderCancel) effect() string { return "queue_provider_cancel" }
+func (ReopenAccess) effect() string        { return "reopen_access" }
 func (ProbeProvider) effect() string       { return "probe_provider" }
 func (Notify) effect() string              { return "notify" }
 
@@ -248,7 +254,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		return s, append(effects, Notify{NoticeRenewed}), nil
 
 	case RenewalDeclined:
-		if !s.Status.Live() {
+		if !s.Status.Live() && s.Status != Pending {
 			return s, nil, nil // a late decline never touches a cancelled row
 		}
 		if !ev.PeriodStart.Equal(s.PaidThrough) {
@@ -266,8 +272,12 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			s.Status = AwaitingMethod
 			return s, []Effect{CloseDunning{}, Notify{NoticeUpdateMethod}}, nil
 		case NonRecoverable:
-			s.Status, s.CancelKind, s.EndedAt = Cancelled, CancelExpired, s.PaidThrough
-			return s, []Effect{CloseDunning{}, EndAccess{s.PaidThrough}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
+			end := s.PaidThrough
+			if ev.At.After(end) {
+				end = ev.At
+			}
+			s.Status, s.CancelKind, s.EndedAt = Cancelled, CancelExpired, end
+			return s, []Effect{CloseDunning{}, EndAccess{end}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
 		default:
 			effects := []Effect{Notify{NoticePaymentFailed}}
 			if s.Status != PastDue {
@@ -285,11 +295,22 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		return s, []Effect{OpenDunning{s.PaidThrough}}, nil
 
 	case DunningExhausted:
-		if s.Status != PastDue {
+		if !s.Status.Live() && s.Status != Pending {
 			return s, nil, illegal(s, e)
 		}
 		s.Status, s.CancelKind, s.EndedAt = Cancelled, CancelExpired, ev.At
 		return s, []Effect{CloseDunning{}, EndAccess{ev.At}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
+
+	case TerminalHeld:
+		if !s.Status.Live() && s.Status != Pending {
+			return s, nil, nil
+		}
+		if s.Owner == Engine {
+			s.Status = PastDue // the engine's own obligation waits for the operator
+			return s, []Effect{CloseDunning{}}, nil
+		}
+		s.Status = Unverified
+		return s, []Effect{CloseDunning{}, ProbeProvider{}}, nil
 
 	case RenewalOverdue:
 		if s.Status != Active || s.Owner == Engine {
@@ -323,28 +344,17 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 		if !s.Status.Live() && s.Status != Pending {
 			return s, nil, illegal(s, e)
 		}
-		immediate := ev.Immediate || ev.Kind == CancelChargeback || !s.PaidThrough.After(ev.At)
-		if !immediate {
-			if s.CancelAtPeriodEnd {
-				return s, nil, nil
-			}
-			s.CancelAtPeriodEnd = true
-			return s, []Effect{CloseDunning{}, QueueProviderCancel{}}, nil
+		end := ev.At
+		if !ev.Immediate && ev.Kind != CancelChargeback && s.PaidThrough.After(ev.At) {
+			end = s.PaidThrough // access runs to the end of what was paid
 		}
-		s.Status, s.CancelKind, s.EndedAt, s.CancelAtPeriodEnd = Cancelled, ev.Kind, ev.At, false
-		return s, []Effect{CloseDunning{}, EndAccess{ev.At}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
-
-	case PeriodEnded:
-		if !s.Status.Live() || !s.CancelAtPeriodEnd || ev.At.Before(s.PaidThrough) {
-			return s, nil, nil
-		}
-		s.Status, s.CancelKind, s.EndedAt, s.CancelAtPeriodEnd = Cancelled, CancelUser, s.PaidThrough, false
-		return s, []Effect{CloseDunning{}, EndAccess{s.PaidThrough}, Notify{NoticeEnded}}, nil
+		s.Status, s.CancelKind, s.EndedAt = Cancelled, ev.Kind, end
+		return s, []Effect{CloseDunning{}, EndAccess{end}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
 
 	case Resume:
-		if s.Status.Live() && s.CancelAtPeriodEnd && s.PaidThrough.After(ev.At) {
-			s.CancelAtPeriodEnd = false
-			return s, nil, nil
+		if s.Status == Cancelled && s.CancelKind == CancelUser && s.EndedAt.Equal(s.PaidThrough) && s.PaidThrough.After(ev.At) {
+			s.Status, s.CancelKind, s.EndedAt = Active, "", time.Time{}
+			return s, []Effect{ReopenAccess{}}, nil
 		}
 		return s, nil, illegal(s, e)
 	}
@@ -354,7 +364,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 // RenewalDue reports whether the engine's due pass should open the renewal
 // obligation for this subscription at now.
 func RenewalDue(s Snapshot, now time.Time) bool {
-	return s.Owner == Engine && s.Status == Active && !s.CancelAtPeriodEnd && !now.Before(s.PaidThrough)
+	return s.Owner == Engine && s.Status == Active && !now.Before(s.PaidThrough)
 }
 
 func illegal(s Snapshot, e Event) error {
