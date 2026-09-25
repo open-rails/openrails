@@ -513,6 +513,11 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	}
 	cp2.authClient = authRuntime
 	cp2.client = authRuntime.Client()
+	// AuthKit checks scoped machine and delegated permissions against the live
+	// bound group, so the delegated verifier needs the engine as its checker.
+	if cp2.delegatedVerifier != nil {
+		cp2.delegatedVerifier.WithPermissionChecker(cp2.client, issuer)
+	}
 	defer func() {
 		if retErr != nil {
 			authRuntime.Close()

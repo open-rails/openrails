@@ -5415,7 +5415,7 @@
     "internal/controlplane/merchant_team.go": "b457fe798ad2b67f5be3b17f0222ff5bbd6b048a8e59940cbd6a869aae09680f",
     "internal/controlplane/remote_application.go": "210889140ad297fd04429968f5bbe5c887550b5c6d4ab5a541b88ae205aaff1b",
     "internal/controlplane/routes.go": "500efe0011ab1a68f6daea30113a02f84590d4f272ad1a14be3d2ea2a1754966",
-    "internal/controlplane/service.go": "7459a13b748abeb74650354ee99392243b596a24d1b296ccba87389ceef822c6",
+    "internal/controlplane/service.go": "c2bf00e72938ac6a992695b8748de86f65ecba84205760ea83b47e92de3ac3bb",
     "internal/controlplane/service_jwt.go": "0c7497b227447df4caa5ef1effb1649ddf8ac139d077f7a18e153d5e051a4dbe",
     "internal/credential/resolved.go": "1deb29cdd816321866b7f13105601fb5bbd0d383cd0f20c8fe0df2b2e0c331b9",
     "internal/hostauth/authkit.go": "be74e7b7a009b99ca42d713366cb23534c39feab2ca52b6c169752a604038cd4",
