@@ -2424,6 +2424,7 @@
       "filepath": "path/filepath",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "intents": "github.com/open-rails/openrails/internal/intents",
       "io": "io",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",

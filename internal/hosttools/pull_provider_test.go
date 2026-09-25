@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -115,4 +116,16 @@ func TestUndoRunPrintsRunnableCommands(t *testing.T) {
 	parsed, err := merchant.ParseID(strings.TrimPrefix(merchantFlag(mid), "id:"))
 	require.NoError(t, err)
 	require.Equal(t, mid, parsed)
+}
+
+// A CLI pull queues the provider cancel of a terminal decision exactly as the
+// worker's pull does (#1102): its decision applier carries the system-origin
+// provider-cancel scheduler, never nil.
+func TestPullEngineQueuesProviderCancels(t *testing.T) {
+	eng := newPullEngine(&pullProviderRuntime{}, nil)
+	applier, ok := eng.Decisions.(*reconcile.LifecycleDecisionApplier)
+	require.True(t, ok)
+	cancels, ok := applier.LC.ProviderCancelScheduler().(*intents.ProviderCancelScheduler)
+	require.True(t, ok, "the CLI pull wires a provider-cancel scheduler")
+	require.NotNil(t, cancels)
 }

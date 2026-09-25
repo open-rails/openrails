@@ -586,15 +586,10 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		return out
 	}
 
-	engine := reconcile.NewEngine(w.DB, w.Config, fetchers)
+	engine := reconcile.NewEngine(w.DB, w.Config, fetchers, w.DeferDelete)
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts // #787: nil-check, see runConvergence
-	}
-	if w.DeferDelete != nil {
-		// #679: a decider stale-decline cancel from the pull path must durably
-		// queue the deferred NMI delete, same as unknown-resolution.
-		engine.Decisions = reconcile.NewDecisionApplier(w.DB, w.DeferDelete)
 	}
 	maxWindows := w.maxWindows()
 	for i := 0; i < maxWindows && since.Before(horizon); i++ {
