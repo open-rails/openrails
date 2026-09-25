@@ -112,6 +112,9 @@ type world struct {
 	client map[topology]*openrails.Client
 	psp    map[string]string
 
+	// invariants are the money invariants checked when the world ends.
+	invariants moneyInvariants
+
 	// replica is set on one process of a multi-replica fleet
 	// (replicas_harness_test.go): its own connections, River identity and
 	// provider transports over the shared database and providers.
@@ -166,6 +169,7 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 		_, _ = pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{w.schema}.Sanitize()+" CASCADE")
 		pool.Close()
 	})
+	t.Cleanup(w.checkMoneyInvariants)
 	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{Schema: w.schema, River: embed.RiverFromHost(), RuntimePool: pool}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, w.schema))
 	return w
