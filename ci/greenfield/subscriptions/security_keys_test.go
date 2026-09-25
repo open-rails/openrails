@@ -56,7 +56,7 @@ func TestSecurityForeignIDsLookMissing(t *testing.T) {
 		require.Equal(t, ms, fs, what)
 		require.Equal(t, errorWithoutRequestID(mb), errorWithoutRequestID(fb), what)
 	}
-	same("update card", http.MethodPut, "/payment-methods/"+method, "/payment-methods/"+missingMethod, map[string]any{"payment_token": w.nmi.tokenize(visa)})
+	same("update card", http.MethodPut, "/payment-methods/"+method, "/payment-methods/"+missingMethod, map[string]any{"payment_token": w.nmi.Tokenize(visa)})
 	same("delete card", http.MethodDelete, "/payment-methods/"+method, "/payment-methods/"+missingMethod, nil)
 	same("select card on a subscription", http.MethodPut, "/subscriptions/"+sub.String()+"/payment-method", "/subscriptions/"+missingSub+"/payment-method", map[string]any{"payment_method_id": mine})
 	require.True(t, owner.entitled("content:members"))

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 const takeoverDrift = "life.engine_takeover.schedule_drift"
@@ -63,17 +64,17 @@ func TestNMIEngineTakeover(t *testing.T) {
 			require.Equal(t, "ready", preview.Stage)
 			require.True(t, preview.Anchor.Equal(end))
 			require.EqualValues(t, 9_990_000, preview.Amount)
-			require.Zero(t, w.nmi.deletesOf(l.railSub), "a preview changes nothing")
+			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "a preview changes nothing")
 
 			key := "takeover-" + uuid.NewString()
 			done := l.takeover(key)
 			require.Equal(t, "completed", done.Stage, "%+v", done)
 			require.NotNil(t, done.SuccessorSubscriptionID)
-			require.Equal(t, 1, w.nmi.deletesOf(l.railSub), "the NMI schedule is deleted exactly once")
-			require.False(t, w.nmi.scheduleLive(l.railSub))
+			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub), "the NMI schedule is deleted exactly once")
+			require.False(t, w.nmi.ScheduleLive(l.railSub))
 			again := l.takeover(key)
 			require.Equal(t, done.ID, again.ID, "the key replays the operation")
-			require.Equal(t, 1, w.nmi.deletesOf(l.railSub))
+			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
 
 			old := w.subscription(tp, l.sub)
 			require.Equal(t, "cancelled", old.Status)
@@ -90,7 +91,7 @@ func TestNMIEngineTakeover(t *testing.T) {
 			// Nothing is charged before the boundary.
 			w.advance(end.Sub(w.clock.Now()) - 2*time.Hour)
 			w.runRenewals()
-			require.Zero(t, w.nmi.saleAttempts())
+			require.Zero(t, len(w.nmi.Attempts()))
 			require.True(t, l.c.entitled(l.ent), "no gap before the boundary")
 
 			// At the boundary the engine charges once, on the legacy card and agreement.
@@ -98,8 +99,8 @@ func TestNMIEngineTakeover(t *testing.T) {
 			w.runRenewals()
 			w.until(func() bool { return w.subscription(tp, successor.ID).CurrentPeriodEndsAt.After(end) }, "the first engine renewal")
 			w.runRenewals()
-			require.Equal(t, 1, w.nmi.saleAttempts(), "exactly one engine charge for the period")
-			sale := w.nmi.lastSale()
+			require.Equal(t, 1, len(w.nmi.Attempts()), "exactly one engine charge for the period")
+			sale := w.nmi.LastSale()
 			require.Equal(t, "9.99", sale.Amount)
 			require.Equal(t, l.railCust, sale.Vault)
 			require.Equal(t, "merchant", sale.InitiatedBy)
@@ -110,7 +111,7 @@ func TestNMIEngineTakeover(t *testing.T) {
 			require.Len(t, completed(w.payments(tp, l.c.id)), 2, "legacy period and first engine period")
 			w.converge()
 			require.Empty(t, w.openFindings(duplicateCharge))
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -135,7 +136,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement)
 			_, err = w.client[tp].GetEngineTakeover(t.Context(), l.sub)
 			requireCode(t, err, http.StatusNotFound, openrails.CodeEngineTakeoverNotFound)
-			require.Zero(t, w.nmi.deletesOf(l.railSub))
+			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 		})
 		t.Run(string(tp)+"/boundary_too_close", func(t *testing.T) {
 			t.Parallel()
@@ -147,7 +148,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose)
 			_, err = w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose)
-			require.Zero(t, w.nmi.deletesOf(l.railSub))
+			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 			require.Equal(t, "provider_dunning", w.subscription(tp, l.sub).CollectionPolicy)
 		})
 		t.Run(string(tp)+"/abandon_after_delete", func(t *testing.T) {
@@ -158,7 +159,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			require.Equal(t, "completed", l.takeover("k-"+uuid.NewString()).Stage)
 			_, err := w.client[tp].AbandonEngineTakeover(t.Context(), l.sub)
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverCommitted)
-			require.Equal(t, 1, w.nmi.deletesOf(l.railSub))
+			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
 		})
 	}
 }
@@ -169,29 +170,25 @@ func TestNMIEngineTakeoverScheduleDrift(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
-		edit func(w *world, s *nmiSchedule)
+		edit func(w *world, s *nmimock.Schedule)
 	}{
-		{"amount", func(_ *world, s *nmiSchedule) { s.Amount = "14.99" }},
-		{"billing_date", func(_ *world, s *nmiSchedule) { s.NextBilling = s.NextBilling.AddDate(0, 0, -3) }},
-		{"vault", func(w *world, s *nmiSchedule) {
-			other := &nmiVault{ID: "othervault-" + uuid.NewString()[:8], BillingID: "otherbill", Card: mastercard}
-			w.nmi.vaults[other.ID] = other
-			s.Vault = other.ID
-		}},
+		{"amount", func(_ *world, s *nmimock.Schedule) { s.Amount = "14.99" }},
+		{"billing_date", func(_ *world, s *nmimock.Schedule) { s.NextBilling = s.NextBilling.AddDate(0, 0, -3) }},
+		{"vault", func(w *world, s *nmimock.Schedule) { s.Vault = w.nmi.AddVault(mastercard) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
 			l := importTakeoverLegacy(t, w, remote)
-			w.nmi.mu.Lock()
-			tc.edit(w, w.nmi.schedules[l.railSub])
-			w.nmi.mu.Unlock()
+			s := w.nmi.Schedule(l.railSub)
+			tc.edit(w, &s)
+			w.nmi.EditSchedule(l.railSub, func(live *nmimock.Schedule) { *live = s })
 			out := l.takeover("k-" + uuid.NewString())
 			require.Equal(t, "not_executed", out.Stage, "%+v", out)
 			require.Equal(t, "failed_terminal", out.Status)
-			require.Zero(t, w.nmi.deletesOf(l.railSub), "a drifted schedule is never deleted")
-			require.True(t, w.nmi.scheduleLive(l.railSub))
+			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "a drifted schedule is never deleted")
+			require.True(t, w.nmi.ScheduleLive(l.railSub))
 			require.Contains(t, w.openFindings(takeoverDrift), l.sub.UUID().String())
 			sub := w.subscription(remote, l.sub)
 			require.Equal(t, "active", sub.Status)
@@ -213,7 +210,7 @@ func TestNMIEngineTakeoverHeld(t *testing.T) {
 		held := l.takeover("k-" + uuid.NewString())
 		require.Equal(t, "pending", held.Status, "%+v", held)
 		require.Equal(t, "held", held.Stage)
-		require.Zero(t, w.nmi.deletesOf(l.railSub))
+		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 
 		end := l.periodEnd()
 		w.advance(end.Sub(w.clock.Now()) + time.Hour)
@@ -223,9 +220,9 @@ func TestNMIEngineTakeoverHeld(t *testing.T) {
 
 		w.armDestructive()
 		w.until(func() bool { return l.takeoverState().Stage == "not_executed" }, "the held takeover passes its cutoff")
-		require.Zero(t, w.nmi.deletesOf(l.railSub))
-		require.True(t, w.nmi.scheduleLive(l.railSub))
-		require.Zero(t, w.nmi.saleAttempts(), "OpenRails never charged")
+		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
+		require.True(t, w.nmi.ScheduleLive(l.railSub))
+		require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charged")
 		require.Equal(t, "provider_dunning", w.subscription(embedded, l.sub).CollectionPolicy)
 	})
 	t.Run("abandon", func(t *testing.T) {
@@ -239,11 +236,11 @@ func TestNMIEngineTakeoverHeld(t *testing.T) {
 		w.armDestructive()
 		w.advance(time.Hour)
 		w.wake()
-		require.Zero(t, w.nmi.deletesOf(l.railSub), "an abandoned takeover never runs")
+		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "an abandoned takeover never runs")
 		require.Equal(t, "abandoned", l.takeoverState().Stage)
 		// A fresh takeover is admissible again.
 		require.Equal(t, "completed", l.takeover("k-"+uuid.NewString()).Stage)
-		require.Equal(t, 1, w.nmi.deletesOf(l.railSub))
+		require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
 	})
 }
 
@@ -289,9 +286,9 @@ func TestNMIEngineTakeoverCrashDuringDelete(t *testing.T) {
 	w.advance(30 * time.Minute)
 	w.wake()
 	w.until(func() bool { return l.takeoverState().Stage == "completed" }, "the takeover resolves from NMI's record")
-	require.Equal(t, 1, w.nmi.deletesOf(l.railSub), "exactly one delete")
+	require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub), "exactly one delete")
 	require.Equal(t, "cancelled", w.subscription(embedded, l.sub).Status)
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }
 
 // importLegacyBook lands n legacy NMI memberships on one price in one book.
@@ -316,10 +313,10 @@ func importLegacyBook(t *testing.T, w *world, n int) []*legacy {
 		require.NoError(t, err)
 		start := w.clock.Now().Add(-10*day + time.Duration(i)*time.Minute)
 		end := start.Add(monthHours * time.Hour)
-		vault := w.nmi.legacyVault(visa)
-		railSub := w.nmi.legacySchedule(vault, plan, "9.99", end)
-		tx := w.nmi.legacySale(vault, "9.99", start)
-		ref := openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.billingOf(vault)}
+		vault := w.nmi.AddVault(visa)
+		railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: "9.99", NextBilling: end})
+		tx := w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID
+		ref := openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
 		book.Customers = append(book.Customers, openrails.DeclaredCustomer{Customer: customerID})
 		book.PaymentMethods = append(book.PaymentMethods, openrails.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef,
 			InitialTransactionID: tx, RecurringTransactionID: tx, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"})
@@ -363,7 +360,7 @@ func TestNMIEngineTakeoverBulk(t *testing.T) {
 
 	deleted, held := 0, 0
 	for _, l := range book {
-		deletes := w.nmi.deletesOf(l.railSub)
+		deletes := w.nmi.ScheduleDeletes(l.railSub)
 		require.LessOrEqual(t, deletes, 1, "no schedule is deleted twice")
 		sub := w.subscription(embedded, l.sub)
 		if deletes == 1 {
@@ -373,21 +370,21 @@ func TestNMIEngineTakeoverBulk(t *testing.T) {
 		} else {
 			held++
 			require.Equal(t, "active", sub.Status)
-			require.True(t, w.nmi.scheduleLive(l.railSub), "a held takeover leaves NMI billing")
+			require.True(t, w.nmi.ScheduleLive(l.railSub), "a held takeover leaves NMI billing")
 			require.Equal(t, "held", l.takeoverState().Stage)
 		}
 	}
 	require.Equal(t, budget, deleted, "the breaker caps the day's deletes exactly, whatever the executor concurrency")
 	require.Positive(t, held)
 	require.NotEmpty(t, w.openFindings("life.provider_intent.held_bulk"))
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 
 	again, err := w.client[embedded].TakeOverBillingBatch(t.Context(), openrails.EngineTakeoverBatchRequest{MaxSubscriptions: n})
 	require.NoError(t, err)
 	require.Empty(t, again.Admitted, "in-flight and completed takeovers are not admitted again")
 	w.settle()
 	for _, l := range book {
-		require.LessOrEqual(t, w.nmi.deletesOf(l.railSub), 1)
+		require.LessOrEqual(t, w.nmi.ScheduleDeletes(l.railSub), 1)
 	}
-	require.Empty(t, w.nmi.unexpected())
+	require.Empty(t, w.nmi.Unexpected())
 }

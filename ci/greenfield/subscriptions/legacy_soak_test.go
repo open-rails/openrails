@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // Soak: refunding an NMI-billed legacy payment with revoke_access while
@@ -32,7 +33,7 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			_, err := w.client[tp].RefundPayment(t.Context(), legacy.ID, params)
 			requireCode(t, err, http.StatusConflict, openrails.CodeProviderCancelHeld)
 			w.settle()
-			require.Empty(t, w.nmi.callsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), "nothing refunded")
+			require.Empty(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), "nothing refunded")
 			require.Equal(t, "active", w.subscription(tp, l.sub).Status)
 			require.True(t, l.c.entitled(l.ent))
 			require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
@@ -41,9 +42,9 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			_, err = w.client[tp].RefundPayment(t.Context(), legacy.ID, params)
 			require.NoError(t, err)
 			w.settle()
-			require.Len(t, w.nmi.callsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), 1)
+			require.Len(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), 1)
 			require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
-			w.until(func() bool { return w.nmi.deletesOf(l.railSub) > 0 }, "the NMI schedule delete")
+			w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 			require.False(t, l.c.entitled(l.ent))
 
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.staleNotice()))
@@ -55,9 +56,9 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			w.converge()
 			require.False(t, l.c.entitled(l.ent), "revoked access stays revoked")
 			require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
-			require.Equal(t, 1, w.nmi.deletesOf(l.railSub))
-			require.Zero(t, w.nmi.saleAttempts())
-			require.Empty(t, w.nmi.unexpected())
+			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
+			require.Zero(t, len(w.nmi.Attempts()))
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -78,10 +79,10 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 			last := now.Add(-12 * time.Hour)
 			pastDue := b.add(&bookRow{source: "past_due", tier: monthly, paid: now.Add(-day), declared: true,
 				dunning: &openrails.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
-			w.nmi.editSchedule(pastDue.schedule, func(s *nmiSchedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
+			w.nmi.EditSchedule(pastDue.schedule, func(s *nmimock.Schedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
 			runway := b.add(&bookRow{source: "runway", tier: monthly, paid: now.Add(20 * day), declared: true,
 				cancel: openrails.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
-			w.nmi.providerCancel(runway.schedule)
+			w.nmi.DeleteSchedule(runway.schedule)
 
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)
 			require.NoError(t, err)
@@ -97,7 +98,7 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, replay.Imported)
 			require.True(t, active.c.entitled(monthly.ent))
-			require.Zero(t, w.nmi.saleAttempts())
+			require.Zero(t, len(w.nmi.Attempts()))
 		})
 	}
 }
@@ -114,7 +115,7 @@ func TestLegacyNMIRefreshProviders(t *testing.T) {
 			// A second member keeps the NMI roster non-empty: an empty roster
 			// never proves absence (#842).
 			l := w.mirrorBook(tp, w.bookTier("monthly", 999, 30), 2)[0]
-			w.nmi.providerCancel(l.railSub)
+			w.nmi.DeleteSchedule(l.railSub)
 			w.advance(time.Hour)
 
 			res, err := w.client[tp].RefreshProviders(t.Context())
@@ -124,8 +125,8 @@ func TestLegacyNMIRefreshProviders(t *testing.T) {
 			w.waitJob(res.JobID)
 			require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).Status == "cancelled" }, 20*time.Second, 250*time.Millisecond,
 				"the NMI-side delete is mirrored by the requested refresh")
-			require.Zero(t, w.nmi.deletesOf(l.railSub), "a schedule NMI ended is never deleted again")
-			require.Zero(t, w.nmi.saleAttempts())
+			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "a schedule NMI ended is never deleted again")
+			require.Zero(t, len(w.nmi.Attempts()))
 		})
 	}
 }

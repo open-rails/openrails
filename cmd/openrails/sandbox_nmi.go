@@ -14,7 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/nmifake"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // newSandboxCmd serves loopback provider fakes for disposable stacks that
@@ -28,9 +28,9 @@ func newSandboxCmd() *cobra.Command {
 	var plans []string
 	nmi := &cobra.Command{
 		Use:   "nmi-gateway",
-		Short: "Serve a fake NMI gateway for provider_sandbox.nmi_gateway_url",
-		Long: `Serves the NMI Customer Vault, Direct Post and Query surface OpenRails uses,
-accepting any Collect.js token (card ending 0002 declines). --plan seeds the
+		Short: "Serve the nmimock NMI gateway for provider_sandbox.nmi_gateway_url",
+		Long: `Serves nmimock: the NMI Customer Vault, Direct Post and Query surface OpenRails
+uses, accepting any Collect.js token ending in four digits (0002 declines). --plan seeds the
 Recurring Plans a catalog links to (id=amount:days, e.g. premium_new=23.00:30).
 Loopback only; point provider_sandbox.nmi_gateway_url
 (PROVIDER_SANDBOX_NMI_GATEWAY_URL) at it.`,
@@ -39,7 +39,7 @@ Loopback only; point provider_sandbox.nmi_gateway_url
 			if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
 				return fmt.Errorf("--listen must be a loopback IP literal and port, got %q", listen)
 			}
-			gateway := nmifake.NewUnstarted()
+			gateway := nmimock.NewUnstarted(nmimock.Options{})
 			for _, p := range plans {
 				id, terms, ok := strings.Cut(p, "=")
 				amount, days, ok2 := strings.Cut(terms, ":")
@@ -50,7 +50,7 @@ Loopback only; point provider_sandbox.nmi_gateway_url
 				if _, err := strconv.ParseFloat(amount, 64); err != nil {
 					return fmt.Errorf("--plan %q: amount must be decimal", p)
 				}
-				gateway.AddPlan(id, amount, n)
+				gateway.AddPlan(nmimock.Plan{ID: id, Name: id, Amount: amount, Days: n})
 			}
 			ln, err := (&net.ListenConfig{}).Listen(cmd.Context(), "tcp", listen)
 			if err != nil {

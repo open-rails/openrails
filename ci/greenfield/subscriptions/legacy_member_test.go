@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // Member actions on legacy NMI-billed (provider-owned) subscriptions through
@@ -94,8 +95,8 @@ func TestLegacyNMICancel(t *testing.T) {
 					require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
 					w.advance(time.Hour)
 					w.wake()
-					require.Zero(t, w.nmi.deletesOf(l.railSub))
-					require.True(t, w.nmi.scheduleLive(l.railSub))
+					require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
+					require.True(t, w.nmi.ScheduleLive(l.railSub))
 					w.armDestructive()
 					status, _ = cancel()
 					require.Less(t, status, 300, "the same cancel works once armed")
@@ -110,7 +111,7 @@ func TestLegacyNMICancel(t *testing.T) {
 					require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
 					w.advance(time.Hour)
 					w.wake()
-					require.Zero(t, w.nmi.deletesOf(l.railSub), "the delete waits for the operator's switch")
+					require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "the delete waits for the operator's switch")
 					w.armDestructive()
 				}
 				if row.by == "member" {
@@ -118,20 +119,20 @@ func TestLegacyNMICancel(t *testing.T) {
 					// is deleted before NMI's next billing date.
 					w.advance(time.Hour)
 					w.wake()
-					require.Zero(t, w.nmi.deletesOf(l.railSub), "the member's undo window keeps the schedule")
+					require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "the member's undo window keeps the schedule")
 					w.advance(end.Sub(w.clock.Now()) - 47*time.Hour)
 				}
-				w.until(func() bool { return w.nmi.deletesOf(l.railSub) > 0 }, "the NMI schedule delete")
+				w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 				w.advance(time.Hour)
 				w.wake()
-				require.Equal(t, 1, w.nmi.deletesOf(l.railSub), "exactly one NMI delete")
-				require.False(t, w.nmi.scheduleLive(l.railSub))
+				require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub), "exactly one NMI delete")
+				require.False(t, w.nmi.ScheduleLive(l.railSub))
 				require.Equal(t, !row.revoke, l.c.entitled(l.ent), "access follows at-period-end vs immediate")
 				w.advance(end.Sub(w.clock.Now()) + time.Hour)
 				w.runRenewals()
 				require.False(t, l.c.entitled(l.ent), "access ends with the paid period")
 				require.Equal(t, charges, l.engineCharges(), "OpenRails never charges a legacy subscription")
-				require.Empty(t, w.nmi.unexpected())
+				require.Empty(t, w.nmi.Unexpected())
 			})
 		}
 	}
@@ -152,17 +153,17 @@ func (l *legacy) importAnother(t *testing.T) (openrails.SubscriptionID, string, 
 	require.NoError(t, err)
 	start := w.clock.Now().Add(-5 * day)
 	end := start.Add(monthHours * time.Hour)
-	railSub := w.nmi.legacySchedule(l.railCust, plan, "9.99", end)
+	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: l.railCust, Plan: plan, Amount: "9.99", NextBilling: end})
 	customerID, err := openrails.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
 	priceID, err := openrails.ParsePriceID(price.ID)
 	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.billingOf(l.railCust)}
+	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
 	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
 		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
 		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method, CollectionPolicy: "provider"}},
-		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.legacySale(l.railCust, "9.99", start), Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
@@ -196,13 +197,13 @@ func TestLegacyNMIMemberCancelsTheNamedSubscription(t *testing.T) {
 	require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "the other membership is untouched")
 
 	w.advance(w.subscription(embedded, second).CurrentPeriodEndsAt.Sub(w.clock.Now()) - 47*time.Hour)
-	w.until(func() bool { return w.nmi.deletesOf(secondRail) > 0 }, "the named schedule's delete")
-	require.Equal(t, 1, w.nmi.deletesOf(secondRail))
-	require.Zero(t, w.nmi.deletesOf(l.railSub), "the other schedule is never deleted")
-	require.True(t, w.nmi.scheduleLive(l.railSub))
+	w.until(func() bool { return w.nmi.ScheduleDeletes(secondRail) > 0 }, "the named schedule's delete")
+	require.Equal(t, 1, w.nmi.ScheduleDeletes(secondRail))
+	require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "the other schedule is never deleted")
+	require.True(t, w.nmi.ScheduleLive(l.railSub))
 	require.True(t, l.c.entitled(l.ent))
 	require.True(t, l.c.entitled(secondEnt), "the cancelled membership keeps its paid period")
-	require.Empty(t, w.nmi.unexpected())
+	require.Empty(t, w.nmi.Unexpected())
 }
 
 // A card update repoints the NMI schedule at the new vault exactly once, and
@@ -233,11 +234,11 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 				return w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), l.sub, openrails.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id})
 			}
 			updates := func() []providerCall {
-				return w.nmi.callsTo(http.MethodPost, "transact.php", func(f url.Values) bool { return f.Get("recurring") == "update_subscription" })
+				return calls(w.nmi.CallsTo(http.MethodPost, "transact.php", func(f url.Values) bool { return f.Get("recurring") == "update_subscription" }))
 			}
 
 			// Another card of the same vault: refused, no NMI write.
-			other := w.nmi.addCard(l.railCust, mastercard)
+			other := w.nmi.AddCard(l.railCust, mastercard)
 			customerID, err := openrails.ParseCustomerID(l.c.id)
 			require.NoError(t, err)
 			_, err = w.client[tp].ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
@@ -270,7 +271,7 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 			require.Equal(t, l.railSub, calls[0].Form.Get("subscription_id"))
 			newVault := calls[0].Form.Get("customer_vault_id")
 			require.NotEqual(t, l.railCust, newVault)
-			require.Equal(t, newVault, w.nmi.scheduleState(l.railSub).Vault)
+			require.Equal(t, newVault, w.nmi.Schedule(l.railSub).Vault)
 			sub := w.subscription(tp, l.sub)
 			require.NotNil(t, sub.PaymentMethodID)
 			require.Equal(t, method, sub.PaymentMethodID.String())
@@ -279,7 +280,7 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 			charges := l.engineCharges()
 			end := l.periodEnd()
 			w.advance(end.Sub(w.clock.Now()) + time.Hour)
-			sale, _ := w.nmi.providerRenew(l.railSub, true)
+			sale := w.nmi.RenewSchedule(l.railSub, true)
 			require.Equal(t, mastercard.Last4, sale.Card.Last4)
 			notice := nmiEvent("transaction.sale.success", obj{"transaction_id": sale.TransactionID, "transaction_type": "cc", "condition": "pendingsettlement", "amount": sale.Amount, "currency": "USD", "order_id": sale.OrderID, "customer_vault_id": sale.Vault,
 				"subscription": obj{"subscription_id": l.railSub}, "action": obj{"action_type": "sale", "amount": sale.Amount, "success": "1", "response_code": "100"}})
@@ -295,7 +296,7 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 			require.True(t, l.periodEnd().After(end))
 			require.Len(t, updates(), 1)
 			require.Equal(t, charges, l.engineCharges(), "OpenRails never charges a legacy subscription")
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -334,7 +335,7 @@ func TestLegacyNMIRefund(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, refund.ID, again.ID, "a replayed refund is the same refund")
 			w.settle()
-			require.Len(t, w.nmi.callsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), 1, "exactly one NMI refund")
+			require.Len(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), 1, "exactly one NMI refund")
 			want := row.amount
 			if want == 0 {
 				want = legacy.Amount
@@ -348,20 +349,20 @@ func TestLegacyNMIRefund(t *testing.T) {
 				// Revoking access ends the membership: NMI stops billing it,
 				// exactly once, and nothing re-grants the access.
 				require.Equal(t, "cancelled", w.subscription(tp, l.sub).Status)
-				w.until(func() bool { return w.nmi.deletesOf(l.railSub) > 0 }, "the NMI schedule delete")
+				w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 				w.converge()
 				w.pull()
 				w.advance(time.Hour)
 				w.wake()
-				require.Equal(t, 1, w.nmi.deletesOf(l.railSub), "exactly one NMI delete")
+				require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub), "exactly one NMI delete")
 				require.False(t, l.c.entitled(l.ent), "revoked access stays revoked through converge and pull")
 			} else {
-				require.True(t, w.nmi.scheduleLive(l.railSub), "a refund without revoke leaves NMI billing")
-				require.Zero(t, w.nmi.deletesOf(l.railSub))
+				require.True(t, w.nmi.ScheduleLive(l.railSub), "a refund without revoke leaves NMI billing")
+				require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 				require.Equal(t, "active", w.subscription(tp, l.sub).Status)
 			}
 			require.Zero(t, l.engineCharges())
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }

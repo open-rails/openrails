@@ -103,7 +103,7 @@ func TestLegacyImportRaisesNoFindings(t *testing.T) {
 			active := b.add(&bookRow{source: "active", tier: monthly, paid: now.Add(10 * day), declared: true})
 			cancelled := b.add(&bookRow{source: "cancelled", tier: monthly, paid: now.Add(20 * day), declared: true,
 				cancel: openrails.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
-			w.nmi.providerCancel(cancelled.schedule)
+			w.nmi.DeleteSchedule(cancelled.schedule)
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)
 			require.NoError(t, err)
 			require.Len(t, result.Imported, 2, "%+v", result)
@@ -119,15 +119,6 @@ func TestLegacyImportRaisesNoFindings(t *testing.T) {
 			}
 		})
 	}
-}
-
-// dashboardRefund refunds cents of an approved NMI sale outside OpenRails.
-func (f *nmiFake) dashboardRefund(txID string, cents int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	s := f.saleByID(txID)
-	s.RefundedCents += cents
-	s.RefundIDs = append(s.RefundIDs, f.next("rf"))
 }
 
 // dashboardRefund refunds amount (minor units) of a charge outside OpenRails.
@@ -191,7 +182,7 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 				l := importLegacy(t, w, "nmi", tp)
 				c, ent, sub, railSub = l.c, l.ent, l.sub, l.railSub
 				tx := w.nmi.ledger(l.railCust)[0]
-				w.nmi.dashboardRefund(tx.ID, map[bool]int64{true: tx.Amount, false: tx.Amount / 2}[r.full])
+				w.nmi.Refund(tx.ID, map[bool]int64{true: tx.Amount, false: tx.Amount / 2}[r.full])
 			case "nmi", "stripe":
 				rail = r.kind
 				e := enroll(t, w, r.kind, tp)
@@ -201,7 +192,7 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 				if r.kind == "stripe" {
 					w.stripe.dashboardRefund(paid.Charge, amount)
 				} else {
-					w.nmi.dashboardRefund(paid.ID, amount)
+					w.nmi.Refund(paid.ID, amount)
 				}
 			}
 			require.True(t, c.entitled(ent))
@@ -220,23 +211,23 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 			if r.kind == "legacy" {
 				switch {
 				case r.revoked && r.armed:
-					require.Equal(t, 1, w.nmi.deletesOf(railSub), "the NMI schedule ends exactly once")
+					require.Equal(t, 1, w.nmi.ScheduleDeletes(railSub), "the NMI schedule ends exactly once")
 				case r.revoked:
-					require.Zero(t, w.nmi.deletesOf(railSub), "the delete waits for the switch")
+					require.Zero(t, w.nmi.ScheduleDeletes(railSub), "the delete waits for the switch")
 					require.Contains(t, w.openFindings(providerCancelHeld), sub.UUID().String())
 					w.armDestructive()
 					w.advance(time.Hour)
 					w.wake()
-					require.Equal(t, 1, w.nmi.deletesOf(railSub), "the held delete runs once armed")
+					require.Equal(t, 1, w.nmi.ScheduleDeletes(railSub), "the held delete runs once armed")
 				default:
-					require.Zero(t, w.nmi.deletesOf(railSub))
-					require.True(t, w.nmi.scheduleLive(railSub))
+					require.Zero(t, w.nmi.ScheduleDeletes(railSub))
+					require.True(t, w.nmi.ScheduleLive(railSub))
 				}
 			}
 			// A later NMI or pull pass does not restore revoked access.
 			w.converge()
 			require.Equal(t, !r.revoked, c.entitled(ent), "revocation holds through convergence")
-			require.Zero(t, w.nmi.saleAttempts()-map[bool]int{true: 1, false: 0}[r.kind == "nmi"], "no charge caused by the refund")
+			require.Zero(t, len(w.nmi.Attempts())-map[bool]int{true: 1, false: 0}[r.kind == "nmi"], "no charge caused by the refund")
 		})
 	}
 }

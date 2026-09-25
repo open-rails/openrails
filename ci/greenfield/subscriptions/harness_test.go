@@ -147,19 +147,19 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 	poolConfig.ConnConfig.Tracer = queries
 	pool, err := pgxpool.NewWithConfig(t.Context(), poolConfig)
 	require.NoError(t, err)
+	// Engine time starts in the past so every accepted operation is already
+	// due on River's wall clock; tests advance it explicitly.
+	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-4 * 365 * 24 * time.Hour).Truncate(time.Second))
 	w := &world{
 		t: t, pool: pool, dsn: dsn(t), queries: queries,
 		schema: "gf_subs_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16],
 		slug:   "subs-" + uuid.NewString()[:8],
-		// Engine time starts in the past so every accepted operation is
-		// already due on River's wall clock; tests advance it explicitly.
-		clock:  clockwork.NewFakeClockAt(time.Now().UTC().Add(-4 * 365 * 24 * time.Hour).Truncate(time.Second)),
+		clock:  clock,
 		stripe: newStripeFake(),
-		nmi:    newNMIFake(),
+		nmi:    newNMIFake(clock.Now),
 		auth:   &verifier{secret: []byte("greenfield-subscriptions-" + uuid.NewString())},
 	}
 	w.auth.slug = w.slug
-	w.nmi.clock = w.clock.Now
 	if len(configure) > 0 {
 		w.cfg = configure[0]
 	}
@@ -264,7 +264,7 @@ func (w *world) start() {
 	}
 	for _, rail := range []string{"stripe", "nmi"} {
 		if _, declared := psps[rail]; declared {
-			require.NotEmpty(t, w.psp[rail], "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.unexpected())
+			require.NotEmpty(t, w.psp[rail], "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.Unexpected())
 		}
 	}
 }
@@ -583,7 +583,7 @@ func (c *customer) saveCard(rail string, card card) string {
 		confirmed := unwrap(c.must(http.MethodPost, fmt.Sprintf("/payment-methods/stripe-setup/%s/confirm", setup["id"]), "", nil))
 		return confirmed["payment_method_id"].(string)
 	case "nmi":
-		token := c.w.nmi.tokenize(card)
+		token := c.w.nmi.Tokenize(card)
 		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": c.w.psp["nmi"], "payment_token": token, "name_on_card": "Greenfield Payer"}))
 		return saved["id"].(string)
 	}
@@ -684,7 +684,7 @@ func (w *world) loseSubmissions(rail string, n int) {
 	if rail == "stripe" {
 		w.stripe.loseSubmissions(n)
 	} else {
-		w.nmi.loseSubmissions(n)
+		w.nmi.LoseSales(n)
 	}
 }
 
@@ -695,9 +695,7 @@ func (w *world) lostSubmissions(rail string) int {
 		defer w.stripe.mu.Unlock()
 		return w.stripe.lost
 	}
-	w.nmi.mu.Lock()
-	defer w.nmi.mu.Unlock()
-	return w.nmi.lost
+	return w.nmi.Lost()
 }
 
 // readUnavailable makes the rail's authoritative payment read fail.
@@ -705,7 +703,7 @@ func (w *world) readUnavailable(rail string, down bool) {
 	if rail == "stripe" {
 		w.stripe.listUnavailable(down)
 	} else {
-		w.nmi.queryUnavailable(down)
+		w.nmi.QueryUnavailable(down)
 	}
 }
 

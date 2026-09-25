@@ -43,7 +43,7 @@ func TestReplicasManyDueAtOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "active", sub.Status)
 	require.Empty(t, f.base.stripe.unexpected())
-	require.Empty(t, f.base.nmi.unexpected())
+	require.Empty(t, f.base.nmi.Unexpected())
 }
 
 // Scenario 2: two replicas admit the same due renewal at the same instant,
@@ -269,7 +269,7 @@ func receiptRead(f *fleet, e *engineCase) func(*http.Request) bool {
 	fk := f.base.nmi
 	return func(r *http.Request) bool {
 		read := strings.HasSuffix(r.URL.Path, "/query.php") || (r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/v5/"))
-		return read && fk.approvedLocked(ref) >= 2
+		return read && fk.approved(ref) >= 2
 	}
 }
 
@@ -382,12 +382,10 @@ func (f *fleet) renewalNotice(e *engineCase) obj {
 		}
 		f.t.Fatal("no Stripe renewal to notify")
 	}
-	fk := f.base.nmi
-	fk.mu.Lock()
-	defer fk.mu.Unlock()
-	for i := len(fk.sales) - 1; i >= 0; i-- {
-		s := fk.sales[i]
-		if s.Vault == ref && s.Declined == "" {
+	sales := f.base.nmi.Sales()
+	for i := len(sales) - 1; i >= 0; i-- {
+		s := sales[i]
+		if s.Vault == ref && s.Approved() {
 			return nmiEvent("transaction.sale.success", obj{"transaction_id": s.TransactionID, "transaction_type": "cc", "condition": "pendingsettlement", "amount": s.Amount, "currency": "USD",
 				"order_id": s.OrderID, "customer_vault_id": s.Vault, "action": obj{"action_type": "sale", "amount": s.Amount, "success": "1", "response_code": "100"}})
 		}
@@ -628,18 +626,18 @@ func TestReplicasProviderOwned(t *testing.T) {
 		require.Equal(t, "past_due", sub.Status, "a decline is never retried at once")
 		require.NotNil(t, sub.NextRetryAt)
 		require.WithinDuration(t, declined.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d")
-		require.Zero(t, f.base.nmi.saleAttempts())
+		require.Zero(t, len(f.base.nmi.Attempts()))
 		f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) - time.Minute)
 		f.passes()
-		require.Zero(t, f.base.nmi.saleAttempts(), "nothing before the scheduled retry")
+		require.Zero(t, len(f.base.nmi.Attempts()), "nothing before the scheduled retry")
 		f.advance(2 * time.Minute)
 		f.passes()
 		f.passes()
 		f.until(func() bool { return l.periodEnd().After(end) }, "OpenRails recovers the failed period")
 		f.passes()
-		require.Equal(t, 1, f.base.nmi.saleAttempts(), "one recovery charge")
+		require.Equal(t, 1, len(f.base.nmi.Attempts()), "one recovery charge")
 		require.Len(t, completed(f.replicas[0].payments(embedded, l.c.id)), 2)
-		require.True(t, f.base.nmi.scheduleLive(l.railSub), "NMI still owns the schedule")
+		require.True(t, f.base.nmi.ScheduleLive(l.railSub), "NMI still owns the schedule")
 	})
 }
 

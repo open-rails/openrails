@@ -64,7 +64,12 @@ func TestSecurityRotatedWebhookSecretExpires(t *testing.T) {
 			require.Len(t, completed(w.payments(embedded, l.c.id)), paid+1)
 
 			renewed := l.periodEnd()
-			w.advance(renewed.Sub(w.clock.Now()) + time.Hour)
+			// Past NMI's own next billing time too, so its charge is not postdated.
+			next := renewed
+			if rail == "nmi" && w.nmi.Schedule(l.railSub).NextBilling.After(next) {
+				next = w.nmi.Schedule(l.railSub).NextBilling
+			}
+			w.advance(next.Sub(w.clock.Now()) + time.Hour)
 			require.True(t, w.clock.Now().After(expires))
 			body, err = json.Marshal(l.providerRenewal(true))
 			require.NoError(t, err)

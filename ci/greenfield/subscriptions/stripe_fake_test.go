@@ -17,14 +17,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // card is what a browser tokenizes. Decline is "" (approve), a Stripe
 // decline_code / NMI response_code, or "auth" (issuer authentication).
-type card struct {
-	Brand, Last4 string
-	Decline      string
-}
+type card = nmimock.Card
 
 var (
 	visa       = card{Brand: "visa", Last4: "4242"}

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // Exactly-once collection (#1092): one NMI order per obligation, a resend
@@ -27,10 +28,10 @@ func TestEngineNMILostSubmissionVaultActivity(t *testing.T) {
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
 	e.toPeriodEnd()
-	vault := w.nmi.lastSale().Vault
-	w.nmi.loseSubmissions(1)
+	vault := w.nmi.LastSale().Vault
+	w.nmi.LoseSales(1)
 	w.runRenewals()
-	w.nmi.approveUnder("another-order", vault, "1.00")
+	w.nmi.AddSale(nmimock.Sale{OrderID: "another-order", Vault: vault, Amount: "1.00"})
 	w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unexplained vault charge is an operator finding")
 	for range 6 {
 		w.advance(time.Hour)
@@ -50,8 +51,8 @@ func TestEngineNMIResendDupSecondsBackstop(t *testing.T) {
 	end := e.periodEnd()
 	e.toPeriodEnd()
 	before := len(w.nmi.saleOrders())
-	w.nmi.dropResponses(1)
-	w.nmi.hideSales(1)
+	w.nmi.DropSaleResponses(1)
+	w.nmi.HideSales(1)
 	w.runRenewals()
 	w.until(func() bool { return len(w.nmi.saleOrders()) == before+2 }, "the apparently lost submission is re-sent")
 	w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the refused resend is an operator finding")
@@ -60,7 +61,7 @@ func TestEngineNMIResendDupSecondsBackstop(t *testing.T) {
 	require.NotEmpty(t, w.nmi.lastAttempt().Get("dup_seconds"), "the resend sets NMI's duplicate window")
 	require.Len(t, e.providerLedger(), 2, "the resend charged nothing")
 
-	w.nmi.reveal()
+	w.nmi.Reveal()
 	w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the indexed original pays the period")
 	require.Len(t, e.providerLedger(), 2, "exactly one renewal charge")
 	require.Len(t, completed(w.payments(embedded, e.c.id)), 2)
@@ -75,22 +76,22 @@ func TestEngineNMISharedOrderFindsEarlierCharge(t *testing.T) {
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
 	e.toPeriodEnd()
-	w.nmi.setDecline(visa.Last4, "202")
+	w.nmi.SetDecline(visa.Last4, "202")
 	w.runRenewals()
 	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the first attempt is declined")
-	declined := w.nmi.lastDeclined()
+	declined := w.nmi.LastDecline()
 	require.NotNil(t, declined)
-	w.nmi.setDecline(visa.Last4, "")
+	w.nmi.SetDecline(visa.Last4, "")
 	// The processor approved the period under the same order after all.
-	paid := w.nmi.approveUnder(declined.OrderID, declined.Vault, declined.Amount)
-	attempts := w.nmi.saleAttempts()
+	paid := w.nmi.AddSale(nmimock.Sale{OrderID: declined.OrderID, Vault: declined.Vault, Amount: declined.Amount})
+	attempts := len(w.nmi.Attempts())
 
 	sub := w.subscription(embedded, e.sub)
 	require.NotNil(t, sub.NextRetryAt)
 	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 	w.runRenewals()
 	w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the retry completes from the earlier charge")
-	require.Equal(t, attempts, w.nmi.saleAttempts(), "the retry sent nothing")
+	require.Equal(t, attempts, len(w.nmi.Attempts()), "the retry sent nothing")
 	require.Len(t, e.providerLedger(), 2)
 	var ids []string
 	for _, p := range completed(w.payments(embedded, e.c.id)) {
@@ -317,7 +318,6 @@ func (f *fleet) runningReplica() *world {
 
 // lastAttempt is the form of the latest sale request.
 func (f *nmiFake) lastAttempt() url.Values {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.attempts[len(f.attempts)-1]
+	attempts := f.Attempts()
+	return attempts[len(attempts)-1]
 }

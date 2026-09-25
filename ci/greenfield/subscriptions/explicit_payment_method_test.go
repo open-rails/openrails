@@ -47,7 +47,7 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 				require.Equal(t, "payment_method_id", *status.Param)
 			}
 			require.Empty(t, w.nmi.ledger(""), "no card is charged")
-			require.Zero(t, w.nmi.saleAttempts())
+			require.Zero(t, len(w.nmi.Attempts()))
 			require.False(t, c.entitled("content:post"))
 		})
 	}

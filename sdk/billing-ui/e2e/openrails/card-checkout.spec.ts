@@ -1,6 +1,6 @@
 // A new card entered in the packaged Checkout subscribes in one click (#1085):
 // the host relays the Collect.js token and OpenRails saves the card, accepts
-// the displayed terms and charges it. The loopback NMI gateway (nmifake)
+// the displayed terms and charges it. The loopback NMI gateway (nmimock)
 // declines cards ending 0002; Collect.js is a stand-in served in its place.
 import { expect, test, type Page } from "@playwright/test"
 

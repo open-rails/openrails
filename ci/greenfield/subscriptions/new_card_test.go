@@ -51,9 +51,7 @@ func (h hostedPay) subscriptions() []openrails.Subscription {
 }
 
 func (w *world) vaultCount() int {
-	w.nmi.mu.Lock()
-	defer w.nmi.mu.Unlock()
-	return len(w.nmi.vaults)
+	return len(w.nmi.Vaults())
 }
 
 func TestHostedNewCardSubscription(t *testing.T) {
@@ -63,7 +61,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			h := hostedPay{w: w, c: w.newCustomer(), tp: tp, price: w.membership("content:members", 9_990_000).ID}
-			token := w.nmi.tokenize(visa)
+			token := w.nmi.Tokenize(visa)
 
 			session, err := h.pay("pay-1", openrails.CheckoutPaymentOptions{PaymentToken: token})
 			require.NoError(t, err)
@@ -102,7 +100,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			require.Len(t, w.nmi.ledger(""), 1, "no second charge")
 			require.Len(t, h.methods(), 1, "no second saved card")
 			require.Len(t, h.subscriptions(), 1)
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -114,7 +112,7 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: w.membership("content:members", 9_990_000).ID}
 	vaults := w.vaultCount()
 
-	_, err := h.pay("pay-declined", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
+	_, err := h.pay("pay-declined", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
 	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
 	var status *openrails.StatusError
 	require.True(t, errors.As(err, &status))
@@ -126,7 +124,7 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	require.False(t, h.c.entitled("content:members"))
 
 	// The next attempt with another card succeeds.
-	session, err := h.pay("pay-retry", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.tokenize(visa)})
+	session, err := h.pay("pay-retry", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)
 	require.Len(t, h.subscriptions(), 1)
@@ -165,7 +163,7 @@ func TestHostedNewCardQuoteThenConfirm(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "quote-" + uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.tokenize(visa), NameOnCard: "Quoted Payer", Zip: "10001", Country: "US"},
+		PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Quoted Payer", Zip: "10001", Country: "US"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", session.Status)
@@ -186,7 +184,7 @@ func TestHostedNewCardOneTimeSale(t *testing.T) {
 	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
-	session, err := h.pay("sale-1", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.tokenize(visa)})
+	session, err := h.pay("sale-1", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)
 	w.settle()

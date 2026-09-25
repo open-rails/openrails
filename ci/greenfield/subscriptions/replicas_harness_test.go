@@ -592,10 +592,8 @@ func (f *fleet) submissions(e *engineCase) int {
 }
 
 func (fk *nmiFake) attemptsFor(vault string) int {
-	fk.mu.Lock()
-	defer fk.mu.Unlock()
 	n := 0
-	for _, a := range fk.attempts {
+	for _, a := range fk.Attempts() {
 		if a.Get("customer_vault_id") == vault {
 			n++
 		}
@@ -603,11 +601,11 @@ func (fk *nmiFake) attemptsFor(vault string) int {
 	return n
 }
 
-// approvedLocked counts approved sales on vault; the caller holds fk.mu.
-func (fk *nmiFake) approvedLocked(vault string) int {
+// approved counts approved sales on vault.
+func (fk *nmiFake) approved(vault string) int {
 	n := 0
-	for _, s := range fk.sales {
-		if s.Vault == vault && s.Declined == "" {
+	for _, s := range fk.Sales() {
+		if s.Vault == vault && s.Approved() {
 			n++
 		}
 	}

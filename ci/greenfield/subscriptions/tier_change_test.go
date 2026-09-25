@@ -39,7 +39,7 @@ func (w *world) railDecline(rail, stripeCode, nmiCode string) {
 	if rail == "stripe" {
 		w.stripe.setDecline(visa.Last4, stripeCode)
 	} else {
-		w.nmi.setDecline(visa.Last4, nmiCode)
+		w.nmi.SetDecline(visa.Last4, nmiCode)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestEngineTierUpgrade(t *testing.T) {
 			w.settle()
 		}
 		require.Empty(t, w.stripe.unexpected())
-		require.Empty(t, w.nmi.unexpected())
+		require.Empty(t, w.nmi.Unexpected())
 	})
 }
 
@@ -210,7 +210,7 @@ func TestEngineTierDowngrade(t *testing.T) {
 			w.settle()
 		}
 		require.Empty(t, w.stripe.unexpected())
-		require.Empty(t, w.nmi.unexpected())
+		require.Empty(t, w.nmi.Unexpected())
 	})
 }
 

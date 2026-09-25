@@ -136,7 +136,7 @@ func TestDefaultPaymentMethod(t *testing.T) {
 		require.Equal(t, used, c.requireOneDefault("delete default"), "the most recently used card is promoted over a newer unused one")
 
 		if rail == "nmi" {
-			c.must(http.MethodPut, "/payment-methods/"+used, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(visa), "last_four": visa.Last4, "card_type": visa.Brand, "expiry_date": "12/35"})
+			c.must(http.MethodPut, "/payment-methods/"+used, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(visa), "last_four": visa.Last4, "card_type": visa.Brand, "expiry_date": "12/35"})
 			w.settle()
 			require.Equal(t, used, c.requireOneDefault("in-place replacement"), "a replaced card keeps its default")
 		}
@@ -161,7 +161,7 @@ func TestDefaultPaymentMethodConcurrentFirstSaves(t *testing.T) {
 			for range 2 {
 				switch rail {
 				case "nmi":
-					requests = append(requests, request{"/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.tokenize(visa), "name_on_card": "Greenfield Payer"}})
+					requests = append(requests, request{"/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "Greenfield Payer"}})
 				case "stripe":
 					setup := c.must(http.MethodPost, "/payment-methods/stripe-setup", "setup-"+uuid.NewString(), map[string]any{"psp_id": w.psp["stripe"], "consent": true})
 					w.stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), visa)
@@ -232,7 +232,7 @@ func TestDefaultPaymentMethodInvariantSequence(t *testing.T) {
 				case 3:
 					before := c.requireOneDefault("before replace")
 					target := pick()
-					status, _ := c.call(http.MethodPut, "/payment-methods/"+target, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
+					status, _ := c.call(http.MethodPut, "/payment-methods/"+target, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
 					w.settle()
 					if status < 300 {
 						require.Equal(t, before, c.requireOneDefault("replace"), "step %d: a replacement never moves the default", step)

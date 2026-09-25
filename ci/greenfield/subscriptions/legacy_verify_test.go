@@ -85,17 +85,17 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 			r := b.add(&bookRow{source: fmt.Sprintf("book-%04d", len(b.rows)), tier: tier, c: c, paid: paid, declared: true})
 			switch len(b.rows) % 100 {
 			case 1:
-				w.nmi.providerCancel(r.schedule)
+				w.nmi.DeleteSchedule(r.schedule)
 				gone = append(gone, r)
 			case 2:
 				silent = append(silent, r)
 			default:
-				w.nmi.providerRenew(r.schedule, true)
+				w.nmi.RenewSchedule(r.schedule, true)
 				renewed = append(renewed, r)
 			}
 		}
 	}
-	reads, writes := w.nmi.readCounts(), len(w.nmiWrites())
+	reads, writes := w.nmi.Reads(), len(w.nmiWrites())
 	// A legacy importer sends its book in request-sized batches; each commit
 	// wakes the verifier.
 	const batch = 250
@@ -123,15 +123,16 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	}, 3*time.Minute, 200*time.Millisecond, "the import is verified")
 
 	t.Logf("verified %s after the first import", time.Since(started))
-	got := verificationReads(reads, w.nmi.readCounts())
+	got := verificationReads(reads, w.nmi.Reads())
 	t.Logf("NMI reads to verify %d imported schedules: %v", len(b.rows), got)
-	require.LessOrEqual(t, got["v5:subscriptions"], batches, "at most one roster read per imported batch")
+	pages := (len(b.rows) + 99) / 100 // NMI's roster pages at per_page=100
+	require.LessOrEqual(t, got["v5:subscriptions"], batches*pages, "at most one roster read per imported batch")
 	require.LessOrEqual(t, got["query:transaction"], batches*5, "a few transaction pages per bulk read")
 	require.LessOrEqual(t, got["query:recurring"]+got["v5:subscriptions/{id}"], 2, "no per-member reads")
 
 	states := w.rowStates()
 	for _, r := range renewed {
-		next := w.nmi.scheduleState(r.schedule).NextBilling.UTC().Truncate(24 * time.Hour)
+		next := w.nmi.Schedule(r.schedule).NextBilling.UTC().Truncate(24 * time.Hour)
 		require.True(t, next.Equal(states[r.schedule].end), "%s: renewed through NMI's next billing date (%s vs %s)", r.source, next, states[r.schedule].end)
 	}
 	for _, r := range append(silent, gone...) {
@@ -140,7 +141,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	for _, r := range append(renewed, silent...) {
 		require.True(t, r.c.entitled(r.tier.ent), "%s: access holds", r.source)
 	}
-	require.Zero(t, w.nmi.saleAttempts(), "OpenRails charges nobody")
+	require.Zero(t, len(w.nmi.Attempts()), "OpenRails charges nobody")
 	require.Len(t, w.nmiWrites(), writes, "verification only reads")
 
 	// Armed, the next pass reads the few rows left in one batch: NMI ended
@@ -155,7 +156,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 		require.Equal(t, "unverified", states[r.schedule].status, r.source)
 		require.True(t, r.c.entitled(r.tier.ent), "%s: access holds", r.source)
 	}
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 	require.Len(t, w.nmiWrites(), writes, "an ended schedule is not deleted again")
 
 	w.converge()
@@ -214,7 +215,7 @@ func TestUnverifiedAfterWebhookIsReadAtOnce(t *testing.T) {
 	require.Equal(t, []string{"subscription:" + l.sub.UUID().String()}, w.openFindings("life.unverified.unresolved"))
 	require.Equal(t, "unverified", w.subscription(embedded, l.sub).Status)
 	require.True(t, l.c.entitled(l.ent), "uncertainty never revokes access")
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }
 
 // readBody reads a held request's form body and leaves it readable.

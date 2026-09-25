@@ -51,9 +51,8 @@ func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, openr
 	sub := c.subscribeAgain(embedded, "nmi", price.ID, price.ent, c.saveCard("nmi", visa))
 	paid := completed(w.payments(embedded, c.id))
 	require.Len(t, paid, 1)
-	w.nmi.mu.Lock()
-	vault := w.nmi.saleByID(paid[0].TransactionID).Vault
-	w.nmi.mu.Unlock()
+	sale, _ := w.nmi.Sale(paid[0].TransactionID)
+	vault := sale.Vault
 	current := w.subscription(embedded, sub)
 	w.advance(current.CurrentPeriodEndsAt.Sub(w.clock.Now()) - left)
 	return c, sub, vault
@@ -126,7 +125,7 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 			require.Contains(t, local, row.charge*10_000, "local payment equals the provider sale")
 		})
 	}
-	require.Empty(t, w.nmi.unexpected())
+	require.Empty(t, w.nmi.Unexpected())
 }
 
 // Hourly memberships are engine-owned; their quotes carry sub-hour credit

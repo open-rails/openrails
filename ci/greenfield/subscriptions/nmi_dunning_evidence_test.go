@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 func providerDunning(book *openrails.DeclaredBilling) {
@@ -28,14 +29,14 @@ func TestNMIStaleRosterDateInsidePaidPeriod(t *testing.T) {
 	l := importLegacy(t, w, "nmi", embedded, providerDunning)
 	w.converge()
 	end := l.periodEnd()
-	w.nmi.editSchedule(l.railSub, func(s *nmiSchedule) { s.NextBilling = w.clock.Now().Add(-2 * day) })
+	w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.NextBilling = w.clock.Now().Add(-2 * day) })
 	w.pull()
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, "active", sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(end))
 	require.Nil(t, sub.NextRetryAt)
 	w.runRenewals()
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }
 
 // A decline first seen after its grace would have ended (the webhook was
@@ -60,14 +61,14 @@ func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	require.WithinDuration(t, now.Add(48*time.Hour), *sub.GraceEndsAt, time.Second, "grace runs from discovery")
 	require.NotNil(t, sub.NextRetryAt)
 	require.WithinDuration(t, now.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from discovery")
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 
 	w.advance(sub.NextRetryAt.Sub(now) + time.Second)
 	w.runRenewals()
 	sub = w.subscription(embedded, l.sub)
 	require.Equal(t, "active", sub.Status)
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)))
-	require.Equal(t, 1, w.nmi.saleAttempts(), "one recovery charge")
+	require.Equal(t, 1, len(w.nmi.Attempts()), "one recovery charge")
 }
 
 // NMI renews at the boundary, then declines the next period. The renewal
@@ -90,7 +91,7 @@ func TestNMIRenewalThenDeclineDunsTheUnpaidPeriod(t *testing.T) {
 	require.NotNil(t, sub.NextRetryAt)
 	require.WithinDuration(t, w.clock.Now().Add(48*time.Hour), *sub.NextRetryAt, time.Second)
 	require.Len(t, completed(w.payments(embedded, l.c.id)), 2, "the initial charge and NMI's renewal")
-	require.Zero(t, w.nmi.saleAttempts())
+	require.Zero(t, len(w.nmi.Attempts()))
 }
 
 // A subscription that appears locally while the pull is reading NMI's roster
@@ -109,7 +110,7 @@ func TestNMIPullIgnoresRowsCreatedDuringTheFetch(t *testing.T) {
 		}
 		_, err := w.pool.Exec(t.Context(), w.sql(`UPDATE openrails.subscriptions SET deleted_at = `+deleted+` WHERE id = $1`), late.sub.UUID())
 		require.NoError(t, err)
-		w.nmi.editSchedule(late.railSub, func(s *nmiSchedule) { s.Deleted = hidden })
+		w.nmi.EditSchedule(late.railSub, func(s *nmimock.Schedule) { s.Deleted = hidden })
 	}
 	hide(true)
 	g := w.nmi.hold(newGate(func(r *http.Request) bool {
@@ -130,5 +131,5 @@ func TestNMIPullIgnoresRowsCreatedDuringTheFetch(t *testing.T) {
 
 	sub := w.subscription(embedded, late.sub)
 	require.Equal(t, "active", sub.Status, "a row the roster could not have listed is not cancelled")
-	require.Zero(t, w.nmi.deletesOf(late.railSub))
+	require.Zero(t, w.nmi.ScheduleDeletes(late.railSub))
 }

@@ -65,9 +65,7 @@ func (w *world) refundNotice(rail string) obj {
 		}
 		w.t.Fatal("no Stripe refund to notify")
 	}
-	w.nmi.mu.Lock()
-	defer w.nmi.mu.Unlock()
-	for _, s := range w.nmi.sales {
+	for _, s := range w.nmi.Sales() {
 		if s.RefundedCents > 0 {
 			return nmiEvent("transaction.refund.success", obj{"transaction_id": s.RefundIDs[len(s.RefundIDs)-1], "transaction_type": "cc", "condition": "complete", "amount": decimalCents(s.RefundedCents), "currency": "USD", "customer_vault_id": s.Vault,
 				"action": obj{"action_type": "refund", "amount": decimalCents(s.RefundedCents), "success": "1"}, "transaction": obj{"transaction_id": s.TransactionID}})

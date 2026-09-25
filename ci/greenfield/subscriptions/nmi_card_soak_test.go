@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // storedCard is a saved method's local row, read as the engine sees it.
@@ -48,8 +49,9 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			e := enroll(t, w, "nmi", tp)
 			method := e.c.saveCard("nmi", mastercard)
 			saved := w.storedCard(method)
-			verification := w.nmi.validationOf(saved.vault)
-			require.NotNil(t, verification, "the saved card was verified at NMI")
+			verifications := w.nmi.Validations(saved.vault)
+			require.NotEmpty(t, verifications, "the saved card was verified at NMI")
+			verification := verifications[0]
 			require.Equal(t, verification.TransactionID, saved.recurringRef, "the verification is the card's recurring agreement")
 			require.Equal(t, "customer", verification.Form.Get("initiated_by"))
 			require.Equal(t, "stored", verification.Form.Get("stored_credential_indicator"))
@@ -67,13 +69,13 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			w.runRenewals()
 			require.True(t, e.periodEnd().After(end), "the membership renews on the new card")
 			require.Len(t, w.nmi.ledger(""), sales+1, "exactly one renewal charge")
-			renewal := w.nmi.lastSale()
+			renewal := w.nmi.LastSale()
 			require.Equal(t, saved.vault, renewal.Vault)
 			require.Equal(t, mastercard.Last4, renewal.Card.Last4)
 			require.Equal(t, "merchant", renewal.InitiatedBy)
 			require.Equal(t, "used", renewal.Indicator)
 			require.Equal(t, verification.TransactionID, renewal.Initial, "the MIT references the new card's agreement")
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
@@ -84,14 +86,10 @@ func TestNMISavedCardVerificationRefused(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
-	vaults := func() int {
-		w.nmi.mu.Lock()
-		defer w.nmi.mu.Unlock()
-		return len(w.nmi.vaults)
-	}
+	vaults := func() int { return len(w.nmi.Vaults()) }
 	before := vaults()
 	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"],
-		"payment_token": w.nmi.tokenize(card{Brand: "visa", Last4: "0119", Decline: "200"}), "name_on_card": "Refused Payer"})
+		"payment_token": w.nmi.Tokenize(card{Brand: "visa", Last4: "0119", Decline: "200"}), "name_on_card": "Refused Payer"})
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
 	require.Equal(t, "card_declined", errorCode(body))
 	require.Equal(t, before, vaults(), "the refused card's vault is removed")
@@ -101,8 +99,8 @@ func TestNMISavedCardVerificationRefused(t *testing.T) {
 
 	funds := c.saveCard("nmi", card{Brand: "visa", Last4: "0002", Decline: "202"})
 	require.NotEmpty(t, w.storedCard(funds).recurringRef, "insufficient funds does not fail a verification")
-	require.Zero(t, w.nmi.saleAttempts())
-	require.Empty(t, w.nmi.unexpected())
+	require.Zero(t, len(w.nmi.Attempts()))
+	require.Empty(t, w.nmi.Unexpected())
 }
 
 // NMI's customer record may omit card_type. An in-place card replacement
@@ -115,11 +113,9 @@ func TestNMIInPlaceCardReplacementWithoutBrand(t *testing.T) {
 	c := w.newCustomer()
 	method := c.saveCard("nmi", mastercard)
 	vault := w.storedCard(method).vault
-	w.nmi.mu.Lock()
-	w.nmi.vaults[vault].NoBrand = true
-	w.nmi.mu.Unlock()
+	w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.NoBrand = true })
 	replacement := card{Brand: "visa", Last4: "1111"}
-	c.must(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(replacement), "last_four": replacement.Last4, "expiry_date": "12/35"})
+	c.must(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(replacement), "last_four": replacement.Last4, "expiry_date": "12/35"})
 	w.settle()
 	got := w.storedCard(method)
 	require.Equal(t, "1111", got.lastFour, "the replacement completes")
@@ -127,10 +123,8 @@ func TestNMIInPlaceCardReplacementWithoutBrand(t *testing.T) {
 
 	gap := c.saveCard("nmi", visa)
 	gapVault := w.storedCard(gap).vault
-	w.nmi.mu.Lock()
-	w.nmi.vaults[gapVault].Card.Last4 = ""
-	w.nmi.mu.Unlock()
-	status, body := c.call(http.MethodPut, "/payment-methods/"+gap, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
+	w.nmi.EditVault(gapVault, func(v *nmimock.Vault) { v.Card.Last4 = "" })
+	status, body := c.call(http.MethodPut, "/payment-methods/"+gap, "", map[string]any{"provider": "nmi", "payment_token": w.nmi.Tokenize(mastercard), "last_four": mastercard.Last4, "card_type": mastercard.Brand, "expiry_date": "12/35"})
 	t.Logf("data gap replacement: %d %v", status, body)
 	w.settle()
 	require.Contains(t, w.openFindings("life.payment_method_update.provider_data_gap"), strings.TrimPrefix(gap, "pm_"))

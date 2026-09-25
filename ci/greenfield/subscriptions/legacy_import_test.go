@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 // bookTier is one catalog price of a legacy NMI book, linked to the NMI plan
@@ -30,7 +31,7 @@ type bookTier struct {
 func (w *world) bookTier(name string, cents int64, days int) bookTier {
 	w.t.Helper()
 	tier := bookTier{plan: "lb_" + name + "_" + uuid.NewString()[:8], amount: decimalCents(cents), cents: cents, days: days, ent: "content:" + name + "-" + uuid.NewString()[:6]}
-	w.nmi.legacyPlan(tier.plan, tier.amount, days, 0)
+	w.nmi.AddPlan(nmimock.Plan{ID: tier.plan, Name: "Legacy " + tier.plan, Amount: tier.amount, Days: days})
 	client := w.client[embedded]
 	product, err := client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: "lb-" + name + "-" + uuid.NewString()[:8], DisplayName: name, EntitlementsSpec: map[string]*int{tier.ent: nil}})
 	require.NoError(w.t, err)
@@ -82,15 +83,15 @@ func (b *legacyBook) add(r *bookRow) *bookRow {
 	require.NoError(t, err)
 	newVault := r.vault == ""
 	if newVault {
-		r.vault = w.nmi.legacyVault(visa)
+		r.vault = w.nmi.AddVault(visa)
 	}
-	r.schedule = w.nmi.legacyScheduleEvery(r.vault, r.tier.plan, r.tier.amount, r.tier.days, r.months, r.paid)
+	r.schedule = w.nmi.AddSchedule(nmimock.Schedule{Vault: r.vault, Plan: r.tier.plan, Amount: r.tier.amount, Days: r.tier.days, Months: r.months, NextBilling: r.paid})
 	start := r.paid.AddDate(0, 0, -r.tier.days)
 	if r.months > 0 {
 		start = r.paid.AddDate(0, -r.months, 0)
 	}
-	sale := w.nmi.scheduleSale(r.schedule, start)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: r.vault, RailMethodRef: w.nmi.billingOf(r.vault)}
+	sale := w.nmi.AddScheduleSale(r.schedule, start)
+	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: r.vault, RailMethodRef: w.nmi.Vault(r.vault).BillingID}
 	if r.declared && newVault {
 		b.book.PaymentMethods = append(b.book.PaymentMethods, openrails.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: r.vault, RailMethodRef: method.RailMethodRef,
 			InitialTransactionID: sale.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"})
@@ -120,9 +121,7 @@ func (r *bookRow) sub(w *world, tp topology) *openrails.Subscription {
 
 // nmiWrites is every provider mutation OpenRails sent to NMI.
 func (w *world) nmiWrites() []providerCall {
-	w.nmi.mu.Lock()
-	defer w.nmi.mu.Unlock()
-	return append([]providerCall(nil), w.nmi.writes...)
+	return calls(w.nmi.Calls())
 }
 
 type refreshMerchant struct {
@@ -181,7 +180,7 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			b := w.newLegacyBook()
 			active := b.add(&bookRow{source: "active", tier: monthly, paid: now.Add(10 * day), declared: true})
 			shared := b.add(&bookRow{source: "daily", tier: daily, paid: now.Add(12 * time.Hour), declared: true})
-			second := w.nmi.addCard(shared.vault, mastercard)
+			second := w.nmi.AddCard(shared.vault, mastercard)
 			sharedID, err := openrails.ParseCustomerID(shared.c.id)
 			require.NoError(t, err)
 			b.book.PaymentMethods = append(b.book.PaymentMethods, openrails.DeclaredPaymentMethod{Customer: sharedID, Rail: "nmi", RailCustomerRef: shared.vault, RailMethodRef: second,
@@ -192,19 +191,19 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			// mirrored and standing access holds while NMI retries.
 			pastDue := b.add(&bookRow{source: "past_due", tier: monthly, paid: now.Add(-day), declared: true,
 				dunning: &openrails.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
-			w.nmi.editSchedule(pastDue.schedule, func(s *nmiSchedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
+			w.nmi.EditSchedule(pastDue.schedule, func(s *nmimock.Schedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
 			cancelled := b.add(&bookRow{source: "cancelled", tier: monthly, paid: now.Add(20 * day), declared: true,
 				cancel: openrails.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
-			w.nmi.providerCancel(cancelled.schedule)
+			w.nmi.DeleteSchedule(cancelled.schedule)
 			expired := b.add(&bookRow{source: "expired", tier: monthly, paid: now.Add(-35 * day), declared: true,
 				cancel: openrails.CancelEvidence{Kind: "provider_terminated", At: now.Add(-35 * day)}})
-			w.nmi.providerCancel(expired.schedule)
+			w.nmi.DeleteSchedule(expired.schedule)
 			// A paused NMI schedule bills nothing: it is declared as the
 			// member's cancellation at the pause, with runway, and the paused
 			// schedule is left alone (schedule_live=false).
 			paused := b.add(&bookRow{source: "paused", tier: monthly, paid: now.Add(5 * day), declared: true,
 				cancel: openrails.CancelEvidence{Kind: "user_cancelled", At: now.Add(-2 * day)}})
-			w.nmi.editSchedule(paused.schedule, func(s *nmiSchedule) { s.Paused = true })
+			w.nmi.EditSchedule(paused.schedule, func(s *nmimock.Schedule) { s.Paused = true })
 			calendar := b.add(&bookRow{source: "calendar", tier: monthly, months: 1, paid: now.Add(15 * day), declared: true})
 			gone := b.add(&bookRow{source: "gone_at_nmi", tier: monthly, paid: now.Add(8 * day), declared: true})
 			orphan := b.add(&bookRow{source: "orphan_card", tier: monthly, paid: now.Add(9 * day)})
@@ -286,9 +285,9 @@ func TestLegacyNMIBookImport(t *testing.T) {
 
 			// A schedule NMI bills that the book never mentioned, and a
 			// booked schedule NMI has since deleted.
-			strayVault := w.nmi.legacyVault(visa)
-			stray := w.nmi.legacyScheduleEvery(strayVault, monthly.plan, monthly.amount, 30, 0, now.Add(5*day))
-			w.nmi.providerCancel(gone.schedule)
+			strayVault := w.nmi.AddVault(visa)
+			stray := w.nmi.AddSchedule(nmimock.Schedule{Vault: strayVault, Plan: monthly.plan, Amount: monthly.amount, Days: 30, Months: 0, NextBilling: now.Add(5 * day)})
+			w.nmi.DeleteSchedule(gone.schedule)
 			w.armDestructive()
 			w.pull()
 			require.Contains(t, w.openFindings("pull.subscription.missing"), stray, "the NMI-only schedule is surfaced")
@@ -298,9 +297,9 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			require.Equal(t, "active", active.sub(w, tp).Status)
 			require.Equal(t, "cancelled", paused.sub(w, tp).Status, "the paused schedule stays a runway cancellation")
 
-			require.Zero(t, w.nmi.saleAttempts(), "OpenRails never charges a provider-owned book")
+			require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charges a provider-owned book")
 			require.Len(t, w.nmiWrites(), writes, "import and pull never write to NMI")
-			require.Empty(t, w.nmi.unexpected())
+			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
 }
