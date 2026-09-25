@@ -31,6 +31,7 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
+	w.stripe.legacyPrice(stripePrice, 1999)
 	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)

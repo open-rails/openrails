@@ -79,6 +79,8 @@ type stripeFake struct {
 	lost      int
 	listDown  bool
 	subsDown  bool
+	// amounts are legacy prices created at Stripe at other than 9.99.
+	amounts map[string]int64
 }
 
 func newStripeFake() *stripeFake {
@@ -265,7 +267,11 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && seg[0] == "prices" && len(seg) == 2 && strings.HasPrefix(seg[1], "price_legacy_"):
 		// A legacy book's monthly 9.99 price, created at Stripe long ago.
-		return 200, obj{"object": "price", "id": seg[1], "product": "prod_legacy", "unit_amount": 999, "currency": "usd", "active": true, "livemode": false,
+		amount, ok := f.amounts[seg[1]]
+		if !ok {
+			amount = 999
+		}
+		return 200, obj{"object": "price", "id": seg[1], "product": "prod_legacy", "unit_amount": amount, "currency": "usd", "active": true, "livemode": false,
 			"type": "recurring", "recurring": obj{"interval": "month", "interval_count": 1}, "metadata": map[string]string{}}
 	case r.Method == http.MethodGet && seg[0] == "payment_methods" && len(seg) == 2:
 		if m, ok := f.methods[seg[1]]; ok {
@@ -558,6 +564,16 @@ func (f *stripeFake) invoiceLocked(subID string, amount int64, paid bool) obj {
 	}
 	s["latest_invoice"] = inv
 	return inv
+}
+
+// legacyPrice creates a legacy monthly price at Stripe for amount cents.
+func (f *stripeFake) legacyPrice(id string, amount int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.amounts == nil {
+		f.amounts = map[string]int64{}
+	}
+	f.amounts[id] = amount
 }
 
 // portalPriceChange is the customer switching price in Stripe's portal: the
