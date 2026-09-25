@@ -34,7 +34,7 @@ point provider_sandbox.nmi_gateway_url (PROVIDER_SANDBOX_NMI_GATEWAY_URL) at it.
 			if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
 				return fmt.Errorf("--listen must be a loopback IP literal and port, got %q", listen)
 			}
-			ln, err := net.Listen("tcp", listen)
+			ln, err := (&net.ListenConfig{}).Listen(cmd.Context(), "tcp", listen)
 			if err != nil {
 				return err
 			}
