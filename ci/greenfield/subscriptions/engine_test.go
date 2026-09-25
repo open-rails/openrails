@@ -901,7 +901,7 @@ func TestEngineDuePassIsolatesRefusals(t *testing.T) {
 	w := newWorld(t)
 	healthy := enroll(t, w, "stripe", embedded)
 	broken := enroll(t, w, "nmi", embedded)
-	_, err := w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.subscriptions SET current_period_ends_at = current_period_ends_at - interval '1 day' WHERE id = $1`, strings.TrimPrefix(broken.sub.String(), "sub_"))
+	_, err := w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, current_period_ends_at = current_period_ends_at - interval '1 day' WHERE id = $1`, strings.TrimPrefix(broken.sub.String(), "sub_"))
 	require.NoError(t, err)
 	end := healthy.periodEnd()
 	healthy.toPeriodEnd()

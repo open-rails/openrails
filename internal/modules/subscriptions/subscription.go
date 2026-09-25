@@ -85,7 +85,6 @@ func (s *SubscriptionService) GetUserSubscription(ctx context.Context, userID st
 	return s.GetByUserID(ctx, userID)
 }
 
-
 // GetAvailableProducts returns all active products with their prices
 func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*models.Product, error) {
 	products, err := s.ProductService.GetActive(ctx)
