@@ -102,8 +102,12 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 			at = now
 		}
 		switch {
+		case d.RemoteGone && subscriptions.OwnerOf(cur) == lifecycle.Provider:
+			// A provider that owns the schedule decides its access: its
+			// confirmed end is immediate.
+			return lifecycle.Cancel{Kind: lifecycle.CancelProvider, Immediate: true, At: at}
 		case d.RemoteGone:
-			return lifecycle.ProviderCancelled{At: at}
+			return lifecycle.ProviderCancelled{At: at} // NMI ended the schedule; paid time is kept
 		case d.Certainty == collection.CertaintyNonRetryableDecline:
 			return lifecycle.RenewalDeclined{PeriodStart: paidThroughOf(cur), Bucket: lifecycle.NonRecoverable, At: at}
 		default:
@@ -159,7 +163,7 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 		if len(effects) == 0 && subscriptions.SnapshotOf(cur) == before {
 			return nil
 		}
-		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared), now, subscriptions.EffectOptions{}); err != nil {
+		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
 			return err
 		}
 		if _, renewed := ev.(lifecycle.RenewalPaid); renewed {
@@ -195,14 +199,18 @@ func paidThroughOf(sub *models.Subscription) time.Time {
 	return sub.CurrentPeriodEndsAt.UTC()
 }
 
-// customerNotices keeps a mirrored transition's notices, except the end of
-// access, which the converge NOTIFY pass sends once for every ending (#789),
-// and every notice when the decision replays declared history.
-func customerNotices(effects []lifecycle.Effect, silent bool) []lifecycle.Effect {
+// customerNotices keeps a mirrored transition's effects, except: the end of
+// access notice, which the converge NOTIFY pass sends once for every ending
+// (#789); every notice when the decision replays declared history; and a
+// provider cancel for a schedule the provider already ended.
+func customerNotices(effects []lifecycle.Effect, silent, gone bool) []lifecycle.Effect {
 	out := effects[:0:0]
 	for _, e := range effects {
 		if n, ok := e.(lifecycle.Notify); ok && (silent || n.Kind == lifecycle.NoticeEnded) {
 			continue
+		}
+		if _, ok := e.(lifecycle.QueueProviderCancel); ok && gone {
+			continue // nothing left to cancel at the provider
 		}
 		out = append(out, e)
 	}

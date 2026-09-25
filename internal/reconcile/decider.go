@@ -678,10 +678,11 @@ const reasonRenewedBeforeDecline = "verified_renewal_before_decline"
 
 // paidPeriod is the period the verified charges since cutoff paid for: one
 // local cycle per distinct charge, from the local end (audit 8). The
-// provider's next billing date is adopted only when it lands on that many
-// cycles (within half a cycle, which absorbs calendar months, or on that
-// boundary's day); a date moved by a later decline is not payment. Without a known
-// cycle only the provider's date can bound it.
+// provider's next billing date is adopted when it lands on that many cycles
+// (within half a cycle, which absorbs calendar months, or on that boundary's
+// day) or falls short of them (a charge in the alignment slack paid an
+// earlier period); a date moved on by a later decline is not payment. Without
+// a known cycle only the provider's date can bound it.
 func paidPeriod(txns []RemoteTransaction, cutoff time.Time, start, end *time.Time, remote *RemoteSubscription) (*time.Time, *time.Time) {
 	next := remoteNextEnd(remote)
 	var remoteStart *time.Time
@@ -707,8 +708,15 @@ func paidPeriod(txns []RemoteTransaction, cutoff time.Time, start, end *time.Tim
 	cycle := end.Sub(*start)
 	paid := time.Duration(max(len(seen), 1))
 	from, to := *end, end.Add(paid*cycle)
-	if next != nil && ((next.After(to.Add(-cycle/2)) && !next.After(to.Add(cycle/2))) || next.Equal(to.Truncate(24*time.Hour))) {
+	switch {
+	case next == nil || next.After(to.Add(cycle/2)):
+		// No date, or one a later decline moved on: the charges bound it.
+	case next.After(to.Add(-cycle/2)) || next.Equal(to.Truncate(24*time.Hour)):
 		to = *next // NMI states a date: the boundary's own day counts
+	case next.After(from):
+		to = *next // a charge in the alignment slack paid an earlier period
+	default:
+		return nil, nil // the charges were already applied
 	}
 	return &from, &to
 }

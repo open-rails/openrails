@@ -55,9 +55,9 @@ func verificationReads(before, after map[string]int) map[string]int {
 
 // A legacy book of thousands of NMI members whose paid periods lapsed before
 // the export lands unverified: NMI has since renewed most, ended some and
-// billed nothing for a few. The import's commit wakes the verifier, which
-// reads the account in bulk — one roster read and a few transaction pages,
-// not one read per member — and resolves every row from NMI's own records.
+// billed nothing for a few. Each import commit wakes the verifier, which
+// reads the account in bulk — a roster read and a few transaction pages, not
+// one read per member — and resolves every row from NMI's own records.
 // OpenRails charges nothing and access holds throughout; the few NMI never
 // billed stay unverified, visible in the backlog finding.
 func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
@@ -83,9 +83,19 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 		}
 	}
 	reads, writes := w.nmi.readCounts(), len(w.nmiWrites())
-	result, err := w.client[embedded].ImportBilling(t.Context(), b.book)
-	require.NoError(t, err)
-	require.Len(t, result.Imported, renewedN+goneN+silentN, "%+v", result.Reasons)
+	// A legacy importer sends its book in request-sized batches; each commit
+	// wakes the verifier.
+	const batch = 400
+	for i := 0; i < len(b.book.Subscriptions); i += batch {
+		j := min(i+batch, len(b.book.Subscriptions))
+		part := b.book
+		part.PaymentMethods, part.Customers = b.book.PaymentMethods[i:j], b.book.Customers[i:j]
+		part.Subscriptions, part.Transactions = b.book.Subscriptions[i:j], b.book.Transactions[i:j]
+		result, err := w.client[embedded].ImportBilling(t.Context(), part)
+		require.NoError(t, err)
+		require.Len(t, result.Imported, j-i, "%+v", result.Reasons)
+	}
+	batches := (len(b.book.Subscriptions) + batch - 1) / batch
 
 	require.Eventually(t, func() bool {
 		states := w.rowStates()
@@ -104,8 +114,8 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 
 	got := verificationReads(reads, w.nmi.readCounts())
 	t.Logf("NMI reads to verify %d imported members: %v", renewedN+goneN+silentN, got)
-	require.Equal(t, 1, got["v5:subscriptions"], "one roster read")
-	require.LessOrEqual(t, got["query:transaction"], 6, "a few transaction pages")
+	require.LessOrEqual(t, got["v5:subscriptions"], batches, "at most one roster read per imported batch")
+	require.LessOrEqual(t, got["query:transaction"], batches*5, "a few transaction pages per bulk read")
 	require.LessOrEqual(t, got["query:recurring"]+got["v5:subscriptions/{id}"], 2, "no per-member reads")
 
 	states := w.rowStates()

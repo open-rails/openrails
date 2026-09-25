@@ -31,6 +31,7 @@ func TestPaidPeriod(t *testing.T) {
 		{"three charges, three cycles", []RemoteTransaction{charge("a", end), charge("b", end.AddDate(0, 0, 30)), charge("c", end.AddDate(0, 0, 60)), charge("c", end.AddDate(0, 0, 60))},
 			roster(end.AddDate(0, 0, 90)), end.AddDate(0, 0, 90)},
 		{"an older charge paid an earlier period", []RemoteTransaction{charge("old", start), charge("a", end)}, nil, end.AddDate(0, 0, 30)},
+		{"a date short of the count bounds it", []RemoteTransaction{charge("a", end), charge("b", end.Add(time.Hour))}, roster(end.AddDate(0, 0, 30)), end.AddDate(0, 0, 30)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			from, to := paidPeriod(c.txns, cutoff, &start, &end, c.remote)
@@ -38,8 +39,11 @@ func TestPaidPeriod(t *testing.T) {
 			require.Equal(t, c.want, *to)
 		})
 	}
+	from, to := paidPeriod(one, cutoff, &start, &end, roster(end))
+	require.Nil(t, from)
+	require.Nil(t, to, "a date not past the paid period: the charge was already applied")
 	next := end.AddDate(0, 0, 30)
-	from, to := paidPeriod(one, cutoff, nil, &end, roster(next))
+	from, to = paidPeriod(one, cutoff, nil, &end, roster(next))
 	require.Equal(t, end, *from, "an unknown cycle takes the provider's date")
 	require.Equal(t, next, *to)
 	from, to = paidPeriod(one, cutoff, nil, &end, nil)
