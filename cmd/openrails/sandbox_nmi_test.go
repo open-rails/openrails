@@ -16,8 +16,9 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	out := &syncBuffer{}
-	cmd := newSandboxCmd()
-	cmd.SetArgs([]string{"nmi-gateway", "--listen", "127.0.0.1:0"})
+	// Through the real root: its config pre-run must not apply (no config here).
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"sandbox", "nmi-gateway", "--listen", "127.0.0.1:0", "--config", t.TempDir() + "/none.yaml"})
 	cmd.SetOut(out)
 	done := make(chan error, 1)
 	go func() { done <- cmd.ExecuteContext(ctx) }()
@@ -53,8 +54,8 @@ func TestSandboxNMIGatewayServesTheQualificationProbe(t *testing.T) {
 
 func TestSandboxNMIGatewayRefusesNonLoopback(t *testing.T) {
 	for _, addr := range []string{"0.0.0.0:0", "localhost:0", ":0"} {
-		cmd := newSandboxCmd()
-		cmd.SetArgs([]string{"nmi-gateway", "--listen", addr})
+		cmd := newRootCmd()
+		cmd.SetArgs([]string{"sandbox", "nmi-gateway", "--listen", addr})
 		cmd.SetOut(io.Discard)
 		cmd.SetErr(io.Discard)
 		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "loopback") {

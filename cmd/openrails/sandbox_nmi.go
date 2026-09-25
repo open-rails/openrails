@@ -18,7 +18,9 @@ import (
 // newSandboxCmd serves loopback provider fakes for disposable stacks that
 // arm a PSP without real sandbox credentials (provider_sandbox.*).
 func newSandboxCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "sandbox", Short: "Loopback provider fakes for disposable test stacks"}
+	// No config: the fakes need no database, posture or credentials.
+	cmd := &cobra.Command{Use: "sandbox", Short: "Loopback provider fakes for disposable test stacks",
+		PersistentPreRunE: func(*cobra.Command, []string) error { return nil }}
 	var listen string
 	var idle time.Duration
 	nmi := &cobra.Command{
