@@ -100,8 +100,8 @@ func afterConvergeTransition(ctx context.Context, deps convergeDeps, sub *models
 	}
 	switch res.Decision.Kind {
 	case reconcile.TransitionPastDue:
-		if deps.NotificationService == nil {
-			return nil
+		if deps.NotificationService == nil || reconcile.DunsDecline(sub, res.Decision) {
+			return nil // FailMembership queued the dunning notice
 		}
 		notification := &models.NotificationQueue{
 			ID:         uuidutil.NewV7(),

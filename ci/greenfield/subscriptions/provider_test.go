@@ -4,10 +4,12 @@ package subscriptions_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -332,6 +334,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			require.Equal(t, "past_due", sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a future schedule date cannot grant an unpaid period")
 			require.NotNil(t, sub.NextRetryAt, "OpenRails schedules recovery after the provider decline")
+			require.WithinDuration(t, w.clock.Now().Add(48*time.Hour), *sub.NextRetryAt, time.Second, "NMI never retries; OpenRails' first retry is the schedule's +2d, not now")
 			require.Zero(t, w.nmi.saleAttempts(), "read-only posture holds automatic recovery")
 			w.cfg = nil
 			w.restart()
@@ -383,4 +386,82 @@ func TestNMIProviderDunningImportRetainsRetryHistory(t *testing.T) {
 		book.Subscriptions[0].Dunning = &openrails.DunningEvidence{Retries: 2, LastRetryAt: &last, ScheduleLive: true}
 	})
 	require.Zero(t, w.nmi.saleAttempts())
+}
+
+// A stalled OpenRails-dunned schedule (past_due, no retry scheduled) resumes
+// at the dunning schedule's next step after its last attempt, never at once.
+// Past grace it is left to grace_exhausted, and provider-owned Stripe and NMI
+// rows are never given a retry.
+func TestDunningStallResumesOnSchedule(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	dunning := func(book *openrails.DeclaredBilling) { book.Subscriptions[0].CollectionPolicy = "provider_dunning" }
+	stalled := importLegacy(t, w, "nmi", embedded, dunning)
+	lapsed := importLegacy(t, w, "nmi", embedded, dunning)
+	stripeOwned := importLegacy(t, w, "stripe", embedded)
+	nmiOwned := importLegacy(t, w, "nmi", embedded)
+	w.converge()
+	charges := stripeOwned.engineCharges()
+	w.advance(stalled.periodEnd().Sub(w.clock.Now()) + day)
+	now := w.clock.Now()
+	last := now.Add(-time.Hour)
+	stall := func(l *legacy, grace time.Time) {
+		_, err := w.pool.Exec(t.Context(), strings.ReplaceAll(`UPDATE openrails.subscriptions
+			SET status = 'past_due', next_retry_at = NULL, retry_attempts = 2, last_retry_at = $2, grace_ends_at = $3
+			WHERE id = $1`, "openrails.", pgx.Identifier{w.schema}.Sanitize()+"."), l.sub.UUID(), last, grace)
+		require.NoError(t, err)
+	}
+	stall(stalled, now.Add(10*day))
+	stall(lapsed, now.Add(-time.Minute))
+	stall(stripeOwned, now.Add(10*day))
+	stall(nmiOwned, now.Add(10*day))
+
+	w.converge()
+	sub := w.subscription(embedded, stalled.sub)
+	require.Equal(t, "past_due", sub.Status)
+	require.NotNil(t, sub.NextRetryAt, "the stalled schedule resumes")
+	require.WithinDuration(t, last.Add(3*day), *sub.NextRetryAt, time.Second, "third attempt: +5d after the first failure, 3d after the second")
+	sub = w.subscription(embedded, lapsed.sub)
+	require.Nil(t, sub.NextRetryAt, "past grace, grace_exhausted owns it")
+	require.Equal(t, "unknown", sub.Status)
+	for _, l := range []*legacy{stripeOwned, nmiOwned} {
+		sub = w.subscription(embedded, l.sub)
+		require.Nil(t, sub.NextRetryAt, "%s: the provider owns its retries", l.rail)
+		require.Equal(t, "past_due", sub.Status)
+	}
+	w.runRenewals()
+	require.Zero(t, w.nmi.saleAttempts())
+	require.Equal(t, charges, stripeOwned.engineCharges())
+}
+
+// A lapsed provider_dunning schedule with no decline seen is never charged by
+// OpenRails: NMI may have billed it unobserved. When NMI's renewal arrives
+// late, the period is paid exactly once.
+func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.armDestructive()
+	l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
+		book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+	})
+	w.converge()
+	end := l.periodEnd()
+	for _, step := range []time.Duration{end.Sub(w.clock.Now()) + time.Hour, 49 * time.Hour} {
+		w.advance(step)
+		w.converge()
+		w.runRenewals()
+		sub := w.subscription(embedded, l.sub)
+		require.NotEqual(t, "past_due", sub.Status, "a lapse is not a decline")
+		require.Nil(t, sub.NextRetryAt)
+		require.Zero(t, w.nmi.saleAttempts(), "OpenRails never charges without a seen decline")
+	}
+
+	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(true)))
+	w.runRenewals()
+	sub := w.subscription(embedded, l.sub)
+	require.Equal(t, "active", sub.Status)
+	require.True(t, sub.CurrentPeriodEndsAt.After(end))
+	require.Zero(t, w.nmi.saleAttempts())
+	require.Len(t, w.nmi.ledger(""), 2, "the initial and NMI's renewal, nothing more")
+	require.Len(t, completed(w.payments(embedded, l.c.id)), 2)
 }

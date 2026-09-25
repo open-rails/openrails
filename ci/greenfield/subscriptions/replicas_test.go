@@ -575,8 +575,9 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 // Scenario 9: provider-owned (imported) memberships under three replicas.
 // Every replica runs due passes and convergence; OpenRails sends no charge.
 // The provider's renewal notice, delivered to all replicas at once, is
-// mirrored once. An NMI schedule with OpenRails dunning recovers its failed
-// period with exactly one charge.
+// mirrored once. An NMI schedule with OpenRails dunning (NMI never retries a
+// decline) recovers its failed period with exactly one charge, at the dunning
+// schedule's first retry and not before.
 func TestReplicasProviderOwned(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -620,17 +621,20 @@ func TestReplicasProviderOwned(t *testing.T) {
 		end := l.periodEnd()
 		f.advance(end.Sub(f.base.clock.Now()) + time.Hour)
 		f.postAll("nmi", l.providerRenewal(false))
-		// The inline converge schedules the stalled retry for now, so a
-		// replica's periodic due pass may recover it before this read.
-		if sub := f.replicas[2].subscription(embedded, l.sub); sub.Status != "active" {
-			require.Equal(t, "past_due", sub.Status)
-			require.NotNil(t, sub.NextRetryAt)
-			f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
-			f.passes()
-			f.passes()
-		} else {
-			require.Equal(t, 1, f.base.nmi.saleAttempts(), "active again only through the recovery charge")
-		}
+		declined := f.base.clock.Now()
+		f.passes()
+		f.passes()
+		sub := f.replicas[2].subscription(embedded, l.sub)
+		require.Equal(t, "past_due", sub.Status, "a decline is never retried at once")
+		require.NotNil(t, sub.NextRetryAt)
+		require.WithinDuration(t, declined.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d")
+		require.Zero(t, f.base.nmi.saleAttempts())
+		f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) - time.Minute)
+		f.passes()
+		require.Zero(t, f.base.nmi.saleAttempts(), "nothing before the scheduled retry")
+		f.advance(2 * time.Minute)
+		f.passes()
+		f.passes()
 		f.until(func() bool { return l.periodEnd().After(end) }, "OpenRails recovers the failed period")
 		f.passes()
 		require.Equal(t, 1, f.base.nmi.saleAttempts(), "one recovery charge")

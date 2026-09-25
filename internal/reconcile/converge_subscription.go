@@ -34,7 +34,6 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 		CollectionPolicy:   sub.CollectionPolicy,
 		Status:             string(sub.Status),
 		Rail:               string(sub.Rail),
-		HasPaymentMethod:   sub.PaymentMethodID != nil,
 		RailSubscriptionID: sub.RailSubscriptionID,
 		PeriodStart:        sub.CurrentPeriodStartsAt,
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
