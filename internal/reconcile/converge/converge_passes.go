@@ -562,6 +562,12 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				if err != nil {
 					return fmt.Errorf("life: load lapsed subscription %s: %w", subID, err)
 				}
+				// The decision was made on the scanned row; a renewal or decline that
+				// landed since makes it stale, and the next pass decides afresh.
+				scanned := row.CurrentPeriodEndsAt
+				if string(sub.Status) != string(row.Status) || (scanned != nil) != (sub.CurrentPeriodEndsAt != nil) || (scanned != nil && !scanned.Equal(*sub.CurrentPeriodEndsAt)) {
+					return nil
+				}
 				_, err = reconcile.ApplyDecision(ctx, p.e.DB, &lifecycle, sub, decision, now)
 				return err
 			},

@@ -81,6 +81,7 @@ func TestSecurityRotatedWebhookSecretExpires(t *testing.T) {
 		t.Run(rail+"/no_expiry", func(t *testing.T) {
 			t.Parallel()
 			w := prepareWorld(t, 12)
+			w.waive("recorded", "the only renewal notice is signed with a refused secret, so the provider's charge is never mirrored")
 			w.declare = declarePrevious(rail, old, time.Time{})
 			w.start()
 			l := importLegacy(t, w, rail, embedded)

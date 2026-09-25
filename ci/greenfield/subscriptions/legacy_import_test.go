@@ -173,6 +173,7 @@ func TestLegacyNMIBookImport(t *testing.T) {
 		t.Run(string(tp), func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
+			w.waive("recorded", "the orphan-card row is blocked from import, so its legacy NMI charge has no local payment by design")
 			now := w.clock.Now()
 			daily, monthly, yearly := w.bookTier("daily", 199, 1), w.bookTier("monthly", 999, 30), w.bookTier("yearly", 9999, 365)
 			writes := len(w.nmiWrites())

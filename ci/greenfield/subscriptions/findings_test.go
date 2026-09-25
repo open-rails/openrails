@@ -29,6 +29,8 @@ func TestDuplicateChargeFindings(t *testing.T) {
 		t.Run(fmt.Sprintf("%dh", hours), func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
+			w.waive("evidenced", "the scenario writes duplicate payment rows directly to exercise the detector")
+			w.waive("once", "the scenario writes duplicate payment rows directly to exercise the detector")
 			clean := enrollEvery(t, w, "nmi", embedded, hours)
 			dup := enrollEvery(t, w, "nmi", embedded, hours)
 			retried := enrollEvery(t, w, "stripe", embedded, hours)

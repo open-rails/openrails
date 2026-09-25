@@ -1704,9 +1704,10 @@ func withLockedSubscription(ctx context.Context, database *db.DB, snapshot *mode
 // cancellation. Grace is set only when none exists. No-op unless active; runs
 // under a row lock on the supplied `dbb`; an outer transaction may extend atomicity.
 func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, dbb *db.DB, sub *models.Subscription, graceEndsAt time.Time) error {
+	belief := sub.CurrentPeriodEndsAt
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
-		if sub.Status != models.StatusActive {
-			return nil // idempotent: only an active sub enters dunning here
+		if sub.Status != models.StatusActive || !samePeriodEnd(belief, sub.CurrentPeriodEndsAt) {
+			return nil // idempotent: only an active sub on the decided period enters dunning here
 		}
 		sub.Status = models.StatusPastDue
 		if sub.GraceEndsAt == nil {
@@ -1770,9 +1771,13 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 	if len(from) == 0 {
 		from = []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue}
 	}
+	belief := sub.CurrentPeriodEndsAt
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
 		if !slices.Contains(from, sub.Status) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) {
 			return nil // idempotent: only active/past_due rows (narrowed by from) enter verification limbo
+		}
+		if !samePeriodEnd(belief, sub.CurrentPeriodEndsAt) {
+			return nil // the caller decided on a period that has since moved (a renewal landed)
 		}
 		sub.Status = models.StatusUnknown
 		sub.GraceEndsAt = nil
@@ -1782,6 +1787,15 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 		}
 		return nil
 	})
+}
+
+// samePeriodEnd reports whether the locked row is still on the period a caller
+// decided on. A caller with no period belief (nil) accepts any.
+func samePeriodEnd(belief, current *time.Time) bool {
+	if belief == nil {
+		return true
+	}
+	return current != nil && current.Equal(*belief)
 }
 
 // UnknownResolution is the provider-confirmed outcome for an `unknown` subscription,
