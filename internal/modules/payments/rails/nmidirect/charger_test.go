@@ -266,8 +266,14 @@ func TestRecurringRefusalVersusUnknown(t *testing.T) {
 		require.False(t, res.Declined, tc.name)
 	}
 
-	// NMI's duplicate-check refusal: this exact order was refused unprocessed, so it did not execute.
-	g := &fakeGateway{billing: `[{"id":"b1"}]`, sale: "response=3&response_code=300&responsetext=Duplicate+transaction+REFID:1"}
+	// NMI's duplicate-check refusal: the matching charge may have paid this
+	// period, so a renewal stays unknown; a customer-present request did not execute.
+	dup := "response=3&response_code=300&responsetext=Duplicate+transaction+REFID:1"
+	g := &fakeGateway{billing: `[{"id":"b1"}]`, sale: dup}
 	_, _, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.RecurringMIT("anchor")))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, charge.ErrNotDispatched, "a duplicate renewal is unknown, never released")
+	g = &fakeGateway{billing: `[{"id":"b1"}]`, sale: dup}
+	_, _, err = newCharger(t, g).ChargeInitialRecurring(context.Background(), request(charge.RecurringReuse("anchor")))
 	require.ErrorIs(t, err, charge.ErrNotDispatched)
 }

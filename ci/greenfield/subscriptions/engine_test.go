@@ -671,9 +671,11 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	require.True(t, e.c.entitled(e.ent))
 }
 
-// NMI's duplicate check refuses a request unprocessed. The engine records the
-// operation as not executed and the next attempt, under a new order, charges
-// exactly once; nothing waits on a verification that can never succeed.
+// NMI's duplicate check refuses a request whose card and amount match a recent
+// charge. A scheduled renewal refused this way is unknown, not released: no
+// new order is ever sent. Verification finds nothing under its order, so the
+// same order is re-sent after the settle delay and charges exactly once. A
+// customer-present enrollment is simply refused.
 func TestEngineNMIDuplicateRefusal(t *testing.T) {
 	t.Parallel()
 	t.Run("renewal", func(t *testing.T) {
@@ -682,15 +684,16 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		e := enroll(t, w, "nmi", embedded)
 		end := e.periodEnd()
 		e.toPeriodEnd()
+		before := len(w.nmi.saleOrders())
 		w.nmi.refuseDuplicates(1)
 		w.runRenewals()
 		require.Len(t, e.providerLedger(), 1, "the refused renewal moved no money")
-		w.advance(2 * time.Minute)
-		w.runRenewals()
-		sub := w.subscription(embedded, e.sub)
-		require.True(t, sub.CurrentPeriodEndsAt.After(end), "the next due pass renews")
-		require.Len(t, e.providerLedger(), 2)
+		w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the refused renewal resolves under its own order")
+		require.Len(t, e.providerLedger(), 2, "exactly one renewal charge")
 		require.Len(t, completed(w.payments(embedded, e.c.id)), 2)
+		orders := w.nmi.saleOrders()[before:]
+		require.Len(t, orders, 2, "the refused request and one resend")
+		require.Equal(t, orders[0], orders[1], "the resend reuses the refused order")
 	})
 	t.Run("enrollment", func(t *testing.T) {
 		t.Parallel()
