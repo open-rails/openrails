@@ -218,8 +218,9 @@ type Decision struct {
 	NewPeriodEnd *time.Time
 	// NewPeriodStart is the provider-stated start of that period, when known.
 	NewPeriodStart *time.Time
-	// GraceEndsAt dates the dunning grace window (TransitionPastDue): the
-	// missed period end + PeriodGrace — one rule for every plane.
+	// GraceEndsAt dates the dunning grace window (TransitionPastDue):
+	// PeriodGrace after the missed period end, or after a decline is seen
+	// when that is later.
 	GraceEndsAt time.Time
 	// RemoteGone (#679, TransitionCancel): the provider-side subscription is
 	// confirmed gone (roster cancelled/expired, or absent from an exhaustive
@@ -497,6 +498,11 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	// 1) A VERIFIED successful renewal charge → the provider billed the new
 	//    period. The only renewal-shaped outcome (#367: renew only off a real charge).
 	if renewTxn != nil && !rosterDead {
+		if declineTxn != nil && declineTxn.OccurredAt.After(renewTxn.OccurredAt) {
+			// A later decline: NMI's next date runs past the unpaid period.
+			// Renew only the periods the charges paid; the decline then dunns.
+			return with(renewPaidPeriods(txns, chargeCutoff, declineTxn.OccurredAt, localStart, localEnd, base))
+		}
 		d := Decision{Kind: TransitionRenew, NewPeriodEnd: remoteNextEnd(remoteSub), Reason: "verified_renewal_charge"}
 		if remoteSub != nil {
 			d.NewPeriodStart = remoteSub.PeriodStart
@@ -537,7 +543,9 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	//    through gateCancelCertainty and parks.
 	if declineTxn != nil {
 		if now.Sub(periodEnd) <= dunningWindow {
-			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Decline: declineTxn, Reason: "declined_renewal_within_window"})
+			// Grace runs from when the decline is seen: one found late still
+			// gets its whole window.
+			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: laterOf(periodEnd, now).Add(PeriodGrace), Decline: declineTxn, Reason: "declined_renewal_within_window"})
 		}
 		// #835: the decline attempt itself dates this cancel. On an imported
 		// book the decline arrived with the data and can be years older than
@@ -556,6 +564,12 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 	//    Emit the cancel-shaped decision and let gateCancelCertainty decide: it
 	//    survives only on a first-party certainty leg, otherwise it parks.
 	if remoteSub != nil && remoteSub.Status == SubscriptionStatusPastDue {
+		if periodEnd.After(now) {
+			// A paid-through row: OpenRails' own recovery charge does not move
+			// NMI's date, so a stale roster date is no failure of this period.
+			base.Reason = "roster_past_due_within_paid_period"
+			return base
+		}
 		if now.Sub(periodEnd) <= dunningWindow {
 			return with(Decision{Kind: TransitionPastDue, GraceEndsAt: periodEnd.Add(PeriodGrace), Reason: "roster_past_due_within_window"})
 		}
@@ -621,6 +635,34 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 	}
 }
 
+// renewPaidPeriods renews one local period per verified charge between the
+// cutoff and a later decline, from the local end. Without a known period
+// length it is inconclusive.
+func renewPaidPeriods(txns []RemoteTransaction, cutoff, declinedAt time.Time, start, end *time.Time, base Decision) Decision {
+	if start == nil || end == nil || !end.After(*start) {
+		base.Reason = "renewal_before_decline_cycle_unknown"
+		return base
+	}
+	paid := 0
+	for i := range txns {
+		t := txns[i]
+		if t.Type == TransactionTypeSale && t.Success && !t.OccurredAt.Before(cutoff) && t.OccurredAt.Before(declinedAt) {
+			paid++
+		}
+	}
+	newStart, newEnd := *end, end.Add(time.Duration(paid)*end.Sub(*start))
+	return Decision{Kind: TransitionRenew, NewPeriodStart: &newStart, NewPeriodEnd: &newEnd, Reason: reasonRenewedBeforeDecline}
+}
+
+const reasonRenewedBeforeDecline = "verified_renewal_before_decline"
+
+func laterOf(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
 // remoteNextEnd is the provider's declared next billing time, or nil.
 func remoteNextEnd(s *RemoteSubscription) *time.Time {
 	if s == nil {
@@ -663,23 +705,27 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		return true, lc.ApplyLocalUnknown(ctx, database, sub)
 
 	case TransitionPastDue:
-		if sub.Status == models.StatusUnknown {
-			return true, lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, nil, d.GraceEndsAt)
-		}
-		if sub.Status != models.StatusActive {
+		switch {
+		case sub.Status == models.StatusUnknown:
+			if err := lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, nil, d.GraceEndsAt); err != nil {
+				return true, err
+			}
+		case sub.Status != models.StatusActive:
 			return false, nil
-		}
-		if sub.CurrentPeriodEndsAt == nil {
+		case sub.CurrentPeriodEndsAt == nil:
 			return false, nil // chk_past_due_has_period_end: unsatisfiable; park path owns it
+		default:
+			if err := lc.ApplyLocalPastDue(ctx, database, sub, d.GraceEndsAt); err != nil {
+				return true, err
+			}
 		}
-		if err := lc.ApplyLocalPastDue(ctx, database, sub, d.GraceEndsAt); err != nil {
-			return true, err
-		}
-		if !DunsDecline(sub, d) || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil || (sub.RetryAttempts != nil && *sub.RetryAttempts > 0) {
+		if !DunsDecline(sub, d) || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil ||
+			(sub.LastRetryAt != nil && !d.Decline.OccurredAt.After(*sub.LastRetryAt)) {
 			return true, nil
 		}
-		// The decline is dunning's first failure: the same path as a declined
-		// OpenRails retry, so its schedule (never "now") and classification apply.
+		// A decline not yet counted is a dunning failure: the same path as a
+		// declined OpenRails retry, so its schedule (never "now") and
+		// classification apply.
 		code := normalize.Trim(d.Decline.DeclineCode)
 		return true, lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
 			Rail:            sub.Rail,

@@ -51,6 +51,7 @@ func TestDecideSnapshotLaw(t *testing.T) {
 		gone      bool
 		floored   bool
 		backfill  int
+		renewEnd  *time.Time
 	}{
 		{name: "verified renewal charge renews", end: e5, roster: rosterSub(SubscriptionStatusActive, next),
 			txns: []RemoteTransaction{rtx("rs", TransactionTypeSale, true, e5.Add(time.Hour), "")},
@@ -78,6 +79,14 @@ func TestDecideSnapshotLaw(t *testing.T) {
 		{name: "a verified charge lifts a recorded decline", status: "past_due", end: e5, roster: rosterSub(SubscriptionStatusActive, next),
 			txns: []RemoteTransaction{rtx("rs", TransactionTypeSale, true, e5.Add(time.Hour), "")},
 			want: TransitionRenew, reason: "verified_renewal_charge", backfill: 1},
+		{name: "a renewal followed by a decline renews only the paid period", start: rel(-35 * oneDay), end: rel(-5 * oneDay), roster: rosterSub(SubscriptionStatusActive, next),
+			txns: []RemoteTransaction{rtx("rs", TransactionTypeSale, true, decideNow.Add(-5*oneDay), ""), rtx("rs", TransactionTypeDecline, false, decideNow.Add(-oneDay), "202")},
+			want: TransitionRenew, reason: "verified_renewal_before_decline", renewEnd: rel(25 * oneDay), backfill: 2},
+		{name: "a decline seen late gets its whole grace from discovery", end: e5, roster: rosterSub(SubscriptionStatusActive, next),
+			txns: []RemoteTransaction{rtx("rs", TransactionTypeDecline, false, e5.Add(time.Hour), "202")},
+			want: TransitionPastDue, reason: "declined_renewal_within_window", backfill: 1},
+		{name: "a stale roster date inside a paid period is no failure", status: "active", end: rel(10 * oneDay), roster: rosterSub(SubscriptionStatusPastDue, e5),
+			want: TransitionNone, reason: "roster_past_due_within_paid_period"},
 		{name: "NMI boundary past a whole period needs a probe", end: e5, roster: rosterSub(SubscriptionStatusActive, next), want: TransitionNone},
 		{name: "future schedule cannot erase a declined renewal", end: e5, roster: rosterSub(SubscriptionStatusActive, next),
 			txns: []RemoteTransaction{rtx("rs", TransactionTypeDecline, false, e5.Add(time.Hour), "202")},
@@ -164,11 +173,21 @@ func TestDecideSnapshotLaw(t *testing.T) {
 			}
 			switch d.Kind {
 			case TransitionRenew, TransitionAdoptPeriodEnd:
-				require.Equal(t, c.roster.NextBillingAt, d.NewPeriodEnd)
+				if c.renewEnd == nil {
+					require.Equal(t, c.roster.NextBillingAt, d.NewPeriodEnd)
+				}
 			case TransitionPastDue:
-				require.Equal(t, c.end.Add(PeriodGrace), d.GraceEndsAt)
+				grace := c.end.Add(PeriodGrace)
+				if d.Decline != nil {
+					grace = laterOf(*c.end, decideNow).Add(PeriodGrace)
+				}
+				require.Equal(t, grace, d.GraceEndsAt)
 			case TransitionCancel:
 				require.False(t, d.EvidenceAt.Before(ev.EvidenceFloor), "cancel evidence %v predates floor", d.EvidenceAt)
+			}
+			if c.renewEnd != nil {
+				require.Equal(t, *c.end, *d.NewPeriodStart)
+				require.Equal(t, *c.renewEnd, *d.NewPeriodEnd)
 			}
 		})
 	}
