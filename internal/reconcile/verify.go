@@ -71,7 +71,7 @@ const (
 	verifyBatchSize       = 50
 	verifyReadTimeout     = 2 * time.Minute
 	bulkReadTimeout       = 30 * time.Minute
-	// unverifiedChannel prefixes the per-schema NOTIFY channel of migration 0013.
+	// unverifiedChannel prefixes the per-schema NOTIFY channel of migration 0014.
 	unverifiedChannel = "openrails_unverified:"
 )
 

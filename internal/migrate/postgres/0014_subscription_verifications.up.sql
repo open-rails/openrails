@@ -1,4 +1,4 @@
--- parent: 12 sha256:57dc21d70c831a972f15f679ec9ab32315454c15e31b7b75d7aaf77883fe6ad3
+-- parent: 13 sha256:18afceee7ee689bbc33dfdf23b9072976b40b57c54fabc1bb4cd5617cb6e060c
 -- #1094: unverified rows are read from the provider at once (#1089 §12).
 -- subscription_verifications tracks every unverified row (since when, how
 -- often read), maintained at commit by a deferred trigger that also wakes the
