@@ -1898,7 +1898,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	notice := ccbillNotice{revoke: models.EntitlementRevokeAdmin, ended: subscriptions.PremiumEndReasonRail}
 	if data.Source == "failedRB" {
 		ev = lifecycle.Cancel{Kind: lifecycle.CancelExpired, Immediate: true, At: now}
-		notice.ended = subscriptions.PremiumEndReasonExpired
+		notice.ended, notice.providerStopped = subscriptions.PremiumEndReasonExpired, true
 	}
 	return s.ccbillMirrorEvent(ctx, data.SubscriptionID, func(sub *models.Subscription) lifecycle.Event {
 		if sub.Status != models.StatusCancelled && data.Reason != "" {

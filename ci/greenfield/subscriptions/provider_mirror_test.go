@@ -168,26 +168,46 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 	})
 }
 
-// dataLinkFake is CCBill DataLink: an ACTIVEMEMBERS roster and empty
-// transaction exports.
+// dataLinkFake is CCBill DataLink: an ACTIVEMEMBERS roster, empty
+// transaction exports, and the subscription-management (SMS) status and
+// cancel actions.
 type dataLinkFake struct {
 	*httptest.Server
 	mu      sync.Mutex
 	members []string
+	cancels map[string]int
 }
 
 func newDataLinkFake(t *testing.T) *dataLinkFake {
-	f := &dataLinkFake{}
+	f := &dataLinkFake{cancels: map[string]int{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if r.Form.Get("transactionTypes") == "ACTIVEMEMBERS" {
+		id := r.Form.Get("subscriptionId")
+		switch {
+		case r.URL.Path == "/utils/subscriptionManagement.cgi" && r.Form.Get("action") == "viewSubscriptionStatus":
+			status := "2" // rebilling
+			if f.cancels[id] > 0 {
+				status = "1" // cancelled, access through the paid period
+			}
+			_, _ = io.WriteString(rw, "<results><subscriptionStatus>"+status+"</subscriptionStatus></results>")
+		case r.URL.Path == "/utils/subscriptionManagement.cgi" && r.Form.Get("action") == "cancelSubscription":
+			f.cancels[id]++
+			_, _ = io.WriteString(rw, "<results>1</results>")
+		case r.Form.Get("transactionTypes") == "ACTIVEMEMBERS":
 			_, _ = io.WriteString(rw, strings.Join(f.members, "\n"))
 		}
 	}))
 	t.Cleanup(f.Close)
 	return f
+}
+
+// cancelled counts the cancelSubscription calls CCBill received for id.
+func (f *dataLinkFake) cancelled(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancels[id]
 }
 
 // list sets the roster to one active member with CCBill's dates.
@@ -197,12 +217,9 @@ func (f *dataLinkFake) list(subscriptionID, rebill, expiry string) {
 	f.members = []string{fmt.Sprintf(`"ACTIVEMEMBERS","945280","x","%s","2020-01-01","member","member@example.test","1","%s","%s"`, subscriptionID, rebill, expiry)}
 }
 
-// The DataLink roster is a status fact, never payment (#1094): a member it
-// lists as active while the local row is past due is a finding once the
-// merchant is armed, never access. CCBill's RenewalSuccess restores it.
-func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
-	t.Parallel()
-	dl := newDataLinkFake(t)
+// newDataLinkWorld is a world whose CCBill account has DataLink credentials,
+// served by dl.
+func newDataLinkWorld(t *testing.T, dl *dataLinkFake) *world {
 	w := prepareWorld(t, 12, func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{CCBillDataLinkURL: dl.URL}
 	})
@@ -212,6 +229,16 @@ func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 		psps["ccbill"]["ccbill"] = account
 	}
 	w.start()
+	return w
+}
+
+// The DataLink roster is a status fact, never payment (#1094): a member it
+// lists as active while the local row is past due is a finding once the
+// merchant is armed, never access. CCBill's RenewalSuccess restores it.
+func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
+	t.Parallel()
+	dl := newDataLinkFake(t)
+	w := newDataLinkWorld(t, dl)
 	m := importCCBill(t, w)
 	w.advance(20 * day)
 	w.deliverCCBill("RenewalFailure", map[string]string{

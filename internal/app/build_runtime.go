@@ -436,30 +436,23 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// ceiling (or#842: the system scheduler used to pass nil, so the paths that
 	// queue the most irreversible work were the only ungated ones).
 	rateCeiling := runtime.RateCeiling()
-	userDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginUser,
-		"user cancellation retained an undo window; rail delete deferred to its close")
-	systemDeferredDeletes := newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginSystem,
-		"terminal dunning failure; remote NMI subscription must stop rebilling")
+	userDeferredDeletes := newProviderCancelScheduler(database, rateCeiling, intents.OriginUser,
+		"user cancellation; the provider schedule must stop billing")
+	systemDeferredDeletes := newProviderCancelScheduler(database, rateCeiling, intents.OriginSystem,
+		"terminal lifecycle outcome; the provider schedule must stop billing")
 	runtime.DeferredDeletes = systemDeferredDeletes
 	if runtime.UserSubscriptionService != nil {
-		runtime.UserSubscriptionService.SetDeferredDeleteScheduler(userDeferredDeletes)
-		// #696: user CCBill cancels queue a durable ccbill_cancel_subscription
-		// intent atomically with the local cancel. User-origin: reactive
-		// completion, executes under mode=limited.
-		runtime.UserSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, rateCeiling, intents.OriginUser,
-			"user cancellation; remote CCBill subscription must stop rebilling"))
+		runtime.UserSubscriptionService.SetProviderCancelScheduler(userDeferredDeletes)
 	}
 	if runtime.SubscriptionLifecycleService != nil {
-		runtime.SubscriptionLifecycleService.SetDeferredDeleteScheduler(systemDeferredDeletes)
+		runtime.SubscriptionLifecycleService.SetProviderCancelScheduler(systemDeferredDeletes)
 	}
 	// or#896: a merchant-initiated cancel goes through the same durable
 	// intents as the user path — admin-origin (a human asked for it, so it
 	// executes under mode=limited like the user cancel) and rate-ceiling gated.
 	if runtime.AdminSubscriptionService != nil {
-		runtime.AdminSubscriptionService.SetDeferredDeleteScheduler(newIntentDeferredDeleteScheduler(database, rateCeiling, intents.OriginAdmin,
-			"merchant-initiated cancellation; remote NMI subscription must stop rebilling"))
-		runtime.AdminSubscriptionService.SetCCBillCancelScheduler(intents.NewCCBillCancelScheduler(database, rateCeiling, intents.OriginAdmin,
-			"merchant-initiated cancellation; remote CCBill subscription must stop rebilling"))
+		runtime.AdminSubscriptionService.SetProviderCancelScheduler(newProviderCancelScheduler(database, rateCeiling, intents.OriginAdmin,
+			"merchant-initiated cancellation; the provider schedule must stop billing"))
 	}
 
 	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works

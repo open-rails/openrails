@@ -53,12 +53,10 @@ type SubscriptionLifecycleService struct {
 	entitlementServiceFactory func(*db.DB, clockwork.Clock) lifecycleEntitlementService
 	cancelSolanaSubscription  func(context.Context, *db.DB, uuid.UUID) error
 
-	// deferDelete enqueues the deferred NMI delete_subscription job (#344
-	// follow-up). Optional: injected via SetDeferredDeleteScheduler in the
-	// composition root (same pattern as UserSubscriptionService.deferDelete).
-	// When nil, terminal dunning cancellations leave the remote NMI
-	// subscription alive (caller-side paths or #107 reconciliation handle it).
-	deferDelete DeferredDeleteScheduler
+	// providerCancel queues the durable provider cancel of a membership the
+	// lifecycle ends (QueueProviderCancel). Injected in the composition root;
+	// when nil a terminal outcome cannot stop the provider schedule.
+	providerCancel ProviderCancelScheduler
 }
 
 type lifecycleEntitlementService interface {
@@ -144,11 +142,9 @@ func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 // SetCreditGranter installs the transaction-aware subscription credit writer.
 // A credit-bearing lifecycle fails closed when this dependency is absent.
 
-// SetDeferredDeleteScheduler injects the deferred NMI delete scheduler (#344
-// follow-up). Wired post-construction in the composition root once the River
-// producer exists, mirroring UserSubscriptionService.SetDeferredDeleteScheduler.
-func (s *SubscriptionLifecycleService) SetDeferredDeleteScheduler(d DeferredDeleteScheduler) {
-	s.deferDelete = d
+// SetProviderCancelScheduler injects the provider-cancel scheduler.
+func (s *SubscriptionLifecycleService) SetProviderCancelScheduler(c ProviderCancelScheduler) {
+	s.providerCancel = c
 }
 
 // now returns the current time from the service's clock
@@ -2287,7 +2283,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.Status == models.StatusCancelled &&
 			rails.RemoteDeleteOnTerminalCancel(subscription.Rail) &&
 			subscription.RailSubscriptionID != "" {
-			if s.deferDelete != nil {
+			if s.providerCancel != nil {
 				subscription.DeletionScheduledAt = &deferredDeleteAt
 				scheduleDeferredDelete = true
 			} else {
@@ -2330,7 +2326,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// DeletionScheduledAt marker and the intent commit atomically (no
 		// crash window between them).
 		if scheduleDeferredDelete {
-			if err := s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, deferredDeleteAt); err != nil {
+			if err := s.providerCancel.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, deferredDeleteAt); err != nil {
 				return fmt.Errorf("enqueue deferred NMI delete with cancellation: %w", err)
 			}
 		}

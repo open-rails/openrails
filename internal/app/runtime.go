@@ -269,7 +269,7 @@ type Runtime struct {
 	// cancellations schedule the rail-side delete through the ONE
 	// mechanism (no inline deletes). User-asked cancellations use a separate
 	// user-origin instance wired into UserSubscriptionService.
-	DeferredDeletes subscriptions.DeferredDeleteScheduler
+	DeferredDeletes subscriptions.ProviderCancelScheduler
 	// Verifier reads unverified subscriptions from their provider as soon as
 	// they become unverified (#1094); started with the billing workers.
 	Verifier *reconcile.Verifier

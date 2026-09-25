@@ -64,46 +64,28 @@ type UserSubscriptionService struct {
 	NMIResolver NMIClientSource
 	clock       clockwork.Clock
 
-	// deferDelete enqueues a deferred NMI delete_subscription job (issue 216).
-	// When nil, NMI cancellations fall back to deleting inline immediately. It is
-	// injected post-construction (the River producer is built after services).
-	deferDelete DeferredDeleteScheduler
-
-	// ccbillCancel enqueues the durable ccbill_cancel_subscription intent
-	// (#696). Injected post-construction like deferDelete.
-	ccbillCancel CCBillRemoteCancelScheduler
+	// providerCancel queues the durable provider cancel of a membership the
+	// member ends (injected post-construction, after the intent ledger).
+	providerCancel ProviderCancelScheduler
 }
 
-// DeferredDeleteScheduler schedules an NMI delete_subscription intent to run
-// at a future time (#358 ledger). WithTx rebinds the scheduler onto a caller
-// transaction so the intent enqueue COMMITS ATOMICALLY with the subscription
-// update that stamps the DeletionScheduledAt marker — the marker<->intent
-// invariant holds transactionally; there is no crash window between them.
-type DeferredDeleteScheduler interface {
+// ProviderCancelScheduler queues the durable cancel of a provider-billed
+// schedule (#1102): the NMI delete, the CCBill DataLink cancel, the Stripe
+// cancel. WithTx rebinds it onto the caller's transaction so the intent
+// commits atomically with the local cancellation that needs it.
+type ProviderCancelScheduler interface {
+	// ScheduleProviderCancel queues sub's provider cancel (a no-op when no
+	// provider bills it). An NMI delete is due at sub.DeletionScheduledAt,
+	// else now, and stamps the marker.
+	ScheduleProviderCancel(ctx context.Context, sub *models.Subscription, now time.Time) error
 	ScheduleNMIDelete(ctx context.Context, userID string, subscriptionID uuid.UUID, runAt time.Time) error
 	CancelNMIDelete(ctx context.Context, userID string, subscriptionID uuid.UUID) error
-	WithTx(tx pgx.Tx) DeferredDeleteScheduler
+	WithTx(tx pgx.Tx) ProviderCancelScheduler
 }
 
-// SetDeferredDeleteScheduler injects the deferred-delete scheduler. Wired in
-// build_runtime after the River producer exists.
-func (s *UserSubscriptionService) SetDeferredDeleteScheduler(d DeferredDeleteScheduler) {
-	s.deferDelete = d
-}
-
-// CCBillRemoteCancelScheduler schedules a durable ccbill_cancel_subscription
-// intent (#696) — merchant-initiated cancel through the DataLink SMS choke
-// point. WithTx rebinds onto the caller's transaction so the intent enqueue
-// COMMITS ATOMICALLY with the local cancellation (queue-always, #679).
-type CCBillRemoteCancelScheduler interface {
-	ScheduleCCBillCancel(ctx context.Context, userID string, subscriptionID uuid.UUID) error
-	WithTx(tx pgx.Tx) CCBillRemoteCancelScheduler
-}
-
-// SetCCBillCancelScheduler injects the CCBill remote-cancel scheduler
-// (intents.CCBillCancelScheduler, wired in build_runtime).
-func (s *UserSubscriptionService) SetCCBillCancelScheduler(c CCBillRemoteCancelScheduler) {
-	s.ccbillCancel = c
+// SetProviderCancelScheduler injects the provider-cancel scheduler.
+func (s *UserSubscriptionService) SetProviderCancelScheduler(c ProviderCancelScheduler) {
+	s.providerCancel = c
 }
 
 // SetClock sets the clock for this service. Used for testing.
@@ -359,7 +341,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		// cancel. With a genuine undo window (issue 216) it is due at
 		// period_end - margin, keeping the schedule for a resume; otherwise now.
 		if subscription.RailSubscriptionID != "" {
-			if s.deferDelete == nil {
+			if s.providerCancel == nil {
 				return fmt.Errorf("nmi remote-delete scheduler unavailable")
 			}
 			if _, err := RequireProviderCancelArmed(ctx, s.SubscriptionService.Database(), subscription, false); err != nil {
@@ -374,7 +356,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 				if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(tx), subscription); err != nil {
 					return err
 				}
-				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, userID, subscription.ID, deleteAt)
+				return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
 			}
 		}
 	case subscription.Rail == models.RailCCBill:
@@ -384,11 +366,11 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		// cancelSubscription stops rebilling and keeps access through the paid
 		// period on its own side, so the intent is due immediately (no undo
 		// window to defer for) and the cancel is not resumable.
-		if s.ccbillCancel == nil {
+		if s.providerCancel == nil {
 			return fmt.Errorf("ccbill remote-cancel scheduler unavailable")
 		}
 		enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
-			return s.ccbillCancel.WithTx(tx).ScheduleCCBillCancel(ctx, userID, subscription.ID)
+			return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
 		}
 	case subscription.Rail == models.RailSolana:
 		return ErrSolanaCancelNeedsWalletSignature

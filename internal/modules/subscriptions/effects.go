@@ -80,20 +80,8 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 				return nil, fmt.Errorf("reopen access %s: %w", sub.ID, err)
 			}
 		case lifecycle.QueueProviderCancel:
-			if !rails.RemoteDeleteOnTerminalCancel(sub.Rail) || sub.RailSubscriptionID == "" || sub.DeletionScheduledAt != nil {
-				continue
-			}
-			if s.deferDelete == nil {
-				log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "rail": sub.Rail}).
-					Warn("no deferred-delete scheduler wired: the provider schedule delete is NOT queued (wiring gap)")
-				continue
-			}
-			at := SystemDeferredDeleteAt(sub, now)
-			sub.DeletionScheduledAt = &at
-			if err := d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, at)
-			}); err != nil {
-				return nil, fmt.Errorf("queue provider cancel %s: %w", sub.ID, err)
+			if err := s.queueProviderCancel(ctx, d, sub, now); err != nil {
+				return nil, err
 			}
 		case lifecycle.OpenDunning:
 			if err := s.dunningAccess(ctx, d, ents, sub, now); err != nil {
@@ -117,6 +105,33 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 		}
 	}
 	return out, nil
+}
+
+// queueProviderCancel queues, in d's transaction, the cancel of the provider
+// schedule a terminal transition leaves billing (#1102). An NMI delete waits
+// out the system cooling-off window; a replay finds it already queued.
+func (s *SubscriptionLifecycleService) queueProviderCancel(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) error {
+	if sub.RailSubscriptionID == "" {
+		return nil
+	}
+	if s.providerCancel == nil {
+		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "rail": sub.Rail}).
+			Warn("no provider-cancel scheduler wired: the provider cancel is NOT queued (wiring gap)")
+		return nil
+	}
+	if rails.RemoteDeleteOnTerminalCancel(sub.Rail) {
+		if sub.DeletionScheduledAt != nil {
+			return nil
+		}
+		at := SystemDeferredDeleteAt(sub, now)
+		sub.DeletionScheduledAt = &at
+	}
+	if err := d.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, sub, now)
+	}); err != nil {
+		return fmt.Errorf("queue provider cancel %s: %w", sub.ID, err)
+	}
+	return nil
 }
 
 func revokeReason(sub *models.Subscription, opts EffectOptions) models.EntitlementRevokeReason {

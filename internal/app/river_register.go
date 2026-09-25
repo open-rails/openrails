@@ -315,7 +315,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	ccbillCancel.DataLinkBaseURL = r.Config.SandboxCCBillDataLinkURL()
 	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, clock) // retain unresolved pre-qualification refunds
 	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
-	rebill.DeferDelete = newIntentDeferredDeleteScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
+	rebill.DeferDelete = newProviderCancelScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		&intents.NMIProviderCutover{DB: r.DB, Resolver: r.CollectionResolver, Clock: clock},
