@@ -200,7 +200,9 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		if s.LifecycleDecision() == "" {
 			return fmt.Errorf("%w: subscription %s (caller %s)", ErrLifecycleUndecided, s.ID, callerName(2))
 		}
-		rows, err := r.db.Gen(ctx).UpdateSubscriptionDecided(ctx, decidedParams(p, s.LifecycleRev))
+		dp := decidedParams(p, s.LifecycleRev)
+		dp.Decision = s.LifecycleDecision()
+		rows, err := r.db.Gen(ctx).UpdateSubscriptionDecided(ctx, dp)
 		if err != nil {
 			return fmt.Errorf("save %s decision on subscription %s (caller %s): %w", s.LifecycleDecision(), s.ID, callerName(2), err)
 		}

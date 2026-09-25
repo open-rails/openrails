@@ -1355,8 +1355,11 @@ type OpenrailsSubscriptionStatusTransition struct {
 	FromStatus     *OpenrailsSubscriptionStatus
 	ToStatus       OpenrailsSubscriptionStatus
 	// cancel_type on the subscription at transition time (meaningful for to_status=cancelled).
-	CancelType *string
-	OccurredAt time.Time
+	CancelType      *string
+	OccurredAt      time.Time
+	Decision        *string
+	FromPaidThrough *time.Time
+	ToPaidThrough   *time.Time
 }
 
 // #1094: one row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.

@@ -5710,6 +5710,7 @@
     "internal/migrate/postgres/0018_nmi_schedule_collection_policy.up.sql": "99b0463f35083f29287f016663335ab6156ae2aa05252eb5453832b91e97bd9f",
     "internal/migrate/postgres/0019_validate_nmi_schedule_policy.up.sql": "ef88a52a16adee44a0fd6ed56852c0ffe32747386a96dc61d9a8b54d767bb7a8",
     "internal/migrate/postgres/0020_subscription_row_version.up.sql": "10ca29264db272281e3844a516c928fef97d5eaaf6767d338db74a7357363197",
+    "internal/migrate/postgres/0021_subscription_transition_decisions.up.sql": "70afc6a3bab01ace674d4bdf5fb6e740a7219db291c2c57ef29ee76f16068870",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "4794cb1f1a292c7b598ebbd886f8d19c32f221178969dd95fbd96f603898f196",
