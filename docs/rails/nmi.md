@@ -205,11 +205,15 @@ doesn't surprise you:
 
 NMI refuses a sale or verification whose card and amount match one it just
 processed (`response=3`, code 300, "Duplicate transaction"), whatever the order
-id. Every OpenRails charge carries a unique order, so this refusal means NOTHING
-was charged: tier-change prorations, one-off sales and card saves answer
-`409 payment_duplicate_refused` (try again in a few minutes), engine renewals
-and recoveries end not executed and the next due pass charges again, and a
-replacement-card verification retries on its own.
+id. The refused request charged nothing: tier-change prorations, one-off sales
+and card saves answer `409 payment_duplicate_refused` (try again in a few
+minutes), a customer-present enrollment fails, and a replacement-card
+verification retries on its own. A scheduled renewal or dunning recovery is
+different: the matching charge may be this period's payment (for an
+NMI-scheduled subscription, NMI's own schedule), so it stays unknown and no new
+order is ever sent. An engine renewal is verified under its own order and, if
+NMI shows nothing, re-sent under that same order; a recovery waits for the
+operator (`openrails intents resolve`).
 
 OpenRails does not send `dup_seconds`, so NMI's own check stays on. It is the
 gateway's net against a double submit: the lost-submission resend re-sends
