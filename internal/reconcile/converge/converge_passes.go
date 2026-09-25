@@ -648,7 +648,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	}
 
 	// life.subscription.dunning_overdue — an OpenRails-dunned NMI schedule
-	// (provider_dunning) past_due within grace with no retry scheduled. The
+	// (nmi_schedule) past_due within grace with no retry scheduled. The
 	// dunning schedule picks the time; this pass never does. Without a recorded
 	// decline there is nothing to resume from: surfaced for the operator.
 	dunningStalled, err := q.ListDunningStalledSubscriptions(ctx, gen.ListDunningStalledSubscriptionsParams{

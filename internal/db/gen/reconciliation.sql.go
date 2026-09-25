@@ -1269,7 +1269,7 @@ FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
-  AND collection_policy = 'provider_dunning'
+  AND collection_policy = 'nmi_schedule'
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > $3::timestamptz)

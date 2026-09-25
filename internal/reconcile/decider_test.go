@@ -244,7 +244,7 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			sub := SubscriptionState{Status: c.status, Rail: "nmi", CollectionPolicy: models.CollectionPolicyProviderDunning,
+			sub := SubscriptionState{Status: c.status, Rail: "nmi", CollectionPolicy: models.CollectionPolicyNMISchedule,
 				PeriodEnd: c.end, GraceEndsAt: c.grace, NextRetryScheduled: c.retry}
 			if c.rail != "" {
 				sub.Rail = c.rail
@@ -315,7 +315,7 @@ func TestDecideInvariants(t *testing.T) {
 
 	for _, status := range []string{"active", "past_due", "unverified", "pending", "cancelled", "expired", "failed"} {
 		for _, rail := range []string{"nmi", "stripe"} {
-			for _, policy := range []models.CollectionPolicy{models.CollectionPolicyProviderDunning, models.CollectionPolicyEngine} {
+			for _, policy := range []models.CollectionPolicy{models.CollectionPolicyNMISchedule, models.CollectionPolicyEngine} {
 				for _, end := range times {
 					for _, grace := range []*time.Time{nil, rel(-time.Hour)} {
 						for _, retry := range []bool{false, true} {

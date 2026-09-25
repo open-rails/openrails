@@ -61,7 +61,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{
 		AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "ccbill"},
 		Customers:     []openrails.DeclaredCustomer{{Customer: customerID}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "ccbill", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end, CollectionPolicy: "provider"}},
+		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "ccbill", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end}},
 		Transactions:  []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)

@@ -73,16 +73,11 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 			PaymentMethod: &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}}
 		book.Transactions = []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
 	}
-	book.Subscriptions[0].CollectionPolicy = "provider"
 	for _, apply := range configure {
 		apply(&book)
 	}
-	policy := book.Subscriptions[0].CollectionPolicy
 	if rail == "nmi" {
 		book.PaymentMethods[0].InitialTransactionID = book.Transactions[0].TransactionID
-		if policy == "provider_dunning" {
-			book.PaymentMethods[0].RecurringTransactionID = book.Transactions[0].TransactionID
-		}
 		if book.Subscriptions[0].Dunning != nil {
 			w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) {
 				s.NextBilling = book.Subscriptions[0].PaidThrough.Add(monthHours * time.Hour)
@@ -107,9 +102,9 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	}
 	require.Equal(t, status, sub.Status)
 	require.Equal(t, l.railSub, sub.RailSubscriptionID)
-	wantPolicy := policy
-	if rail == "nmi" && (book.PaymentMethods[0].RecurringTransactionID != "" || scheduleSale(book, l.railSub)) {
-		wantPolicy = "provider_dunning" // every NMI schedule with a recurring anchor is dunned by OpenRails (Paul, 2026-09-25)
+	wantPolicy := "provider"
+	if rail == "nmi" {
+		wantPolicy = "nmi_schedule" // every NMI schedule is dunned by OpenRails (Paul, 2026-09-25)
 	}
 	require.Equal(t, wantPolicy, sub.CollectionPolicy)
 	require.NotNil(t, sub.PaymentMethodID)
@@ -118,7 +113,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	require.NoError(t, err)
 	require.Equal(t, []string{book.Subscriptions[0].SourceID}, replay.Skipped)
 	require.Equal(t, charges, l.engineCharges(), "import replay never charges")
-	if policy == "provider_dunning" {
+	if rail == "nmi" && book.PaymentMethods[0].RecurringTransactionID != "" {
 		conflict := book
 		conflict.PaymentMethods = append([]openrails.DeclaredPaymentMethod(nil), book.PaymentMethods...)
 		conflict.PaymentMethods[0].RecurringTransactionID = "another-recurring-agreement"
@@ -325,7 +320,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
-				book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+				declareRecurringAnchor(book)
 			})
 			w.converge()
 			// Hold provider writes while observing the failed period. The due
@@ -347,7 +342,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			w.runRenewals()
 			sub = w.subscription(tp, l.sub)
 			require.Equal(t, "active", sub.Status)
-			require.Equal(t, "provider_dunning", sub.CollectionPolicy)
+			require.Equal(t, "nmi_schedule", sub.CollectionPolicy)
 			require.Equal(t, l.railSub, sub.RailSubscriptionID)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)))
 			require.Nil(t, sub.NextRetryAt)
@@ -387,7 +382,7 @@ func TestNMIProviderDunningImportRetainsRetryHistory(t *testing.T) {
 	w := newWorld(t)
 	importLegacy(t, w, "nmi", remote, func(book *openrails.DeclaredBilling) {
 		last := w.clock.Now().Add(-2 * time.Hour)
-		book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+		declareRecurringAnchor(book)
 		book.Subscriptions[0].Dunning = &openrails.DunningEvidence{Retries: 2, LastRetryAt: &last, ScheduleLive: true}
 	})
 	require.Zero(t, len(w.nmi.Attempts()))
@@ -400,7 +395,7 @@ func TestNMIProviderDunningImportRetainsRetryHistory(t *testing.T) {
 func TestDunningStallResumesOnSchedule(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	dunning := func(book *openrails.DeclaredBilling) { book.Subscriptions[0].CollectionPolicy = "provider_dunning" }
+	dunning := func(book *openrails.DeclaredBilling) { declareRecurringAnchor(book) }
 	stalled := importLegacy(t, w, "nmi", embedded, dunning)
 	lapsed := importLegacy(t, w, "nmi", embedded, dunning)
 	stripeOwned := importLegacy(t, w, "stripe", embedded)
@@ -440,7 +435,7 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 	require.Equal(t, charges, stripeOwned.engineCharges())
 }
 
-// A lapsed provider_dunning schedule with no decline seen is never charged by
+// A lapsed NMI schedule with no decline seen is never charged by
 // OpenRails: NMI may have billed it unobserved. When NMI's renewal arrives
 // late, the period is paid exactly once.
 func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
@@ -448,7 +443,7 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	w := newWorld(t)
 	w.armDestructive()
 	l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
-		book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+		declareRecurringAnchor(book)
 	})
 	w.converge()
 	end := l.periodEnd()
@@ -472,12 +467,8 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	require.Len(t, completed(w.payments(embedded, l.c.id)), 2)
 }
 
-// scheduleSale reports whether the book holds an approved sale of the schedule.
-func scheduleSale(book openrails.DeclaredBilling, railSub string) bool {
-	for _, t := range book.Transactions {
-		if t.RailSubscriptionID == railSub && t.Success && (t.Type == "" || t.Type == "sale") {
-			return true
-		}
-	}
-	return false
+// declareRecurringAnchor declares the NMI card's recurring agreement: the
+// schedule's signup sale.
+func declareRecurringAnchor(book *openrails.DeclaredBilling) {
+	book.PaymentMethods[0].RecurringTransactionID = book.Transactions[0].TransactionID
 }

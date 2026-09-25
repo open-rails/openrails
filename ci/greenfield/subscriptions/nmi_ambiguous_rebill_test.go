@@ -20,7 +20,7 @@ func TestNMIRecoveryDuplicateRefusalIsNotResent(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
-		book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+		declareRecurringAnchor(book)
 	})
 	w.converge()
 	w.cfg = func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeReadOnly }

@@ -27,6 +27,7 @@ type renewalEffects struct {
 // renewals and qualified accepted charges. Its explicit period and source-bound
 // grants are idempotent, so a webhook-first payment row can be completed here.
 func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects renewalEffects) (*models.NotificationQueue, error) {
+	recovered := false
 	if !effects.PreserveLifecycle {
 		// The payment fact decides through the state machine (#1091).
 		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
@@ -36,6 +37,11 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		applied, err := Transition(sub, event, s.now())
 		if err != nil {
 			return nil, fmt.Errorf("renew subscription %s: %w", sub.ID, err)
+		}
+		for _, e := range applied {
+			if _, ok := e.(lifecycle.CloseDunning); ok {
+				recovered = true
+			}
 		}
 		if len(applied) > 0 {
 			// The paid window is the charge's own period, never moved backwards.
@@ -64,6 +70,12 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
 		if err := pushEngineRenewalGrace(ctx, d, entitlementsService, sub, entitlementNames(sub.EntitlementsSpecSnapshot), effects.PeriodStart, effects.PeriodEnd); err != nil {
 			return nil, err
+		}
+	}
+	if recovered {
+		// A membership recovered from dunning has standing access again.
+		if err := entitlementsService.ResumeSubscriptionAccess(ctx, sub.ID); err != nil {
+			return nil, fmt.Errorf("reopen access %s: %w", sub.ID, err)
 		}
 	}
 	if effects.RevokeRemoved {

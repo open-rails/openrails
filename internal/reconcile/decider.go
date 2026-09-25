@@ -266,10 +266,10 @@ type Decision struct {
 }
 
 // DunsDecline reports that OpenRails' dunning owns the retries after this
-// decision's decline: a provider_dunning NMI schedule entering past_due off a
+// decision's decline: an NMI schedule entering past_due off a
 // seen decline. FailMembership then counts, classifies and schedules it.
 func DunsDecline(sub *models.Subscription, d Decision) bool {
-	return d.Kind == TransitionPastDue && d.Decline != nil && sub != nil && sub.CollectionPolicy == models.CollectionPolicyProviderDunning
+	return d.Kind == TransitionPastDue && d.Decline != nil && sub != nil && sub.CollectionPolicy == models.CollectionPolicyNMISchedule
 }
 
 // Decide maps (current row, evidence bundle) → transition. PURE. dunningWindow

@@ -609,11 +609,11 @@ func TestReplicasProviderOwned(t *testing.T) {
 			require.True(t, l.c.entitled(l.ent))
 		})
 	}
-	t.Run("nmi/provider_dunning", func(t *testing.T) {
+	t.Run("nmi/nmi_schedule", func(t *testing.T) {
 		t.Parallel()
 		f := newFleet(t, 3)
 		l := importLegacy(t, f.replicas[0], "nmi", embedded, func(book *openrails.DeclaredBilling) {
-			book.Subscriptions[0].CollectionPolicy = "provider_dunning"
+			declareRecurringAnchor(book)
 		})
 		f.replicas[1].converge()
 		end := l.periodEnd()

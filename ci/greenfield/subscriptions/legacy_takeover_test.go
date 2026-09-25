@@ -149,7 +149,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			_, err = w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
 			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose)
 			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
-			require.Equal(t, "provider_dunning", w.subscription(tp, l.sub).CollectionPolicy)
+			require.Equal(t, "nmi_schedule", w.subscription(tp, l.sub).CollectionPolicy)
 		})
 		t.Run(string(tp)+"/abandon_after_delete", func(t *testing.T) {
 			t.Parallel()
@@ -192,7 +192,7 @@ func TestNMIEngineTakeoverScheduleDrift(t *testing.T) {
 			require.Contains(t, w.openFindings(takeoverDrift), l.sub.UUID().String())
 			sub := w.subscription(remote, l.sub)
 			require.Equal(t, "active", sub.Status)
-			require.Equal(t, "provider_dunning", sub.CollectionPolicy)
+			require.Equal(t, "nmi_schedule", sub.CollectionPolicy)
 		})
 	}
 }
@@ -223,7 +223,7 @@ func TestNMIEngineTakeoverHeld(t *testing.T) {
 		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 		require.True(t, w.nmi.ScheduleLive(l.railSub))
 		require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charged")
-		require.Equal(t, "provider_dunning", w.subscription(embedded, l.sub).CollectionPolicy)
+		require.Equal(t, "nmi_schedule", w.subscription(embedded, l.sub).CollectionPolicy)
 	})
 	t.Run("abandon", func(t *testing.T) {
 		t.Parallel()
@@ -320,7 +320,7 @@ func importLegacyBook(t *testing.T, w *world, n int) []*legacy {
 		book.Customers = append(book.Customers, openrails.DeclaredCustomer{Customer: customerID})
 		book.PaymentMethods = append(book.PaymentMethods, openrails.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef,
 			InitialTransactionID: tx, RecurringTransactionID: tx, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"})
-		book.Subscriptions = append(book.Subscriptions, openrails.DeclaredSubscription{SourceID: fmt.Sprintf("book-%d-%s", i, railSub), CollectionPolicy: "provider", Customer: customerID, Price: priceID,
+		book.Subscriptions = append(book.Subscriptions, openrails.DeclaredSubscription{SourceID: fmt.Sprintf("book-%d-%s", i, railSub), Customer: customerID, Price: priceID,
 			Rail: "nmi", RailSubscriptionID: railSub, StartedAt: start, PaidThrough: &end, PaymentMethod: &ref})
 		book.Transactions = append(book.Transactions, openrails.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: tx, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start})
 		out = append(out, &legacy{w: w, rail: "nmi", tp: embedded, c: c, railSub: railSub, railCust: vault, ent: ent})

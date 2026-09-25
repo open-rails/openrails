@@ -164,10 +164,10 @@ func nmiCancelMode(sub *models.Subscription, now time.Time) CancelMode {
 	return CancelModeReversible
 }
 
-// nmiAutoBilled preserves native provider scheduling unless the subscription
-// explicitly delegates dunning. Engine subscriptions are excluded from this worker.
+// nmiAutoBilled: NMI never retries a decline, so OpenRails dunning retries
+// every NMI schedule. Engine subscriptions are excluded from this worker.
 func nmiAutoBilled(sub *models.Subscription) bool {
-	return sub == nil || sub.CollectionPolicy != models.CollectionPolicyProviderDunning
+	return sub == nil
 }
 
 // descriptors is the compile-time-complete registry: UNKEYED struct literals,

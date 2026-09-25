@@ -356,7 +356,7 @@ SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
   AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
        OR (sub.status='awaiting_method' AND sub.grace_ends_at <= sqlc.arg(now)::timestamptz
-           AND ((sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='provider_dunning' AND sub.rail='nmi')))
+           AND ((sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
        OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
            AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))

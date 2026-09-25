@@ -33,7 +33,7 @@ func TestRegistryCompleteness(t *testing.T) {
 // Pins the per-rail facts the old switches encoded, so a descriptor edit that flips behaviour fails here.
 func TestRegistryPinnedFacts(t *testing.T) {
 	t.Parallel()
-	delegated := &models.Subscription{CollectionPolicy: models.CollectionPolicyProviderDunning}
+	delegated := &models.Subscription{CollectionPolicy: models.CollectionPolicyNMISchedule}
 	for _, c := range []struct {
 		rail                                                                    models.Rail
 		remoteCustomer, chargeSaved, dunning, psps, remoteDelete, trial, pmCRUD bool

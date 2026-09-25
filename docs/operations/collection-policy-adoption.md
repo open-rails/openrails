@@ -6,15 +6,16 @@ needed for import verification; never alter or cancel the external provider
 schedules as part of initialization. No old-binary compatibility or provider-to-
 engine ownership migration is supplied.
 
-Each subscription has an immutable collection policy. Existing Stripe, CCBill
-and ordinary NMI schedules import as `provider`. A reviewed NMI agreement where
-OpenRails already manages retry recovery imports explicitly as
-`provider_dunning`; it still has a provider-owned recurring schedule. Do not
-infer engine ownership from a saved card or from the old card-level
-`rebill_driver=openrails` flag.
+Each subscription has an immutable collection policy, decided by the rail at
+import: Stripe and CCBill schedules are `provider` (the provider retries), and
+every NMI schedule is `nmi_schedule` (NMI charges on its schedule, OpenRails
+retries its declines). The importer records the card's recurring anchor (the
+declared recurring transaction, else the schedule's first approved sale) and
+raises `life.import.no_recurring_anchor` when there is none. Do not infer engine
+ownership from a saved card or from the old card-level `rebill_driver=openrails`
+flag.
 
-The declared provider-book import accepts `provider` and NMI
-`provider_dunning`, preserves remote schedule references and declared financial
+The declared provider-book import preserves remote schedule references and declared financial
 history, and rejects a repeat import that changes ownership. It cannot invent
 engine authority. Existing proven engine/noncard history requires a compatible
 canonical archive with its accepted operations and execution references, rather

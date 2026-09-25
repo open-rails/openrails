@@ -162,7 +162,7 @@ func (l *legacy) importAnother(t *testing.T) (openrails.SubscriptionID, string, 
 	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
 		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
 		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
-			StartedAt: start, PaidThrough: &end, PaymentMethod: method, CollectionPolicy: "provider"}},
+			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
 		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
