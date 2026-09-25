@@ -107,7 +107,10 @@ dependencies with their supervisor; a host-owned shared River client is checked
 separately with `CheckJobProgress` because its process state is outside
 OpenRails.
 
-OpenRails currently exposes no Prometheus or runtime telemetry endpoint.
+The standalone server serves `GET /metrics` with one gauge per dependency,
+`openrails_dependency_up{dependency,class}` (class `required` or `optional`);
+alert on optional ones at 0 as degraded. Beyond that there is no runtime
+telemetry endpoint.
 `/v1/merchant/metrics`, `/query`, and `/schema` are authenticated merchant
 business analytics, not process/runtime metrics; adding runtime observability
 remains parked in tracker issue #701.

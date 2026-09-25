@@ -658,7 +658,8 @@ reported as degraded and never fail it; `run-server --no-workers` is therefore l
 host-owned embedded River client is outside that local-process check and is
 observed with `CheckJobProgress`.
 
-There is no Prometheus/runtime-metrics endpoint. The authenticated
+`GET /metrics` exports `openrails_dependency_up{dependency,class}` for every
+dependency readiness reports, optional ones included. The authenticated
 `/v1/merchant/metrics` query and schema routes expose merchant business
 analytics, not Go/process telemetry; runtime observability remains parked in
 tracker issue #701.
