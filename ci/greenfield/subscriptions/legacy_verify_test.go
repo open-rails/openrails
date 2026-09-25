@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,8 +55,8 @@ func verificationReads(before, after map[string]int) map[string]int {
 	return out
 }
 
-// A legacy book of thousands of NMI members whose paid periods lapsed before
-// the export lands unverified: NMI has since renewed most, ended some and
+// A legacy book of 1,000 NMI schedules whose paid periods lapsed before the
+// export lands unverified: NMI has since renewed most, ended some and
 // billed nothing for a few. Each import commit wakes the verifier, which
 // reads the account in bulk — a roster read and a few transaction pages, not
 // one read per member — and resolves every row from NMI's own records.
@@ -64,28 +66,37 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
-	tier := w.bookTier("monthly", 999, 30)
-	const renewedN, goneN, silentN = 1960, 20, 20
+	// 50 members holding 20 memberships each: 1,000 NMI schedules.
+	const members, tiers = 50, 20
+	var book []bookTier
+	for i := range tiers {
+		book = append(book, w.bookTier(fmt.Sprintf("tier%02d", i), 999, 30))
+	}
 	paid := w.clock.Now().Add(-2 * day)
 	b := w.newLegacyBook()
 	var renewed, gone, silent []*bookRow
-	for i := range renewedN + goneN + silentN {
-		r := b.add(&bookRow{source: fmt.Sprintf("book-%04d", i), tier: tier, paid: paid, declared: true})
-		switch {
-		case i < renewedN:
-			w.nmi.providerRenew(r.schedule, true)
-			renewed = append(renewed, r)
-		case i < renewedN+goneN:
-			w.nmi.providerCancel(r.schedule)
-			gone = append(gone, r)
-		default:
-			silent = append(silent, r)
+	for range members {
+		c := w.newCustomer()
+		for _, tier := range book {
+			r := b.add(&bookRow{source: fmt.Sprintf("book-%04d", len(b.rows)), tier: tier, c: c, paid: paid, declared: true})
+			switch len(b.rows) % 100 {
+			case 1:
+				w.nmi.providerCancel(r.schedule)
+				gone = append(gone, r)
+			case 2:
+				silent = append(silent, r)
+			default:
+				w.nmi.providerRenew(r.schedule, true)
+				renewed = append(renewed, r)
+			}
 		}
 	}
+	w.refreshIdle() // the startup pull's reads are not the verifier's
 	reads, writes := w.nmi.readCounts(), len(w.nmiWrites())
 	// A legacy importer sends its book in request-sized batches; each commit
 	// wakes the verifier.
-	const batch = 400
+	const batch = 250
+	started := time.Now()
 	for i := 0; i < len(b.book.Subscriptions); i += batch {
 		j := min(i+batch, len(b.book.Subscriptions))
 		part := b.book
@@ -96,6 +107,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 		require.Len(t, result.Imported, j-i, "%+v", result.Reasons)
 	}
 	batches := (len(b.book.Subscriptions) + batch - 1) / batch
+	t.Logf("imported in %s", time.Since(started))
 
 	require.Eventually(t, func() bool {
 		states := w.rowStates()
@@ -112,8 +124,9 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 		return true
 	}, 3*time.Minute, 200*time.Millisecond, "the import is verified")
 
+	t.Logf("verified %s after the first import", time.Since(started))
 	got := verificationReads(reads, w.nmi.readCounts())
-	t.Logf("NMI reads to verify %d imported members: %v", renewedN+goneN+silentN, got)
+	t.Logf("NMI reads to verify %d imported schedules: %v", len(b.rows), got)
 	require.LessOrEqual(t, got["v5:subscriptions"], batches, "at most one roster read per imported batch")
 	require.LessOrEqual(t, got["query:transaction"], batches*5, "a few transaction pages per bulk read")
 	require.LessOrEqual(t, got["query:recurring"]+got["v5:subscriptions/{id}"], 2, "no per-member reads")
@@ -127,7 +140,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 		require.Equal(t, "unverified", states[r.schedule].status, "%s: nothing billed, nothing decided", r.source)
 	}
 	for _, r := range append(renewed, silent...) {
-		require.True(t, r.c.entitled(tier.ent), "%s: access holds", r.source)
+		require.True(t, r.c.entitled(r.tier.ent), "%s: access holds", r.source)
 	}
 	require.Zero(t, w.nmi.saleAttempts(), "OpenRails charges nobody")
 	require.Len(t, w.nmiWrites(), writes, "verification only reads")
@@ -137,7 +150,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	var count int
 	require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT (evidence->'local'->>'count')::int FROM `+pgx.Identifier{w.schema}.Sanitize()+`.reconciliation_findings
 		WHERE finding_type = 'life.unverified.backlog'`).Scan(&count))
-	require.Equal(t, silentN, count)
+	require.Equal(t, len(silent), count)
 }
 
 // A lapsed NMI member parked unverified by a webhook's convergence is read
@@ -199,4 +212,20 @@ func readBody(r *http.Request) string {
 	raw, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	return string(raw)
+}
+
+// refreshIdle waits for the startup provider refresh to finish, so its
+// reads are not counted as the verifier's.
+func (w *world) refreshIdle() {
+	w.t.Helper()
+	kinds := []string{"openrails.provider_refresh", "openrails.provider_refresh_merchant"}
+	require.Eventually(w.t, func() bool {
+		busy, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(kinds...).
+			States(rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStatePending, rivertype.JobStateScheduled).First(10))
+		if err != nil || len(busy.Jobs) > 0 {
+			return false
+		}
+		done, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(kinds[1]).States(rivertype.JobStateCompleted).First(1))
+		return err == nil && len(done.Jobs) > 0
+	}, time.Minute, 50*time.Millisecond, "the startup provider refresh")
 }

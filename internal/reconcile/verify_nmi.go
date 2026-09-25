@@ -307,6 +307,7 @@ func (v *Verifier) bulkRead(ctx context.Context, mid merchant.ID) error {
 			return err
 		}
 		v.cover(mid, subs)
+		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid.String(), "rows": len(subs)}).Info("verify: bulk read of the account's unverified rows")
 		if len(subs) == 0 {
 			return clearCheckpoint(ctx, v.DB, mid, psp)
 		}
