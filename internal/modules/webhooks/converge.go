@@ -9,12 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -86,39 +81,4 @@ func markSubscriptionDirty(ctx context.Context, enq SubscriptionConvergeEnqueuer
 		"rail": rail, "subscription_reference": reference, "event_type": eventType,
 	}).Info("webhook marked subscription dirty; fetch-and-converge enqueued")
 	return nil
-}
-
-// afterConvergeTransition lands the rail-agnostic post-transition effects the
-// old payload-apply handlers carried:
-//   - TransitionPastDue: payment-method-failed notification (best-effort).
-//
-// Renewal credits are part of the lifecycle transition's transaction; there
-// is deliberately no post-transition credit write here.
-func afterConvergeTransition(ctx context.Context, deps convergeDeps, sub *models.Subscription, res reconcile.SubscriptionConvergence) error {
-	if !res.Applied {
-		return nil
-	}
-	switch res.Decision.Kind {
-	case reconcile.TransitionPastDue:
-		if deps.NotificationService == nil || reconcile.DunsDecline(sub, res.Decision) {
-			return nil // FailMembership queued the dunning notice
-		}
-		notification := &models.NotificationQueue{
-			ID:         uuidutil.NewV7(),
-			CustomerID: sub.CustomerID,
-			EventType:  models.NotificationPaymentMethodFailed,
-			Data:       openrails.NotificationData{Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, Source: "fetch_converge"},
-		}
-		if err := deps.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-				Error("converge: failed to deliver payment failure notification")
-		}
-	}
-	return nil
-}
-
-// convergeDeps are the shared service dependencies of the per-rail converge
-// implementations.
-type convergeDeps struct {
-	NotificationService *subscriptions.NotificationService
 }

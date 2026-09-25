@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,6 +35,8 @@ type UnknownReconcileOptions struct {
 	// Breaker (#834) refuses to read absence from an implausibly small roster.
 	// Zero value = defaults.
 	Breaker RosterBreaker
+	// SkipRails are rails another plane verifies (the NMI Verifier).
+	SkipRails []string
 }
 
 func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
@@ -101,6 +104,9 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 	floor := EvidenceFloorFor(ctx, database, merchantID.UUID())
 
 	for _, rail := range reconcilableRails() {
+		if slices.Contains(opts.SkipRails, rail) {
+			continue
+		}
 		provider := Provider(rail)
 		fetcher := fetchers[provider]
 		prober := probers[provider]

@@ -3,7 +3,6 @@ package reconcile
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -514,11 +512,12 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 			// Renew only the periods the charges paid; the decline then dunns.
 			return with(renewPaidPeriods(txns, chargeCutoff, declineTxn.OccurredAt, localStart, localEnd, base))
 		}
-		d := Decision{Kind: TransitionRenew, NewPeriodEnd: remoteNextEnd(remoteSub), Reason: "verified_renewal_charge"}
-		if remoteSub != nil {
-			d.NewPeriodStart = remoteSub.PeriodStart
+		start, end := paidPeriod(txns, chargeCutoff, localStart, localEnd, remoteSub)
+		if end == nil {
+			base.Reason = "renewal_period_unknown"
+			return base
 		}
-		return with(d)
+		return with(Decision{Kind: TransitionRenew, NewPeriodStart: start, NewPeriodEnd: end, Reason: "verified_renewal_charge"})
 	}
 	// 2) Roster alive with a FUTURE boundary but no charge → adopt the provider's
 	//    clock (#367: period adoption alone never grants access). A future
@@ -673,6 +672,43 @@ func renewPaidPeriods(txns []RemoteTransaction, cutoff, declinedAt time.Time, st
 
 const reasonRenewedBeforeDecline = "verified_renewal_before_decline"
 
+// paidPeriod is the period the verified charges since cutoff paid for: one
+// local cycle per distinct charge, from the local end (audit 8). The
+// provider's next billing date is adopted only when it lands on that many
+// cycles (within half a cycle, which absorbs calendar months, or on that
+// boundary's day); a date moved by a later decline is not payment. Without a known
+// cycle only the provider's date can bound it.
+func paidPeriod(txns []RemoteTransaction, cutoff time.Time, start, end *time.Time, remote *RemoteSubscription) (*time.Time, *time.Time) {
+	next := remoteNextEnd(remote)
+	var remoteStart *time.Time
+	if remote != nil {
+		remoteStart = remote.PeriodStart
+	}
+	if start == nil || end == nil || !end.After(*start) {
+		if next == nil {
+			return nil, nil
+		}
+		if end != nil {
+			s := *end
+			return &s, next
+		}
+		return remoteStart, next
+	}
+	seen := map[string]bool{}
+	for _, t := range txns {
+		if t.Type == TransactionTypeSale && t.Success && !t.OccurredAt.Before(cutoff) && !seen[t.TransactionID] {
+			seen[t.TransactionID] = true
+		}
+	}
+	cycle := end.Sub(*start)
+	paid := time.Duration(max(len(seen), 1))
+	from, to := *end, end.Add(paid*cycle)
+	if next != nil && ((next.After(to.Add(-cycle/2)) && !next.After(to.Add(cycle/2))) || next.Equal(to.Truncate(24*time.Hour))) {
+		to = *next // NMI states a date: the boundary's own day counts
+	}
+	return &from, &to
+}
+
 // ProviderDeclared names the snapshot a declared legacy import synthesizes.
 const ProviderDeclared Provider = "declared"
 
@@ -702,101 +738,6 @@ func subscriptionBackfill(txns []RemoteTransaction, since time.Time) []RemoteTra
 		}
 	}
 	return out
-}
-
-// ApplyDecision routes one decider transition through the shared subscription
-// lifecycle chokepoints — the ONLY way a plane moves subscription state (#665).
-// Non-unknown rows take the `unknown` waypoint (park, then resolve) so every
-// transition lands through the one resolution implementation; each leg is
-// idempotent, so a crash between them is healed by the next pass. Returns
-// whether a transition was attempted (false = no-op / precondition unmet).
-func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
-	if database == nil || lc == nil || sub == nil {
-		return false, fmt.Errorf("apply decision: db, lifecycle and subscription are required")
-	}
-	if d.Kind != TransitionNone && d.stale(sub) {
-		return false, nil
-	}
-	switch d.Kind {
-	case TransitionNone:
-		return false, nil
-
-	case TransitionParkUnknown:
-		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
-			return false, nil
-		}
-		return true, lc.ApplyLocalUnknown(ctx, database, sub)
-
-	case TransitionPastDue:
-		switch {
-		case sub.Status == models.StatusUnverified:
-			if err := lc.ResolveUnknownSubscription(ctx, database, sub, subscriptions.ResolvePastDue, nil, nil, d.GraceEndsAt); err != nil {
-				return true, err
-			}
-		case sub.Status != models.StatusActive:
-			return false, nil
-		case sub.CurrentPeriodEndsAt == nil:
-			return false, nil // chk_past_due_has_period_end: unsatisfiable; park path owns it
-		default:
-			if err := lc.ApplyLocalPastDue(ctx, database, sub, d.GraceEndsAt); err != nil {
-				return true, err
-			}
-		}
-		if !DunsDecline(sub, d) || sub.Status != models.StatusPastDue || sub.NextRetryAt != nil ||
-			(sub.LastRetryAt != nil && !d.Decline.OccurredAt.After(*sub.LastRetryAt)) {
-			return true, nil
-		}
-		// A decline not yet counted is a dunning failure: the same path as a
-		// declined OpenRails retry, so its schedule (never "now") and
-		// classification apply.
-		code := normalize.Trim(d.Decline.DeclineCode)
-		return true, lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
-			Rail:            sub.Rail,
-			SubscriptionID:  &sub.ID,
-			FailureCode:     normalize.OptionalString(code),
-			Decline:         collection.ClassifyDecline(string(sub.Rail), code),
-			AttemptRecorded: true,
-		})
-
-	case TransitionRenew, TransitionAdoptPeriodEnd, TransitionCancel:
-		if sub.Status != models.StatusUnverified {
-			from := []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue}
-			if d.Kind == TransitionAdoptPeriodEnd {
-				// Adoption never lifts dunning; checked again under the row lock
-				// because a decline can land after the decision was made.
-				from = from[:1]
-			}
-			if !slices.Contains(from, sub.Status) {
-				return false, nil
-			}
-			// `unknown` waypoint: one resolution implementation for every plane.
-			if err := lc.ApplyLocalUnknown(ctx, database, sub, from...); err != nil {
-				return false, err
-			}
-		}
-		var res subscriptions.UnknownResolution
-		switch d.Kind {
-		case TransitionRenew:
-			res = subscriptions.ResolveRenewed
-		case TransitionAdoptPeriodEnd:
-			res = subscriptions.ResolveAdopted
-		default:
-			res = subscriptions.ResolveCancelled
-			if !d.RemoteGone {
-				// #679: the remote sub may still exist and keep retrying; the
-				// lifecycle queues the deferred provider delete.
-				res = subscriptions.ResolveCancelledRemoteAlive
-			}
-		}
-		grace := d.GraceEndsAt
-		if grace.IsZero() {
-			grace = now
-		}
-		return true, lc.ResolveUnknownSubscription(ctx, database, sub, res, d.NewPeriodStart, d.NewPeriodEnd, grace)
-
-	default:
-		return false, fmt.Errorf("apply decision: unknown transition %d", d.Kind)
-	}
 }
 
 // DecisionApplier applies decider transitions for the pull engine's enforce

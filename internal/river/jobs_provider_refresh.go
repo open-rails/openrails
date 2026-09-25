@@ -290,6 +290,9 @@ type ProviderRefreshWorker struct {
 	// (fake-provider test seam).
 	PullEndpoints reconcile.ProviderEndpoints
 	NMIClients    *railresolve.NMIFactory
+	// Verifier reads the unverified NMI rows (#1094); nil leaves them to the
+	// unknown-cohort reconcile.
+	Verifier *reconcile.Verifier
 
 	Window          time.Duration
 	SafetyLag       time.Duration
@@ -484,7 +487,14 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		// delete; without this the lifecycle WARNs and the remote keeps retrying.
 		lc.SetDeferredDeleteScheduler(w.DeferDelete)
 	}
-	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, merchant.ID(mid), w.now(), reconcile.UnknownReconcileOptions{})
+	opts := reconcile.UnknownReconcileOptions{}
+	var verifyErr error
+	if w.Verifier != nil {
+		opts.SkipRails = []string{string(reconcile.ProviderNMI)}
+		verifyErr = w.Verifier.Pass(ctx, merchant.ID(mid))
+	}
+	res, err := reconcile.ReconcileUnknownCohort(ctx, w.DB, lc, fetchers, probers, merchant.ID(mid), w.now(), opts)
+	err = errors.Join(verifyErr, err)
 	if res.Held > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{"merchant_id": mid, "held": res.Held}).
 			Error("Provider Refresh: unknown-cohort cancellations withheld by a pass-level guard; a requires_review finding is open")
