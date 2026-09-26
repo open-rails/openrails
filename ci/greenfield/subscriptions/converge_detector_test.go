@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,7 +58,13 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 	}
 	retryAt := now.Add(day).UTC().Truncate(time.Second)
 	moved := map[uuid.UUID]bool{}
-	remove := failpoint.Set(func(ctx context.Context, s failpoint.Site) error {
+	var mu sync.Mutex
+	// The hook is process-wide: the runtime's own converge sweep can reach it
+	// first, under a job context that may end. The move is made on the test's
+	// context so it lands whichever pass reaches the row first.
+	remove := failpoint.Set(func(_ context.Context, s failpoint.Site) error {
+		mu.Lock()
+		defer mu.Unlock()
 		if s.Point != failpoint.BeforeRepair || moved[s.Subscription] {
 			return nil
 		}
@@ -67,7 +74,7 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 			w.decide(renewed.sub, `current_period_ends_at = current_period_ends_at + interval '30 days'`)
 		case retried.sub.UUID():
 			moved[s.Subscription] = true
-			_, err := w.pool.Exec(ctx, w.q(`UPDATE openrails.subscriptions SET next_retry_at = $2 WHERE id = $1`), retried.sub.UUID(), retryAt)
+			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.subscriptions SET next_retry_at = $2 WHERE id = $1`), retried.sub.UUID(), retryAt)
 			return err
 		}
 		return nil
@@ -75,7 +82,9 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 	defer remove()
 	w.converge()
 	remove()
+	mu.Lock()
 	require.Len(t, moved, 2, "both moves ran between detection and repair")
+	mu.Unlock()
 
 	for _, l := range []*legacy{overdue, stalled} {
 		r := w.lifeRow(l.sub)
