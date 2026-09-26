@@ -13,6 +13,8 @@ import (
 type CachedProvider struct {
 	provider Provider
 	ttl      time.Duration
+	now      func() time.Time
+	flights  *flights
 
 	mu    sync.RWMutex
 	cache map[string]*cachedQuote
@@ -32,6 +34,8 @@ func NewCachedProvider(provider Provider, ttl time.Duration) *CachedProvider {
 	return &CachedProvider{
 		provider: provider,
 		ttl:      ttl,
+		now:      time.Now,
+		flights:  newFlights(),
 		cache:    make(map[string]*cachedQuote),
 	}
 }
@@ -44,11 +48,10 @@ func (p *CachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency str
 		return nil, fmt.Errorf("from_currency and to_currency are required")
 	}
 	key := fromCurrency + ":" + toCurrency
-	// Check cache first
 	p.mu.RLock()
-	if cached, ok := p.cache[key]; ok && time.Now().Before(cached.expiresAt) {
-		p.mu.RUnlock()
-		// Return a copy to prevent mutation
+	cached, ok := p.cache[key]
+	p.mu.RUnlock()
+	if ok && p.now().Before(cached.expiresAt) && !staleRate(cached.quote.AsOf, p.now()) {
 		return &Quote{
 			FromCurrency: cached.quote.FromCurrency,
 			ToCurrency:   cached.quote.ToCurrency,
@@ -56,23 +59,19 @@ func (p *CachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency str
 			AsOf:         cached.quote.AsOf,
 		}, nil
 	}
-	p.mu.RUnlock()
-
-	// Fetch fresh quote
-	quote, err := p.provider.Quote(ctx, fromCurrency, toCurrency)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the result
-	p.mu.Lock()
-	p.cache[key] = &cachedQuote{
-		quote:     quote,
-		expiresAt: time.Now().Add(p.ttl),
-	}
-	p.mu.Unlock()
-
-	return quote, nil
+	return p.flights.do(ctx, key, func(ctx context.Context) (*Quote, error) {
+		quote, err := p.provider.Quote(ctx, fromCurrency, toCurrency)
+		if err != nil {
+			return nil, err
+		}
+		if staleRate(quote.AsOf, p.now()) {
+			return nil, fmt.Errorf("upstream rate %s -> %s is stale (as of %s)", fromCurrency, toCurrency, quote.AsOf.Format(time.RFC3339))
+		}
+		p.mu.Lock()
+		p.cache[key] = &cachedQuote{quote: quote, expiresAt: p.now().Add(p.ttl)}
+		p.mu.Unlock()
+		return quote, nil
+	})
 }
 
 // QuoteToUSD returns a cached quote to USD.

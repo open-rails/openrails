@@ -37,36 +37,13 @@ type RedisCachedProvider struct {
 	provider Provider
 	ttl      time.Duration
 
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	last   time.Time
-	memory map[string]redisRate
-	// inline fetches are single-flight per pair; a failure is remembered for
-	// negativeTTL so a burst of quotes does not hammer a failing upstream.
-	inflight    map[string]*fetchCall
-	failed      map[string]failedFetch
-	negativeTTL time.Duration
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	last    time.Time
+	memory  map[string]redisRate
+	now     func() time.Time
+	flights *flights
 }
-
-type fetchCall struct {
-	done chan struct{}
-	rate redisRate
-	err  error
-}
-
-type failedFetch struct {
-	until time.Time
-	err   error
-}
-
-const (
-	// maxRateAge rejects an upstream rate published longer ago than this: a
-	// lagging CDN file is not a fresh rate, whenever it was fetched.
-	maxRateAge = 48 * time.Hour
-	// inlineFetchTimeout bounds one inline upstream read.
-	inlineFetchTimeout = 10 * time.Second
-	defaultNegativeTTL = 30 * time.Second
-)
 
 func NewRedisCachedProvider(rdb redis.Cmdable, provider Provider, ttl time.Duration) *RedisCachedProvider {
 	if provider == nil {
@@ -75,8 +52,7 @@ func NewRedisCachedProvider(rdb redis.Cmdable, provider Provider, ttl time.Durat
 	if ttl <= 0 {
 		ttl = 3 * time.Hour
 	}
-	return &RedisCachedProvider{rdb: rdb, provider: provider, ttl: ttl, memory: map[string]redisRate{},
-		inflight: map[string]*fetchCall{}, failed: map[string]failedFetch{}, negativeTTL: defaultNegativeTTL}
+	return &RedisCachedProvider{rdb: rdb, provider: provider, ttl: ttl, memory: map[string]redisRate{}, now: time.Now, flights: newFlights()}
 }
 
 func (p *RedisCachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency string) (*Quote, error) {
@@ -100,11 +76,17 @@ func (p *RedisCachedProvider) Quote(ctx context.Context, fromCurrency, toCurrenc
 	if rate, ok := p.memoryRate(fromCurrency, toCurrency); ok {
 		return rate.quote(), nil
 	}
-	rate, err := p.fetchInline(ctx, fromCurrency, toCurrency)
+	quote, err := p.flights.do(ctx, redisRateKey(fromCurrency, toCurrency), func(ctx context.Context) (*Quote, error) {
+		rate, err := p.fetch(ctx, fromCurrency, toCurrency, p.now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		return rate.quote(), nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("FX rate unavailable for %s -> %s: %w", fromCurrency, toCurrency, err)
 	}
-	return rate.quote(), nil
+	return quote, nil
 }
 
 func (p *RedisCachedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
@@ -116,7 +98,7 @@ func (r redisRate) quote() *Quote {
 }
 
 func (r redisRate) fresh(from, to string, now time.Time) bool {
-	return r.Rate > 0 && strings.EqualFold(r.FromCurrency, from) && strings.EqualFold(r.ToCurrency, to) && now.Before(r.ExpiresAt)
+	return r.Rate > 0 && strings.EqualFold(r.FromCurrency, from) && strings.EqualFold(r.ToCurrency, to) && now.Before(r.ExpiresAt) && !staleRate(r.AsOf, now)
 }
 
 // redisRate returns the fresh shared rate; redis.Nil when it is missing or stale.
@@ -129,7 +111,7 @@ func (p *RedisCachedProvider) redisRate(ctx context.Context, from, to string) (r
 	if err := json.Unmarshal(raw, &rate); err != nil {
 		return redisRate{}, fmt.Errorf("decode FX rate: %w", err)
 	}
-	if !rate.fresh(from, to, time.Now().UTC()) {
+	if !rate.fresh(from, to, p.now().UTC()) {
 		return redisRate{}, redis.Nil
 	}
 	return rate, nil
@@ -139,44 +121,7 @@ func (p *RedisCachedProvider) memoryRate(from, to string) (redisRate, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	rate, ok := p.memory[redisRateKey(from, to)]
-	return rate, ok && rate.fresh(from, to, time.Now().UTC())
-}
-
-// fetchInline is the request-path upstream read: single-flight per pair,
-// bounded, negatively cached, and abandoned when the caller's ctx ends.
-func (p *RedisCachedProvider) fetchInline(ctx context.Context, from, to string) (redisRate, error) {
-	key := redisRateKey(from, to)
-	p.mu.Lock()
-	if f, ok := p.failed[key]; ok && time.Now().Before(f.until) {
-		p.mu.Unlock()
-		return redisRate{}, f.err
-	}
-	call := p.inflight[key]
-	if call == nil {
-		call = &fetchCall{done: make(chan struct{})}
-		p.inflight[key] = call
-		go func() {
-			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineFetchTimeout)
-			defer cancel()
-			call.rate, call.err = p.fetch(fctx, from, to, time.Now().UTC())
-			p.mu.Lock()
-			delete(p.inflight, key)
-			if call.err != nil {
-				p.failed[key] = failedFetch{until: time.Now().Add(p.negativeTTL), err: call.err}
-			} else {
-				delete(p.failed, key)
-			}
-			p.mu.Unlock()
-			close(call.done)
-		}()
-	}
-	p.mu.Unlock()
-	select {
-	case <-call.done:
-		return call.rate, call.err
-	case <-ctx.Done():
-		return redisRate{}, ctx.Err()
-	}
+	return rate, ok && rate.fresh(from, to, p.now().UTC())
 }
 
 // fetch reads one pair from the upstream provider into memory.
@@ -185,7 +130,7 @@ func (p *RedisCachedProvider) fetch(ctx context.Context, from, to string, now ti
 	if err != nil {
 		return redisRate{}, err
 	}
-	if q.AsOf.IsZero() || now.Sub(q.AsOf) > maxRateAge {
+	if staleRate(q.AsOf, now) {
 		return redisRate{}, fmt.Errorf("upstream rate %s -> %s is stale (as of %s)", from, to, q.AsOf.Format(time.RFC3339))
 	}
 	rate := redisRate{
@@ -199,8 +144,8 @@ func (p *RedisCachedProvider) fetch(ctx context.Context, from, to string, now ti
 	}
 	p.mu.Lock()
 	p.memory[redisRateKey(from, to)] = rate
-	delete(p.failed, redisRateKey(from, to))
 	p.mu.Unlock()
+	p.flights.forget(redisRateKey(from, to))
 	return rate, nil
 }
 
@@ -214,7 +159,7 @@ func (p *RedisCachedProvider) Refresh(ctx context.Context, currencies []string) 
 func (p *RedisCachedProvider) refresh(ctx context.Context, currencies []string, since time.Time) error {
 	currencies = uniqueCurrencies(currencies)
 	var errs []error
-	now := time.Now().UTC()
+	now := p.now().UTC()
 	for _, from := range currencies {
 		for _, to := range currencies {
 			if from == to {
@@ -250,7 +195,7 @@ func (p *RedisCachedProvider) publish(ctx context.Context) error {
 		rates = append(rates, rate)
 	}
 	p.mu.Unlock()
-	now := time.Now().UTC()
+	now := p.now().UTC()
 	for _, rate := range rates {
 		ttl := rate.ExpiresAt.Sub(now)
 		if ttl <= 0 {

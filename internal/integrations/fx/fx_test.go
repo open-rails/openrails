@@ -249,7 +249,7 @@ func TestRedisCachedProviderSingleFlightsInlineFetch(t *testing.T) {
 func TestRedisCachedProviderNegativeCachesUpstreamFailure(t *testing.T) {
 	upstream := &scriptedProvider{err: errors.New("upstream down")}
 	p := NewRedisCachedProvider(nil, upstream, time.Hour)
-	p.negativeTTL = 200 * time.Millisecond
+	p.flights.negativeTTL = 200 * time.Millisecond
 	for range 3 {
 		if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
 			t.Fatal("want failure")
@@ -265,5 +265,79 @@ func TestRedisCachedProviderNegativeCachesUpstreamFailure(t *testing.T) {
 	}
 	if n := upstream.calls.Load(); n != 2 {
 		t.Fatalf("upstream calls = %d, want 2 after the window", n)
+	}
+}
+
+// The in-memory cache (no Redis) holds the same line as the Redis cache: a
+// lagging upstream file is not fresh, concurrent misses make one call, and a
+// failure is remembered briefly.
+func TestCachedProviderRejectsStaleUpstreamRates(t *testing.T) {
+	p := NewCachedProvider(&scriptedProvider{asOf: time.Now().Add(-5 * 24 * time.Hour)}, time.Hour)
+	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
+		t.Fatal("a rate published days ago must not quote")
+	}
+}
+
+func TestCachedProviderSingleFlightsFetch(t *testing.T) {
+	upstream := &scriptedProvider{gate: make(chan struct{})}
+	p := NewCachedProvider(upstream, time.Hour)
+	errs := make(chan error, 8)
+	for range 8 {
+		go func() { _, err := p.Quote(context.Background(), "EUR", "USD"); errs <- err }()
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(upstream.gate)
+	for range 8 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := upstream.calls.Load(); n != 1 {
+		t.Fatalf("upstream calls = %d, want 1", n)
+	}
+}
+
+func TestCachedProviderNegativeCachesFailure(t *testing.T) {
+	upstream := &scriptedProvider{err: errors.New("upstream down")}
+	p := NewCachedProvider(upstream, time.Hour)
+	p.flights.negativeTTL = 200 * time.Millisecond
+	for range 3 {
+		if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
+			t.Fatal("want failure")
+		}
+	}
+	if n := upstream.calls.Load(); n != 1 {
+		t.Fatalf("upstream calls = %d, want 1 inside the negative window", n)
+	}
+}
+
+// A cached rate ages out by its publication date at use time, not only when it
+// was fetched: both caches refetch rather than serve a rate now too old.
+func TestCachedRatesAgeAtUseTime(t *testing.T) {
+	published := time.Now()
+	for name, build := range map[string]func(Provider) (Provider, *func() time.Time){
+		"memory": func(up Provider) (Provider, *func() time.Time) {
+			p := NewCachedProvider(up, 1000*time.Hour)
+			return p, &p.now
+		},
+		"redis": func(up Provider) (Provider, *func() time.Time) {
+			p := NewRedisCachedProvider(nil, up, 1000*time.Hour)
+			return p, &p.now
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			upstream := &scriptedProvider{asOf: published}
+			p, now := build(upstream)
+			if _, err := p.Quote(context.Background(), "EUR", "USD"); err != nil {
+				t.Fatal(err)
+			}
+			*now = func() time.Time { return published.Add(49 * time.Hour) }
+			if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
+				t.Fatal("a rate published 49h ago must not be served from cache")
+			}
+			if n := upstream.calls.Load(); n != 2 {
+				t.Fatalf("upstream calls = %d, want a refetch", n)
+			}
+		})
 	}
 }
