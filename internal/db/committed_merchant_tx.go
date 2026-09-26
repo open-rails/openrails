@@ -45,7 +45,7 @@ func (p *Pool) CommittedMerchantTx(ctx context.Context, id merchant.ID, fn func(
 			return err
 		}
 	} else {
-		acquired, err := p.raw.Acquire(ctx)
+		acquired, err := acquire(ctx, p.raw)
 		if err != nil {
 			return err
 		}

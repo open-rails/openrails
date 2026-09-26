@@ -616,3 +616,38 @@ func TestWebhookDuplicatesLeaveRenewalsAlone(t *testing.T) {
 	}
 	require.Equal(t, 1, e.applied("evt_hot"))
 }
+
+// #1105: a request holding its pinned connection runs pool work on that same
+// connection, even on a one-connection pool; and a pool with nothing free
+// answers ErrPoolExhausted within a bound instead of waiting forever.
+func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	config, err := pgxpool.ParseConfig(strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN")))
+	require.NoError(t, err)
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	d, err := db.NewWithPGXPool(pool, e.schema)
+	require.NoError(t, err)
+
+	ctx, release, err := d.WithMerchantConn(e.ctx())
+	require.NoError(t, err)
+	var n int
+	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error { return nil }))
+	require.NoError(t, d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM openrails.idempotency_keys`).Scan(&n)
+	}), "pool work inside a pinned request reuses the pin")
+	require.NoError(t, d.DataPool().QueryRow(ctx, `SELECT 1`).Scan(&n))
+
+	// The pin holds the only connection: work outside the request is refused
+	// in bounded time.
+	started := time.Now()
+	_, err = d.DataPool().Exec(e.t.Context(), `SELECT 1`)
+	require.ErrorIs(t, err, db.ErrPoolExhausted)
+	require.Less(t, time.Since(started), 15*time.Second)
+	release()
+	_, err = d.DataPool().Exec(e.t.Context(), `SELECT 1`)
+	require.NoError(t, err)
+}

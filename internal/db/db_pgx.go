@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -47,7 +46,7 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
-		return d.rw.wrapDBTX(d.pool)
+		return d.rw.wrapDBTX(pooledDBTX{pool: d.pool})
 	}
 	return errDBTX{fmt.Errorf("db: no pgx handle available on this DB")}
 }
@@ -72,7 +71,7 @@ func (d *DB) GenDirectory() *gen.Queries {
 	if d == nil || d.pool == nil {
 		return gen.New(errDBTX{fmt.Errorf("db: GenDirectory requires a pool-backed DB")})
 	}
-	return gen.New(d.rw.wrapDBTX(d.pool))
+	return gen.New(d.rw.wrapDBTX(pooledDBTX{pool: d.pool, directory: true}))
 }
 
 // pgxBeginner abstracts where a transaction starts: the pinned merchant
@@ -111,7 +110,7 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		return schemaTx{Tx: tx, rw: d.rw, river: d.river}, nil
 	}
 	if d.pool != nil {
-		tx, err := d.pool.Begin(ctx)
+		tx, err := pooledDBTX{pool: d.pool, directory: true}.Begin(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -231,11 +230,6 @@ type lazyMerchantPgxConn struct {
 	conn *pgxpool.Conn
 }
 
-// lazyMerchantAcquireTimeout bounds the lazy acquisition (same rationale as
-// tenantConnAcquireTimeout: never park forever on a pool when client aborts
-// don't propagate).
-const lazyMerchantAcquireTimeout = 4 * time.Second
-
 // get returns the pinned connection, acquiring it on first use. It hands out
 // the underlying *pgx.Conn: a caller still holding it after a re-pin gets
 // "conn closed" from the dead connection, never a released pool handle.
@@ -252,9 +246,7 @@ func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgx.Conn, error) {
 		l.conn.Release()
 		l.conn = nil
 	}
-	acqCtx, cancel := context.WithTimeout(ctx, lazyMerchantAcquireTimeout)
-	conn, err := l.pool.Acquire(acqCtx)
-	cancel()
+	conn, err := acquire(ctx, l.pool)
 	if err != nil {
 		return nil, fmt.Errorf("db: acquire pgx merchant connection: %w", err)
 	}

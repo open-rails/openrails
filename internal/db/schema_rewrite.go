@@ -188,20 +188,24 @@ func (p *Pool) Schema() string {
 	return p.schema
 }
 
+// Pool statements reuse the request's pinned connection when it is idle, and
+// otherwise wait a bounded time for a pooled one (#1105).
+func (p *Pool) handle() pooledDBTX { return pooledDBTX{pool: p.raw} }
+
 func (p *Pool) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	return p.raw.Exec(ctx, p.rw.apply(sql), args...)
+	return p.handle().Exec(ctx, p.rw.apply(sql), args...)
 }
 
 func (p *Pool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	return p.raw.Query(ctx, p.rw.apply(sql), args...)
+	return p.handle().Query(ctx, p.rw.apply(sql), args...)
 }
 
 func (p *Pool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	return p.raw.QueryRow(ctx, p.rw.apply(sql), args...)
+	return p.handle().QueryRow(ctx, p.rw.apply(sql), args...)
 }
 
 func (p *Pool) Begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := p.raw.Begin(ctx)
+	tx, err := p.handle().Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
