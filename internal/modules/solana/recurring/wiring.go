@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -117,6 +118,9 @@ func (s pspSigner) resolve(ctx context.Context, merchantID merchant.ID) (solanai
 		return nil, err
 	}
 	if ok {
+		if err := signerApproved(account); err != nil {
+			return nil, err
+		}
 		cfg := signerConfigFromEvidence(account.Evidence)
 		switch cfg.Mode {
 		case "local_keypair":
@@ -141,6 +145,9 @@ func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.
 	if !ok {
 		return nil, fmt.Errorf("solana: no PSP for merchant address %s", publicKey)
 	}
+	if err := signerApproved(account); err != nil {
+		return nil, err
+	}
 	cfg := signerConfigFromEvidence(account.Evidence)
 	switch cfg.Mode {
 	case "local_keypair":
@@ -158,6 +165,16 @@ func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.
 	default:
 		return nil, fmt.Errorf("solana: unknown signer mode %q", cfg.Mode)
 	}
+}
+
+// signerApproved refuses a PSP whose Transit signer reports an unapproved
+// identity (#1101): nothing is signed for, or paid to, it until an operator
+// approves the change.
+func signerApproved(account gen.OpenrailsPsp) error {
+	if account.PendingSignerPublicKey != nil && *account.PendingSignerPublicKey != "" {
+		return fmt.Errorf("solana: PSP %s signer now reports %s: %w", account.AccountID, *account.PendingSignerPublicKey, vault.ErrSignerUnapproved)
+	}
+	return nil
 }
 
 type solanaSignerConfig struct {

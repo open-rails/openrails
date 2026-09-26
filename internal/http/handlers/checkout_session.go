@@ -328,6 +328,9 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		return
 	}
 	switch {
+	case errors.Is(err, vault.ErrUnavailable):
+		// Before validation: a refused signer is unavailable, not a bad request.
+		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable, "payment signer is temporarily unavailable"))
 	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
 		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "custodian_capture_unavailable", "custodian capture is unavailable"))
 	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):
@@ -342,8 +345,6 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		r.ErrorJSON(http.StatusConflict, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutSessionValidation):
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
-	case errors.Is(err, vault.ErrUnavailable):
-		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable, "payment signer is temporarily unavailable"))
 	default:
 		writeRefusal(r, err, "checkout session request failed")
 	}

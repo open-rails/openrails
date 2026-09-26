@@ -24,6 +24,8 @@ import (
 	"github.com/open-rails/openrails/embed/operator"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
+	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -124,6 +126,38 @@ func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (openrails
 func sign(t *testing.T, rt *embed.Runtime) ([]byte, error) {
 	t.Helper()
 	return app.HostGraph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("greenfield"))
+}
+
+// solanaCheckoutStatus attempts a Solana checkout for a new one-time or
+// recurring price and returns the HTTP status of the refusal (0 on success).
+func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool) int {
+	t.Helper()
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", EntitlementsSpec: map[string]*int{"content:sol": nil}})
+	require.NoError(t, err)
+	params := &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
+	kind := openrails.OfferPermanent
+	if recurring {
+		hours := 720
+		params.AccessDurationHours, params.AutoRenew, kind = &hours, true, openrails.OfferRecurring
+	}
+	price, err := client.Prices.Create(t.Context(), params)
+	require.NoError(t, err)
+	_, err = client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
+		Customer:       openrails.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
+		PriceKey:       price.Key,
+		Entitlement:    "content:sol",
+		OfferKind:      kind,
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "solana", TokenSymbol: "USDC", Flow: "transfer_request"},
+		IdempotencyKey: "sol-" + uuid.NewString(),
+		SuccessURL:     "https://greenfield.test/success",
+		CancelURL:      "https://greenfield.test/cancel",
+	})
+	var status *openrails.StatusError
+	if err == nil {
+		return 0
+	}
+	require.ErrorAs(t, err, &status, err.Error())
+	return status.Status
 }
 
 func waitReady(t *testing.T, rt *embed.Runtime) {
@@ -296,6 +330,14 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	}
 	require.True(t, logged, "the key change is logged at ERROR with both public keys")
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
+	require.Equal(t, http.StatusServiceUnavailable, solanaCheckoutStatus(t, client, false), "a one-time Solana checkout answers 503")
+	require.Equal(t, http.StatusServiceUnavailable, solanaCheckoutStatus(t, client, true), "a recurring Solana subscribe answers 503")
+	signer := func(rt *embed.Runtime) solanaint.Signer {
+		r := app.HostGraph(rt).Runtime
+		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.MerchantSecretBackend.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))
+	}
+	_, err = signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
+	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
 	psp, ok := checkoutPSP(t, client, "solana")
 	require.True(t, ok)
 	require.Equal(t, openrails.CheckoutPSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
@@ -325,6 +367,9 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.NoError(t, operator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
 	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))
 	require.NoError(t, railConfig(second, mid))
+	pub, err := signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
+	require.NoError(t, err)
+	require.Equal(t, rotated, pub.String())
 	active, _ = solanaRows(rotated)
 	require.Equal(t, 1, active, "the approved identity is provisioned")
 	oldActive, oldArchived := solanaRows(old)
