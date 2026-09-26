@@ -161,3 +161,23 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=openrails.psps.id
 WHERE openrails.psps.merchant_id=EXCLUDED.merchant_id
   AND openrails.psps.key IS NOT DISTINCT FROM EXCLUDED.key
 RETURNING id;
+
+-- name: SetPSPPendingSigner :execrows
+-- #1101: record the unapproved public key a changed Transit signer reports.
+UPDATE openrails.psps
+SET pending_signer_public_key = sqlc.arg(public_key)::text,
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(id)::uuid;
+
+-- name: ApprovePSPPendingSigner :execrows
+-- #1101: the operator approval is the only writer that clears a pending
+-- signer. The stored identity drains; the approved one is provisioned next.
+UPDATE openrails.psps
+SET pending_signer_public_key = NULL,
+    archived = true,
+    replaced_at = COALESCE(replaced_at, now()),
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(id)::uuid
+  AND pending_signer_public_key = sqlc.arg(public_key)::text;

@@ -5,33 +5,23 @@ import (
 	"fmt"
 )
 
-// ReadinessDependency is one boot-dependency probed by Runtime.Ready (#748).
+// ReadinessDependency is one dependency reported by Runtime.Ready (#748).
 type ReadinessDependency struct {
-	// Name identifies the dependency (e.g. "postgres", "garnet", "merchant_secrets", "river").
+	// Name identifies the dependency (e.g. "postgres", "river", "redis", "vault").
 	Name string
-	// Available is true when the dependency is configured (where relevant) and reachable.
+	// Available is true when the dependency is usable.
 	Available bool
-	// Err is nil when Available; otherwise the reason (missing config or a live probe failure).
+	// Optional dependencies never fail readiness; while unavailable only the
+	// features that need them answer 503.
+	Optional bool
+	// Err is nil when Available; otherwise the reason.
 	Err error
 }
 
-// Ready runs the #748 canonical dependency probes shared by EVERY host
-// surface — standalone (/readyz, internal/http/routes_public.go) and embedded
-// (pkg/embedded.Embedded.Ready) both call this so neither can report healthy
-// while the other reports degraded.
-//
-// Checks: Postgres (always required), Redis (probed ONLY when configured —
-// Redis is optional everywhere else in OpenRails, so its absence must not
-// fail readiness; when configured, an unreachable Redis DOES fail it), the
-// merchant-secret backend (armed at boot, AND live-reachable when armed with
-// a Vault-backed store — a paused/unreachable Vault fails this even though
-// arming succeeded earlier), River producer presence, and — when OpenRails
-// owns River — a running local worker consumer. Host-owned embedded River is
-// started outside this runtime, so its progress is reported by RiverProgress.
-//
-// Returns every dependency's status (for verbose diagnostics) plus a single
-// wrapped error naming the FIRST failing one; nil when everything the running
-// configuration actually depends on is healthy.
+// Ready is the readiness shared by the standalone /readyz and embedded
+// Runtime.Ready. Only Postgres and River are required. Redis, Vault and PSP
+// posture are reported from cached background state as optional (degraded)
+// entries; Ready never contacts them.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	if r == nil || r.riverClosed.Load() {
 		dep := ReadinessDependency{Name: "runtime", Err: fmt.Errorf("not initialized")}
@@ -39,8 +29,8 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	}
 
 	var deps []ReadinessDependency
-	probe := func(name string, err error) {
-		deps = append(deps, ReadinessDependency{Name: name, Available: err == nil, Err: err})
+	add := func(name string, optional bool, err error) {
+		deps = append(deps, ReadinessDependency{Name: name, Available: err == nil, Optional: optional, Err: err})
 	}
 
 	var pgErr error
@@ -49,16 +39,13 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	} else {
 		pgErr = r.DB.Pool().Ping(ctx)
 	}
-	probe("postgres", pgErr)
+	add("postgres", false, pgErr)
 
-	// Redis (garnet) is optional everywhere else in OpenRails — only probe it,
-	// and only fail readiness on it, when the runtime actually holds a client.
-	if r.RedisClient != nil {
-		probe("garnet", r.RedisClient.Ping(ctx).Err())
+	var merchantsErr error
+	if r.Merchants == nil {
+		merchantsErr = fmt.Errorf("merchants service not armed (#699)")
 	}
-
-	probe("merchant_secrets", r.merchantSecretsReady(ctx))
-	probe("psp_posture", r.providerPostureReady(ctx))
+	add("merchants", false, merchantsErr)
 
 	var riverErr error
 	if r.hostRiver && !r.hostRiverBound.Load() {
@@ -66,34 +53,52 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	} else if r.RiverProducer == nil {
 		riverErr = fmt.Errorf("river producer not initialized")
 	}
-	probe("river", riverErr)
+	add("river", false, riverErr)
 	if !r.hostRiver && !r.externalRiverClient {
 		var consumerErr error
 		if !r.workerConsumerRunning.Load() {
 			consumerErr = fmt.Errorf("managed River worker consumer is not running")
 		}
-		probe("river_consumer", consumerErr)
+		add("river_consumer", false, consumerErr)
 	}
 
+	if r.RedisClient != nil {
+		if observed, err := r.redisState.observed(); observed {
+			add("redis", true, err)
+		}
+	}
+	if r.MerchantSecretBackend != nil && r.MerchantSecretBackend.VaultAuth != nil {
+		add("vault", true, r.MerchantSecretBackend.State())
+	}
+	add("psp_posture", true, r.postureState())
+
 	for _, d := range deps {
-		if !d.Available {
+		if !d.Available && !d.Optional {
 			return deps, fmt.Errorf("readiness: %s: %w", d.Name, d.Err)
 		}
 	}
 	return deps, nil
 }
 
-// merchantSecretsReady checks the #699/#723/#748 arming contract: the
-// merchants service (or, in MODE 1, the manifest plane) must be armed, and —
-// when arming built a live backend (Vault) — that backend must still answer.
-func (r *Runtime) merchantSecretsReady(ctx context.Context) error {
-	if r.Merchants == nil {
-		return fmt.Errorf("merchants service not armed (secret-store build failed at boot, #699/#748)")
+// VaultProbe is the live Vault check for a host dependency supervisor; nil
+// when this runtime owns no Vault login.
+func (r *Runtime) VaultProbe(ctx context.Context) error {
+	if r == nil || r.MerchantSecretBackend == nil {
+		return nil
 	}
-	if r.MerchantSecretPing != nil {
-		if err := r.MerchantSecretPing(ctx); err != nil {
-			return fmt.Errorf("backend unreachable: %w", err)
-		}
+	return r.MerchantSecretBackend.Probe(ctx)
+}
+
+// UsesVault reports whether this runtime supervises its own Vault login.
+func (r *Runtime) UsesVault() bool {
+	return r != nil && r.MerchantSecretBackend != nil && r.MerchantSecretBackend.VaultAuth != nil
+}
+
+// PostureState is the cached PSP posture: nil when every loaded PSP is
+// verified and armed. It never contacts a provider.
+func (r *Runtime) PostureState() error {
+	if r == nil {
+		return nil
 	}
-	return nil
+	return r.postureState()
 }

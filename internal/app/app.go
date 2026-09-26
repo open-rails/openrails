@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -188,7 +189,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		switchable := cache.NewSwitchableCache(memoryCache)
 		appCache = switchable
 		if runtime.RedisClient != nil {
-			stop = monitorRedis(runtime.RedisClient, switchable, memoryCache)
+			stop = monitorRedis(runtime.RedisClient, switchable, memoryCache, runtime.redisState.record)
 		} else {
 			log.Warn("redis not configured; cache operating in-memory only")
 		}
@@ -247,50 +248,44 @@ func (a *App) Close(ctx context.Context) error {
 	return fmt.Errorf("shutdown errors: %v", errs)
 }
 
-func monitorRedis(client *redis.Client, switchable *cache.SwitchableCache, fallback cache.Cache) context.CancelFunc {
+// monitorRedis starts on the memory cache and switches to Redis once a probe
+// answers, back to memory when one fails: every 10s while up, capped
+// full-jitter backoff while down. Construction never waits on Redis.
+func monitorRedis(client *redis.Client, switchable *cache.SwitchableCache, fallback cache.Cache, record func(error)) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	redisCache := cache.NewRedisCache(client)
-
-	// Initial probe
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	usingRedis := false
-	if _, err := client.Ping(probeCtx).Result(); err == nil {
-		switchable.SetBackend(redisCache)
-		log.Info("redis available: using redis-backed cache")
-		usingRedis = true
-	} else {
-		log.WithError(err).Warn("redis unavailable at startup; using in-memory cache")
-	}
-	probeCancel()
-
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
+		usingRedis := false
+		for attempt := 0; ; {
+			pingCtx, pingCancel := context.WithTimeout(ctx, 2*time.Second)
+			err := client.Ping(pingCtx).Err()
+			pingCancel()
+			if ctx.Err() != nil {
 				return
-			case <-ticker.C:
-				pingCtx, pingCancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_, err := client.Ping(pingCtx).Result()
-				pingCancel()
-				if err == nil {
-					if !usingRedis {
-						switchable.SetBackend(redisCache)
-						usingRedis = true
-						log.Info("redis became available; switched cache backend")
-					}
-					continue
-				}
-				if usingRedis {
-					switchable.SetBackend(fallback)
-					usingRedis = false
-					log.WithError(err).Warn("redis lost; reverting cache to memory")
-				}
+			}
+			record(err)
+			wait := 10 * time.Second
+			switch {
+			case err == nil && !usingRedis:
+				switchable.SetBackend(redisCache)
+				usingRedis = true
+				log.Info("redis available; cache uses redis")
+			case err != nil && usingRedis:
+				switchable.SetBackend(fallback)
+				usingRedis = false
+				log.WithError(err).Warn("redis lost; cache reverted to memory")
+			}
+			if err != nil {
+				wait = retry.Backoff(attempt, retry.Base, retry.Max)
+				attempt++
+			} else {
+				attempt = 0
+			}
+			if !retry.Sleep(ctx, wait) {
+				return
 			}
 		}
 	}()
-
 	return cancel
 }
 

@@ -9,7 +9,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 | Service | Required | What it does | Losing it |
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns the `openrails` schema. | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
-| **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). If Redis is configured but unreachable, boot continues but readiness stays failed until it recovers. Deliberately omitting Redis keeps readiness green and uses the per-process fallback. Redis holds only transient counters — nothing durable. |
+| **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). If Redis is configured but unreachable, boot and readiness are unaffected; the cache switches to Redis once it answers. Redis holds only transient counters — nothing durable. |
 | **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
@@ -93,19 +93,24 @@ OpenRails' workers converge state around that:
 | Worker health check | 5 min | seeds `openrails.worker_state`, raises repair alerts when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
-(readiness; `?verbose=1` adds per-dependency detail — DB, configured Redis,
-merchant-secret backend, River producer, a locally managed River consumer, and
-auth). K8s aliases `/healthz` / `/readyz`. A standalone
+(readiness; `?verbose=1` adds per-dependency detail). Readiness requires only
+Postgres, the merchants service, the River producer, a locally managed River
+consumer and auth; Redis, Vault and PSP posture are reported as `degraded`
+from cached background state and never fail it. K8s aliases `/healthz` / `/readyz`. A standalone
 `run-server --no-workers` process remains live but not ready because it has no
 local job consumer. It still binds its request-side River producers before HTTP
 starts; a separate `run-worker` process contributes both billing and AuthKit
 lifecycle workers using the same database, issuer and manifest configuration.
 Embedded hosts wire the dependency checks into their own
-handler via `rt.Ready(ctx)`; a host-owned shared River client is checked
+handler via `rt.Ready(ctx)` and register `rt.Probes()` as optional
+dependencies with their supervisor; a host-owned shared River client is checked
 separately with `CheckJobProgress` because its process state is outside
 OpenRails.
 
-OpenRails currently exposes no Prometheus or runtime telemetry endpoint.
+The standalone server serves `GET /metrics` with one gauge per dependency,
+`openrails_dependency_up{dependency,class}` (class `required` or `optional`);
+alert on optional ones at 0 as degraded. Beyond that there is no runtime
+telemetry endpoint.
 `/v1/merchant/metrics`, `/query`, and `/schema` are authenticated merchant
 business analytics, not process/runtime metrics; adding runtime observability
 remains parked in tracker issue #701.

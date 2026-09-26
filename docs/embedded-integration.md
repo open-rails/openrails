@@ -165,7 +165,18 @@ defer rt.Close(ctx)
 
 **Runtime surface**: `rt.Client()` provides the shared application client;
 `rt.HTTPRoutes()`, `rt.RiverJobs()`, readiness/progress checks,
-`rt.RunWorkers(ctx)` and `rt.Close(ctx)` own process infrastructure. Merchant
+`rt.RunWorkers(ctx)` and `rt.Close(ctx)` own process infrastructure.
+
+Only Postgres can fail `embed.New` or `rt.Ready`. Vault login, PSP posture
+checks and Redis reconnect in the background (capped full-jitter backoff,
+forever); until then only their feature answers 503. Register their probes
+with the host's `github.com/open-rails/helpers/deps` supervisor:
+
+```go
+for _, p := range rt.Probes() { // openrails_vault, openrails_psp_posture
+	sup.Add(p.Name, deps.Optional, p.Check, nil)
+}
+``` Merchant
 and PSP declarations belong in `Options.Merchant`. One-off manifest and restore
 tooling belongs to `embed/operator.New(rt)`; the host transaction extension is
 constructed with `embed.NewHostTransactions(rt)`. Storage remains internal.

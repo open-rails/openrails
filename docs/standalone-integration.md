@@ -40,9 +40,8 @@ there is no separate private/service listener.
   app's database. Apply migrations with `openrails migrate up` before each new
   version boots (the server validates and refuses to start on missing migrations).
 - **A Redis-compatible service** (we recommend Garnet) — optional, backs
-  rate limiting. If omitted, limits are in-memory per-process and readiness
-  remains green; if configured but unreachable, boot falls back to memory but
-  readiness fails until Redis recovers.
+  rate limiting. If omitted or unreachable, limits are in-memory per-process
+  and readiness remains green.
 - **HashiCorp Vault** — optional. Two independent uses: KV storage for merchant
   secrets (`secret_backend: vault`) and Transit signing for Solana custody. See
   [vault.md](vault.md).

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/retry"
 )
 
 // ErrDisarmed refuses a provider mutation before any bytes are sent.
@@ -117,28 +119,39 @@ func (s Status) Error() error {
 }
 
 type entry struct {
-	run    sync.Mutex
-	status Status
-	done   bool
+	mu       sync.Mutex
+	status   Status
+	done     bool
+	failures int
+	retryAt  time.Time
+	// flight is closed when the running check has recorded its verdict.
+	flight chan struct{}
 }
 
-// Registry is a concurrency-safe verdict cache. Unknown verdicts are retried
-// no sooner than RetryAfter; live and unsupported verdicts stay disarmed until
-// an explicit Verify (credential reload) replaces them.
+// DefaultTimeout bounds one posture check, whatever the provider client's own
+// timeout: a checkout waiting on it must not hang.
+const DefaultTimeout = 5 * time.Second
+
+// Registry is a concurrency-safe verdict cache. One check runs per key at a
+// time, bounded by Timeout; every caller waits for it only as long as its own
+// context allows. An Unknown verdict (the provider did not answer) is retried
+// after Backoff(consecutive unknowns); live and unsupported verdicts stay
+// disarmed until an explicit Verify (credential reload) replaces them.
 type Registry struct {
-	RetryAfter time.Duration
-	Now        func() time.Time
+	Timeout time.Duration
+	Backoff func(attempt int) time.Duration
+	Now     func() time.Time
 
 	mu      sync.Mutex
 	entries map[Key]*entry
 }
 
-// NewRegistry returns an empty registry.
-func NewRegistry(retryAfter time.Duration) *Registry {
-	return &Registry{RetryAfter: retryAfter, entries: map[Key]*entry{}}
+// NewRegistry returns an empty registry retrying unknown verdicts after backoff.
+func NewRegistry(backoff func(attempt int) time.Duration) *Registry {
+	return &Registry{Timeout: DefaultTimeout, Backoff: backoff, entries: map[Key]*entry{}}
 }
 
-var process = NewRegistry(30 * time.Second)
+var process = NewRegistry(func(attempt int) time.Duration { return retry.Backoff(attempt, time.Second, retry.Max) })
 
 // Process is the registry shared by every provider client in this process.
 // Verdicts are facts about external credentials, not about one runtime.
@@ -165,38 +178,59 @@ func (r *Registry) entry(k Key) *entry {
 	return e
 }
 
-// Verify runs check now and records the verdict, replacing any prior one.
+// Verify checks k now (joining a check already running) and records the
+// verdict, replacing any prior one.
 func (r *Registry) Verify(ctx context.Context, k Key, check Check) Status {
-	e := r.entry(k)
-	e.run.Lock()
-	defer e.run.Unlock()
-	return r.record(ctx, e, k, check)
+	return r.resolve(ctx, k, check, true)
 }
 
 // Require returns nil only for an armed key. An unseen key is verified once;
-// an Unknown verdict is re-verified after RetryAfter.
+// an Unknown verdict is re-verified once its backoff has elapsed.
 func (r *Registry) Require(ctx context.Context, k Key, check Check) error {
-	e := r.entry(k)
-	e.run.Lock()
-	defer e.run.Unlock()
-	if e.done && (e.status.Verdict != Unknown || r.now().Sub(e.status.CheckedAt) < r.RetryAfter) {
-		return e.status.Error()
-	}
-	return r.record(ctx, e, k, check).Error()
+	return r.resolve(ctx, k, check, false).Error()
 }
 
 // Refresh re-verifies k only when its Unknown verdict is due for retry.
 func (r *Registry) Refresh(ctx context.Context, k Key, check Check) Status {
-	e := r.entry(k)
-	e.run.Lock()
-	defer e.run.Unlock()
-	if e.done && (e.status.Verdict != Unknown || r.now().Sub(e.status.CheckedAt) < r.RetryAfter) {
-		return e.status
-	}
-	return r.record(ctx, e, k, check)
+	return r.resolve(ctx, k, check, false)
 }
 
-func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check) Status {
+func (r *Registry) settled(e *entry) bool {
+	return e.done && (e.status.Verdict != Unknown || r.now().Before(e.retryAt))
+}
+
+func (r *Registry) resolve(ctx context.Context, k Key, check Check, force bool) Status {
+	e := r.entry(k)
+	e.mu.Lock()
+	if !force && r.settled(e) {
+		s := e.status
+		e.mu.Unlock()
+		return s
+	}
+	flight := e.flight
+	if flight == nil {
+		flight = make(chan struct{})
+		e.flight = flight
+		go r.record(context.WithoutCancel(ctx), e, k, check, flight)
+	}
+	e.mu.Unlock()
+	select {
+	case <-flight:
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.status
+	case <-ctx.Done():
+		return Status{Key: k, Verdict: Unknown, Err: ctx.Err(), CheckedAt: r.now()}
+	}
+}
+
+func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check, flight chan struct{}) {
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	verdict, err := Unknown, error(nil)
 	if check == nil {
 		err = errors.New("no posture check")
@@ -206,9 +240,21 @@ func (r *Registry) record(ctx context.Context, e *entry, k Key, check Check) Sta
 	if verdict == k.expected() && err != nil {
 		verdict = Unknown
 	}
-	e.status = Status{Key: k, Verdict: verdict, Err: err, CheckedAt: r.now()}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := r.now()
+	e.status = Status{Key: k, Verdict: verdict, Err: err, CheckedAt: now}
 	e.done = true
-	return e.status
+	if verdict == Unknown {
+		if r.Backoff != nil {
+			e.retryAt = now.Add(r.Backoff(e.failures))
+		}
+		e.failures++
+	} else {
+		e.failures, e.retryAt = 0, time.Time{}
+	}
+	e.flight = nil
+	close(flight)
 }
 
 // Lookup returns the recorded status for k.
@@ -219,8 +265,8 @@ func (r *Registry) Lookup(k Key) (Status, bool) {
 	if e == nil {
 		return Status{}, false
 	}
-	e.run.Lock()
-	defer e.run.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.status, e.done
 }
 
@@ -266,20 +312,30 @@ func (t *Tracked) PSPDisarmed(r *Registry, pspID uuid.UUID) bool {
 	return done && s.Verdict != Unknown && !s.Armed()
 }
 
-// Disarmed refreshes due Unknown verdicts and returns every disarmed key.
-func (t *Tracked) Disarmed(ctx context.Context, r *Registry) []Status {
+// PSPStatus returns pspID's recorded status, if it has one.
+func (t *Tracked) PSPStatus(r *Registry, pspID uuid.UUID) (Status, bool) {
+	t.mu.Lock()
+	k, ok := t.psps[pspID]
+	t.mu.Unlock()
+	if !ok {
+		return Status{}, false
+	}
+	return r.Lookup(k)
+}
+
+// Unarmed returns every tracked key that is not armed, from cached verdicts
+// only: it never contacts a provider.
+func (t *Tracked) Unarmed(r *Registry) []Status {
 	t.mu.Lock()
 	keys := make([]Key, 0, len(t.checks))
-	checks := make(map[Key]Check, len(t.checks))
-	for k, c := range t.checks {
+	for k := range t.checks {
 		keys = append(keys, k)
-		checks[k] = c
 	}
 	t.mu.Unlock()
 	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 	var out []Status
 	for _, k := range keys {
-		if s := r.Refresh(ctx, k, checks[k]); !s.Armed() {
+		if s, done := r.Lookup(k); done && !s.Armed() {
 			out = append(out, s)
 		}
 	}

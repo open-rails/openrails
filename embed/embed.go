@@ -132,7 +132,10 @@ func init() {
 }
 
 // New builds the engine. ctx bounds the wait for the database; nothing else
-// does.
+// does. Only Postgres can fail construction: Vault login, PSP posture checks
+// and Redis run in the background and fail only the features that need them
+// (503) until they answer. Register Probes with the host's dependency
+// supervisor to see them.
 func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -208,7 +211,8 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
-	if err := configureMerchant(ctx, application, opts.Merchant); err != nil {
+	signerPending, err := configureMerchant(ctx, application, opts.Merchant)
+	if err != nil {
 		_ = r.Close(ctx)
 		return nil, err
 	}
@@ -218,7 +222,6 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 			declared = append(declared, m.ID)
 		}
 	}
-	application.Runtime.VerifyProviderPosture(ctx, declared...)
 	if opts.HTTP != nil {
 		if err := r.configureHTTP(*opts.HTTP); err != nil {
 			_ = r.Close(ctx)
@@ -238,6 +241,14 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 	r.svc = svc
+	declaration := opts.Merchant
+	application.Runtime.ApproveSolanaSigner = func(ctx context.Context, mid merchant.ID, key string) error {
+		return approveSolanaSigner(ctx, application, declaration, mid, key)
+	}
+	if signerPending {
+		confirmSigner(application, opts.Merchant)
+	}
+	application.Runtime.StartProviderPosture(declared...)
 	if opts.RunWorkers {
 		wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		r.workersCancel = cancel

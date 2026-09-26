@@ -154,7 +154,7 @@ func (q *Queries) LockPriceForBindingUpdate(ctx context.Context, arg LockPriceFo
 }
 
 const resolvePriceBindingPSP = `-- name: ResolvePriceBindingPSP :many
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text
   AND (($3::uuid IS NOT NULL AND id = $3::uuid)
        OR ($3::uuid IS NULL AND key = $4::text))
@@ -196,6 +196,7 @@ func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBi
 			&i.UpdatedAt,
 			&i.Archived,
 			&i.CustodianID,
+			&i.PendingSignerPublicKey,
 		); err != nil {
 			return nil, err
 		}

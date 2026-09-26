@@ -55,9 +55,23 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
-	// providerPosture holds the sandbox PSP credentials verified at load;
-	// Ready reports any that are disarmed.
+	// providerPosture holds the PSP credentials verified at load; Ready
+	// reports any that are disarmed or still unknown.
 	providerPosture providerposture.Tracked
+	// background owns goroutines that reconnect optional providers; Close
+	// stops them first.
+	background backgroundTasks
+	// redisState is the cached Redis state the cache monitor last observed.
+	redisState dependencyState
+	// signerIdentity records a Vault Transit key that no longer matches its
+	// stored Solana identity.
+	signerIdentity dependencyState
+	// ApproveSolanaSigner, set by the embedded constructor, accepts the
+	// identity a changed Transit signer now reports (embed/operator).
+	ApproveSolanaSigner func(ctx context.Context, merchantID merchant.ID, key string) error
+	// posturePending counts loaded PSPs whose verdict is not yet known; -1
+	// until StartProviderPosture's first pass completes.
+	posturePending atomic.Int64
 	// NMIPostureV5BaseURL is a test-only seam for the startup sandbox probe.
 	NMIPostureV5BaseURL string
 	// NMIClients is the single PSP-scoped NMI client factory (#1055).
@@ -167,13 +181,6 @@ type Runtime struct {
 	// consumers read it through Merchants like any other store. The DB/Vault
 	// store is never constructed in this mode.
 	ManifestSecrets *merchants.ManifestSecretStore
-	// MerchantSecretPing, when set, live-probes whether the merchant-secret
-	// backend built for Merchants is reachable RIGHT NOW (#748 Ready()) — the
-	// counterpart to Merchants' boot-time arming. Nil when arming hasn't run
-	// (see Ready's armed/unarmed check) or the backend needs no separate
-	// liveness probe (e.g. MODE 1's in-memory manifest plane). Set by
-	// EnsureMerchantsService / the standalone server alongside Merchants.
-	MerchantSecretPing func(ctx context.Context) error
 	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
 	// credential resolver (invoice collection adapters + NMI clients for rebills,
 	// cancels, refunds and admin actions).
@@ -317,6 +324,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 	r.riverCompositionSealed = true
 	r.riverCompositionMu.Unlock()
 
+	r.background.stop()
 	var errs []error
 	if r.MerchantSecretBackend != nil {
 		defer r.MerchantSecretBackend.Close()

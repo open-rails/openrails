@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -1348,7 +1349,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 
 	solanaProc, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+		return fmt.Errorf("%w: %w", ErrCheckoutSessionValidation, err)
 	}
 
 	tokenSymbol := strings.ToUpper(strings.TrimSpace(payment.TokenSymbol))
@@ -1532,6 +1533,9 @@ func getStringSliceField(fields map[string]any, key string) []string {
 // subscription (#261). It stores the canonical plan terms + the current step on
 // the session; the response renders next_action: solana_sign_transactions.
 func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest) error {
+	if err := s.solanaSignerAvailable(ctx); err != nil {
+		return err
+	}
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
 		return fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
 	}
@@ -1621,7 +1625,19 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 // published Solana recurring plan → mode resolved to subscription) — no client
 // mode override. The duplicate-billing guard still runs up front so we never
 // hand out a QR that would double-bill.
+// solanaSignerAvailable refuses (503) while the Solana rail's signer is
+// unavailable or its identity change awaits approval (#1101).
+func (s *CheckoutSessionService) solanaSignerAvailable(ctx context.Context) error {
+	if _, err := solanamodule.RequireSolanaRailConfig(ctx, s.rails); err != nil && errors.Is(err, vault.ErrUnavailable) {
+		return err
+	}
+	return nil
+}
+
 func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx context.Context, session *models.CheckoutSession) error {
+	if err := s.solanaSignerAvailable(ctx); err != nil {
+		return err
+	}
 	price, err := s.priceService.GetByID(ctx, *session.PriceID)
 	if err != nil || price == nil {
 		return fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)

@@ -652,13 +652,14 @@ liveness beat rather than from its start.
 `GET /health/live` (liveness) and `GET /health/ready` (readiness;
 `?verbose=1` adds per-dependency detail), with K8s aliases `/healthz` /
 `/readyz`. There is no `/health`. Embedded hosts wire the same checks into
-their own handler. Readiness requires Postgres, configured Redis, the active
-merchant-secret backend, the River producer and a locally managed River worker
-consumer; `run-server --no-workers` is therefore live but not ready. A
+their own handler. Readiness requires Postgres, the merchants service, the River producer and a
+locally managed River worker consumer; Redis, Vault and PSP posture are
+reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. A
 host-owned embedded River client is outside that local-process check and is
 observed with `CheckJobProgress`.
 
-There is no Prometheus/runtime-metrics endpoint. The authenticated
+`GET /metrics` exports `openrails_dependency_up{dependency,class}` for every
+dependency readiness reports, optional ones included. The authenticated
 `/v1/merchant/metrics` query and schema routes expose merchant business
 analytics, not Go/process telemetry; runtime observability remains parked in
 tracker issue #701.

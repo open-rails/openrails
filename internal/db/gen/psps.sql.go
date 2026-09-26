@@ -12,6 +12,33 @@ import (
 	"github.com/google/uuid"
 )
 
+const approvePSPPendingSigner = `-- name: ApprovePSPPendingSigner :execrows
+UPDATE openrails.psps
+SET pending_signer_public_key = NULL,
+    archived = true,
+    replaced_at = COALESCE(replaced_at, now()),
+    updated_at = now()
+WHERE merchant_id = $1::uuid
+  AND id = $2::uuid
+  AND pending_signer_public_key = $3::text
+`
+
+type ApprovePSPPendingSignerParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PublicKey  string
+}
+
+// #1101: the operator approval is the only writer that clears a pending
+// signer. The stored identity drains; the approved one is provisioned next.
+func (q *Queries) ApprovePSPPendingSigner(ctx context.Context, arg ApprovePSPPendingSignerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, approvePSPPendingSigner, arg.MerchantID, arg.ID, arg.PublicKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActivePSPsForNewWork = `-- name: CountActivePSPsForNewWork :one
 SELECT count(*)::bigint FROM openrails.psps
 WHERE merchant_id = $1::uuid
@@ -89,7 +116,7 @@ func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentity
 }
 
 const getActivePSPForNewWork = `-- name: GetActivePSPForNewWork :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -124,12 +151,13 @@ func (q *Queries) GetActivePSPForNewWork(ctx context.Context, arg GetActivePSPFo
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }
 
 const getPSP = `-- name: GetPSP :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE psps.merchant_id = $2::uuid AND id = $1
 `
 
@@ -156,12 +184,13 @@ func (q *Queries) GetPSP(ctx context.Context, arg GetPSPParams) (OpenrailsPsp, e
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }
 
 const getPSPByIdentity = `-- name: GetPSPByIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -199,12 +228,13 @@ func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityPara
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }
 
 const getPSPByRailIdentity = `-- name: GetPSPByRailIdentity :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE psps.merchant_id = $1::uuid AND rail = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
   AND account_id = $4::text
@@ -241,13 +271,14 @@ func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIden
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }
 
 const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
 
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE id = $1::uuid AND merchant_id = $2::uuid
 FOR SHARE
 `
@@ -279,12 +310,13 @@ func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutove
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }
 
 const getPSPForQualificationUpdate = `-- name: GetPSPForQualificationUpdate :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE id = $1::uuid AND merchant_id = $2::uuid
 FOR NO KEY UPDATE
 `
@@ -312,6 +344,7 @@ func (q *Queries) GetPSPForQualificationUpdate(ctx context.Context, arg GetPSPFo
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }
@@ -369,7 +402,7 @@ func (q *Queries) ListLivePSPsForRail(ctx context.Context, arg ListLivePSPsForRa
 }
 
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = lower($2::text))
 ORDER BY rail, environment, archived, created_at, id
@@ -404,6 +437,7 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, arg ListPSPsForMercha
 			&i.UpdatedAt,
 			&i.Archived,
 			&i.CustodianID,
+			&i.PendingSignerPublicKey,
 		); err != nil {
 			return nil, err
 		}
@@ -522,6 +556,29 @@ func (q *Queries) SetPSPCutoverQualification(ctx context.Context, arg SetPSPCuto
 	return result.RowsAffected(), nil
 }
 
+const setPSPPendingSigner = `-- name: SetPSPPendingSigner :execrows
+UPDATE openrails.psps
+SET pending_signer_public_key = $1::text,
+    updated_at = now()
+WHERE merchant_id = $2::uuid
+  AND id = $3::uuid
+`
+
+type SetPSPPendingSignerParams struct {
+	PublicKey  string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #1101: record the unapproved public key a changed Transit signer reports.
+func (q *Queries) SetPSPPendingSigner(ctx context.Context, arg SetPSPPendingSignerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPSPPendingSigner, arg.PublicKey, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertPSP = `-- name: UpsertPSP :one
 
 INSERT INTO openrails.psps (
@@ -561,7 +618,7 @@ ON CONFLICT (rail, environment, account_id) DO UPDATE SET
     last_verified_at = COALESCE(EXCLUDED.last_verified_at, openrails.psps.last_verified_at),
     updated_at = now()
 WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id
+RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key
 `
 
 type UpsertPSPParams struct {
@@ -607,6 +664,7 @@ func (q *Queries) UpsertPSP(ctx context.Context, arg UpsertPSPParams) (Openrails
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }

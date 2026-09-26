@@ -148,7 +148,7 @@ func (q *Queries) LockCredentialPublicationResult(ctx context.Context, arg LockC
 }
 
 const lockPSPForCredentialPublication = `-- name: LockPSPForCredentialPublication :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4
 FOR UPDATE
 `
@@ -183,6 +183,7 @@ func (q *Queries) LockPSPForCredentialPublication(ctx context.Context, arg LockP
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }

@@ -70,6 +70,7 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	// Kubernetes-style health check endpoints (aliases)
 	s.handle(mux, http.MethodGet+" /healthz", live)
 	s.handle(mux, http.MethodGet+" /readyz", http.HandlerFunc(s.readyHandler))
+	s.handle(mux, http.MethodGet+" /metrics", http.HandlerFunc(s.metricsHandler))
 }
 
 // readyHandler serves /health/ready and /readyz. Dependency checks are the
@@ -121,6 +122,9 @@ func dependencyStatus(deps []app.ReadinessDependency) map[string]any {
 			continue
 		}
 		entry := map[string]any{"available": false}
+		if d.Optional {
+			entry["degraded"] = true
+		}
 		if d.Err != nil {
 			entry["last_error"] = d.Err.Error()
 		}

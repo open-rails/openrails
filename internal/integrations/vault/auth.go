@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/retry"
 )
 
 // Config configures the Vault client + auth for a managed deployment. It is kept
@@ -57,42 +57,42 @@ const defaultK8sJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 // file-delivered.
 const reauthSecretIDEnvVar = "VAULT_SECRET_ID"
 
-// Login authenticates the OpenRails process to Vault (NOT per-merchant — merchant
-// isolation is enforced by the (tenant, name) addressing) and returns a client
-// whose token is kept fresh by a background Supervisor until ctx is cancelled.
-//
-// The returned Supervisor is the #751 "supervisor calling Login again" a stale
-// comment on the old renew() promised but never built: it renews the current
-// token/lease up to Vault's MAX TTL exactly as before, and now ALSO
-// re-authenticates automatically when that is no longer possible (see
-// Supervisor's doc). Callers that only need the client (tests standing up a
-// one-off root/dedicated-container connection, for instance) may discard it;
-// production callers should keep it to feed a readiness probe (AuthState) and
-// to wire KVv2Adapter.WithReauthTrigger for immediate 403-triggered re-auth.
+// ErrNotAuthenticated means this process holds no working Vault token yet (or
+// any longer). Operations refuse without a network call until the background
+// login succeeds.
+var ErrNotAuthenticated = fmt.Errorf("%w: not authenticated", ErrUnavailable)
+
+// ErrSignerUnapproved means a Transit signer's key no longer matches the
+// Solana identity stored for it (a rotated key, or the wrong Vault address,
+// namespace or mount). The Solana rail refuses (503) until an operator
+// approves the new identity.
+var ErrSignerUnapproved = fmt.Errorf("%w: Solana signer identity changed and awaits operator approval", ErrUnavailable)
+
+// Login builds the process Vault client (NOT per-merchant: merchant isolation
+// is the (tenant, name) addressing) without touching the network. The returned
+// Supervisor logs in, renews and re-authenticates in the background with
+// capped full-jitter backoff until ctx ends; AuthState reports
+// ErrNotAuthenticated until the first login succeeds. Only a configuration
+// error (unknown method, token auth without a token) fails here.
 func Login(ctx context.Context, cfg Config) (*vaultapi.Client, *Supervisor, error) {
 	apiCfg := vaultapi.DefaultConfig()
 	if strings.TrimSpace(cfg.Address) != "" {
 		apiCfg.Address = cfg.Address
 	}
+	apiCfg.Timeout = requestTimeout
 	client, err := vaultapi.NewClient(apiCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("vault: new client: %w", err)
 	}
-
 	if cfg.Namespace != "" {
 		client.SetNamespace(cfg.Namespace)
 	}
-
-	// Token auth short-circuits the credential-login flow: the operator
-	// supplied a token directly (dev server, e2e, or a sidecar-managed
-	// token). There is no login material to redo if it ever dies, so its
-	// Supervisor renews-if-renewable and otherwise only detects+alarms (#751
-	// task 3) — see startStaticTokenSupervisor.
 	method := strings.ToLower(strings.TrimSpace(cfg.AuthMethod))
 	if method == "" && strings.TrimSpace(cfg.Token) != "" {
 		method = "token"
 	}
-	if method == "token" {
+	switch method {
+	case "token":
 		// No ambient VAULT_TOKEN fallback (#712): env is read once at the binary
 		// boundary (config vault.token maps from VAULT_TOKEN); absence fails here.
 		token := strings.TrimSpace(cfg.Token)
@@ -100,31 +100,17 @@ func Login(ctx context.Context, cfg Config) (*vaultapi.Client, *Supervisor, erro
 			return nil, nil, fmt.Errorf("vault: token auth selected but no token (set vault.token; env VAULT_TOKEN feeds it via config.Load)")
 		}
 		client.SetToken(token)
-		sup, err := startStaticTokenSupervisor(ctx, client, token)
-		if err != nil {
-			return nil, nil, err
-		}
-		return client, sup, nil
+	case "approle", "kubernetes":
+		cfg.AuthMethod = method
+	default:
+		return nil, nil, fmt.Errorf("vault: unsupported auth method %q", cfg.AuthMethod)
 	}
-
-	secret, err := login(ctx, client, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	if secret == nil || secret.Auth == nil || secret.Auth.ClientToken == "" {
-		return nil, nil, fmt.Errorf("vault: login returned no token")
-	}
-	client.SetToken(secret.Auth.ClientToken)
-
-	sup := &Supervisor{client: client, cfg: cfg, reauthable: true, kick: make(chan struct{}, 1)}
-	// Supervise unconditionally, even when the initial secret is (unusually)
-	// non-renewable: the watcher still waits out its lease and signals done
-	// at expiry, which is exactly the re-auth trigger (#751) — previously a
-	// non-renewable initial secret meant NO watcher at all, and the token was
-	// never refreshed by any means.
-	go sup.superviseLoop(ctx, secret)
+	sup := &Supervisor{client: client, cfg: cfg, reauthable: method != "token", kick: make(chan struct{}, 1), err: ErrNotAuthenticated}
+	go sup.run(ctx)
 	return client, sup, nil
 }
+
+const requestTimeout = 10 * time.Second
 
 func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.Secret, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.AuthMethod)) {
@@ -192,47 +178,25 @@ func resolveApproleSecretID(staticFallback string) (string, error) {
 	return staticFallback, nil
 }
 
-// Supervisor is the "supervisor calling Login again" a stale comment on the
-// old renew() promised but never built (#751). It owns keeping ONE Login'd
-// Vault client authenticated for the life of the ctx Login was called with:
-//
-//   - it runs Vault's own LifetimeWatcher to renew the current token/lease up
-//     to its Vault-enforced MAX TTL — unchanged from before this issue;
-//   - when the watcher ends (MAX TTL reached, the secret was never
-//     renewable, or NotifyPermissionDenied confirms the token already died),
-//     it re-authenticates with the SAME credential method, re-resolving
-//     credential material fresh on every attempt (see resolveApproleSecretID
-//     and the kubernetes JWT re-read in login()), backing off exponentially
-//     with jitter between attempts and logging loudly on every failure;
-//   - on a successful re-auth it swaps the fresh token onto the SAME
-//     *vaultapi.Client every consumer already holds and starts a new
-//     watcher — see reauthWithBackoff's doc for why that swap is safe for
-//     concurrent readers;
-//   - a bare static token (VAULT_TOKEN) has no credential material to redo a
-//     login with, so its Supervisor only renews (when Vault reports the
-//     token renewable) or detects+alarms (when it does not) — see
-//     startStaticTokenSupervisor.
-//
-// AuthState is the #751 task-4 health probe: nil while currently
-// authenticated, the most recent failure otherwise. Exported so a readiness
-// probe (tracked separately in #748) can consume it without depending on any
-// of this package's internals beyond this one method.
+// Supervisor keeps one Login'd client authenticated for the life of the ctx
+// Login was called with (#751): it logs in, renews the token/lease up to
+// Vault's MAX TTL, and re-authenticates with the same method (re-reading
+// credential material each attempt) when renewal ends or a permission-denied
+// read proves the token dead. A bare static token has no login material, so
+// it is only renewed while Vault allows. Every retry uses capped full-jitter
+// backoff, forever. A fresh token is swapped onto the SAME *vaultapi.Client
+// (SetToken is guarded by the client's own lock), so consumers never
+// re-fetch it.
 type Supervisor struct {
-	client *vaultapi.Client
-	cfg    Config
-
-	// reauthable is true only for AppRole/Kubernetes logins, which have
-	// credential material login() can redo. A bare token has none — see
-	// startStaticTokenSupervisor, which leaves this false (the zero value).
+	client     *vaultapi.Client
+	cfg        Config
 	reauthable bool
 
 	mu  sync.Mutex
 	err error
 
-	// kick lets NotifyPermissionDenied end the CURRENT watch early — e.g. a
-	// runtime 403 whose self-lookup confirms the token is already dead —
-	// instead of waiting out its nominal remaining lease. Buffered(1):
-	// coalesces a burst of concurrent notifications into a single wakeup.
+	// kick ends the current watch early (NotifyPermissionDenied); buffered(1)
+	// coalesces bursts.
 	kick chan struct{}
 }
 
@@ -289,28 +253,133 @@ func (s *Supervisor) NotifyPermissionDenied(err error) {
 	log.WithError(err).Debug("vault: permission-denied read, but the token itself still checks out (self-lookup ok) — treating as an in-policy denial, not a re-auth trigger")
 }
 
-// superviseLoop watches secret to the end of its life, then either
-// re-authenticates (credential-backed methods) or settles into the terminal
-// failed state (static tokens have nothing to redo a login with), repeating
-// for as long as ctx lives.
-func (s *Supervisor) superviseLoop(ctx context.Context, secret *vaultapi.Secret) {
-	for {
-		s.watchOnce(ctx, secret)
+func (s *Supervisor) run(ctx context.Context) {
+	failures := 0
+	for ctx.Err() == nil {
+		secret, err := s.authenticate(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			s.setErr(fmt.Errorf("%w: %w", ErrNotAuthenticated, err))
+			entry := log.WithError(err).WithField("attempt", failures+1)
+			if failures == 0 {
+				entry.Error("vault: authentication failed; Vault-backed signing and secrets are unavailable, retrying in the background")
+			} else {
+				entry.Debug("vault: authentication retry failed")
+			}
+			if !retry.Sleep(ctx, retry.Backoff(failures, time.Second, retry.Max)) {
+				return
+			}
+			failures++
+			continue
+		}
+		select {
+		case <-s.kick:
+		default:
+		}
+		s.setErr(nil)
+		log.WithField("attempts", failures+1).Info("vault: authenticated")
+		failures = 0
+		s.hold(ctx, secret)
 		if ctx.Err() != nil {
 			return
 		}
+		if s.AuthState() == nil {
+			s.setErr(fmt.Errorf("%w: token lease ended", ErrNotAuthenticated))
+		}
 		if !s.reauthable {
-			s.setErr(fmt.Errorf("vault: static token auth has no re-authentication path and its lease/renewal has ended — Vault access WILL fail until the operator issues a fresh token (vault.token / VAULT_TOKEN) and restarts the process"))
-			log.Error("vault: static Vault token expired or was revoked with no automatic recovery possible — issue a new token and restart")
-			return
+			log.Error("vault: static Vault token expired or was revoked; Vault access fails until the operator issues a fresh token (vault.token / VAULT_TOKEN)")
 		}
-		newSecret, ok := s.reauthWithBackoff(ctx)
-		if !ok {
-			return
-		}
-		s.setErr(nil)
-		secret = newSecret
 	}
+}
+
+// authenticate obtains a working token: a fresh login for AppRole/Kubernetes,
+// a self-lookup of the supplied token otherwise. A nil secret is a
+// non-expiring token with nothing to renew.
+func (s *Supervisor) authenticate(ctx context.Context) (*vaultapi.Secret, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	if s.reauthable {
+		secret, err := login(ctx, s.client, s.cfg)
+		if err != nil {
+			return nil, err
+		}
+		if secret == nil || secret.Auth == nil || secret.Auth.ClientToken == "" {
+			return nil, fmt.Errorf("vault: login returned no token")
+		}
+		s.client.SetToken(secret.Auth.ClientToken)
+		return secret, nil
+	}
+	lookup, err := s.client.Auth().Token().LookupSelfWithContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("vault: token auth: look up token self: %w", err)
+	}
+	renewable, err := lookup.TokenIsRenewable()
+	if err != nil {
+		return nil, fmt.Errorf("vault: token auth: parse renewable: %w", err)
+	}
+	ttl, err := lookup.TokenTTL()
+	if err != nil {
+		return nil, fmt.Errorf("vault: token auth: parse ttl: %w", err)
+	}
+	token := s.client.Token()
+	switch {
+	case renewable:
+		return &vaultapi.Secret{Auth: &vaultapi.SecretAuth{ClientToken: token, Renewable: true, LeaseDuration: int(ttl.Seconds())}}, nil
+	case ttl > 0:
+		log.Warnf("vault: token auth uses a NON-RENEWABLE token expiring at %s (in %s); rotate vault.token/VAULT_TOKEN before then", time.Now().Add(ttl).Format(time.RFC3339), ttl.Round(time.Second))
+		return &vaultapi.Secret{Auth: &vaultapi.SecretAuth{ClientToken: token, LeaseDuration: int(ttl.Seconds())}}, nil
+	default:
+		return nil, nil
+	}
+}
+
+// hold keeps secret alive until its lease ends, a kick proves it dead, or ctx
+// ends. A nil secret never expires on its own.
+func (s *Supervisor) hold(ctx context.Context, secret *vaultapi.Secret) {
+	if secret == nil {
+		select {
+		case <-ctx.Done():
+		case <-s.kick:
+		}
+		return
+	}
+	s.watchOnce(ctx, secret)
+}
+
+// Wait blocks until authenticated, up to timeout: for one-off tools that
+// need Vault before doing anything, never for a serving process.
+func (s *Supervisor) Wait(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		err := s.AuthState()
+		if err == nil {
+			return nil
+		}
+		if !retry.Sleep(ctx, 25*time.Millisecond) {
+			return err
+		}
+	}
+}
+
+// Probe is the live check a host dependency supervisor runs: nil only while
+// authenticated and Vault answers a token self-lookup.
+func (s *Supervisor) Probe(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if err := s.AuthState(); err != nil {
+		return err
+	}
+	if _, err := s.client.Auth().Token().LookupSelfWithContext(ctx); err != nil {
+		if IsPermissionDenied(err) {
+			s.NotifyPermissionDenied(err)
+		}
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return nil
 }
 
 // watchOnce runs a LifetimeWatcher for secret to completion: naturally (the
@@ -342,101 +411,6 @@ func (s *Supervisor) watchOnce(ctx context.Context, secret *vaultapi.Secret) {
 			// renewed; still healthy.
 		}
 	}
-}
-
-// reauthWithBackoff re-runs login with exponential backoff + jitter until it
-// succeeds or ctx is cancelled, logging loudly (repeated ERROR, not once) on
-// every failed attempt — the operator-facing signal #751 exists to create,
-// replacing 15-minutes-later cache-driven surprise with an immediate one.
-//
-// On success it swaps the fresh token onto the SAME *vaultapi.Client every
-// consumer already holds via client.SetToken. This is safe for concurrent
-// readers: vaultapi.Client guards SetToken/Token with its own internal
-// modifyLock (sync.RWMutex; hashicorp/vault/api client.go), so a swap can
-// never race a concurrent Token() read into a torn value. A request already
-// in flight read whatever token was current when IT built its request; any
-// request issued after the swap picks up the fresh token. No consumer (the KV
-// adapter, the Transit adapter, the capability prober) needs to be told the
-// token changed or hold a lock of its own.
-func (s *Supervisor) reauthWithBackoff(ctx context.Context) (*vaultapi.Secret, bool) {
-	const (
-		initialBackoff = 2 * time.Second
-		maxBackoff     = 2 * time.Minute
-	)
-	backoff := initialBackoff
-	for attempt := 1; ; attempt++ {
-		secret, err := login(ctx, s.client, s.cfg)
-		if err == nil && secret != nil && secret.Auth != nil && secret.Auth.ClientToken != "" {
-			s.client.SetToken(secret.Auth.ClientToken)
-			log.WithField("attempts", attempt).Info("vault: re-authentication succeeded")
-			return secret, true
-		}
-		if err == nil {
-			err = fmt.Errorf("vault: re-login returned no token")
-		}
-		s.setErr(fmt.Errorf("vault: re-authentication attempt %d failed: %w", attempt, err))
-		log.WithError(err).WithField("attempt", attempt).
-			Error("vault: RE-AUTHENTICATION FAILED — merchant secret / signing operations are degraded until this clears; retrying with backoff")
-
-		wait := backoff/2 + time.Duration(rand.Int64N(int64(backoff/2)+1)) // #nosec G404 -- retry backoff jitter timing, not security-sensitive
-		select {
-		case <-ctx.Done():
-			return nil, false
-		case <-time.After(wait):
-		}
-		backoff *= 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
-	}
-}
-
-// startStaticTokenSupervisor builds the Supervisor for token-mode auth (#751
-// task 3). A bare token has no login material to redo, so its Supervisor
-// never re-authenticates — it only renews (if Vault reports the token
-// renewable) or detects and loudly alarms (if not):
-//
-//   - renewable: the SAME watch loop as approle/kubernetes keeps it alive
-//     indefinitely on Vault's own renewal machinery. If renewal eventually
-//     exhausts (Vault enforces a max TTL on periodic tokens too), there is
-//     still nothing to re-authenticate WITH, so the terminal state is the
-//     loud failure below.
-//   - non-renewable with a real TTL: a prominent boot-time warning names the
-//     exact expiry deadline — no silent decay. A background watch flips
-//     AuthState() to a loud, permanent error right as the token's lease
-//     ends, so a runtime 403 is never the first signal.
-//   - non-renewable with TTL == 0 (Vault's shape for non-expiring root/dev
-//     tokens): nothing to watch — these keep working silently, as before.
-func startStaticTokenSupervisor(ctx context.Context, client *vaultapi.Client, token string) (*Supervisor, error) {
-	sup := &Supervisor{client: client, kick: make(chan struct{}, 1)}
-
-	lookup, err := client.Auth().Token().LookupSelfWithContext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("vault: token auth: look up token self: %w", err)
-	}
-	renewable, err := lookup.TokenIsRenewable()
-	if err != nil {
-		return nil, fmt.Errorf("vault: token auth: parse renewable: %w", err)
-	}
-	ttl, err := lookup.TokenTTL()
-	if err != nil {
-		return nil, fmt.Errorf("vault: token auth: parse ttl: %w", err)
-	}
-
-	switch {
-	case renewable:
-		secret := &vaultapi.Secret{Auth: &vaultapi.SecretAuth{ClientToken: token, Renewable: true, LeaseDuration: int(ttl.Seconds())}}
-		go sup.superviseLoop(ctx, secret)
-	case ttl > 0:
-		deadline := time.Now().Add(ttl)
-		log.Warnf("vault: token auth uses a NON-RENEWABLE token expiring at %s (in %s) — Vault access WILL stop then with NO automatic recovery; rotate vault.token/VAULT_TOKEN and restart the process before that deadline", deadline.Format(time.RFC3339), ttl.Round(time.Second))
-		secret := &vaultapi.Secret{Auth: &vaultapi.SecretAuth{ClientToken: token, Renewable: false, LeaseDuration: int(ttl.Seconds())}}
-		go sup.superviseLoop(ctx, secret)
-	default:
-		// Non-expiring root/dev token: nothing to watch; keeps working
-		// silently forever, matching the documented contract.
-	}
-	return sup, nil
 }
 
 // IsPermissionDenied reports whether err is a Vault permission-denied

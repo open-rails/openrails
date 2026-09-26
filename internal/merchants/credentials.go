@@ -201,6 +201,7 @@ type pspSecretScope struct {
 	custodianID        *uuid.UUID
 	// webhookOverlapUntil bounds webhook_signing_secret_previous (SEC-29).
 	webhookOverlapUntil time.Time
+	signerChange        string
 }
 
 // applyEvidence unpacks the PSP row's evidence document: the manifest-supplied
@@ -272,6 +273,7 @@ func (s pspSecretScope) exported() PSPScope {
 		CredentialRefs:     s.credentialRefs,
 		RetiredCredentials: s.retiredCredentials,
 		CustodianID:        s.custodianID,
+		SignerChange:       s.signerChange,
 	}
 }
 
@@ -384,6 +386,9 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 	if row.Key != nil {
 		scope.key = strings.TrimSpace(*row.Key)
 	}
+	if row.PendingSignerPublicKey != nil {
+		scope.signerChange = *row.PendingSignerPublicKey
+	}
 	return scope, true, nil
 }
 
@@ -432,7 +437,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	var evidence []byte
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND lower(key) = lower($2)
@@ -441,7 +446,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 				 ORDER BY created_at DESC, id DESC
 				 LIMIT 1
 			`, id.String(), strings.TrimSpace(key), environment).
-			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
+			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil
@@ -468,7 +473,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 	var out []PSPScope
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		rows, err := s.database.Qx(ctx).Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
@@ -484,7 +489,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 		for rows.Next() {
 			var scope pspSecretScope
 			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID); err != nil {
+			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange); err != nil {
 				return err
 			}
 			scope.applyEvidence(evidence)
@@ -512,7 +517,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 	var out []PSPScope
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		rows, err := s.database.Qx(ctx).Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND environment = $2
@@ -527,7 +532,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 		for rows.Next() {
 			var scope pspSecretScope
 			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID); err != nil {
+			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange); err != nil {
 				return err
 			}
 			scope.applyEvidence(evidence)
@@ -556,13 +561,13 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	var evidence []byte
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
 				   AND account_id = $3 AND environment = $4
 				 LIMIT 1
-			`, id.String(), rail, strings.TrimSpace(accountID), s.providerEnvironment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
+			`, id.String(), rail, strings.TrimSpace(accountID), s.providerEnvironment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pspSecretScope{}, false, nil
@@ -630,14 +635,14 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 	var evidence []byte
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, evidence, COALESCE(key,''), custodian_id
+				SELECT id, rail, environment, account_id, evidence, COALESCE(key,''), custodian_id, COALESCE(pending_signer_public_key, '')
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
 				   AND environment = $3
 				 ORDER BY created_at DESC, id DESC
 				 LIMIT 1
-			`, id.String(), rail, environment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &evidence, &scope.key, &scope.custodianID)
+			`, id.String(), rail, environment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &evidence, &scope.key, &scope.custodianID, &scope.signerChange)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil
@@ -1065,6 +1070,9 @@ func PSPScopeFromRow(row gen.OpenrailsPsp) PSPScope {
 		scope.key = *row.Key
 	}
 	scope.applyEvidence(row.Evidence)
+	if row.PendingSignerPublicKey != nil {
+		scope.signerChange = *row.PendingSignerPublicKey
+	}
 	return scope.exported()
 }
 
@@ -1076,8 +1084,8 @@ func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.U
 	var scope pspSecretScope
 	var evidence []byte
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `SELECT id,rail,environment,account_id,COALESCE(key,''),evidence,custodian_id FROM openrails.psps WHERE merchant_id=$1 AND id=$2`, id.UUID(), pspID).
-			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
+		return s.database.Qx(ctx).QueryRow(ctx, `SELECT id,rail,environment,account_id,COALESCE(key,''),evidence,custodian_id,COALESCE(pending_signer_public_key,'') FROM openrails.psps WHERE merchant_id=$1 AND id=$2`, id.UUID(), pspID).
+			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil

@@ -7,6 +7,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
@@ -17,6 +18,9 @@ import (
 // instead. Any other error keeps its domain message, with credential-bearing
 // query parameters scrubbed as a second line of defence.
 func solanaClientError(err error, status int) (int, string) {
+	if errors.Is(err, vault.ErrUnavailable) {
+		return http.StatusServiceUnavailable, "Solana signer is temporarily unavailable; please retry"
+	}
 	if errors.Is(err, solanarpc.ErrAllRPCEndpointsFailed) {
 		log.WithField("detail", redact.Secrets(err.Error())).
 			Warn("solana: RPC chain unavailable; returning a generic error to the client (#SEC-17)")

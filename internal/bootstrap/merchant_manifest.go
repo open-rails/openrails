@@ -27,6 +27,7 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -262,14 +263,28 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		return fmt.Errorf("wrap control-plane db: %w", err)
 	}
 
+	directory, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return err
+	}
 	for _, slug := range sortedMerchantKeys(manifest.Merchants) {
 		mt := manifest.Merchants[slug]
+		transit := solanaTransit
+		switch {
+		case transit == nil:
+		case opts.WrapTransit != nil:
+			transit = opts.WrapTransit(slug, transit)
+		default:
+			// One-off tools fail closed on a changed Transit key too.
+			transit = &signeridentity.Transit{TransitClient: transit, DB: database, Directory: directory, Slug: slug,
+				Environment: config.ExpectedProviderEnvironment(cfg.IsTestMode())}
+		}
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantRequest{
 			Config:        cfg,
 			ControlPlane:  cp,
 			Database:      database,
 			SecretStore:   secretStore,
-			SolanaTransit: solanaTransit,
+			SolanaTransit: transit,
 			Slug:          slug,
 			Merchant:      mt,
 			Options:       opts,
@@ -293,8 +308,14 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 // ephemeral memory (CLI runs: DB projections converge, secrets validate but
 // are NOT persisted — the running server holds its own from its boot manifest).
 func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, opts MerchantManifestReconcileOptions) (merchants.MerchantSecretStore, solana.TransitClient, error) {
+	if opts.SecretStore != nil && opts.SolanaTransit != nil {
+		return opts.SecretStore, opts.SolanaTransit, nil
+	}
 	if opts.SecretStore != nil {
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
+		if err == nil {
+			err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
 		}
@@ -303,12 +324,18 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		log.Info("merchant bootstrap: snapshot credentials validate in memory and are not persisted")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
+		if err == nil {
+			err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
 		}
 		return merchants.NewMemorySecretStore(), transitStore.SolanaTransit, nil
 	}
 	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
+	if err == nil {
+		err = secretBackend.Await(ctx, merchantsecrets.AwaitTimeout)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("merchant bootstrap: build secret store: %w", err)
 	}

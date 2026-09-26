@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -327,6 +328,9 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		return
 	}
 	switch {
+	case errors.Is(err, vault.ErrUnavailable):
+		// Before validation: a refused signer is unavailable, not a bad request.
+		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable, "payment signer is temporarily unavailable"))
 	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
 		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "custodian_capture_unavailable", "custodian capture is unavailable"))
 	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):

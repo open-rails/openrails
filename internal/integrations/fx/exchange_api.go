@@ -117,7 +117,9 @@ func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency, 
 		}
 	}
 
-	asOf := time.Now()
+	// No (or an unreadable) publication date leaves AsOf zero: the caches
+	// treat an undated rate as stale rather than as published now.
+	var asOf time.Time
 	if dateStr != "" {
 		if parsed, err := timeutil.ParseDateUTC(dateStr); err == nil {
 			asOf = parsed

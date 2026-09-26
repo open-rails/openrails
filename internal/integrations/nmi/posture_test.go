@@ -161,13 +161,32 @@ func TestSandboxDeploymentUsesQualificationProbeOnce(t *testing.T) {
 	require.EqualValues(t, 3, g.mutations.Load())
 }
 
-func TestLivePostureUnverifiedCredentialIsNotQueriedPerMutation(t *testing.T) {
+// SEC-33 after a restart: posture now verifies in the background, so a live
+// credential this process has not seen yet is checked inline, once, before its
+// first mutation. A test-mode account is refused; a live one proceeds and is
+// not re-queried per mutation.
+func TestLivePostureUnseenCredentialVerifiesInlineBeforeFirstMutation(t *testing.T) {
+	live := func(g *fakeGateway) *NMIClient {
+		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointGateway}, false)
+		require.NoError(t, err)
+		client.QueryURL = g.URL + "/query"
+		client.V5BaseURL = g.URL
+		client.DirectPostURL = g.URL + "/transact"
+		return client
+	}
+	testMode := newFakeGateway(t, "true")
+	err := live(testMode).Void(context.Background(), "txn")
+	require.ErrorIs(t, err, providerposture.ErrDisarmed, "a test-mode account is never approved blind")
+	require.EqualValues(t, 0, testMode.mutations.Load())
+	require.EqualValues(t, 1, testMode.queries.Load())
+
 	g := newFakeGateway(t, "false")
-	client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointGateway}, false)
-	require.NoError(t, err)
-	client.V5BaseURL = g.URL
-	require.NoError(t, client.Void(context.Background(), "txn"))
-	require.EqualValues(t, 0, g.queries.Load(), "live credentials are verified when loaded, not per mutation")
+	client := live(g)
+	for range 3 {
+		require.NoError(t, client.Void(context.Background(), "txn"))
+	}
+	require.EqualValues(t, 1, g.queries.Load(), "verified once, inline")
+	require.EqualValues(t, 3, g.mutations.Load())
 }
 
 func TestLoopbackFixtureMarkerIsExplicitAndLoopbackOnly(t *testing.T) {

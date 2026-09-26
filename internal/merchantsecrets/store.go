@@ -4,6 +4,7 @@ package merchantsecrets
 import (
 	"context"
 	"fmt"
+	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
 	log "github.com/sirupsen/logrus"
@@ -14,6 +15,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/retry"
 )
 
 const (
@@ -44,35 +46,22 @@ func resolveVaultTransitMount(vc *config.VaultConfig) string {
 	return vc.TransitMount
 }
 
-// Store contains the selected merchant secret backend, the optional Vault Transit
-// client for Solana signing, and the probed Vault capabilities (#661). Capabilities
-// gate which operations/routes light up — they are advisory, never authorization.
+// Store contains the selected merchant secret backend, the optional Vault
+// Transit client for Solana signing, and the assumed Vault capabilities (#661).
+// Capabilities gate which routes light up; they never authorize (Vault's
+// runtime 403 is the boundary).
 type Store struct {
 	closeAuth     context.CancelFunc
 	Secrets       merchants.MerchantSecretStore
 	SolanaTransit solanaint.TransitClient
 	Capabilities  vault.Capabilities
-	// Derived route-gating signals (#661). Advisory only — they hide/degrade
-	// routes, never authorize. SolanaCanSign: a Vault connection OR a local Solana
-	// key is supported. SecretWrite: provider-secret writes / config-push are possible.
+	// SolanaCanSign: a Vault connection OR a local Solana key is supported.
+	// SecretWrite: provider-secret writes / config-push are possible.
 	SolanaCanSign bool
 	SecretWrite   bool
-	// VaultAuth is the #751 auth-health probe for the Vault client backing
-	// this store: nil when Vault isn't enabled, non-nil (call .AuthState())
-	// otherwise. Ping folds it in so readiness sees auth death too.
+	// VaultAuth supervises the owned Vault login in the background; nil when
+	// Vault is disabled or the client is borrowed from the host.
 	VaultAuth *vault.Supervisor
-	// vclient is the authenticated Vault client Build logged in with, kept ONLY
-	// when Vault actually serves the merchant-secret KV store (secret_backend=vault).
-	// nil for the DB-backed store and for BuildManifest — Ping is then a no-op,
-	// since those backends have no separate liveness signal beyond the runtime DB
-	// ping / in-memory plane (#748 Ready()).
-	vclient *vaultapi.Client
-	// kvMount is the resolved KV-v2 mount (config.VaultConfig.KVMount, or
-	// DefaultVaultKVMount) Build probed vclient against — Ping re-probes the
-	// same mount, never the package default directly, so a non-default mount
-	// stays correct post-construction.
-	kvMount     string
-	scopePrefix string
 }
 
 // Close stops only authentication supervision owned by this runtime. It never
@@ -83,28 +72,37 @@ func (s *Store) Close() {
 	}
 }
 
-// Ping reports whether the merchant-secret backend is usable RIGHT NOW — the
-// live counterpart to Build's construction-time capability probe (#748).
-// DB-backed stores need no separate check (nil receiver client -> always nil,
-// the runtime DB ping already covers them). Vault-backed stores first check
-// the #751 auth supervisor (a dead/unrecoverable token is a readiness failure
-// even while the server is reachable), then re-run the same
-// sys/capabilities-self probe Build used, on the SAME authenticated client, so
-// a Vault that goes unreachable/sealed/paused AFTER boot is caught by
-// readiness instead of only surfacing at request time.
-func (s *Store) Ping(ctx context.Context) error {
-	if s == nil || s.vclient == nil {
+// State is the cached Vault auth state: nil when no owned Vault is in use or
+// it is authenticated. It never touches the network.
+func (s *Store) State() error {
+	if s == nil {
 		return nil
 	}
-	if s.VaultAuth != nil {
-		if err := s.VaultAuth.AuthState(); err != nil {
-			return fmt.Errorf("vault auth: %w", err)
-		}
+	return s.VaultAuth.AuthState()
+}
+
+// Await waits up to timeout for the background Vault login. One-off tools
+// (bootstrap, pull-provider) use it; a serving process never waits.
+func (s *Store) Await(ctx context.Context, timeout time.Duration) error {
+	if s == nil {
+		return nil
 	}
-	if _, err := vault.SelfCapabilities(ctx, s.vclient, s.kvMount, s.scopePrefix); err != nil {
-		return fmt.Errorf("vault unreachable: %w", err)
+	if err := s.VaultAuth.Wait(ctx, timeout); err != nil {
+		return fmt.Errorf("vault: %w", err)
 	}
 	return nil
+}
+
+// AwaitTimeout bounds how long a one-off tool waits for Vault.
+const AwaitTimeout = 30 * time.Second
+
+// Probe is the live Vault check for a host dependency supervisor; nil when no
+// owned Vault is in use.
+func (s *Store) Probe(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	return s.VaultAuth.Probe(ctx)
 }
 
 // deriveRouteGates computes the advisory route-gating signals. localKeys: the
@@ -212,9 +210,9 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, option
 	}
 	backend := cfg.SecretStoreBackend()
 
-	// Open a Vault connection whenever Vault is configured, then probe what the
-	// token may actually do. The connection may serve KV, Transit, both, or (with a
-	// transit-only policy) only signing.
+	// Open a Vault connection whenever Vault is configured. Login runs in the
+	// background (only Postgres may block construction); capabilities are
+	// assumed from the declared backend and verified once authenticated.
 	var (
 		vclient   *vaultapi.Client
 		transit   solanaint.TransitClient
@@ -228,36 +226,24 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, option
 			vc = &config.VaultConfig{}
 		}
 		kvMount = resolveVaultKVMount(vc)
-		client, sup, err := opts.VaultClient, (*vault.Supervisor)(nil), error(nil)
+		client := opts.VaultClient
 		if client == nil {
 			authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 			ownedCancel = cancel
-			client, sup, err = vault.Login(authCtx, vault.Config{
-				Address:    vc.Address,
-				Namespace:  vc.Namespace,
-				AuthMethod: vc.AuthMethod,
-				Token:      vc.Token,
-				RoleID:     vc.RoleID,
-				SecretID:   vc.SecretID,
-				K8sRole:    vc.K8sRole,
-			})
-		}
-		if err != nil {
-			return nil, fmt.Errorf("vault login: %w", err)
-		}
-		vaultAuth = sup
-		caps, err = vault.SelfCapabilities(ctx, client, kvMount, vc.ScopePrefix)
-		if err != nil {
-			// Only fatal when secrets are declared to live in Vault: the KV store
-			// can't be verified. Otherwise degrade — transit signing doesn't need
-			// the probe (runtime 403 is the boundary).
-			if backend == config.SecretBackendVault {
-				return nil, fmt.Errorf("vault capability probe: %w", err)
+			var err error
+			client, vaultAuth, err = vault.Login(authCtx, vaultConfig(vc))
+			if err != nil {
+				return nil, fmt.Errorf("vault login: %w", err)
 			}
-			log.WithError(err).Warn("vault: capability probe failed; continuing (secret_backend=db, Vault used for transit signing only)")
+			if backend == config.SecretBackendVault {
+				go verifyCapabilities(authCtx, client, vaultAuth, kvMount, vc.ScopePrefix)
+			}
+		}
+		if backend == config.SecretBackendVault {
+			caps = vault.Capabilities{KVRead: true, KVWrite: true}
 		}
 		vclient = client
-		transit = vault.NewTransitAdapter(client, resolveVaultTransitMount(vc))
+		transit = vault.NewTransitAdapter(client, resolveVaultTransitMount(vc)).WithSupervisor(vaultAuth)
 	}
 
 	// Secret store per DECLARED backend — never auto-fallback (the data lives in one
@@ -269,9 +255,6 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, option
 	encryptionEnabled := cfg != nil && cfg.Encryption != nil && cfg.Encryption.MasterKey != ""
 	solanaCanSign, secretWrite := deriveRouteGates(useVault, vclient != nil, encryptionEnabled, caps)
 	if useVault {
-		if !caps.KVWrite {
-			log.Warn("vault: secret_backend=vault with read-only KV capability; merchant-secret writes / config-push are disabled")
-		}
 		prefix := ""
 		if cfg.Vault != nil {
 			prefix = cfg.Vault.ScopePrefix
@@ -295,9 +278,6 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, option
 			SolanaCanSign: solanaCanSign,
 			SecretWrite:   secretWrite && !opts.ReadOnly,
 			VaultAuth:     vaultAuth,
-			vclient:       vclient,
-			kvMount:       kvMount,
-			scopePrefix:   prefix,
 		}, nil
 	}
 
@@ -383,23 +363,28 @@ func BuildManifest(ctx context.Context, cfg *config.Config, snapshot *merchants.
 }
 
 // BuildTransit opens the Vault Transit signing client when Vault is enabled
-// (a zero-value *Store, SolanaTransit nil, otherwise). Standalone of the KV
-// store — MODE 1 uses it for Solana vault_transit signers with no KV backend
-// at all.
-//
-// Threaded like the KV path in Build (#751 follow-up): the Supervisor from
-// vault.Login is kept on the returned Store (VaultAuth) and vclient is kept
-// too, so Store.Ping folds in auth-health + reachability for transit-only
-// connections exactly as it does for the KV path — callers that only need the
-// transit client read Store.SolanaTransit; callers that also want liveness
-// call Store.Ping.
+// (a zero-value *Store, SolanaTransit nil, otherwise). MODE 1 uses it for
+// Solana vault_transit signers with no KV backend. Login runs in the
+// background; Transit answers vault.ErrNotAuthenticated until it succeeds.
 func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 	if cfg == nil || cfg.Vault == nil || !cfg.Vault.Enabled {
 		return &Store{}, nil
 	}
-	vc := cfg.Vault
 	authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	client, sup, err := vault.Login(authCtx, vault.Config{
+	client, sup, err := vault.Login(authCtx, vaultConfig(cfg.Vault))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("vault login: %w", err)
+	}
+	return &Store{
+		closeAuth:     cancel,
+		SolanaTransit: vault.NewTransitAdapter(client, resolveVaultTransitMount(cfg.Vault)).WithSupervisor(sup),
+		VaultAuth:     sup,
+	}, nil
+}
+
+func vaultConfig(vc *config.VaultConfig) vault.Config {
+	return vault.Config{
 		Address:    vc.Address,
 		Namespace:  vc.Namespace,
 		AuthMethod: vc.AuthMethod,
@@ -407,17 +392,27 @@ func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 		RoleID:     vc.RoleID,
 		SecretID:   vc.SecretID,
 		K8sRole:    vc.K8sRole,
-	})
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("vault login: %w", err)
 	}
-	return &Store{
-		closeAuth:     cancel,
-		SolanaTransit: vault.NewTransitAdapter(client, resolveVaultTransitMount(vc)),
-		VaultAuth:     sup,
-		vclient:       client,
-	}, nil
+}
+
+// verifyCapabilities reports, once Vault authenticates, a token that cannot
+// serve the declared KV store. Diagnostics only: reads fail at runtime either way.
+func verifyCapabilities(ctx context.Context, client *vaultapi.Client, sup *vault.Supervisor, kvMount, scopePrefix string) {
+	_ = retry.Forever(ctx, func(ctx context.Context) error {
+		if err := sup.AuthState(); err != nil {
+			return err
+		}
+		caps, err := vault.SelfCapabilities(ctx, client, kvMount, scopePrefix)
+		if err != nil {
+			return err
+		}
+		if !caps.KVRead {
+			log.Errorf("vault: secret_backend=vault but the token cannot read the KV mount %q; merchant secrets are unavailable", kvMount)
+		} else if !caps.KVWrite {
+			log.Warn("vault: secret_backend=vault with read-only KV capability; merchant-secret writes fail")
+		}
+		return nil
+	}, nil)
 }
 
 // enforceEncryptionPosture is the #667 boot gate on the DB-backed (fallback)
