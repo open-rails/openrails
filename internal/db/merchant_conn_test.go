@@ -31,7 +31,7 @@ func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ctx, nestedCtx, "a compatible nested pin reuses the outer one")
 
-	require.Equal(t, pooledDBTX{pool: otherPool}, other.Qx(ctx), "another database must never execute on the first pool's pin")
+	require.Equal(t, pooledDBTX{pool: otherPool, schema: "openrails"}, other.Qx(ctx), "another database must never execute on the first pool's pin")
 	otherCtx, done, err := other.WithMerchantConn(ctx)
 	require.NoError(t, err)
 	defer done()

@@ -190,7 +190,7 @@ func (p *Pool) Schema() string {
 
 // Pool statements reuse the request's pinned connection when it is idle, and
 // otherwise wait a bounded time for a pooled one (#1105).
-func (p *Pool) handle() pooledDBTX { return pooledDBTX{pool: p.raw} }
+func (p *Pool) handle() pooledDBTX { return pooledDBTX{pool: p.raw, schema: p.rw.schema()} }
 
 func (p *Pool) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	return p.handle().Exec(ctx, p.rw.apply(sql), args...)

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Connection discipline (#1105). A request pins one connection (WithMerchantConn)
@@ -44,18 +45,23 @@ func acquire(ctx context.Context, pool *pgxpool.Pool) (*pgxpool.Conn, error) {
 }
 
 // requestConn is the request's pinned connection on pool when it can take a
-// statement now: pinned to this pool, not busy with an open result, and not
-// inside a transaction (whose scope a pool statement must not join).
-func requestConn(ctx context.Context, pool *pgxpool.Pool) *pgx.Conn {
+// statement now: pinned to this pool and schema for the context's merchant,
+// not busy with an open result, and not inside a transaction (whose scope a
+// pool statement must not join). Otherwise the statement takes a fresh
+// connection, whose wait is bounded.
+func requestConn(ctx context.Context, pool *pgxpool.Pool, schema string) (*lazyMerchantPgxConn, *pgx.Conn) {
 	lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
-	if !ok || lc.pool != pool {
-		return nil
+	if !ok || lc.pool != pool || lc.schema != schema {
+		return nil, nil
+	}
+	if mid, ok := merchant.FromContext(ctx); !ok || mid.String() != lc.tenantID {
+		return nil, nil
 	}
 	conn, err := lc.get(ctx)
 	if err != nil || conn.IsClosed() || conn.PgConn().IsBusy() || conn.PgConn().TxStatus() != 'I' {
-		return nil
+		return nil, nil
 	}
-	return conn
+	return lc, conn
 }
 
 // pooledDBTX runs statements on the request's pin when it can, else on a
@@ -63,14 +69,20 @@ func requestConn(ctx context.Context, pool *pgxpool.Pool) *pgx.Conn {
 // directory reads must not carry the request's merchant session state.
 type pooledDBTX struct {
 	pool      *pgxpool.Pool
+	schema    string
 	directory bool
 }
 
-func (p pooledDBTX) pinned(ctx context.Context) *pgx.Conn {
+func (p pooledDBTX) pin(ctx context.Context) (*lazyMerchantPgxConn, *pgx.Conn) {
 	if p.directory {
-		return nil
+		return nil, nil
 	}
-	return requestConn(ctx, p.pool)
+	return requestConn(ctx, p.pool, p.schema)
+}
+
+func (p pooledDBTX) pinned(ctx context.Context) *pgx.Conn {
+	_, conn := p.pin(ctx)
+	return conn
 }
 
 func (p pooledDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -113,8 +125,15 @@ func (p pooledDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.R
 }
 
 func (p pooledDBTX) Begin(ctx context.Context) (pgx.Tx, error) {
-	if conn := p.pinned(ctx); conn != nil {
-		return conn.Begin(ctx)
+	if lc, conn := p.pin(ctx); conn != nil {
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lc.mu.Lock()
+		lc.poolTx = true
+		lc.mu.Unlock()
+		return &pinnedPoolTx{Tx: tx, lc: lc}, nil
 	}
 	conn, err := acquire(ctx, p.pool)
 	if err != nil {
@@ -126,6 +145,29 @@ func (p pooledDBTX) Begin(ctx context.Context) (pgx.Tx, error) {
 		return nil, err
 	}
 	return &releasingTx{Tx: tx, conn: conn}, nil
+}
+
+// pinnedPoolTx is a pool transaction on the request's pin; while it is open,
+// DB statements on the pin are refused rather than joining it.
+type pinnedPoolTx struct {
+	pgx.Tx
+	lc *lazyMerchantPgxConn
+}
+
+func (t *pinnedPoolTx) Commit(ctx context.Context) error {
+	defer t.done()
+	return t.Tx.Commit(ctx)
+}
+
+func (t *pinnedPoolTx) Rollback(ctx context.Context) error {
+	defer t.done()
+	return t.Tx.Rollback(ctx)
+}
+
+func (t *pinnedPoolTx) done() {
+	t.lc.mu.Lock()
+	t.lc.poolTx = false
+	t.lc.mu.Unlock()
 }
 
 // releasingRows returns its connection once the rows are done.

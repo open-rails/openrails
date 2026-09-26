@@ -651,3 +651,65 @@ func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
 	_, err = d.DataPool().Exec(e.t.Context(), `SELECT 1`)
 	require.NoError(t, err)
 }
+
+// #1105 review: a transaction open on the request's connection is never
+// joined silently. A statement through the request's DB inside a pool
+// transaction, and a nested DB transaction, are refused with
+// ErrPinInTransaction; the outer transaction alone decides what commits.
+func TestPinnedTransactionIsNeverJoined(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	d := e.replicas[0].db
+	e.exec(`CREATE TABLE openrails.test_rows (v text NOT NULL)`)
+	rows := func() []string {
+		r, err := e.admin.Query(t.Context(), e.q(`SELECT v FROM openrails.test_rows ORDER BY v`))
+		require.NoError(t, err)
+		out, err := pgx.CollectRows(r, pgx.RowTo[string])
+		require.NoError(t, err)
+		return out
+	}
+	insert := `INSERT INTO openrails.test_rows (v) VALUES ($1)`
+	ctx, release, err := d.WithMerchantConn(e.ctx())
+	require.NoError(t, err)
+	defer release()
+
+	// A statement on the request's DB inside a pool transaction.
+	err = d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, insert, "outer"); err != nil {
+			return err
+		}
+		_, err := d.Qx(ctx).Exec(ctx, insert, "joined")
+		require.ErrorIs(t, err, db.ErrPinInTransaction)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"outer"}, rows(), "the refused statement never ran inside the transaction")
+
+	// A nested DB transaction inside a pool transaction.
+	err = d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, insert, "rolled-back"); err != nil {
+			return err
+		}
+		inner := d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, insert, "inner")
+			return err
+		})
+		require.ErrorIs(t, inner, db.ErrPinInTransaction)
+		return errors.New("roll the outer transaction back")
+	})
+	require.Error(t, err)
+	require.Equal(t, []string{"outer"}, rows(), "no inner COMMIT ended the outer transaction early")
+
+	// A pool statement inside the pool transaction takes its own connection,
+	// never the open transaction.
+	err = d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
+		_, err := d.DataPool().Exec(ctx, insert, "separate")
+		return errors.Join(err, errors.New("roll back"))
+	})
+	require.Error(t, err)
+	require.Equal(t, []string{"outer", "separate"}, rows())
+
+	// A context for another merchant never runs on this merchant's pin.
+	other := merchant.WithID(ctx, merchant.ID(e.newMerchant()))
+	require.NoError(t, d.DataPool().QueryRow(other, `SELECT 1`).Scan(new(int)))
+}
