@@ -107,7 +107,7 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 }
 
 const lockCatalogApplicationPSP = `-- name: LockCatalogApplicationPSP :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
 `
 
 type LockCatalogApplicationPSPParams struct {
@@ -133,6 +133,7 @@ func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalog
 		&i.UpdatedAt,
 		&i.Archived,
 		&i.CustodianID,
+		&i.PendingSignerPublicKey,
 	)
 	return i, err
 }

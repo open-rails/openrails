@@ -320,7 +320,7 @@ func (q *Queries) DeletePaymentMethod(ctx context.Context, arg DeletePaymentMeth
 }
 
 const getCollectionCustodianAccountsForShare = `-- name: GetCollectionCustodianAccountsForShare :one
-SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at
+SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, p.pending_signer_public_key, c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at
 FROM openrails.psps p
 JOIN openrails.custodians c ON c.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
@@ -360,6 +360,7 @@ func (q *Queries) GetCollectionCustodianAccountsForShare(ctx context.Context, ar
 		&i.OpenrailsPsp.UpdatedAt,
 		&i.OpenrailsPsp.Archived,
 		&i.OpenrailsPsp.CustodianID,
+		&i.OpenrailsPsp.PendingSignerPublicKey,
 		&i.OpenrailsCustodian.ID,
 		&i.OpenrailsCustodian.MerchantID,
 		&i.OpenrailsCustodian.Key,

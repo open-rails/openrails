@@ -1116,7 +1116,8 @@ type OpenrailsPsp struct {
 	// Drain-only provider-account lifecycle flag. false means eligible for new work; true remains addressable for existing obligations and inbound provider events.
 	Archived bool
 	// or#880: the custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant's custodian.
-	CustodianID *uuid.UUID
+	CustodianID            *uuid.UUID
+	PendingSignerPublicKey *string
 }
 
 // customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings (or#893 supersedes #704, which dropped psp_id when no writer set it).

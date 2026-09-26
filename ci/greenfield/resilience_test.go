@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/operator"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -300,6 +301,26 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.Equal(t, openrails.CheckoutPSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
 	active, _ := solanaRows(rotated)
 	require.Zero(t, active, "an unapproved identity never receives money")
+
+	// Re-applying the PSP through the generic upsert (a manifest Overwrite)
+	// cannot clear a pending change: only the approval does.
+	database := app.HostGraph(second).Runtime.DB
+	require.NoError(t, database.RunInMerchantScope(t.Context(), mid, "overwrite", func(ctx context.Context) error {
+		rail := "solana"
+		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID(), Rail: &rail})
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{ID: row.ID, MerchantID: row.MerchantID, Rail: row.Rail, Environment: &row.Environment,
+				AccountID: row.AccountID, Key: row.Key, Archived: &row.Archived, Evidence: []byte(`{"source":"merchant_config_manifest","signer":{"mode":"vault_transit","key":"` + transitKey + `"}}`), CustodianID: row.CustodianID})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "a pending change survives an overwrite")
 
 	require.NoError(t, operator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
 	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))
