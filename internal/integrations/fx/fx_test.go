@@ -341,3 +341,20 @@ func TestCachedRatesAgeAtUseTime(t *testing.T) {
 		})
 	}
 }
+
+// An FX file without a publication date is not fresh: it carries no AsOf
+// (never "now"), so every cache refuses it.
+func TestExchangeAPIUndatedRateIsStale(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"eur":{"usd":1.08}}`))
+	}))
+	defer srv.Close()
+	p := &ExchangeAPIProvider{client: srv.Client(), baseURL: srv.URL}
+	q, err := p.QuoteToUSD(context.Background(), "EUR")
+	if err != nil || !q.AsOf.IsZero() {
+		t.Fatalf("undated quote must carry no AsOf: %+v %v", q, err)
+	}
+	if _, err := NewCachedProvider(p, time.Hour).Quote(context.Background(), "EUR", "USD"); err == nil {
+		t.Fatal("an undated rate must not quote")
+	}
+}
