@@ -13,6 +13,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
@@ -23,10 +24,12 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/operator"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -363,6 +366,24 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 		return nil
 	}))
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "a pending change survives an overwrite")
+
+	// A database failure while checking the stored identity fails closed:
+	// nothing is provisioned or approved and the rail stays refused.
+	broken, err := pgxpool.New(t.Context(), f.dsn(t))
+	require.NoError(t, err)
+	broken.Close()
+	brokenDB, err := db.NewWithPGXPool(broken, f.schema)
+	require.NoError(t, err)
+	graph := app.HostGraph(second).Runtime
+	check := &signeridentity.Transit{TransitClient: graph.MerchantSecretBackend.SolanaTransit, DB: brokenDB, Directory: graph.Merchants,
+		Slug: slug, Environment: config.ExpectedProviderEnvironment(true)}
+	_, err = check.PublicKey(t.Context(), transitKey)
+	require.ErrorIs(t, err, vault.ErrUnavailable, "an unreadable stored identity never accepts Vault's key")
+	_, err = signeridentity.Approve(t.Context(), brokenDB, graph.Merchants, graph.MerchantSecretBackend.SolanaTransit, mid, config.ExpectedProviderEnvironment(true), transitKey)
+	require.Error(t, err)
+	active, _ = solanaRows(rotated)
+	require.Zero(t, active)
+	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved)
 
 	require.NoError(t, operator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
 	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))

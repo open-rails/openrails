@@ -54,7 +54,11 @@ func (t *Transit) PublicKey(ctx context.Context, key string) ([]byte, error) {
 	if err != nil && (!t.Tolerate || !errors.Is(err, vault.ErrUnavailable)) {
 		return nil, err
 	}
-	mid, rows := Stored(ctx, t.DB, t.Directory, t.Slug, t.Environment, key)
+	mid, rows, lookupErr := Stored(ctx, t.DB, t.Directory, t.Slug, t.Environment, key)
+	if lookupErr != nil {
+		// Without the stored identity nothing can be compared: fail closed.
+		return nil, fmt.Errorf("solana signer %q: read stored identity: %w: %w", key, vault.ErrUnavailable, lookupErr)
+	}
 	if err != nil {
 		t.unavailable.Store(true)
 		if len(rows) == 0 {
@@ -98,15 +102,19 @@ type StoredSigner struct {
 }
 
 // Stored returns the merchant and its active Solana PSPs signed by the
-// Transit key, oldest first.
-func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, slug, environment, key string) (merchant.ID, []StoredSigner) {
+// Transit key, oldest first. A merchant not provisioned yet has none; any
+// other failure is returned, never read as "none".
+func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, slug, environment, key string) (merchant.ID, []StoredSigner, error) {
 	m, err := directory.GetBySlug(ctx, merchant.NormalizeSlug(slug))
+	if errors.Is(err, merchants.ErrMerchantNotFound) {
+		return merchant.ID{}, nil, nil
+	}
 	if err != nil {
-		return merchant.ID{}, nil
+		return merchant.ID{}, nil, err
 	}
 	rail := "solana"
 	var out []StoredSigner
-	_ = database.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
+	err = database.RunInMerchantScope(ctx, m.ID, "stored solana signer", func(ctx context.Context) error {
 		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: m.ID.UUID(), Rail: &rail})
 		if err != nil {
 			return err
@@ -127,7 +135,10 @@ func Stored(ctx context.Context, database *db.DB, directory *merchants.Service, 
 		}
 		return nil
 	})
-	return m.ID, out
+	if err != nil {
+		return merchant.ID{}, nil, err
+	}
+	return m.ID, out, nil
 }
 
 // Approve accepts the identity Vault now reports for key: stored identities
@@ -147,7 +158,10 @@ func Approve(ctx context.Context, database *db.DB, directory *merchants.Service,
 	if err != nil {
 		return "", err
 	}
-	_, rows := Stored(ctx, database, directory, m.Slug, environment, key)
+	_, rows, err := Stored(ctx, database, directory, m.Slug, environment, key)
+	if err != nil {
+		return "", fmt.Errorf("read stored identity: %w", err)
+	}
 	var n int64
 	if err := database.RunInMerchantScope(ctx, mid, "approve solana signer", func(ctx context.Context) error {
 		for _, r := range rows {
