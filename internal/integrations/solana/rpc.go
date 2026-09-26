@@ -182,6 +182,11 @@ func (c *RPCClient) LatestBlockhash(ctx context.Context) (RecentBlockhash, error
 	return c.fallback.LatestBlockhash(ctx)
 }
 
+// GetBlockHeight returns the cluster's current block height at commitment.
+func (c *RPCClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	return c.fallback.GetBlockHeight(ctx, commitment)
+}
+
 // GetMinimumBalanceForRentExemption returns the minimum balance needed for rent exemption
 func (c *RPCClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataSize uint64) (uint64, error) {
 	return c.fallback.GetMinimumBalanceForRentExemption(ctx, dataSize)
@@ -225,13 +230,25 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 // cursor: before != "" continues the newest-first walk strictly below that
 // signature (#714 wallet-scan pagination). limit caps the page (RPC max 1000).
 func (c *RPCClient) GetSignaturesForAddressPage(ctx context.Context, address string, before string, limit int) ([]SignatureInfo, error) {
+	return c.signaturesForAddress(ctx, address, before, limit, rpc.CommitmentFinalized)
+}
+
+// HasConfirmedSignatures reports whether any transaction naming address has
+// reached confirmed commitment: once the block height passes a blockhash's
+// last valid height, a transaction built on it either shows here or never lands.
+func (c *RPCClient) HasConfirmedSignatures(ctx context.Context, address string) (bool, error) {
+	sigs, err := c.signaturesForAddress(ctx, address, "", 1, rpc.CommitmentConfirmed)
+	return len(sigs) > 0, err
+}
+
+func (c *RPCClient) signaturesForAddress(ctx context.Context, address string, before string, limit int, commitment rpc.CommitmentType) ([]SignatureInfo, error) {
 	pubkey, err := solanago.PublicKeyFromBase58(strings.TrimSpace(address))
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
 	opts := &rpc.GetSignaturesForAddressOpts{
-		Commitment: rpc.CommitmentFinalized,
+		Commitment: commitment,
 	}
 	if limit > 0 {
 		limitVal := limit

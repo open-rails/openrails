@@ -51,6 +51,7 @@ var CrossMerchantUniqueExemptions = map[string]string{
 
 	// Genuinely global identifiers, unique across the install by construction.
 	"solana_subscriptions_subscription_pda_key": "a Solana PDA is globally unique on-chain; two merchants CANNOT share one",
+	"uq_solana_pay_receipts_signature":          "#1086: a Solana transaction signature is globally unique on-chain, and one transfer is credited or reviewed at most once anywhere",
 	"uq_psps_identity":                          "one (rail, environment, account_id) gateway account belongs to exactly one merchant — operator-declared config, deliberately install-wide",
 	"uq_custodians_identity":                    "the custody sibling (or#880, replacing uq_psps_custodian_identity): one (kind, environment, account_id) custodian tenant belongs to exactly one merchant, for the same reason and by the same operator declaration — and inbound custodian webhooks route by it before any merchant context exists",
 }

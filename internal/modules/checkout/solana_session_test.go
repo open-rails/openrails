@@ -132,8 +132,14 @@ type noopSolanaTransactions struct{}
 func (noopSolanaTransactions) BuildPaymentTransactionFromQuote(context.Context, *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error) {
 	return nil, errors.New("unexpected build")
 }
-func (noopSolanaTransactions) VerifyTransactionWithContent(context.Context, string, uint64, string, string, string, *string, uuid.UUID, solanaint.PurchaseMemoPolicy) error {
-	return errors.New("unexpected verify")
+func (noopSolanaTransactions) ObserveTransfer(context.Context, solanaint.ObserveTransferRequest) (*solanaint.TransferObservation, error) {
+	return nil, errors.New("unexpected observe")
+}
+func (noopSolanaTransactions) BlockHeight(context.Context) (uint64, error) {
+	return 0, errors.New("unexpected block height")
+}
+func (noopSolanaTransactions) ReferenceHasTransfers(context.Context, string) (bool, error) {
+	return false, errors.New("unexpected signature read")
 }
 
 // Build and confirm use only the persisted quote; a session missing any part

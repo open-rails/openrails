@@ -109,6 +109,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add account updater worker: %w", err)
 	}
+	if err := addTrackedWorker(r, workers, &riverjobs.SolanaPayGCWorker{DB: r.DB, Clock: clock}); err != nil {
+		return fmt.Errorf("add solana pay gc worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CreditExpiryWorker{
 		DB:    r.DB,
 		Clock: clock,
@@ -612,6 +615,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.SolanaReconcileArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 6 * time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 15 minutes: delete settled Solana Pay references (#1086).
+	jobs = append(jobs, r.healthPeriodic(
+		15*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.SolanaPayGCArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

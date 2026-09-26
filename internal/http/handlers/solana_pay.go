@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -95,14 +96,16 @@ func PostSolanaPay(r *httprequest.Request) {
 
 func writeSolanaPayError(r *httprequest.Request, err error) {
 	switch {
-	case err == checkout.ErrCheckoutSessionNotFound:
+	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):
 		r.ErrorJSON(http.StatusNotFound, "checkout session not found")
-	case err == checkout.ErrCheckoutSessionExpired:
+	case errors.Is(err, checkout.ErrCheckoutSessionExpired):
 		r.ErrorJSON(http.StatusGone, "checkout session expired")
-	case err == checkout.ErrCheckoutSessionNotSolana:
+	case errors.Is(err, checkout.ErrCheckoutSessionNotSolana):
 		r.ErrorJSON(http.StatusBadRequest, "not a solana checkout session")
-	case err == checkout.ErrCheckoutSessionAlreadyCompleted:
+	case errors.Is(err, checkout.ErrCheckoutSessionAlreadyCompleted):
 		r.ErrorJSON(http.StatusConflict, "checkout session already completed")
+	case errors.Is(err, checkout.ErrCheckoutSessionConflict):
+		r.ErrorJSON(http.StatusConflict, "a payment for this checkout is already in progress")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "failed to process request")
 	}

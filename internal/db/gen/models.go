@@ -1279,6 +1279,40 @@ type OpenrailsRepriceBatch struct {
 	SubscriptionsBlocked int32
 }
 
+// #1086: every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed) and needs a refund or operator decision; ignored = no transfer to the merchant (deleted with its reference). A signature is credited or reviewed at most once across every reference.
+type OpenrailsSolanaPayReceipt struct {
+	MerchantID        uuid.UUID
+	Reference         string
+	Signature         string
+	CheckoutSessionID uuid.UUID
+	Disposition       string
+	ReviewReason      *string
+	TokenMint         string
+	ExpectedAmount    int64
+	ReceivedAmount    int64
+	Payer             *string
+	LandedAt          *time.Time
+	PaymentID         *uuid.UUID
+	CreatedAt         time.Time
+}
+
+// #1086: one Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then openrails.solana_pay_gc deletes the settled row. built_transaction is the one transaction-request tx offered while its blockhash can still land.
+type OpenrailsSolanaPayReference struct {
+	MerchantID        uuid.UUID
+	Reference         string
+	CheckoutSessionID uuid.UUID
+	Kind              string
+	Status            string
+	SettleUntil       time.Time
+	WatchUntil        time.Time
+	NextPollAt        time.Time
+	Signature         *string
+	BuiltTransaction  *string
+	BuiltValidHeight  *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type OpenrailsSolanaSubscription struct {
 	ID                       uuid.UUID
 	MerchantID               uuid.UUID

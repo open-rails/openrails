@@ -2,8 +2,6 @@ package solana
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -13,7 +11,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -21,25 +19,12 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/merchant"
-	redis "github.com/redis/go-redis/v9"
-	log "github.com/sirupsen/logrus"
 )
 
-const (
-	// Redis keys
-	pendingSolanaPaymentsKey = "pending_solana_payments"
-	solanaPayKeyPrefix       = "solana_pay:"
-	solanaPayConsumedPrefix  = "solana_pay_consumed:"
-
-	// pendingPaymentTTL is how long a QUOTE is offered — the Redis pending
-	// record and the price it carries. It is price validity, never a refusal
-	// of settled money (xs-007 row 35): the poller keeps discovering the
-	// reference through the durable checkout session after this lapses, and a
-	// transfer that lands late is honoured at the quoted token amount.
-	pendingPaymentTTL = 15 * time.Minute
-	consumedRefTTL    = 24 * time.Hour
-)
+// pendingPaymentTTL is how long a transfer-request quote is offered. It is
+// price validity, never a refusal of settled money: a transfer landing within
+// SettlementGrace after it is still credited at the quoted amount.
+const pendingPaymentTTL = 15 * time.Minute
 
 type purchaseEligibilityChecker interface {
 	CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*PurchaseEligibilityResult, error)
@@ -57,51 +42,9 @@ const (
 	eligibilityDowngrade = "downgrade"
 )
 
-// ErrSolanaSubscribePending is returned by ConfirmSolanaSubscribeSession (and
-// surfaced through the poller) when a RECURRING subscribe Solana Pay session has
-// only its init tx landed so far — the authority now exists but the atomic
-// [subscribe+transfer] bundle has not landed yet. The poller treats it as
-// "keep polling": it does NOT consume the reference (the subscribe tx carries the
-// SAME reference) and re-checks until the subscription PDA is funded. It is a
-// normal in-progress state, not a failure.
-var ErrSolanaSubscribePending = errors.New("solana: recurring subscribe pending subscribe step")
-
-// PendingSolanaPayment represents a pending Solana payment stored in Redis
-type PendingSolanaPayment struct {
-	UserID      string    `json:"user_id"`
-	PriceID     string    `json:"price_id"`
-	SessionID   string    `json:"session_id,omitempty"`
-	Amount      int64     `json:"amount"`   // cents (fiat equivalent)
-	Currency    string    `json:"currency"` // e.g., "usd"
-	Token       string    `json:"token"`    // e.g., "USDC"
-	TokenMint   string    `json:"token_mint"`
-	TokenAmount uint64    `json:"token_amount"` // token base units
-	Recipient   string    `json:"recipient"`    // merchant wallet
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
-
-	// Lifecycle marks a checkout-session-backed pending record whose confirmation
-	// mirrors an on-chain CANCEL or TIER-CHANGE (checkout modes solana_cancel /
-	// solana_tier_change) rather than registering a purchase. When set, the poller
-	// skips token/amount verification (the random reference already identifies the
-	// tx) and routes the confirmed signature to ConfirmSolanaLifecycleSession.
-	Lifecycle bool `json:"lifecycle,omitempty"`
-
-	// Subscribe marks a checkout-session-backed pending record for a RECURRING
-	// subscribe over Solana Pay (mode=subscription, flow=transaction_request). Like
-	// Lifecycle, the poller skips token verification (the random reference already
-	// identifies the tx) and routes the confirmed signature to
-	// ConfirmSolanaSubscribeSession, which advances the init→subscribe step and, once
-	// the atomic [subscribe+transfer] bundle has landed, enrolls the membership. The
-	// init tx and the subscribe tx share this same reference, so confirmation is
-	// step-aware + idempotent.
-	Subscribe bool `json:"subscribe,omitempty"`
-}
-
 // SolanaPayService handles Solana Pay Transfer Request flow
 type SolanaPayService struct {
 	db                 *db.DB
-	redis              *redis.Client
 	cfg                *config.Config
 	rails              railresolve.Source
 	clock              clockwork.Clock
@@ -119,7 +62,6 @@ type SolanaPayService struct {
 // NewSolanaPayService creates a new SolanaPayService
 func NewSolanaPayService(
 	db *db.DB,
-	redis *redis.Client,
 	cfg *config.Config,
 	railSet railresolve.Source,
 	priceService *catalog.PriceService,
@@ -131,7 +73,6 @@ func NewSolanaPayService(
 ) *SolanaPayService {
 	return &SolanaPayService{
 		db:                 db,
-		redis:              redis,
 		cfg:                cfg,
 		rails:              railSet,
 		priceService:       priceService,
@@ -262,25 +203,8 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	now := s.now()
 	expiresAt := now.Add(pendingPaymentTTL)
 
-	// Store pending payment in Redis
-	pending := &PendingSolanaPayment{
-		UserID:      userID,
-		PriceID:     priceID.String(),
-		Amount:      price.Amount,
-		Currency:    price.Currency,
-		Token:       tokenSymbol,
-		TokenMint:   tokenMint,
-		TokenAmount: tokenUnits,
-		Recipient:   recipient,
-		CreatedAt:   now,
-		ExpiresAt:   expiresAt,
-	}
-	if sessionID != nil && *sessionID != uuid.Nil {
-		pending.SessionID = sessionID.String()
-	}
-
-	if err := s.storePendingPayment(ctx, reference, pending); err != nil {
-		return nil, fmt.Errorf("failed to store pending payment: %w", err)
+	if _, err := NewPayLedger(s.db).Register(ctx, ReferencePurchase, *sessionID, reference, expiresAt, now); err != nil {
+		return nil, fmt.Errorf("failed to register solana pay reference: %w", err)
 	}
 
 	// Build Solana Pay Transfer Request URL. The memo field (#713) stamps the
@@ -347,273 +271,8 @@ func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipien
 	return baseURL + params
 }
 
-// pendingReferenceMember encodes a pending-set member as "<merchant_id>|<ref>"
-// (#728): the poller fans out per merchant, so every pending reference carries
-// its merchant. References are base58, so '|' never collides.
-func pendingReferenceMember(mid merchant.ID, reference string) string {
-	return mid.String() + "|" + reference
-}
-
-// parsePendingReferenceMember splits a set member back into merchant + ref.
-// or#893: `<merchant_id>|<reference>` is the ONLY shape. A member that does not
-// parse is not history — the bare pre-#728 form has long since aged out of any
-// live set through its own TTL — it is corruption of a live poller input, and
-// the poller must say so rather than quietly discarding somebody's payment
-// reference.
-func parsePendingReferenceMember(member string) (merchant.ID, string, error) {
-	midStr, ref, cut := strings.Cut(member, "|")
-	if !cut {
-		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: expected <merchant_id>|<reference>", member)
-	}
-	id, err := uuid.Parse(midStr)
-	if err != nil || id == uuid.Nil {
-		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: %q is not a merchant id", member, midStr)
-	}
-	if strings.TrimSpace(ref) == "" {
-		return merchant.ID{}, "", fmt.Errorf("malformed pending member %q: empty reference", member)
-	}
-	return merchant.ID(id), strings.TrimSpace(ref), nil
-}
-
-// storePendingPayment stores a pending payment in Redis
-func (s *SolanaPayService) storePendingPayment(ctx context.Context, reference string, pending *PendingSolanaPayment) error {
-	if s.redis == nil {
-		return fmt.Errorf("redis not configured")
-	}
-	// #728: the pending set is merchant-attributed; a payment without a resolved
-	// merchant cannot be polled.
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return fmt.Errorf("solana pending payment requires a merchant: %w", err)
-	}
-
-	key := solanaPayKeyPrefix + reference
-	data, err := json.Marshal(pending)
-	if err != nil {
-		return fmt.Errorf("failed to marshal pending payment: %w", err)
-	}
-
-	// Store the payment data with TTL
-	if err := s.redis.Set(ctx, key, data, pendingPaymentTTL).Err(); err != nil {
-		return fmt.Errorf("failed to store pending payment: %w", err)
-	}
-
-	// Add to the pending payments set
-	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
-		// Try to cleanup the key we just set
-		s.redis.Del(ctx, key)
-		return fmt.Errorf("failed to add to pending set: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"reference": reference,
-		"user_id":   pending.UserID,
-		"amount":    pending.Amount,
-		"token":     pending.Token,
-	}).Info("Stored pending Solana payment")
-
-	return nil
-}
-
-// GetPendingPayment retrieves a pending payment by reference
-func (s *SolanaPayService) GetPendingPayment(ctx context.Context, reference string) (*PendingSolanaPayment, error) {
-	if s.redis == nil {
-		return nil, fmt.Errorf("redis not configured")
-	}
-
-	key := solanaPayKeyPrefix + reference
-	data, err := s.redis.Get(ctx, key).Bytes()
-	if err == redis.Nil {
-		return nil, nil // Not found (expired)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pending payment: %w", err)
-	}
-
-	var pending PendingSolanaPayment
-	if err := json.Unmarshal(data, &pending); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pending payment: %w", err)
-	}
-
-	return &pending, nil
-}
-
-// PendingReferencesByMerchant returns the pending payment references grouped
-// by merchant (#728) — the poller's per-merchant fan-out input.
-//
-// or#893: a member that does not parse FAILS the pass. Every writer
-// (storePendingPayment, RegisterPendingReference) requires a merchant and emits
-// the canonical form, so an unparseable member means the set was written by
-// something else — and silently SREMing it, as the pre-#728 compatibility lane
-// did, deletes a buyer's pending payment reference and with it the poller's
-// only chance to credit a payment that may already be on chain.
-func (s *SolanaPayService) PendingReferencesByMerchant(ctx context.Context) (map[merchant.ID][]string, error) {
-	if s.redis == nil {
-		return nil, nil
-	}
-
-	members, err := s.redis.SMembers(ctx, pendingSolanaPaymentsKey).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pending references: %w", err)
-	}
-	out := make(map[merchant.ID][]string, len(members))
-	for _, member := range members {
-		mid, ref, err := parsePendingReferenceMember(member)
-		if err != nil {
-			return nil, fmt.Errorf("solana pending set is corrupt: %w", err)
-		}
-		out[mid] = append(out[mid], ref)
-	}
-	return out, nil
-}
-
-// RegisterPendingReference adds an already-bound checkout-session reference to the
-// poller's pending set so the reference poller actually iterates it. The one-off
-// transfer-request flow seeds its reference via GeneratePayment; the
-// transaction-request lifecycle (cancel/tier-change) + recurring-subscribe flows
-// instead bind the reference to the DB session and call this — the poller then
-// recovers the session via GetByReference. Idempotent (SAdd on a set).
-func (s *SolanaPayService) RegisterPendingReference(ctx context.Context, reference string) error {
-	if s.redis == nil {
-		return nil
-	}
-	reference = strings.TrimSpace(reference)
-	if reference == "" {
-		return nil
-	}
-	// #728: merchant-attributed member so the poller polls it in the right scope.
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return fmt.Errorf("solana pending reference requires a merchant: %w", err)
-	}
-	if err := s.redis.SAdd(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
-		return fmt.Errorf("failed to add reference to pending set: %w", err)
-	}
-	return nil
-}
-
-// RemovePendingPayment removes a pending payment from Redis
-func (s *SolanaPayService) RemovePendingPayment(ctx context.Context, reference string) error {
-	if s.redis == nil {
-		return nil
-	}
-	reference = strings.TrimSpace(reference)
-	if reference == "" {
-		return nil
-	}
-
-	key := solanaPayKeyPrefix + reference
-	var removeErr error
-
-	// Remove from set. or#893: only the canonical merchant-attributed member —
-	// the bare form is not a shape this set can hold, and SREMing a bare
-	// `<reference>` on a set that only ever holds `<merchant>|<reference>` was
-	// always a no-op dressed as cleanup. A removal with no merchant on ctx
-	// cannot name the member and must say so.
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return fmt.Errorf("solana pending reference removal requires a merchant: %w", err)
-	}
-	if err := s.redis.SRem(ctx, pendingSolanaPaymentsKey, pendingReferenceMember(mid, reference)).Err(); err != nil {
-		removeErr = fmt.Errorf("failed to remove from pending set: %w", err)
-	}
-
-	// Delete the key
-	if err := s.redis.Del(ctx, key).Err(); err != nil {
-		if removeErr != nil {
-			removeErr = fmt.Errorf("%v; failed to delete pending payment key: %w", removeErr, err)
-		} else {
-			removeErr = fmt.Errorf("failed to delete pending payment key: %w", err)
-		}
-	}
-
-	if removeErr != nil {
-		log.WithError(removeErr).WithField("reference", reference).Warn("Failed to remove pending Solana payment")
-		return removeErr
-	}
-
-	return nil
-}
-
-func (s *SolanaPayService) IsReferenceConsumed(ctx context.Context, reference string) (bool, error) {
-	if s.redis == nil {
-		return false, nil
-	}
-
-	reference = strings.TrimSpace(reference)
-	if reference == "" {
-		return false, nil
-	}
-
-	count, err := s.redis.Exists(ctx, solanaPayConsumedPrefix+reference).Result()
-	if err != nil {
-		return false, fmt.Errorf("failed checking consumed reference: %w", err)
-	}
-
-	return count > 0, nil
-}
-
-func (s *SolanaPayService) MarkReferenceConsumed(ctx context.Context, reference, transactionID string) (bool, error) {
-	if s.redis == nil {
-		return false, fmt.Errorf("redis not configured")
-	}
-
-	reference = strings.TrimSpace(reference)
-	if reference == "" {
-		return false, fmt.Errorf("reference is required")
-	}
-
-	value := strings.TrimSpace(transactionID)
-	if value == "" {
-		value = "consumed"
-	}
-
-	claimed, err := s.redis.SetNX(ctx, solanaPayConsumedPrefix+reference, value, consumedRefTTL).Result()
-	if err != nil {
-		return false, fmt.Errorf("failed to mark reference consumed: %w", err)
-	}
-
-	return claimed, nil
-}
-
-func (s *SolanaPayService) ConsumeAndRemovePending(ctx context.Context, reference, transactionID string) error {
-	reference = strings.TrimSpace(reference)
-	if reference == "" {
-		return nil
-	}
-
-	if _, err := s.MarkReferenceConsumed(ctx, reference, transactionID); err != nil {
-		return err
-	}
-
-	if err := s.RemovePendingPayment(ctx, reference); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// GetPaymentStatus checks if a payment is pending, confirmed, or expired
-func (s *SolanaPayService) GetPaymentStatus(ctx context.Context, reference string) (status string, payment *models.Payment, err error) {
-	// or#869 (staticcheck SA4023): there used to be a "first check Postgres for
-	// a confirmed payment" step here, guarded by `err == nil && payment != nil`.
-	// It could never be taken because the lookup unconditionally returned an
-	// error: a Solana reference is EPHEMERAL, existing only for on-chain matching
-	// during checkout; a confirmed payment is identified by its transaction
-	// signature instead.
-	// So there is no confirmed-payment lookup by reference to do, and pretending
-	// to try one made this function read as if there were. Redis is the only
-	// answer this reference can have.
-
-	// Check Redis for pending payment
-	pending, err := s.GetPendingPayment(ctx, reference)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to check pending payment: %w", err)
-	}
-
-	if pending == nil {
-		return "expired", nil, nil
-	}
-
-	return "pending", nil, nil
+// RegisterReference gives a transaction-request checkout attempt its one
+// reference and puts it under the poller's watch. Idempotent per attempt.
+func (s *SolanaPayService) RegisterReference(ctx context.Context, kind ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.OpenrailsSolanaPayReference, error) {
+	return NewPayLedger(s.db).Register(ctx, kind, sessionID, strings.TrimSpace(reference), quoteExpiresAt, s.now())
 }

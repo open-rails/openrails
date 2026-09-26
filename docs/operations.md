@@ -610,6 +610,24 @@ at signup; legacy-imported subscriptions whose NMI `orderid` predates
 OpenRails won't match the per-subscription probe — the Event Refresh lane's
 watermarked backfill catches their provider events.
 
+## Solana Pay settlement (#1086)
+
+Solana Pay state is in PostgreSQL. A checkout attempt has one reference in
+`openrails.solana_pay_references` (`pending` → `confirmed` | `expired`); every
+replica's poller claims due references with `SKIP LOCKED`, reads the chain and
+hands each new signature, oldest first, to one settlement transaction. Every
+signature on a reference is recorded once in `openrails.solana_pay_receipts`,
+and a signature is credited or reviewed at most once across all references.
+
+- The first transfer of at least the quoted amount that lands by quote expiry
+  + 30 min is credited; an excess is credited and flagged `overpaid`.
+- Anything else is recorded with `disposition = 'review'` and a
+  `billing_ledger_repair_required` alert (`solana_pay_<reason>`):
+  `already_paid`, `late`, `underpaid`, `session_closed`. Nothing is refunded
+  automatically.
+- A paid or expired reference stays watched for 7 days so later transfers are
+  recorded; the GC job then deletes it. Credited and review receipts are kept.
+
 ## Background worker schedule
 
 Everything runs by itself under River once `run-server` (or `run-worker`) is
@@ -620,7 +638,7 @@ up. "start" = RunOnStart.
 | Provider-intent executor | 1 min + start |
 | Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
 | Notification email sweep | 10 min |
-| Convergence sweep (+ start) · arrears delinquency evaluation | 15 min |
+| Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Plan-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
