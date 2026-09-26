@@ -2,9 +2,9 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -47,7 +47,7 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
-		return d.rw.wrapDBTX(d.pool)
+		return d.rw.wrapDBTX(pooledDBTX{pool: d.pool, schema: d.rw.schema()})
 	}
 	return errDBTX{fmt.Errorf("db: no pgx handle available on this DB")}
 }
@@ -72,7 +72,7 @@ func (d *DB) GenDirectory() *gen.Queries {
 	if d == nil || d.pool == nil {
 		return gen.New(errDBTX{fmt.Errorf("db: GenDirectory requires a pool-backed DB")})
 	}
-	return gen.New(d.rw.wrapDBTX(d.pool))
+	return gen.New(d.rw.wrapDBTX(pooledDBTX{pool: d.pool, directory: true}))
 }
 
 // pgxBeginner abstracts where a transaction starts: the pinned merchant
@@ -100,18 +100,15 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	if lc != nil {
 		// Begin on the pinned merchant connection (acquiring it now if this is
 		// the request's first sqlc touch) so the tx inherits the session GUC.
-		conn, err := lc.get(ctx)
-		if err != nil {
-			return nil, err
-		}
-		tx, err := conn.Begin(ctx)
+		// Never a second BEGIN inside a transaction already open on it.
+		tx, err := lc.begin(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return schemaTx{Tx: tx, rw: d.rw, river: d.river}, nil
 	}
 	if d.pool != nil {
-		tx, err := d.pool.Begin(ctx)
+		tx, err := pooledDBTX{pool: d.pool, directory: true}.Begin(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -229,12 +226,9 @@ type lazyMerchantPgxConn struct {
 
 	mu   sync.Mutex
 	conn *pgxpool.Conn
+	// poolTx marks a pool transaction open on the pin (#1105).
+	poolTx bool
 }
-
-// lazyMerchantAcquireTimeout bounds the lazy acquisition (same rationale as
-// tenantConnAcquireTimeout: never park forever on a pool when client aborts
-// don't propagate).
-const lazyMerchantAcquireTimeout = 4 * time.Second
 
 // get returns the pinned connection, acquiring it on first use. It hands out
 // the underlying *pgx.Conn: a caller still holding it after a re-pin gets
@@ -252,9 +246,7 @@ func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgx.Conn, error) {
 		l.conn.Release()
 		l.conn = nil
 	}
-	acqCtx, cancel := context.WithTimeout(ctx, lazyMerchantAcquireTimeout)
-	conn, err := l.pool.Acquire(acqCtx)
-	cancel()
+	conn, err := acquire(ctx, l.pool)
 	if err != nil {
 		return nil, fmt.Errorf("db: acquire pgx merchant connection: %w", err)
 	}
@@ -306,8 +298,44 @@ func (l *lazyMerchantPgxConn) releaseIdle() {
 	}
 }
 
-func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+// ErrPinInTransaction refuses work on the request's connection that would
+// silently join a transaction it did not open: a second BEGIN inside an open
+// transaction (whose inner COMMIT would end the outer one early), or a DB
+// statement inside a pool transaction (#1105). Use that transaction's handle.
+var ErrPinInTransaction = errors.New("db: the request's connection is inside a transaction; use that transaction")
+
+// idle returns the pinned connection for a DB statement. A DB transaction
+// open on it is joined, as DB callers have always done; a pool transaction
+// open on it is refused.
+func (l *lazyMerchantPgxConn) idle(ctx context.Context) (*pgx.Conn, error) {
 	conn, err := l.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	poolTx := l.poolTx
+	l.mu.Unlock()
+	if poolTx && conn.PgConn().TxStatus() != 'I' {
+		return nil, ErrPinInTransaction
+	}
+	return conn, nil
+}
+
+// begin opens a transaction on the pinned connection, never a second one
+// inside a transaction already open on it.
+func (l *lazyMerchantPgxConn) begin(ctx context.Context) (pgx.Tx, error) {
+	conn, err := l.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if conn.PgConn().TxStatus() != 'I' {
+		return nil, ErrPinInTransaction
+	}
+	return conn.Begin(ctx)
+}
+
+func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	conn, err := l.idle(ctx)
 	if err != nil {
 		return pgconn.CommandTag{}, err
 	}
@@ -315,7 +343,7 @@ func (l *lazyMerchantPgxConn) Exec(ctx context.Context, sql string, args ...inte
 }
 
 func (l *lazyMerchantPgxConn) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	conn, err := l.get(ctx)
+	conn, err := l.idle(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +351,7 @@ func (l *lazyMerchantPgxConn) Query(ctx context.Context, sql string, args ...int
 }
 
 func (l *lazyMerchantPgxConn) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	conn, err := l.get(ctx)
+	conn, err := l.idle(ctx)
 	if err != nil {
 		return errRow{err}
 	}

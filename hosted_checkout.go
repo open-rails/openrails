@@ -89,6 +89,10 @@ type HostedCheckoutPayRequest struct {
 	Zip             string `json:"zip,omitempty"`
 	Country         string `json:"country,omitempty"`
 	TokenSymbol     string `json:"token_symbol,omitempty"`
+	// The tokenized new card's display facts, as billing-ui sends them.
+	LastFour   string `json:"last_four,omitempty"`
+	CardType   string `json:"card_type,omitempty"`
+	ExpiryDate string `json:"expiry_date,omitempty"`
 }
 
 // HostedCheckoutPayResult is the host's answer to a pay request.

@@ -22,6 +22,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/api"
@@ -156,6 +157,12 @@ func (r *Request) logRefusal(code int, fields logrus.Fields, msg string) {
 // admission carried no cause at all, and attributing them cost a bisect across
 // two standing stacks. Every 500 that has an error in hand should use this.
 func (r *Request) InternalError(msg string, cause error) {
+	// A saturated database pool is a retryable 503, never a 500 (#1105).
+	var refusal *apperr.Error
+	if errors.As(cause, &refusal) && refusal.Status == http.StatusServiceUnavailable {
+		r.APIError(api.NewAPIError(refusal.Status, api.ErrorTypeForStatus(refusal.Status), refusal.Code, refusal.Message))
+		return
+	}
 	requestID := r.RequestID()
 	logrus.WithError(cause).WithField("request_id", requestID).Error(msg)
 	response := api.SimpleErrorResponse(http.StatusInternalServerError, msg)
