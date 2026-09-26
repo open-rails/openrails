@@ -53,16 +53,34 @@ func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *Checkou
 	if session.CustomerID.String() != user.ID {
 		return nil, ErrCheckoutSessionNotFound
 	}
+	response, found, err := s.acceptedOperationSessionResponse(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		response = s.sessionToResponse(session)
+	}
 	canonicalizeCheckoutPaymentName(&req.Payment)
 	stored, _ := session.RailState[checkoutSessionFingerprintKey].(string)
 	fingerprint := checkoutSessionRequestFingerprintForRail(req, user, string(session.Rail))
 	if stored == "" || stored != fingerprint {
+		// #1104: a buyer retrying a finished attempt with other details (a new
+		// card after a decline) must learn it finished, or its host never moves
+		// on. The answer is the session's identity and terminal status only.
+		if terminalCheckoutStatus(response.Status) {
+			return &CheckoutSessionResponse{Object: response.Object, ID: response.ID, Status: response.Status}, nil
+		}
 		return nil, openrails.ErrIdempotencyKeyReused
 	}
-	if response, found, err := s.acceptedOperationSessionResponse(ctx, session); found || err != nil {
-		return response, err
+	return response, nil
+}
+
+func terminalCheckoutStatus(status string) bool {
+	switch models.CheckoutSessionStatus(status) {
+	case models.CheckoutSessionStatusSucceeded, models.CheckoutSessionStatusFailed, models.CheckoutSessionStatusExpired, models.CheckoutSessionStatusCanceled:
+		return true
 	}
-	return s.sessionToResponse(session), nil
+	return false
 }
 
 // GetSessionByKey is an ownership read; the secret-bearing creation request is
