@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -42,7 +44,10 @@ type InvoiceConfig = boot.InvoiceConfig
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
 	StripeClients *stripeapi.Factory
-	PGXPool       *pgxpool.Pool
+	// NMITransport replaces the NMI wire (a test seam, like embed.Options'
+	// NMITransport); nil is the real gateway.
+	NMITransport http.RoundTripper
+	PGXPool      *pgxpool.Pool
 	// NameAuthority resolves names in an external merchant manifest. The pull
 	// itself is always scoped by MerchantID; nil selects unbound host names only.
 	NameAuthority merchant.NameAuthority
@@ -165,6 +170,7 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 			DB:            rt.DB,
 			AccountIDs:    accountPins,
 			Endpoints:     opts.Endpoints,
+			NMIClients:    nmiClients(opts.NMITransport),
 		}.Build(ctx, merchantID)
 		fetchers := armed.Fetchers
 		if len(fetchers) == 0 {
@@ -938,4 +944,11 @@ func newPullEngine(rt *pullProviderRuntime, fetchers map[reconcile.Provider]reco
 	cancels := intents.NewProviderCancelScheduler(rt.DB, intents.NewRateCeiling(rt.DB), intents.OriginSystem,
 		"terminal lifecycle outcome; the provider schedule must stop billing")
 	return reconcile.NewEngine(rt.DB, rt.Config, fetchers, cancels)
+}
+
+func nmiClients(transport http.RoundTripper) *railresolve.NMIFactory {
+	if transport == nil {
+		return nil
+	}
+	return &railresolve.NMIFactory{Transport: transport}
 }

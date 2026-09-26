@@ -158,7 +158,8 @@ func (m *Mock) Void(txID string) {
 }
 
 // RenewSchedule is NMI's recurring engine billing a schedule, dated its next
-// billing time whatever the clock: approve false declines it with 202. Either way the schedule
+// billing time whatever the clock: approve false declines it with the vault
+// card's decline code (202 when the card has none). Either way the schedule
 // advances to its next regular date; NMI never retries a failed period.
 func (m *Mock) RenewSchedule(id string, approve bool) Sale {
 	m.mu.Lock()
@@ -170,7 +171,11 @@ func (m *Mock) renew(s *Schedule, approve bool) Sale {
 	sale := Sale{Vault: s.Vault, Amount: s.Amount, OrderID: s.Order, ScheduleID: s.ID, At: s.NextBilling}
 	if !approve {
 		v := m.mustVault(s.Vault)
-		sale.TransactionID, sale.BillingID, sale.Card, sale.Currency, sale.Declined = m.next("declined"), v.BillingID, v.Card, "USD", "202"
+		code := v.Card.Decline // the issuer's answer for this card, else a soft decline
+		if code == "" {
+			code = "202"
+		}
+		sale.TransactionID, sale.BillingID, sale.Card, sale.Currency, sale.Declined = m.next("declined"), v.BillingID, v.Card, "USD", code
 		m.sales = append(m.sales, &sale)
 		s.NextBilling = s.advance(s.NextBilling)
 		return sale.clone()

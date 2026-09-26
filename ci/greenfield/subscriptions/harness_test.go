@@ -111,6 +111,8 @@ type world struct {
 	server *httptest.Server
 	client map[topology]*openrails.Client
 	psp    map[string]string
+	// psps is the merchant's provider declaration, as its manifest states it.
+	psps map[string]embed.PSPConfig
 
 	// invariants are the money invariants checked when the world ends.
 	invariants moneyInvariants
@@ -226,6 +228,7 @@ func (w *world) start() {
 	if w.declare != nil {
 		w.declare(psps)
 	}
+	w.psps = psps
 	rt, err := embed.New(t.Context(), embed.Options{
 		Auth:            identity,
 		HTTP:            &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: embed.CustomerBillingManagement}}},
