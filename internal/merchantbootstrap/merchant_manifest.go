@@ -657,6 +657,12 @@ type MerchantManifestReconcileOptions struct {
 	// accepts (a provider that cannot answer now) instead of failing the
 	// whole reconcile; the caller retries it in the background.
 	DeferPSP func(rail string, err error) bool
+	// SolanaTransit, when set, is the serving runtime's Transit client: the
+	// reconcile uses it instead of opening (and waiting on) its own Vault login.
+	SolanaTransit solana.TransitClient
+	// WrapTransit, when set, wraps the Transit client for one merchant's
+	// provisioning (the signer identity check).
+	WrapTransit func(slug string, transit solana.TransitClient) solana.TransitClient
 }
 
 type ManifestProviderIdentityResolver interface {
