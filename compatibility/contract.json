@@ -2140,23 +2140,14 @@
     },
     "embed/provision.go": {
       "app": "github.com/open-rails/openrails/internal/app",
-      "atomic": "sync/atomic",
       "boot": "github.com/open-rails/openrails/internal/merchantbootstrap",
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
       "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
       "go-yaml": "github.com/goccy/go-yaml",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "solanago": "github.com/gagliardetto/solana-go",
-      "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
-      "time": "time",
-      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
+      "signeridentity": "github.com/open-rails/openrails/internal/signeridentity"
     },
     "embed/psp_declaration.go": {
       "hosttools": "github.com/open-rails/openrails/internal/hosttools"
@@ -3860,7 +3851,8 @@
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
     },
     "internal/modules/checkout/session_types.go": {
       "billingauth": "github.com/open-rails/openrails/pkg/billingauth",
@@ -4311,7 +4303,8 @@
       "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
       "strings": "strings",
       "time": "time",
-      "v5": "github.com/jackc/pgx/v5"
+      "v5": "github.com/jackc/pgx/v5",
+      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
     },
     "internal/modules/subscriptions/admin_service.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -5557,7 +5550,7 @@
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",
     "internal/auth/provider.go": "bca5b1e71635a8ac9d0f7fdb3324de353a6eea81d35815384ba49e9e2aeca915",
     "internal/auth/verifier.go": "fff455adc5824ad634c19e9dbe0073fb8649ca73b97001de1241c740ec101d26",
-    "internal/bootstrap/serverboot/serverboot.go": "401d527b0917ff410ec9a0b8ba07d903d70b3c185fbbd8d96ea222ffb1f8a6d6",
+    "internal/bootstrap/serverboot/serverboot.go": "f403806fcad9865a1aea0aaed34b3f0cbfb7b32b75e6fb07df839c4b441e4677",
     "internal/controlplane/api_key.go": "b489b70f84468ca600fe471e23626306bf18c477197861abf72538587c1f9918",
     "internal/controlplane/authority.go": "7cb16d51d953f090c73bec3e59c9729443a8b53d8cf767ce75c09f868224369a",
     "internal/controlplane/bootstrap.go": "ea9d197d62b3535d9b687e40f0c34457a807b97c333f2debb7a06a270f1b78af",
@@ -5616,7 +5609,7 @@
     "internal/http/handlers/catalogs.go": "a5e333a2e8daf5c7c2f9f36546715600ffa431f0e59c57aaa9d53cc63fc4d6f3",
     "internal/http/handlers/change_tier.go": "b0db30105783ac3d7c88395dcc700cd322b3fe559f4f42191d793be3ebf27a8a",
     "internal/http/handlers/checkout_config.go": "54c97d9a1cdb1fb8c4121acad6d6aecfdc3f66d18965e4069fddcd0254c4853a",
-    "internal/http/handlers/checkout_session.go": "fcd68ba69aedd08102c4909e3fdc7aaebcd1e59f0a3f51c56ef41067d46109b2",
+    "internal/http/handlers/checkout_session.go": "bb1fc547777e44d783077f70ccb302e35c72ddc889b84a9a9c52b63c74beb306",
     "internal/http/handlers/currencies.go": "bbd9ca69f19792125a1df03ef1ac5f425637f3ac025cbdab5f574cf7f8f36e9e",
     "internal/http/handlers/customer_billing_policy.go": "57b6b55f867af6f3528434b1a22060cf7d5e397bd74fdf63190e0797c5133dc5",
     "internal/http/handlers/customer_payment.go": "2026933f069c038fc41676212a8350838cfc76d0ae6176092b0bb1df94470815",
@@ -5729,6 +5722,7 @@
     "internal/migrate/postgres/0021_subscription_transition_decisions.up.sql": "70afc6a3bab01ace674d4bdf5fb6e740a7219db291c2c57ef29ee76f16068870",
     "internal/migrate/postgres/0022_subscription_dunning_policy.up.sql": "3da9fb3e088a53bbfe2718321953087db74fffc936cffef54e7c591e8a515fb0",
     "internal/migrate/postgres/0023_idempotency_keys.up.sql": "b4c2ca7fa4cf194bbd36852db5afc03bb5980c2b0c63abf462a53c520fcd39d5",
+    "internal/migrate/postgres/0024_psp_pending_signer.up.sql": "faf1dd9119ccdad9e15f8d691d0e5b6a9bece3d103a365155708d65054e2780e",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "106a9386e03018afa8da77497d9fa2fdcb1f3fd834bdd8a20a73e95f3f4a4f56",
@@ -5737,7 +5731,7 @@
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/initial_membership_new_card.go": "8988bd3766c205500e14944e15d926bdbc526b91219fcf8b503cfe61a7ea6a68",
-    "internal/modules/checkout/session_service.go": "77d4c16772d625bccef0b2e694844e91b44e13097293b1b42854c1f819bf892e",
+    "internal/modules/checkout/session_service.go": "8d87e45862db7c4268645944d312df72841a486e621260c8024304bf1ec5fda8",
     "internal/modules/checkout/session_types.go": "d2a942c9d615065f5893064d5377710a501cb5504338ece953d17f69cad82387",
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
     "internal/modules/checkout/stripe_method_setup.go": "8924e7385efa3ee2ab0b9052aff26921d0bd066f8273786819ed1fe2ef113a4b",
