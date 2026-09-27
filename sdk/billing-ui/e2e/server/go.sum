@@ -178,8 +178,8 @@ github.com/open-rails/authkit v0.144.0 h1:rSwJhC0QLXOkSzZlyD+X97hHCWSLjq3kHslRIU
 github.com/open-rails/authkit v0.144.0/go.mod h1:F6QzjPo2Ler4P3apAC83Zo0lg8MC3dehaVoyBqYtGFU=
 github.com/open-rails/helpers v0.3.0 h1:SE5YuAO3mOwcUF5ttkffHn2KNHPRQv9q83OUsoH6IMs=
 github.com/open-rails/helpers v0.3.0/go.mod h1:SGBErWMyTPllcGAfiHvZf5qvEBDZpT17c7KS/s11Y/Y=
-github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+GDFS6pU=
-github.com/open-rails/migratekit v1.0.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
+github.com/open-rails/migratekit v1.10.0 h1:ujeSd7Arz7etqkRhRUaHevOZy2PFX9+8874xZqOgzNs=
+github.com/open-rails/migratekit v1.10.0/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
 github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

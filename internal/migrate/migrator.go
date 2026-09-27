@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/migrate/retired"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -107,7 +108,17 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Optio
 		return fmt.Errorf("create OpenRails migrator: %w", err)
 	}
 	defer m.Close()
-	m.WithSchema(schema)
+	// Strict integrity: an edited applied migration refuses unless the schema
+	// is unchanged. Databases built by a retired baseline are converted.
+	m.WithSchema(schema).WithStrictIntegrity().
+		WithRender(func(target string) ([]migratekit.Migration, error) {
+			all, err := migratekit.LoadFromFS(postgresmigrations.FS)
+			if err != nil {
+				return nil, err
+			}
+			return rewriteMigrationsSchema(all, target)
+		}).
+		WithConversions(retired.Conversions()...)
 	// or#901: refuse a database that has run migrations this build no longer
 	// carries, BEFORE applying anything. See assertNoOrphanedMigrations.
 	// A fresh database has no ledger yet. Applied only reads it; migratekit's
