@@ -73,3 +73,34 @@ UPDATE openrails.payment_attempts SET
     token_type = CASE WHEN sqlc.arg(network_token)::boolean THEN 'network_token' ELSE token_type END,
     enriched_at = sqlc.arg(enriched_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND enriched_at IS NULL;
+
+-- name: ListPaymentAttempts :many
+-- #1116: the merchant's attempts, newest first; every filter is optional.
+SELECT sqlc.embed(a), count(*) OVER () AS total
+FROM openrails.payment_attempts a
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(kind)::text IS NULL OR a.kind = sqlc.narg(kind)::text)
+  AND (sqlc.narg(owner)::text IS NULL OR a.owner = sqlc.narg(owner)::text)
+  AND (sqlc.narg(category)::text IS NULL OR a.category = sqlc.narg(category)::text)
+  AND (sqlc.narg(reason)::text IS NULL OR a.reason = sqlc.narg(reason)::text)
+  AND (sqlc.narg(response_code)::text IS NULL OR a.response_code = sqlc.narg(response_code)::text)
+  AND (sqlc.narg(card_entry)::text IS NULL OR a.card_entry = sqlc.narg(card_entry)::text)
+  AND (sqlc.narg(psp_id)::uuid IS NULL OR a.psp_id = sqlc.narg(psp_id)::uuid)
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR a.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(checkout_id)::uuid IS NULL OR a.checkout_id = sqlc.narg(checkout_id)::uuid)
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR a.subscription_id = sqlc.narg(subscription_id)::uuid)
+  AND (sqlc.narg(cycle_id)::uuid IS NULL OR a.cycle_id = sqlc.narg(cycle_id)::uuid)
+  AND (sqlc.narg(since)::timestamptz IS NULL OR a.attempted_at >= sqlc.narg(since)::timestamptz)
+  AND (sqlc.narg(until)::timestamptz IS NULL OR a.attempted_at < sqlc.narg(until)::timestamptz)
+ORDER BY a.attempted_at DESC, a.id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: GetPaymentAttempt :one
+SELECT * FROM openrails.payment_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: ListCycleAttempts :many
+-- #1116: a rebill cycle's attempts, oldest first.
+SELECT * FROM openrails.payment_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND cycle_id = sqlc.arg(cycle_id)::uuid
+ORDER BY attempted_at, id;

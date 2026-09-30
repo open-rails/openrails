@@ -144,3 +144,55 @@ func TestDeclineMetrics(t *testing.T) {
 		}
 	}
 }
+
+// A declined renewal collected on the second retry reads back through the
+// attempt and cycle APIs (#1116).
+func TestAttemptAndCycleReads(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	e := enroll(t, w, "nmi", embedded)
+	e.setDecline(visa.Last4, "insufficient_funds", "202")
+	e.toPeriodEnd()
+	w.runRenewals()
+	for i := range 2 {
+		if i == 1 {
+			e.setDecline(visa.Last4, "", "")
+		}
+		s := w.subscription(embedded, e.sub)
+		w.advance(s.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+		w.runRenewals()
+	}
+	c := w.client[embedded]
+	ctx := t.Context()
+
+	cycles, err := c.ListRebillCycles(ctx, openrails.RebillCycleFilter{SubscriptionID: e.sub})
+	require.NoError(t, err)
+	require.Len(t, cycles.Data, 1)
+	cycle := cycles.Data[0]
+	require.Equal(t, []string{"engine", "declined", "collected", "dunning_retry"}, []string{cycle.Owner, cycle.FirstOutcome, cycle.Outcome, cycle.RecoveredBy})
+	require.NotNil(t, cycle.CollectedAt)
+	for outcome, n := range map[string]int{"collected": 1, "open": 0, "lost": 0} {
+		page, err := c.ListRebillCycles(ctx, openrails.RebillCycleFilter{SubscriptionID: e.sub, Outcome: outcome})
+		require.NoError(t, err)
+		require.Len(t, page.Data, n, outcome)
+	}
+
+	full, err := c.GetRebillCycle(ctx, cycle.ID)
+	require.NoError(t, err)
+	require.Len(t, full.Attempts, 3)
+	require.Equal(t, []string{"rebill", "dunning_retry", "dunning_retry"}, []string{full.Attempts[0].Kind, full.Attempts[1].Kind, full.Attempts[2].Kind})
+	require.Equal(t, openrails.DeclineInsufficientFunds, full.Attempts[0].Reason)
+
+	attempts, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{CycleID: cycle.ID})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), attempts.Total)
+	require.Equal(t, full.Attempts[2].ID, attempts.Data[0].ID, "newest first")
+	one, err := c.GetPaymentAttempt(ctx, attempts.Data[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "approved", one.Category)
+	require.Equal(t, cycle.ID, *one.CycleID)
+
+	declined, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{Category: "issuer_soft", Kind: "dunning_retry"})
+	require.NoError(t, err)
+	require.Len(t, declined.Data, 1)
+}

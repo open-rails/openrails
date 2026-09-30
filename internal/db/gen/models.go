@@ -1319,17 +1319,17 @@ type OpenrailsRebillCycleFact struct {
 	MissedAt       *time.Time
 	MissReason     *string
 	CreatedAt      time.Time
-	FirstCategory  string
+	FirstCategory  *string
 	FirstReason    *string
-	FirstAt        time.Time
-	WonAttemptID   uuid.UUID
-	WonKind        string
-	WonSource      string
-	WonAt          time.Time
-	WonOrdinal     int64
-	FirstFailed    *bool
+	FirstAt        *time.Time
+	WonAttemptID   *uuid.UUID
+	WonKind        *string
+	WonSource      *string
+	WonAt          *time.Time
+	WonOrdinal     *int64
+	FirstFailed    bool
 	FirstOutcome   string
-	ClosedAt       interface{}
+	ClosedAt       time.Time
 	RecoveredBy    string
 }
 

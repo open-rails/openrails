@@ -9,7 +9,7 @@ import (
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
 // OpenRails-minted resources travel as prefixed text (cat_, prod_, price_, sub_,
-// pay_, pm_, cs_) and host-owned identities (CustomerID, MerchantID) as the
+// pay_, pm_, cs_, att_, cyc_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
 // id marshals to "" and "" decodes to the zero id; use IsZero (and the json
@@ -27,6 +27,10 @@ type (
 	PaymentID         uuid.UUID
 	PaymentMethodID   uuid.UUID
 	CheckoutSessionID uuid.UUID
+	// PaymentAttemptID names one authorization a PSP answered (#1110).
+	PaymentAttemptID uuid.UUID
+	// RebillCycleID names one paid period that came due (#1111).
+	RebillCycleID uuid.UUID
 )
 
 const (
@@ -37,6 +41,8 @@ const (
 	PaymentIDPrefix         = "pay_"
 	PaymentMethodIDPrefix   = "pm_"
 	CheckoutSessionIDPrefix = "cs_"
+	PaymentAttemptIDPrefix  = "att_"
+	RebillCycleIDPrefix     = "cyc_"
 )
 
 func ParseCatalogID(s string) (CatalogID, error) {
@@ -69,6 +75,15 @@ func ParseCheckoutSessionID(s string) (CheckoutSessionID, error) {
 	return CheckoutSessionID(u), err
 }
 
+func ParsePaymentAttemptID(s string) (PaymentAttemptID, error) {
+	u, err := parsePrefixedID("payment attempt", PaymentAttemptIDPrefix, s)
+	return PaymentAttemptID(u), err
+}
+func ParseRebillCycleID(s string) (RebillCycleID, error) {
+	u, err := parsePrefixedID("rebill cycle", RebillCycleIDPrefix, s)
+	return RebillCycleID(u), err
+}
+
 // ParseCustomerID reads the plain UUID spelling of a customer id.
 func ParseCustomerID(s string) (CustomerID, error) {
 	u, err := parsePrefixedID("customer", "", s)
@@ -83,6 +98,8 @@ func (id SubscriptionID) UUID() uuid.UUID    { return uuid.UUID(id) }
 func (id PaymentID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id PaymentMethodID) UUID() uuid.UUID   { return uuid.UUID(id) }
 func (id CheckoutSessionID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id PaymentAttemptID) UUID() uuid.UUID  { return uuid.UUID(id) }
+func (id RebillCycleID) UUID() uuid.UUID     { return uuid.UUID(id) }
 
 func (id CustomerID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
 func (id CatalogID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
@@ -92,6 +109,8 @@ func (id SubscriptionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentMethodID) IsZero() bool   { return uuid.UUID(id) == uuid.Nil }
 func (id CheckoutSessionID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
+func (id PaymentAttemptID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
+func (id RebillCycleID) IsZero() bool     { return uuid.UUID(id) == uuid.Nil }
 
 // String is the wire spelling; the zero id is "".
 func (id CustomerID) String() string { return formatPrefixedID("", uuid.UUID(id)) }
@@ -108,6 +127,10 @@ func (id PaymentMethodID) String() string {
 func (id CheckoutSessionID) String() string {
 	return formatPrefixedID(CheckoutSessionIDPrefix, uuid.UUID(id))
 }
+func (id PaymentAttemptID) String() string {
+	return formatPrefixedID(PaymentAttemptIDPrefix, uuid.UUID(id))
+}
+func (id RebillCycleID) String() string { return formatPrefixedID(RebillCycleIDPrefix, uuid.UUID(id)) }
 
 func (id CustomerID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
 func (id CatalogID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
@@ -117,6 +140,8 @@ func (id SubscriptionID) MarshalText() ([]byte, error)    { return []byte(id.Str
 func (id PaymentID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id PaymentMethodID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
 func (id CheckoutSessionID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id PaymentAttemptID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
+func (id RebillCycleID) MarshalText() ([]byte, error)     { return []byte(id.String()), nil }
 
 func (id *CustomerID) UnmarshalText(text []byte) error {
 	parsed, err := ParseCustomerID(string(text))
@@ -155,6 +180,16 @@ func (id *PaymentMethodID) UnmarshalText(text []byte) error {
 }
 func (id *CheckoutSessionID) UnmarshalText(text []byte) error {
 	parsed, err := ParseCheckoutSessionID(string(text))
+	*id = parsed
+	return err
+}
+func (id *PaymentAttemptID) UnmarshalText(text []byte) error {
+	parsed, err := ParsePaymentAttemptID(string(text))
+	*id = parsed
+	return err
+}
+func (id *RebillCycleID) UnmarshalText(text []byte) error {
+	parsed, err := ParseRebillCycleID(string(text))
 	*id = parsed
 	return err
 }

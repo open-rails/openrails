@@ -785,6 +785,14 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	payments.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminPayment), payRead...)
 	payments.Handle(http.MethodPost, "/:id/refunds", h(httphandlers.AdminRefundPayment), payRefund...)
 
+	// #1116: every authorization a PSP answered, and every rebill cycle.
+	attempts := rr.Group("/payment-attempts")
+	attempts.Handle(http.MethodGet, "", h(httphandlers.ListPaymentAttempts), payRead...)
+	attempts.Handle(http.MethodGet, "/:id", h(httphandlers.GetPaymentAttempt), payRead...)
+	cycles := rr.Group("/rebill-cycles")
+	cycles.Handle(http.MethodGet, "", h(httphandlers.ListRebillCycles), payRead...)
+	cycles.Handle(http.MethodGet, "/:id", h(httphandlers.GetRebillCycle), payRead...)
+
 	// #1058: purchases a product archive recorded for merchant review.
 	reviews := rr.Group("/purchase-reviews")
 	reviews.Handle(http.MethodGet, "", h(httphandlers.ListPurchaseReviews), payRead...)

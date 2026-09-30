@@ -38,3 +38,22 @@ sql:
             go_type:
               type: "time.Time"
               pointer: true
+          # #1116: sqlc reads rebill_cycle_facts' LATERAL columns as NOT NULL.
+          - column: "openrails.rebill_cycle_facts.first_category"
+            go_type: {type: "string", pointer: true}
+          - column: "openrails.rebill_cycle_facts.first_at"
+            go_type: {type: "time.Time", pointer: true}
+          - column: "openrails.rebill_cycle_facts.won_attempt_id"
+            go_type: {import: "github.com/google/uuid", type: "UUID", pointer: true}
+          - column: "openrails.rebill_cycle_facts.won_kind"
+            go_type: {type: "string", pointer: true}
+          - column: "openrails.rebill_cycle_facts.won_source"
+            go_type: {type: "string", pointer: true}
+          - column: "openrails.rebill_cycle_facts.won_at"
+            go_type: {type: "time.Time", pointer: true}
+          - column: "openrails.rebill_cycle_facts.won_ordinal"
+            go_type: {type: "int64", pointer: true}
+          - column: "openrails.rebill_cycle_facts.first_failed"
+            go_type: "bool"
+          - column: "openrails.rebill_cycle_facts.closed_at"
+            go_type: "time.Time"
