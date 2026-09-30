@@ -93,7 +93,7 @@ type Attempt struct {
 	Target                                                   string
 	SubscriptionID, PaymentMethodID, PaymentID, RailIntentID *uuid.UUID
 	// Step keys an operation's attempts that carry no transaction id.
-	Step                           string
+	Step                            string
 	CardBrand, CardLast4, TokenType string
 }
 

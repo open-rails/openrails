@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -71,7 +72,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	require.Equal(t, []string{"initial", "approved", "engine"}, []string{charged.Kind, charged.Category, charged.Owner})
 	for _, a := range rows {
 		require.Equal(t, "new", a.CardEntry)
-		require.Equal(t, price.ID, str(a.Target))
+		require.Equal(t, strings.TrimPrefix(price.ID, "price_"), str(a.Target))
 		require.Equal(t, *rows[0].Checkout, *a.Checkout, "one checkout")
 	}
 	paid := completed(w.payments(embedded, h.c.id))
