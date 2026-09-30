@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,8 +172,8 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	cycle := cycles.Data[0]
 	require.Equal(t, []string{"engine", "declined", "collected", "dunning_retry"}, []string{cycle.Owner, cycle.FirstOutcome, cycle.Outcome, cycle.RecoveredBy})
 	require.NotNil(t, cycle.CollectedAt)
-	for outcome, n := range map[string]int{"collected": 1, "open": 0, "lost": 0} {
-		page, err := c.ListRebillCycles(ctx, openrails.RebillCycleFilter{SubscriptionID: e.sub, Outcome: outcome})
+	for outcome, n := range map[string]int{"collected": 1, "open": 0, "lost": 0, "open,lost": 0, "lost,collected": 1} {
+		page, err := c.ListRebillCycles(ctx, openrails.RebillCycleFilter{SubscriptionID: e.sub, Outcome: strings.Split(outcome, ",")})
 		require.NoError(t, err)
 		require.Len(t, page.Data, n, outcome)
 	}
@@ -192,7 +193,10 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	require.Equal(t, "approved", one.Category)
 	require.Equal(t, cycle.ID, *one.CycleID)
 
-	declined, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{Category: "issuer_soft", Kind: "dunning_retry"})
+	declined, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{Category: []string{"issuer_soft"}, Kind: []string{"dunning_retry"}})
 	require.NoError(t, err)
 	require.Len(t, declined.Data, 1)
+	failed, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{CycleID: cycle.ID, Kind: []string{"rebill", "dunning_retry"}, Category: []string{"issuer_soft", "issuer_hard"}})
+	require.NoError(t, err)
+	require.Len(t, failed.Data, 2, "the cycle's two declines")
 }

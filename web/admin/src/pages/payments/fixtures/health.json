@@ -1,0 +1,957 @@
+{
+  "attempts": {
+    "data": [
+      {
+        "amount": "9990000",
+        "attempted_at": "2022-11-05T10:49:02-06:00",
+        "card_brand": "visa",
+        "card_entry": "saved",
+        "card_last4": "4242",
+        "category": "approved",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cycle_id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "id": "att_01a0f338-34de-78de-9b7e-82c2177402ea",
+        "kind": "dunning_retry",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000013"
+      },
+      {
+        "action": "retry",
+        "amount": "9990000",
+        "attempted_at": "2022-11-02T10:49:01-06:00",
+        "card_brand": "visa",
+        "card_entry": "saved",
+        "card_last4": "4242",
+        "category": "issuer_soft",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cycle_id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "id": "att_01a0f338-32fe-70b2-9018-7cc5f1f0bdd0",
+        "kind": "dunning_retry",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "reason": "insufficient_funds",
+        "response_code": "202",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000012"
+      },
+      {
+        "action": "retry",
+        "amount": "9990000",
+        "attempted_at": "2022-10-31T10:49:00-06:00",
+        "card_brand": "visa",
+        "card_entry": "saved",
+        "card_last4": "4242",
+        "category": "issuer_soft",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cycle_id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "id": "att_01a0f338-30ff-7810-b945-691106b30172",
+        "kind": "rebill",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "reason": "insufficient_funds",
+        "response_code": "202",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000011"
+      },
+      {
+        "amount": "9990000",
+        "attempted_at": "2022-10-01T10:48:59-06:00",
+        "card_brand": "visa",
+        "card_entry": "new",
+        "card_last4": "4242",
+        "category": "approved",
+        "checkout_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
+        "checkout_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "id": "att_01a0f338-2ed5-7030-88df-aa55c44e0137",
+        "kind": "initial",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_id": "pay_01a0f338-2e49-7bf0-953c-73b99890d215",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000010"
+      },
+      {
+        "amount": "0",
+        "attempted_at": "2022-10-01T10:48:59-06:00",
+        "card_brand": "visa",
+        "card_entry": "new",
+        "card_last4": "4242",
+        "category": "approved",
+        "checkout_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
+        "checkout_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "id": "att_01a0f338-2e45-7dbc-9179-54282db03fa9",
+        "kind": "verify",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "source": "openrails",
+        "token_type": "psp_token",
+        "transaction_id": "validate00000009"
+      },
+      {
+        "action": "fix_payment_method",
+        "amount": "0",
+        "attempted_at": "2022-10-01T10:48:59-06:00",
+        "card_entry": "new",
+        "category": "card_data",
+        "checkout_id": "01a0f338-2e24-72a1-8bc8-3bb0412d17a3",
+        "checkout_target": "3c520f1b-9c60-5755-b700-39b76cd24751",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cvv_result": "N",
+        "id": "att_01a0f338-2e21-7255-9a0c-820a1da69a6a",
+        "kind": "verify",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "reason": "incorrect_cvc",
+        "response_code": "200",
+        "response_text": "DECLINE",
+        "source": "openrails",
+        "transaction_id": "validate00000005"
+      }
+    ],
+    "has_more": false,
+    "limit": 50,
+    "object": "list",
+    "offset": 0,
+    "total": 6
+  },
+  "cycle": {
+    "amount": "9990000",
+    "attempts": [
+      {
+        "action": "retry",
+        "amount": "9990000",
+        "attempted_at": "2022-10-31T10:49:00-06:00",
+        "card_brand": "visa",
+        "card_entry": "saved",
+        "card_last4": "4242",
+        "category": "issuer_soft",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cycle_id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "id": "att_01a0f338-30ff-7810-b945-691106b30172",
+        "kind": "rebill",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "reason": "insufficient_funds",
+        "response_code": "202",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000011"
+      },
+      {
+        "action": "retry",
+        "amount": "9990000",
+        "attempted_at": "2022-11-02T10:49:01-06:00",
+        "card_brand": "visa",
+        "card_entry": "saved",
+        "card_last4": "4242",
+        "category": "issuer_soft",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cycle_id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "id": "att_01a0f338-32fe-70b2-9018-7cc5f1f0bdd0",
+        "kind": "dunning_retry",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "reason": "insufficient_funds",
+        "response_code": "202",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000012"
+      },
+      {
+        "amount": "9990000",
+        "attempted_at": "2022-11-05T10:49:02-06:00",
+        "card_brand": "visa",
+        "card_entry": "saved",
+        "card_last4": "4242",
+        "category": "approved",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "cycle_id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "id": "att_01a0f338-34de-78de-9b7e-82c2177402ea",
+        "kind": "dunning_retry",
+        "object": "payment_attempt",
+        "observed_via": "response",
+        "owner": "engine",
+        "payment_method_id": "pm_01a0f338-2e35-72c0-a2da-64fb5a08dfff",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "source": "openrails",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190",
+        "token_type": "psp_token",
+        "transaction_id": "tx00000013"
+      }
+    ],
+    "closes_at": "2022-11-05T10:49:02-06:00",
+    "collected_at": "2022-11-05T10:49:02-06:00",
+    "currency": "USD",
+    "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+    "due_at": "2022-10-31T10:48:59-06:00",
+    "first_outcome": "declined",
+    "id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+    "object": "rebill_cycle",
+    "outcome": "collected",
+    "owner": "engine",
+    "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+    "rail": "nmi",
+    "recovered_by": "dunning_retry",
+    "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190"
+  },
+  "cycles": {
+    "data": [
+      {
+        "amount": "9990000",
+        "closes_at": "2022-11-05T10:49:02-06:00",
+        "collected_at": "2022-11-05T10:49:02-06:00",
+        "currency": "USD",
+        "customer_id": "e3a78a10-eb20-4a2b-9bb5-e8e748510d18",
+        "due_at": "2022-10-31T10:48:59-06:00",
+        "first_outcome": "declined",
+        "id": "cyc_01a0f338-3100-7061-a30f-b948f9f306a3",
+        "object": "rebill_cycle",
+        "outcome": "collected",
+        "owner": "engine",
+        "psp_id": "b0382e51-d8a6-5759-8226-deb029c83d83",
+        "rail": "nmi",
+        "recovered_by": "dunning_retry",
+        "subscription_id": "sub_01a0f338-2e49-7bee-be65-569992dca190"
+      }
+    ],
+    "has_more": false,
+    "limit": 50,
+    "object": "list",
+    "offset": 0,
+    "total": 1
+  },
+  "metrics": {
+    "avs": {
+      "query": {
+        "by": [
+          "avs_result"
+        ],
+        "filters": {
+          "card_entry": [
+            "new"
+          ],
+          "kind": [
+            "verify",
+            "initial"
+          ]
+        },
+        "measures": [
+          "attempts",
+          "attempt_failure_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "avs_result"
+          },
+          {
+            "kind": "measure",
+            "name": "attempts",
+            "unit": "count"
+          },
+          {
+            "kind": "measure",
+            "name": "attempt_failure_rate",
+            "unit": "ratio"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "",
+            3,
+            0.3333333333333333
+          ]
+        ]
+      }
+    },
+    "byAttempt": {
+      "query": {
+        "by": [
+          "owner",
+          "recovery_attempt"
+        ],
+        "measures": [
+          "dunning_recovered"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "owner"
+          },
+          {
+            "kind": "dimension",
+            "name": "recovery_attempt"
+          },
+          {
+            "kind": "measure",
+            "name": "dunning_recovered",
+            "unit": "count"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "engine",
+            "3",
+            1
+          ]
+        ]
+      }
+    },
+    "byDays": {
+      "query": {
+        "by": [
+          "owner",
+          "days_to_recover"
+        ],
+        "measures": [
+          "dunning_recovered"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "owner"
+          },
+          {
+            "kind": "dimension",
+            "name": "days_to_recover"
+          },
+          {
+            "kind": "measure",
+            "name": "dunning_recovered",
+            "unit": "count"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "engine",
+            "5",
+            1
+          ]
+        ]
+      }
+    },
+    "coverage": {
+      "query": {
+        "by": [
+          "rail_account",
+          "observed_via"
+        ],
+        "filters": {
+          "source": [
+            "provider_schedule"
+          ]
+        },
+        "measures": [
+          "attempts"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "rail_account"
+          },
+          {
+            "kind": "dimension",
+            "name": "observed_via"
+          },
+          {
+            "kind": "measure",
+            "name": "attempts",
+            "unit": "count"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": []
+      }
+    },
+    "cvv": {
+      "query": {
+        "by": [
+          "cvv_result"
+        ],
+        "filters": {
+          "card_entry": [
+            "new"
+          ],
+          "kind": [
+            "verify",
+            "initial"
+          ]
+        },
+        "measures": [
+          "attempts",
+          "attempt_failure_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "cvv_result"
+          },
+          {
+            "kind": "measure",
+            "name": "attempts",
+            "unit": "count"
+          },
+          {
+            "kind": "measure",
+            "name": "attempt_failure_rate",
+            "unit": "ratio"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "",
+            2,
+            0
+          ],
+          [
+            "N",
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    "missed": {
+      "query": {
+        "by": [
+          "miss_reason",
+          "rail_account"
+        ],
+        "measures": [
+          "rebills_missed"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "miss_reason"
+          },
+          {
+            "kind": "dimension",
+            "name": "rail_account"
+          },
+          {
+            "kind": "measure",
+            "name": "rebills_missed",
+            "unit": "count"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": []
+      }
+    },
+    "reasons": {
+      "query": {
+        "by": [
+          "category",
+          "reason",
+          "response_code"
+        ],
+        "compare": "previous_period",
+        "measures": [
+          "failed_attempts"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "category"
+          },
+          {
+            "kind": "dimension",
+            "name": "reason"
+          },
+          {
+            "kind": "dimension",
+            "name": "response_code"
+          },
+          {
+            "kind": "measure",
+            "name": "failed_attempts",
+            "unit": "count"
+          }
+        ],
+        "compare_range": {
+          "from": "2022-08-27T13:48:55Z",
+          "to": "2022-10-01T15:48:59Z"
+        },
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "card_data",
+            "incorrect_cvc",
+            "200",
+            1
+          ],
+          [
+            "issuer_soft",
+            "insufficient_funds",
+            "202",
+            2
+          ]
+        ]
+      }
+    },
+    "recoveryRate": {
+      "query": {
+        "by": [
+          "owner"
+        ],
+        "measures": [
+          "dunning_recovery_rate",
+          "dunning_recovered"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "owner"
+          },
+          {
+            "kind": "measure",
+            "name": "dunning_recovery_rate",
+            "unit": "ratio"
+          },
+          {
+            "kind": "measure",
+            "name": "dunning_recovered",
+            "unit": "count"
+          }
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "engine",
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    "tileCheckout": {
+      "query": {
+        "compare": "previous_period",
+        "measures": [
+          "checkout_failure_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "measure",
+            "name": "checkout_failure_rate",
+            "unit": "ratio"
+          }
+        ],
+        "compare_range": {
+          "from": "2022-08-27T13:48:55Z",
+          "to": "2022-10-01T15:48:59Z"
+        },
+        "compare_rows": [
+          [
+            null
+          ]
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            0
+          ]
+        ]
+      }
+    },
+    "tileCycles": {
+      "query": {
+        "compare": "previous_period",
+        "measures": [
+          "rebill_first_failure_rate",
+          "rebills_missed",
+          "dunning_recovery_rate",
+          "rebill_collection_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "measure",
+            "name": "rebill_first_failure_rate",
+            "unit": "ratio"
+          },
+          {
+            "kind": "measure",
+            "name": "rebills_missed",
+            "unit": "count"
+          },
+          {
+            "kind": "measure",
+            "name": "dunning_recovery_rate",
+            "unit": "ratio"
+          },
+          {
+            "kind": "measure",
+            "name": "rebill_collection_rate",
+            "unit": "ratio"
+          }
+        ],
+        "compare_range": {
+          "from": "2022-08-27T13:48:55Z",
+          "to": "2022-10-01T15:48:59Z"
+        },
+        "compare_rows": [
+          [
+            null,
+            0,
+            null,
+            null
+          ]
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            1,
+            0,
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    "tileNewCard": {
+      "query": {
+        "compare": "previous_period",
+        "filters": {
+          "card_entry": [
+            "new"
+          ],
+          "kind": [
+            "verify",
+            "initial"
+          ]
+        },
+        "measures": [
+          "attempt_failure_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "measure",
+            "name": "attempt_failure_rate",
+            "unit": "ratio"
+          }
+        ],
+        "compare_range": {
+          "from": "2022-08-27T13:48:55Z",
+          "to": "2022-10-01T15:48:59Z"
+        },
+        "compare_rows": [
+          [
+            null
+          ]
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            0.3333333333333333
+          ]
+        ]
+      }
+    },
+    "trendNewCard": {
+      "query": {
+        "by": [
+          "time",
+          "owner"
+        ],
+        "filters": {
+          "card_entry": [
+            "new"
+          ],
+          "kind": [
+            "verify",
+            "initial"
+          ]
+        },
+        "grain": "week",
+        "measures": [
+          "attempt_failure_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "time",
+            "name": "time"
+          },
+          {
+            "kind": "dimension",
+            "name": "owner"
+          },
+          {
+            "kind": "measure",
+            "name": "attempt_failure_rate",
+            "unit": "ratio"
+          }
+        ],
+        "grain": "week",
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "2022-09-26T00:00:00Z",
+            "engine",
+            0.3333333333333333
+          ],
+          [
+            "2022-10-03T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-10T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-17T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-24T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-31T00:00:00Z",
+            "engine",
+            null
+          ]
+        ]
+      }
+    },
+    "trendRebill": {
+      "query": {
+        "by": [
+          "time",
+          "owner"
+        ],
+        "grain": "week",
+        "measures": [
+          "rebill_first_failure_rate"
+        ],
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "time",
+            "name": "time"
+          },
+          {
+            "kind": "dimension",
+            "name": "owner"
+          },
+          {
+            "kind": "measure",
+            "name": "rebill_first_failure_rate",
+            "unit": "ratio"
+          }
+        ],
+        "grain": "week",
+        "range": {
+          "from": "2022-10-01T15:48:59Z",
+          "to": "2022-11-05T17:49:03Z"
+        },
+        "rows": [
+          [
+            "2022-09-26T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-03T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-10T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-17T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-24T00:00:00Z",
+            "engine",
+            null
+          ],
+          [
+            "2022-10-31T00:00:00Z",
+            "engine",
+            1
+          ]
+        ]
+      }
+    }
+  }
+}

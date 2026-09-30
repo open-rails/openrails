@@ -44,23 +44,22 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
 
 -- name: ListRebillCycles :many
 -- #1116: the merchant's rebill cycles as rebill_cycle_facts derives them,
--- latest due first. outcome filters on collected, lost (closed by now
--- without a collection) or open.
+-- latest due first. Outcome is collected, lost (closed by now without a
+-- collection) or open; a text filter matches any of its values.
 SELECT sqlc.embed(cf), count(*) OVER () AS total
 FROM openrails.rebill_cycle_facts cf
 WHERE cf.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(owner)::text IS NULL OR cf.owner = sqlc.narg(owner)::text)
-  AND (sqlc.narg(first_outcome)::text IS NULL OR cf.first_outcome = sqlc.narg(first_outcome)::text)
-  AND (sqlc.narg(miss_reason)::text IS NULL OR cf.miss_reason = sqlc.narg(miss_reason)::text)
+  AND (sqlc.narg(owners)::text[] IS NULL OR cf.owner = ANY(sqlc.narg(owners)::text[]))
+  AND (sqlc.narg(first_outcomes)::text[] IS NULL OR cf.first_outcome = ANY(sqlc.narg(first_outcomes)::text[]))
+  AND (sqlc.narg(miss_reasons)::text[] IS NULL OR cf.miss_reason = ANY(sqlc.narg(miss_reasons)::text[]))
   AND (sqlc.narg(psp_id)::uuid IS NULL OR cf.psp_id = sqlc.narg(psp_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR cf.subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(due_since)::timestamptz IS NULL OR cf.due_at >= sqlc.narg(due_since)::timestamptz)
   AND (sqlc.narg(due_until)::timestamptz IS NULL OR cf.due_at < sqlc.narg(due_until)::timestamptz)
-  AND CASE sqlc.narg(outcome)::text
-        WHEN 'collected' THEN cf.won_at IS NOT NULL
-        WHEN 'lost' THEN cf.won_at IS NULL AND cf.closed_at <= sqlc.arg(now)::timestamptz
-        WHEN 'open' THEN cf.won_at IS NULL AND cf.closed_at > sqlc.arg(now)::timestamptz
-        ELSE true END
+  AND (sqlc.narg(outcomes)::text[] IS NULL OR CASE
+        WHEN cf.won_at IS NOT NULL THEN 'collected'
+        WHEN cf.closed_at <= sqlc.arg(now)::timestamptz THEN 'lost'
+        ELSE 'open' END = ANY(sqlc.narg(outcomes)::text[]))
 ORDER BY cf.due_at DESC, cf.id DESC
 LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 

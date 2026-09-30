@@ -280,7 +280,9 @@ function TimeSeriesChart({
               type="monotone"
               stroke={chartColor(i)}
               strokeWidth={2}
-              dot={false}
+              // A rate's empty buckets are gaps; dots keep a lone value visible.
+              connectNulls={s.unit === "ratio"}
+              dot={s.unit === "ratio" ? { r: 2.5 } : false}
             />
           ))}
         </LineChart>

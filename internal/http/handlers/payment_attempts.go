@@ -19,7 +19,9 @@ import (
 // ListPaymentAttempts lists the merchant's payment attempts, newest first
 // (#1116).
 //
-//	GET /merchant/payment-attempts?kind&owner&category&reason&response_code&card_entry&psp_id&customer_id&checkout_id&subscription_id&cycle_id&since&until&limit&offset
+//	GET /merchant/payment-attempts?kind&owner&category&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&checkout_id&subscription_id&cycle_id&since&until&limit&offset
+//
+// A text filter takes one value or a comma-separated list.
 func ListPaymentAttempts(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {
@@ -27,8 +29,9 @@ func ListPaymentAttempts(r *httprequest.Request) {
 	}
 	q := queryReader{r: r}
 	params := gen.ListPaymentAttemptsParams{
-		MerchantID: mid, Kind: q.text("kind"), Owner: q.text("owner"), Category: q.text("category"), Reason: q.text("reason"),
-		ResponseCode: q.text("response_code"), CardEntry: q.text("card_entry"), PspID: q.uuid("psp_id"), CustomerID: q.uuid("customer_id"),
+		MerchantID: mid, Kinds: q.list("kind"), Owners: q.list("owner"), Categories: q.list("category"), Reasons: q.list("reason"),
+		ResponseCodes: q.list("response_code"), CardEntries: q.list("card_entry"), Sources: q.list("source"), ObservedVias: q.list("observed_via"),
+		AvsResults: q.list("avs_result"), CvvResults: q.list("cvv_result"), PspID: q.uuid("psp_id"), CustomerID: q.uuid("customer_id"),
 		CheckoutID: q.uuid("checkout_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
 			id, err := openrails.ParseSubscriptionID(s)
 			return id.UUID(), err
@@ -85,20 +88,24 @@ func GetPaymentAttempt(r *httprequest.Request) {
 // (#1116).
 //
 //	GET /merchant/rebill-cycles?owner&first_outcome&miss_reason&outcome&psp_id&subscription_id&due_since&due_until&limit&offset
+//
+// A text filter takes one value or a comma-separated list.
 func ListRebillCycles(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {
 		return
 	}
 	q := queryReader{r: r}
-	outcome := q.text("outcome")
-	if outcome != nil && *outcome != "collected" && *outcome != "lost" && *outcome != "open" {
-		r.ErrorJSON(http.StatusBadRequest, `outcome must be "collected", "lost" or "open"`)
-		return
+	outcomes := q.list("outcome")
+	for _, o := range outcomes {
+		if o != "collected" && o != "lost" && o != "open" {
+			r.ErrorJSON(http.StatusBadRequest, `outcome must be "collected", "lost" or "open"`)
+			return
+		}
 	}
 	now := r.Clock.Now()
 	params := gen.ListRebillCyclesParams{
-		MerchantID: mid, Now: now, Owner: q.text("owner"), FirstOutcome: q.text("first_outcome"), MissReason: q.text("miss_reason"), Outcome: outcome,
+		MerchantID: mid, Now: now, Owners: q.list("owner"), FirstOutcomes: q.list("first_outcome"), MissReasons: q.list("miss_reason"), Outcomes: outcomes,
 		PspID: q.uuid("psp_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
 			id, err := openrails.ParseSubscriptionID(s)
 			return id.UUID(), err
@@ -229,11 +236,15 @@ type queryReader struct {
 	err error
 }
 
-func (q *queryReader) text(key string) *string {
-	if v := strings.TrimSpace(q.r.Query(key)); v != "" {
-		return &v
+// list is a filter's values, comma-separated; nil when absent.
+func (q *queryReader) list(key string) []string {
+	var out []string
+	for _, v := range strings.Split(q.r.Query(key), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
 	}
-	return nil
+	return out
 }
 
 func (q *queryReader) uuid(key string) *uuid.UUID {

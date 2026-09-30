@@ -164,6 +164,66 @@ export interface PaymentObject {
   created_at: string
 }
 
+// --- Payment attempts and rebill cycles (#1116) ---
+
+export interface PaymentAttempt {
+  id: string // att_...
+  object: "payment_attempt"
+  kind: string
+  owner: string
+  card_entry: string
+  source: string
+  observed_via: string
+  category: string
+  reason?: string
+  action?: string
+  response_code?: string
+  response_text?: string
+  issuer_code?: string
+  issuer_text?: string
+  avs_result?: string
+  cvv_result?: string
+  card_brand?: string
+  card_last4?: string
+  card_bin?: string
+  token_type?: string
+  transaction_id?: string
+  rail: Rail
+  psp_id: string // plain UUID
+  customer_id: string // plain UUID
+  amount: string // native units
+  currency?: string
+  attempted_at: string
+  checkout_id?: string
+  checkout_target?: string
+  cycle_id?: string // cyc_...
+  subscription_id?: string // sub_...
+  payment_method_id?: string // pm_...
+  payment_id?: string // pay_...
+  enriched_at?: string
+}
+
+export interface RebillCycle {
+  id: string // cyc_...
+  object: "rebill_cycle"
+  subscription_id: string // sub_...
+  customer_id: string
+  psp_id: string
+  rail: Rail
+  owner: string
+  due_at: string
+  amount: string
+  currency: string
+  first_outcome: string
+  outcome: "collected" | "lost" | "open"
+  missed_at?: string
+  miss_reason?: string
+  collected_at?: string
+  recovered_by?: string
+  closes_at: string
+  attempts?: PaymentAttempt[]
+}
+
 // --- Subscription admin response (list/detail) ---
 
 export interface AdminSubscription extends RawSubscription {

@@ -7,9 +7,11 @@ import {
   getCustomerProfile,
   getMerchantSettings,
   getPayment,
+  getPaymentAttempt,
   getPrice,
   getPriceKeyHistory,
   getProduct,
+  getRebillCycle,
   getSubscription,
   getUsageMeter,
   getUnreadCount,
@@ -20,10 +22,12 @@ import {
   listCustomerUsageRateOverrides,
   listFindings,
   listNotifications,
+  listPaymentAttempts,
   listPaymentProviders,
   listPayments,
   listPrices,
   listProducts,
+  listRebillCycles,
   listRepairAlerts,
   listRepriceBatchesByKey,
   listReprices,
@@ -34,6 +38,8 @@ import {
   listTeamInvites,
   listWebhooks,
   listWorkerHealth,
+  type AttemptFilters,
+  type CycleFilters,
   type PaymentFilters,
   type RepriceFilters,
   type SubscriptionFilters,
@@ -93,6 +99,8 @@ const buildQueryKeys = (root: () => MerchantRoot) => ({
   subscription: (id: string) => [...root(), "subscriptions", id] as const,
   payments: () => [...root(), "payments"] as const,
   payment: (id: string) => [...root(), "payments", id] as const,
+  attempts: () => [...root(), "payment-attempts"] as const,
+  cycles: () => [...root(), "rebill-cycles"] as const,
   catalog: () => [...root(), "catalog"] as const,
   catalogDrift: () => [...root(), "catalog", "drift"] as const,
   usageMeters: () => [...root(), "catalog", "meters"] as const,
@@ -197,6 +205,35 @@ export const adminQueries = {
       queryFn: ({ signal }) => getPayment(id, signal),
       enabled: Boolean(id),
       meta: { errorAction: "Load payment" },
+    }),
+  attempts: (filters: AttemptFilters, limit: number, offset: number) =>
+    queryOptions({
+      queryKey: [...queryKeys.attempts(), { filters, limit, offset }],
+      queryFn: ({ signal }) =>
+        listPaymentAttempts(filters, limit, offset, signal),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load payment attempts" },
+    }),
+  attempt: (id: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.attempts(), id],
+      queryFn: ({ signal }) => getPaymentAttempt(id, signal),
+      enabled: Boolean(id),
+      meta: { errorAction: "Load payment attempt" },
+    }),
+  cycles: (filters: CycleFilters, limit: number, offset: number) =>
+    queryOptions({
+      queryKey: [...queryKeys.cycles(), { filters, limit, offset }],
+      queryFn: ({ signal }) => listRebillCycles(filters, limit, offset, signal),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load rebill cycles" },
+    }),
+  cycle: (id: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.cycles(), id],
+      queryFn: ({ signal }) => getRebillCycle(id, signal),
+      enabled: Boolean(id),
+      meta: { errorAction: "Load rebill cycle" },
     }),
   products: (
     options: { limit?: number; offset?: number; errorAction?: string } = {}

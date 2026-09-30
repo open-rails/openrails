@@ -371,31 +371,39 @@ const listPaymentAttempts = `-- name: ListPaymentAttempts :many
 SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.checkout_id, a.checkout_target, a.subscription_id, a.payment_method_id, a.payment_id, a.rail_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.enriched_at, count(*) OVER () AS total
 FROM openrails.payment_attempts a
 WHERE a.merchant_id = $1::uuid
-  AND ($2::text IS NULL OR a.kind = $2::text)
-  AND ($3::text IS NULL OR a.owner = $3::text)
-  AND ($4::text IS NULL OR a.category = $4::text)
-  AND ($5::text IS NULL OR a.reason = $5::text)
-  AND ($6::text IS NULL OR a.response_code = $6::text)
-  AND ($7::text IS NULL OR a.card_entry = $7::text)
-  AND ($8::uuid IS NULL OR a.psp_id = $8::uuid)
-  AND ($9::uuid IS NULL OR a.customer_id = $9::uuid)
-  AND ($10::uuid IS NULL OR a.checkout_id = $10::uuid)
-  AND ($11::uuid IS NULL OR a.subscription_id = $11::uuid)
-  AND ($12::uuid IS NULL OR a.cycle_id = $12::uuid)
-  AND ($13::timestamptz IS NULL OR a.attempted_at >= $13::timestamptz)
-  AND ($14::timestamptz IS NULL OR a.attempted_at < $14::timestamptz)
+  AND ($2::text[] IS NULL OR a.kind = ANY($2::text[]))
+  AND ($3::text[] IS NULL OR a.owner = ANY($3::text[]))
+  AND ($4::text[] IS NULL OR a.category = ANY($4::text[]))
+  AND ($5::text[] IS NULL OR a.reason = ANY($5::text[]))
+  AND ($6::text[] IS NULL OR a.response_code = ANY($6::text[]))
+  AND ($7::text[] IS NULL OR a.card_entry = ANY($7::text[]))
+  AND ($8::text[] IS NULL OR a.source = ANY($8::text[]))
+  AND ($9::text[] IS NULL OR a.observed_via = ANY($9::text[]))
+  AND ($10::text[] IS NULL OR a.avs_result = ANY($10::text[]))
+  AND ($11::text[] IS NULL OR a.cvv_result = ANY($11::text[]))
+  AND ($12::uuid IS NULL OR a.psp_id = $12::uuid)
+  AND ($13::uuid IS NULL OR a.customer_id = $13::uuid)
+  AND ($14::uuid IS NULL OR a.checkout_id = $14::uuid)
+  AND ($15::uuid IS NULL OR a.subscription_id = $15::uuid)
+  AND ($16::uuid IS NULL OR a.cycle_id = $16::uuid)
+  AND ($17::timestamptz IS NULL OR a.attempted_at >= $17::timestamptz)
+  AND ($18::timestamptz IS NULL OR a.attempted_at < $18::timestamptz)
 ORDER BY a.attempted_at DESC, a.id DESC
-LIMIT $16::bigint OFFSET $15::bigint
+LIMIT $20::bigint OFFSET $19::bigint
 `
 
 type ListPaymentAttemptsParams struct {
 	MerchantID     uuid.UUID
-	Kind           *string
-	Owner          *string
-	Category       *string
-	Reason         *string
-	ResponseCode   *string
-	CardEntry      *string
+	Kinds          []string
+	Owners         []string
+	Categories     []string
+	Reasons        []string
+	ResponseCodes  []string
+	CardEntries    []string
+	Sources        []string
+	ObservedVias   []string
+	AvsResults     []string
+	CvvResults     []string
 	PspID          *uuid.UUID
 	CustomerID     *uuid.UUID
 	CheckoutID     *uuid.UUID
@@ -412,16 +420,21 @@ type ListPaymentAttemptsRow struct {
 	Total                   int64
 }
 
-// #1116: the merchant's attempts, newest first; every filter is optional.
+// #1116: the merchant's attempts, newest first; every filter is optional and
+// a text filter matches any of its values.
 func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemptsParams) ([]ListPaymentAttemptsRow, error) {
 	rows, err := q.db.Query(ctx, listPaymentAttempts,
 		arg.MerchantID,
-		arg.Kind,
-		arg.Owner,
-		arg.Category,
-		arg.Reason,
-		arg.ResponseCode,
-		arg.CardEntry,
+		arg.Kinds,
+		arg.Owners,
+		arg.Categories,
+		arg.Reasons,
+		arg.ResponseCodes,
+		arg.CardEntries,
+		arg.Sources,
+		arg.ObservedVias,
+		arg.AvsResults,
+		arg.CvvResults,
 		arg.PspID,
 		arg.CustomerID,
 		arg.CheckoutID,

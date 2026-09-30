@@ -52,7 +52,7 @@ export function WidgetTile({
     error,
     refetch,
   } = useQuery(adminQueries.widgetMetrics(query))
-  const link = widget.viz === "stat" ? deepLinkFor(widget.query) : null
+  const link = deepLinkFor(widget.query, widget.viz)
 
   const isStat = widget.viz === "stat"
 
