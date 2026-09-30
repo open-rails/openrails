@@ -68,7 +68,7 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 		},
 		"RunBootstrap":            func() error { _, err := RunBootstrap(ctx, a, BootstrapOptions{}); return err },
 		"ListMerchantsForSubject": func() error { _, err := ListMerchantsForSubject(ctx, a, "user"); return err },
-		"ListMerchantRefs":        func() error { _, err := ListMerchantRefs(ctx, a, []string{"shop"}); return err },
+		"ListUserMerchants":       func() error { _, err := ListUserMerchants(ctx, a, "user"); return err },
 		"ListActiveMerchantIDs":   func() error { _, err := ListActiveMerchantIDs(ctx, a, 10, 0); return err },
 		"SetMerchantDisplayName":  func() error { return SetMerchantDisplayName(ctx, a, id, "Shop") },
 		"RenameMerchant":          func() error { return RenameMerchant(ctx, a, id, "shop") },

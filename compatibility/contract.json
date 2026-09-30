@@ -745,9 +745,9 @@
       "func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm string) (bool, error)",
       "func (c *ControlPlane) JWKSHandler() http.Handler",
       "func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]merchant.ID, error)",
-      "func (c *ControlPlane) ListMerchantRefs(ctx context.Context, slugs []string) ([]MerchantRef, error)",
       "func (c *ControlPlane) ListMerchantRetirementCandidates(ctx context.Context, req MerchantRetirementCandidatesRequest) (MerchantRetirementCandidatePage, error)",
       "func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject string) ([]MerchantRef, error)",
+      "func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]UserMerchant, error)",
       "func (c *ControlPlane) PlanProviderAccountCutover(ctx context.Context, id merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error)",
       "func (c *ControlPlane) ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*ProvisionMerchantResult, error)",
       "func (c *ControlPlane) ProvisionMerchantForRestore(ctx context.Context, req ProvisionMerchantForRestoreRequest) (*ProvisionMerchantResult, error)",
@@ -795,6 +795,7 @@
       "type ProvisionMerchantRequest = operator.ProvisionMerchantRequest",
       "type ProvisionMerchantResult = operator.ProvisionMerchantResult",
       "type RetireUnusedMerchantResult = operator.RetireUnusedMerchantResult",
+      "type UserMerchant = operator.UserMerchant",
       "var ErrCreationRefused = operator.ErrCreationRefused",
       "var ErrEmailUnverified = operator.ErrEmailUnverified",
       "var ErrInvalidSlug = operator.ErrInvalidSlug",
@@ -846,7 +847,8 @@
     "internal/controlplane": [
       "type BootstrapOptions struct {\n\tBootstrapMerchantSlug string\n\n\tInitialAdminUserID string\n\n\tMintInitialAPIKey bool\n}",
       "type BootstrapResult struct {\n\tBootstrapMerchantSlug string\n\n\tBootstrapMerchantGroupID string\n\n\tMerchantGroupCreated bool\n\n\tAPIKeyMinted bool\n\tAPIKeySecret string\n\tAPIKeyID     string\n}",
-      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tAdmission func(ctx context.Context, instanceSlug, ownerUserID string) error\n}"
+      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tAdmission func(ctx context.Context, instanceSlug, ownerUserID string) error\n}",
+      "type UserMerchant struct {\n\tID          merchant.ID `json:\"id\"`\n\tSlug        string      `json:\"slug\"`\n\tDisplayName string      `json:\"display_name,omitempty\"`\n\tRole        string      `json:\"role\"`\n}"
     ],
     "internal/db/models": [
       "func (r Rail) EventSource() EventSource",
@@ -923,7 +925,8 @@
       "type ProvisionMerchantForRestoreRequest struct {\n\tMerchantID merchant.ID\n\n\tSlug            string\n\tExistingGroupID string\n\tOwnerUserID     string\n}",
       "type ProvisionMerchantRequest struct {\n\tSlug string\n\n\tOwnerUserID string\n}",
       "type ProvisionMerchantResult struct {\n\tMerchantID merchant.ID\n\n\tGroupID string\n\n\tCreated bool\n}",
-      "type RetireUnusedMerchantResult = merchants.RetireResult"
+      "type RetireUnusedMerchantResult = merchants.RetireResult",
+      "type UserMerchant = controlplane.UserMerchant"
     ],
     "internal/providerqualification": [
       "type Record struct {\n\tPSPID       uuid.UUID `json:\"psp_id\"`\n\tEnvironment string    `json:\"environment\"`\n\tContract    string    `json:\"contract\"`\n\tEvidenceRef string    `json:\"evidence_ref\"`\n}"
@@ -1291,7 +1294,8 @@
       "type MerchantAPIKey struct {\n\tID         string     `json:\"id\"`\n\tName       string     `json:\"name\"`\n\tRole       string     `json:\"role\"`\n\tPrefix     string     `json:\"prefix\"`\n\tCreatedAt  time.Time  `json:\"created_at\"`\n\tLastUsedAt *time.Time `json:\"last_used_at,omitempty\"`\n\tExpiresAt  *time.Time `json:\"expires_at,omitempty\"`\n\tRevokedAt  *time.Time `json:\"revoked_at,omitempty\"`\n}",
       "type MerchantTeamInvite struct {\n\tID         string     `json:\"id\"`\n\tRole       string     `json:\"role\"`\n\tCreatedAt  time.Time  `json:\"created_at\"`\n\tExpiresAt  *time.Time `json:\"expires_at,omitempty\"`\n\tRedeemedAt *time.Time `json:\"redeemed_at,omitempty\"`\n\tRevokedAt  *time.Time `json:\"revoked_at,omitempty\"`\n}",
       "type MerchantTeamInviteResult struct {\n\tAdded bool `json:\"added\"`\n\n\tMember *MerchantTeamMember `json:\"member,omitempty\"`\n\n\tInvite *MerchantTeamInvite `json:\"invite,omitempty\"`\n\n\tURL string `json:\"url,omitempty\"`\n}",
-      "type MerchantTeamMember struct {\n\tUserID   string `json:\"user_id\"`\n\tEmail    string `json:\"email,omitempty\"`\n\tUsername string `json:\"username,omitempty\"`\n\tRole     string `json:\"role\"`\n}"
+      "type MerchantTeamMember struct {\n\tUserID   string `json:\"user_id\"`\n\tEmail    string `json:\"email,omitempty\"`\n\tUsername string `json:\"username,omitempty\"`\n\tRole     string `json:\"role\"`\n}",
+      "type UserMerchant struct {\n\tID          merchant.ID `json:\"id\"`\n\tSlug        string      `json:\"slug\"`\n\tDisplayName string      `json:\"display_name,omitempty\"`\n\tRole        string      `json:\"role\"`\n}"
     ],
     "internal/custodymigration": [
       "type ImportedToken struct {\n\tSourceRailCustomerRef string `json:\"source_rail_customer_ref\"`\n\n\tSourceRailMethodRef string `json:\"source_rail_method_ref,omitempty\"`\n\n\tToken       string `json:\"token\"`\n\tFingerprint string `json:\"fingerprint,omitempty\"`\n\tLastFour    string `json:\"last_four,omitempty\"`\n\tCardType    string `json:\"card_type,omitempty\"`\n\tExpiryDate  string `json:\"expiry_date,omitempty\"`\n\n\tNetworkTokenID     string `json:\"network_token_id,omitempty\"`\n\tNetworkTokenStatus string `json:\"network_token_status,omitempty\"`\n\tNetworkTokenPAR    string `json:\"network_token_par,omitempty\"`\n\n\tCustomer *uuid.UUID `json:\"customer,omitempty\"`\n}",
@@ -2283,6 +2287,14 @@
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "slices": "slices",
+      "strings": "strings"
+    },
+    "internal/controlplane/merchant_names.go": {
+      "authkit": "github.com/open-rails/authkit",
+      "context": "context",
+      "fmt": "fmt",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "strings": "strings"
     },
     "internal/controlplane/merchant_team.go": {
@@ -4675,6 +4687,15 @@
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/pkg/merchant"
     },
+    "internal/operator/profile.go": {
+      "app": "github.com/open-rails/openrails/internal/app",
+      "context": "context",
+      "controlplane": "github.com/open-rails/openrails/internal/controlplane",
+      "fmt": "fmt",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
+      "policy": "github.com/open-rails/openrails/internal/auth/policy"
+    },
     "internal/operator/provider_account_cutover.go": {
       "app": "github.com/open-rails/openrails/internal/app",
       "context": "context",
@@ -5522,7 +5543,7 @@
     }
   },
   "boundary_sources_sha256": {
-    "embed/controlplane/controlplane.go": "930d57373417e519d3e819b2db66de6b7245d9a3884cc6853611e64626e566c7",
+    "embed/controlplane/controlplane.go": "5db81896d63e80f0e2763f5e0a87f6e916db03bc74159d99d15200a4eab40274",
     "embed/embed.go": "a0a1f0b989ca58eccf42384234cce3337dabe5123571eeb4f182cec7ced4fc7a",
     "embed/transport.go": "9d8695d0fcacdb9a2f71c1f89acf4200b2581273e8238e03df27c8d45e4c6fc3",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
@@ -5548,7 +5569,7 @@
     "internal/controlplane/merchant_api_keys.go": "07edcd4aa7012a12c03f8d72cb044298402f8b06c1db9f2fff7f42934b177d1c",
     "internal/controlplane/merchant_creation.go": "b549e4b75e768bbf3f09bb3be8d52de31ac5c33ccbb35f513d06d697553e6257",
     "internal/controlplane/merchant_directory.go": "0f7a0558d14ec930063ea9886c1404dbb66a9d364f558d913cc77e929a09532e",
-    "internal/controlplane/merchant_names.go": "29a7f8e7e070c3931e10814241c88430028b079f010d69228c472e3b816fa866",
+    "internal/controlplane/merchant_names.go": "871e400717acb9733f0ef8b11a1a13eb9464dfe22d6e5c9ff79354a1dd832897",
     "internal/controlplane/merchant_provision.go": "147910382acc77e0b1106b3eab435c3f7470750ad66f148c3912a0ff7b3a85b8",
     "internal/controlplane/merchant_team.go": "f49a3031d7c639dac99b480fce93f522cbe846823d016197d0eee11ff7248621",
     "internal/controlplane/remote_application.go": "210889140ad297fd04429968f5bbe5c887550b5c6d4ab5a541b88ae205aaff1b",
@@ -5673,7 +5694,7 @@
     "internal/http/routes_admin.go": "464d56a21d2710e87da9024a314f9294a6671373bd089e1e7d2b81efed32a179",
     "internal/http/routes_admin_console.go": "49ef2a933c0603c774ffaa567fe79fdf2576a19f9f9a5e80d2e5e6980300ef50",
     "internal/http/routes_controlplane.go": "2ad52099584ea836cb9007739f335f241824bf07d9757a4def2be6a66d55c412",
-    "internal/http/routes_merchants.go": "504e98056d93c53474d8ff1ed5251d6dfa49c9808c7d24d7e610d0695b84d3af",
+    "internal/http/routes_merchants.go": "0229e3228f50d7b6214f3e1cf8cec05046caf18dde879c2d6724a29c1dfa96ea",
     "internal/http/routes_platform.go": "342d3927eacfa12c8c8d1b8a7876c151e4815cdc30698d6baaf8685f5746e848",
     "internal/http/routes_public.go": "fc3890d363bacaf60b0352db88656e18c63c1e68cc89af0899bafc918ba3aa06",
     "internal/http/routes_self.go": "7034160e9b7dc5dd85d3f98d410901efd191987cda20e69979596d058c872652",
@@ -5720,7 +5741,7 @@
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
     "internal/modules/checkout/stripe_method_setup.go": "8924e7385efa3ee2ab0b9052aff26921d0bd066f8273786819ed1fe2ef113a4b",
     "internal/modules/money/subscription_collection_admission.go": "c9090f95983a8e447de9ed99a118e2fa88cf945e9aee1f61f8227e34b3503aa0",
-    "internal/operator/profile.go": "9d25bf9a01a85bc0f191ecd093b30bcdce5a4983955f1b5a25cf6d3d5d5d78bc",
+    "internal/operator/profile.go": "9374fdf868146726fc6cd9cbd6fa1272964a1c59ab2bc762d513578812721572",
     "internal/requestauth/cache.go": "5841a63887ec69aee7ca8c0f8de84fb76fee2357cc6dd4c69e1030255bc40bdf",
     "internal/requestauth/hostprincipal.go": "da329e07de292fd17e2a6d7345ead3d766eb9702707a61f7fe62f9a6d357a8a6",
     "internal/service/customer_payment.go": "e7601d6460b3d27e305b9f160834ea319766ea34425e3a88e42897fddc365fb2",

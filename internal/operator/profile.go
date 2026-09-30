@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -16,28 +17,18 @@ var ErrMerchantNotFound = merchants.ErrMerchantNotFound
 var ErrPermissionRequired = policy.ErrPermissionRequired
 var ErrMerchantUnresolved = policy.ErrMerchantUnresolved
 
-// ListMerchantRefs returns the directory identity — slug plus display name — of
-// each requested slug, for the slugs that exist. It is the read counterpart of
-// SetMerchantDisplayName. Unknown slugs are omitted. This is a privileged host
-// seam; callers must authorize the slugs before use.
-func ListMerchantRefs(ctx context.Context, a *app.App, slugs []string) ([]MerchantRef, error) {
+// UserMerchant is a live merchant a user holds a role in.
+type UserMerchant = controlplane.UserMerchant
+
+// ListUserMerchants returns the live merchants userID holds a role in, with its
+// highest role in each: the "my merchants" read. This is a privileged host
+// seam; callers pass the authenticated user.
+func ListUserMerchants(ctx context.Context, a *app.App, userID string) ([]UserMerchant, error) {
 	cp := Get(a)
 	if cp == nil {
-		return nil, fmt.Errorf("control plane list merchant refs: no control plane attached (call Attach first)")
+		return nil, fmt.Errorf("control plane list user merchants: no control plane attached (call Attach first)")
 	}
-	dir, err := merchants.NewDirectoryService(cp.Pool())
-	if err != nil {
-		return nil, fmt.Errorf("control plane list merchant refs: build merchant directory service: %w", err)
-	}
-	rows, err := dir.ListDirectoryRefs(ctx, slugs)
-	if err != nil {
-		return nil, fmt.Errorf("control plane list merchant refs: %w", err)
-	}
-	out := make([]MerchantRef, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, MerchantRef{ID: r.ID, Slug: r.Slug, DisplayName: r.DisplayName})
-	}
-	return out, nil
+	return cp.ListUserMerchants(ctx, userID)
 }
 
 // SetMerchantDisplayName sets an active merchant's human-readable directory

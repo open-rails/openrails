@@ -40,6 +40,7 @@ type (
 	ProvisionMerchantRequest            = operator.ProvisionMerchantRequest
 	ProvisionMerchantResult             = operator.ProvisionMerchantResult
 	MerchantRef                         = operator.MerchantRef
+	UserMerchant                        = operator.UserMerchant
 	FleetSnapshot                       = operator.FleetSnapshot
 	FleetSeries                         = operator.FleetSeries
 	FleetMerchantFunnel                 = operator.FleetMerchantFunnel
@@ -213,10 +214,11 @@ func (c *ControlPlane) RenameMerchant(ctx context.Context, id merchant.ID, name 
 	return operator.RenameMerchant(ctx, c.app, id, name)
 }
 
-// ListMerchantRefs resolves directory identity for merchants the caller
-// already holds a membership in.
-func (c *ControlPlane) ListMerchantRefs(ctx context.Context, slugs []string) ([]MerchantRef, error) {
-	return operator.ListMerchantRefs(ctx, c.app, slugs)
+// ListUserMerchants returns the live merchants userID holds a role in, ordered
+// by name, with the user's highest role in each. Hosts pass the authenticated
+// user.
+func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]UserMerchant, error) {
+	return operator.ListUserMerchants(ctx, c.app, userID)
 }
 
 // ListMerchantsForSubject returns the active merchants where subject has a

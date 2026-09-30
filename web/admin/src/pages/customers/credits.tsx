@@ -83,7 +83,7 @@ export function CustomerCreditSupportSection({
   currencies: string[]
 }) {
   const { activeMerchant } = useAuth()
-  const merchant = activeMerchant?.instance_slug ?? ""
+  const merchant = activeMerchant?.slug ?? ""
   return (
     <CreditSupport
       key={`${merchant}:${customerId}`}

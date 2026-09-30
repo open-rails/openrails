@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -119,12 +120,12 @@ func (s *Service) GetBySlug(ctx context.Context, name string) (*Merchant, error)
 
 // ListByGroups returns the live merchants bound to the given AuthKit groups,
 // ordered by name.
-func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]Merchant, error) {
+func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]DirectoryRef, error) {
 	if len(groupIDs) == 0 {
 		return nil, nil
 	}
 	rows, err := s.database.Qx(ctx).Query(ctx, `
-		SELECT id::text, slug, status, permission_group_id
+		SELECT id, slug, COALESCE(display_name, ''), permission_group_id
 		  FROM openrails.merchants
 		 WHERE permission_group_id = ANY($1) AND deleted_at IS NULL
 		 ORDER BY slug`, groupIDs)
@@ -132,13 +133,15 @@ func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]Mercha
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Merchant
+	var out []DirectoryRef
 	for rows.Next() {
-		m, err := scanMerchant(rows)
-		if err != nil {
+		var id uuid.UUID
+		ref := DirectoryRef{}
+		if err := rows.Scan(&id, &ref.Slug, &ref.DisplayName, &ref.GroupID); err != nil {
 			return nil, err
 		}
-		out = append(out, *m)
+		ref.ID = merchant.ID(id)
+		out = append(out, ref)
 	}
 	return out, rows.Err()
 }

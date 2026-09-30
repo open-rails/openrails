@@ -236,19 +236,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const selectMerchant = React.useCallback(
     (slug: string) => {
       const selected = merchants.find(
-        (merchant) => merchant.instance_slug === slug
+        (merchant) => merchant.slug === slug
       )
       const session = getTokens()
       if (
         !selected ||
         !session ||
-        session.merchant === selected.instance_slug
+        session.merchant === selected.slug
       ) {
         return
       }
       if (
         !setTokensIfCurrent(
-          { ...session, merchant: selected.instance_slug },
+          { ...session, merchant: selected.slug },
           session
         )
       ) {

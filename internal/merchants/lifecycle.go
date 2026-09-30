@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -223,46 +222,13 @@ func (s *Service) GetByGroupID(ctx context.Context, groupID string) (*Merchant, 
 	return s.merchantByGroupID(ctx, groupID)
 }
 
-// DirectoryRef is a merchant's public-facing directory identity: the slug it is
-// addressed by and the human-readable name an operator gave it.
+// DirectoryRef is a merchant's public-facing directory identity: its name, the
+// human-readable name an operator gave it, and its AuthKit group.
 type DirectoryRef struct {
 	ID          merchant.ID
 	Slug        string
 	DisplayName string
-}
-
-// maxDirectoryRefSlugs bounds one directory-ref lookup. It exists so a host
-// forwarding a caller-supplied slug list cannot turn this into an unbounded
-// array scan; it errors rather than truncating, because a silently short answer
-// would read as "those merchants do not exist".
-const maxDirectoryRefSlugs = 200
-
-// ListDirectoryRefs returns the directory identity of each requested live or
-// former name, for the names that resolve. Unknown names are omitted: the caller
-// asked about a set, not a specific row. Suspended merchants still resolve, so a
-// host holding a membership can label it whatever the merchant's status.
-func (s *Service) ListDirectoryRefs(ctx context.Context, slugs []string) ([]DirectoryRef, error) {
-	if len(slugs) > maxDirectoryRefSlugs {
-		return nil, fmt.Errorf("merchants: list directory refs: %d slugs exceeds the %d limit", len(slugs), maxDirectoryRefSlugs)
-	}
-	normalized := make([]string, 0, len(slugs))
-	for _, slug := range slugs {
-		if slug = normalizeSlug(slug); slug != "" {
-			normalized = append(normalized, slug)
-		}
-	}
-	if len(normalized) == 0 {
-		return nil, nil
-	}
-	rows, err := gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefs(ctx, normalized)
-	if err != nil {
-		return nil, fmt.Errorf("merchants: list directory refs: %w", err)
-	}
-	refs := make([]DirectoryRef, 0, len(rows))
-	for _, row := range rows {
-		refs = append(refs, DirectoryRef{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
-	}
-	return refs, nil
+	GroupID     string
 }
 
 // SetDisplayName sets the human-readable name for an active merchant. An empty
