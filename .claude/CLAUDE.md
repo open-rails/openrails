@@ -70,8 +70,10 @@ placeholders, not customer or repository names.
   mirrored to Stripe Features (`lookup_key` = the string).
 
 ## Schema / DB
-- App schema is `openrails` (configurable via execution-time SQL rewrite). RLS is enforced for the
-  unprivileged `openrails_app` role, merchant-scoped via the `app.merchant_id` GUC set by MerchantTx.
+- App schema is `openrails` (configurable via execution-time SQL rewrite). There is NO row-level
+  security: tenant isolation is the explicit `merchant_id` (or `psp_id`) predicate on every tenant
+  query, plus composite foreign keys. The `app.merchant_id` GUC MerchantTx sets only serves stored
+  functions and queries that call `current_merchant_id()`; it filters nothing on its own.
 - Migrations are squashed to a single baseline (`migrations/postgres/0001_*`); new migrations start
   at 002. Greenfield — no numbered history to preserve.
 
