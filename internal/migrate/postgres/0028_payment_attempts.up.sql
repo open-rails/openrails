@@ -1,4 +1,4 @@
--- parent: 26 sha256:4d30f5570dc11bb861f5e951dc5371ff2a190097402de28275b12669df53f870
+-- parent: 27 sha256:71d394c0d3eac5ed94b9868a7d6a04783f463864826cac340079e62ba5ee68fb
 -- #1110: one row per authorization request that reached a PSP and got an
 -- answer (approved, declined, or an error the PSP processed), classified at
 -- write time by internal/billing/decline. Money stays in payments.

@@ -1507,7 +1507,7 @@
       "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
       "type engineTakeoverProgress struct {\n\tDeleteSubmitted bool   `json:\"delete_submitted,omitempty\"`\n\tNotExecuted     string `json:\"not_executed,omitempty\"`\n\tAbandoned       bool   `json:\"abandoned,omitempty\"`\n\tCompleted       bool   `json:\"completed,omitempty\"`\n}",
       "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
-      "type initialMembershipRefusal struct {\n\tBinding               receiptBinding `json:\"binding\"`\n\tKind                  string         `json:\"kind\"`\n\tResponseCode          int            `json:\"response_code\"`\n\tLocalizationID        string         `json:\"localization_id\"`\n\tStripePaymentIntentID string         `json:\"stripe_payment_intent_id,omitempty\"`\n\tStripeFailureCode     string         `json:\"stripe_failure_code,omitempty\"`\n\tStripeDeclineCode     string         `json:\"stripe_decline_code,omitempty\"`\n}",
+      "type initialMembershipRefusal struct {\n\tBinding               receiptBinding `json:\"binding\"`\n\tKind                  string         `json:\"kind\"`\n\tResponseCode          int            `json:\"response_code\"`\n\tLocalizationID        string         `json:\"localization_id\"`\n\tStripePaymentIntentID string         `json:\"stripe_payment_intent_id,omitempty\"`\n\tStripeFailureCode     string         `json:\"stripe_failure_code,omitempty\"`\n\tStripeDeclineCode     string         `json:\"stripe_decline_code,omitempty\"`\n\n\tTransactionID string `json:\"transaction_id,omitempty\"`\n\tAVS           string `json:\"avs,omitempty\"`\n\tCVV           string `json:\"cvv,omitempty\"`\n\tText          string `json:\"text,omitempty\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
       "type nmiCutoverDecision struct {\n\tAction        string         `json:\"action\"`\n\tAuthorization map[string]any `json:\"authorization,omitempty\"`\n}",
       "type nmiCutoverPayload struct {\n\tSourceQualification         providerqualification.BoundRecord `json:\"source_qualification\"`\n\tTargetQualification         providerqualification.BoundRecord `json:\"target_qualification\"`\n\tRequest                     nmiCutoverRequest                 `json:\"request\"`\n\tCustomerID                  uuid.UUID                         `json:\"customer_id\"`\n\tSubscriptionID              uuid.UUID                         `json:\"subscription_id\"`\n\tSourceSubscriptionID        string                            `json:\"source_subscription_id\"`\n\tSourcePaymentMethodID       uuid.UUID                         `json:\"source_payment_method_id\"`\n\tSourceInstrument            charge.FrozenInstrument           `json:\"source_instrument\"`\n\tPriceID                     uuid.UUID                         `json:\"price_id\"`\n\tPlanID                      string                            `json:\"plan_id\"`\n\tTargetInstrument            charge.FrozenInstrument           `json:\"target_instrument\"`\n\tCurrency                    string                            `json:\"currency\"`\n\tAmount                      int64                             `json:\"amount\"`\n\tCycleHours                  int32                             `json:\"cycle_hours\"`\n\tPeriodStart                 time.Time                         `json:\"period_start\"`\n\tPeriodEnd                   time.Time                         `json:\"period_end\"`\n\tAnchor                      time.Time                         `json:\"anchor\"`\n\tSourceCredentialFingerprint string                            `json:\"source_credential_fingerprint\"`\n\tTargetCredentialFingerprint string                            `json:\"target_credential_fingerprint\"`\n}",
@@ -3226,10 +3226,12 @@
     "internal/intents/initial_membership_refusal.go": {
       "bytes": "bytes",
       "context": "context",
+      "decline": "github.com/open-rails/openrails/internal/billing/decline",
       "errors": "errors",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "strconv": "strconv",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
     },
     "internal/intents/manual_rebill_completion.go": {
@@ -3326,9 +3328,12 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/intents/nmi_payment_method_update.go": {
+      "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "decline": "github.com/open-rails/openrails/internal/billing/decline",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -3339,6 +3344,7 @@
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "sha256": "crypto/sha256",
+      "strconv": "strconv",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
@@ -3714,6 +3720,7 @@
       "url": "net/url"
     },
     "internal/modules/checkout/contracts.go": {
+      "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
       "fmt": "fmt",
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -3721,11 +3728,13 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/checkout/custodian_sale.go": {
+      "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
       "basistheory": "github.com/open-rails/openrails/internal/integrations/basistheory",
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
+      "decline": "github.com/open-rails/openrails/internal/billing/decline",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -3749,6 +3758,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/checkout/nmi_sale_service.go": {
+      "attempts": "github.com/open-rails/openrails/internal/modules/attempts",
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -3782,6 +3792,7 @@
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "nmidirect": "github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect",
       "openrails": "github.com/open-rails/openrails",
+      "paymentattempts": "github.com/open-rails/openrails/internal/modules/attempts",
       "strconv": "strconv",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
@@ -5748,14 +5759,15 @@
     "internal/migrate/postgres/0025_merchant_names.up.sql": "6fd965307c01ba8d8b182e30a3402afcca52005a41af2433d9ab1041640e144c",
     "internal/migrate/postgres/0026_solana_signature_settles_one_checkout.up.sql": "17608a83412fe016fbdc3e04c693495cafab455ad25caff1920835ea72805888",
     "internal/migrate/postgres/0027_api_host_claims.up.sql": "d2c2e463d14c3f96b0c9e3b7d7ea6a581c78a3b1c6fc3853c2502918ddf059fc",
+    "internal/migrate/postgres/0028_payment_attempts.up.sql": "7ee0db26127b098e59343644c49ad8a11df21ee87596f65ce16205623350caaa",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
-    "internal/migrate/postgres/owned_tables.go": "cb9e499740a2bc956716d06dc1de5fb59b655aff63f84e29e3bcec101cd45fd4",
+    "internal/migrate/postgres/owned_tables.go": "cf096a1a1ceba8c1fc3d2d6f34572e4a99f8b02a23a2adef8133f7313530ea0d",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "8891a0cdffb892a5ec42f4b3433dcdb50781c36d5132d2546eadda2cf46fad94",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
-    "internal/modules/checkout/initial_membership_new_card.go": "8988bd3766c205500e14944e15d926bdbc526b91219fcf8b503cfe61a7ea6a68",
+    "internal/modules/checkout/initial_membership_new_card.go": "84f53897b2b8d869ec0832aebd4dcf4891e5ab46caeac4f6e229a88ac8d67f4c",
     "internal/modules/checkout/session_service.go": "5e4751233493bcbd56e400877d58822032a377ef9c41653312a7ae3335800a0f",
     "internal/modules/checkout/session_types.go": "d2a942c9d615065f5893064d5377710a501cb5504338ece953d17f69cad82387",
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
