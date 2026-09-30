@@ -2,12 +2,13 @@ package nmi
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/billing/decline"
 )
 
 // Read-only liveness probes over the NMI Query API (query.php). Shared by the
@@ -15,37 +16,6 @@ import (
 // probe (#665, reconcile.NMISubscriptionProber): both answer "what does the
 // provider believe happened?" by READS — no direct-post mutation is reachable
 // from this file.
-
-// saleQueryResponse mirrors the slice of the Query API transaction report the
-// probes read (search by order_id).
-type saleQueryResponse struct {
-	XMLName       xml.Name               `xml:"nm_response"`
-	Transactions  []saleQueryTransaction `xml:"transaction"`
-	ErrorResponse string                 `xml:"error_response"`
-}
-
-type saleQueryTransaction struct {
-	TransactionID string `xml:"transaction_id"`
-	OrderID       string `xml:"order_id"`
-	Condition     string `xml:"condition"`
-	Currency      string `xml:"currency"`
-	Actions       []struct {
-		Amount       string `xml:"amount"`
-		ActionType   string `xml:"action_type"`
-		Success      string `xml:"success"`
-		Date         string `xml:"date"`
-		ResponseCode string `xml:"response_code"`
-		ResponseText string `xml:"response_text"`
-	} `xml:"action"`
-}
-
-func (t saleQueryTransaction) reversed() bool {
-	actions := make([]TransactionAction, 0, len(t.Actions))
-	for _, a := range t.Actions {
-		actions = append(actions, TransactionAction{Type: a.ActionType, Success: a.Success, Amount: a.Amount})
-	}
-	return SaleReversed(t.Condition, actions)
-}
 
 // queryAPITimeFormat is the Query API start_date/end_date (and action <date>)
 // timestamp layout: YYYYMMDDhhmmss.
@@ -112,62 +82,41 @@ func (c *NMIClient) probeSales(ctx context.Context, filter QueryFilter, orderID 
 	if !since.IsZero() {
 		filter.StartDate = since.UTC().Format(queryAPITimeFormat)
 	}
-	raw, err := c.SearchTransactions(ctx, filter)
+	report, err := c.TransactionReport(ctx, filter)
 	if err != nil {
 		return result, err
 	}
-
-	var parsed saleQueryResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return result, fmt.Errorf("parse transaction query response: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return result, fmt.Errorf("transaction query error_response: %s", msg)
-	}
-
-	result.Sales = saleActions(parsed, orderID, since)
-	var latestDecline time.Time
-	for _, txn := range parsed.Transactions {
+	for _, txn := range report.Transactions {
 		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
 			continue
 		}
-		if txn.reversed() {
+		if txn.Reversed() {
 			result.ReversedFound, result.ReversedTransactionID = true, strings.TrimSpace(txn.TransactionID)
 			continue
 		}
-		for _, action := range txn.Actions {
-			if strings.ToLower(strings.TrimSpace(action.ActionType)) != "sale" {
-				continue
-			}
-			actionAt, dateOK := time.Time{}, false
-			if ts, perr := time.ParseInLocation(queryAPITimeFormat, strings.TrimSpace(action.Date), time.UTC); perr == nil {
-				actionAt, dateOK = ts, true
-			}
-			// Defensive client-side date filter on top of the server-side
-			// start_date: an action with an unparseable date still counts
-			// (fail open on evidence, the server already filtered).
-			if !since.IsZero() && dateOK && actionAt.Before(since.UTC()) {
-				continue
-			}
-			if strings.TrimSpace(action.Success) == "1" {
-				result.SuccessFound = true
-				result.SuccessTransactionID = strings.TrimSpace(txn.TransactionID)
-				result.SuccessAt = actionAt // zero when unparseable
-				result.SuccessAmount = strings.TrimSpace(action.Amount)
-				result.SuccessCurrency = strings.TrimSpace(txn.Currency)
-				return result, nil
-			}
-			if !result.DeclineFound || !dateOK || actionAt.After(latestDecline) {
-				result.DeclineFound = true
-				result.DeclineTransactionID = strings.TrimSpace(txn.TransactionID)
-				result.DeclineAt = actionAt // zero when unparseable
-				result.DeclineAmount = strings.TrimSpace(action.Amount)
-				result.DeclineCurrency = strings.TrimSpace(txn.Currency)
-				result.DeclineReason = strings.TrimSpace(action.ResponseText)
-				result.DeclineResponseCode, _ = strconv.Atoi(strings.TrimSpace(action.ResponseCode))
-				if dateOK {
-					latestDecline = actionAt
-				}
+		result.Sales = append(result.Sales, saleActions(txn, since)...)
+	}
+	var latestDecline time.Time
+	for _, sale := range result.Sales {
+		if sale.Success {
+			result.SuccessFound = true
+			result.SuccessTransactionID = sale.TransactionID
+			result.SuccessAt = sale.At // zero when unparseable
+			result.SuccessAmount = sale.Amount
+			result.SuccessCurrency = sale.Currency
+			return result, nil
+		}
+		dated := !sale.At.IsZero()
+		if !result.DeclineFound || !dated || sale.At.After(latestDecline) {
+			result.DeclineFound = true
+			result.DeclineTransactionID = sale.TransactionID
+			result.DeclineAt = sale.At
+			result.DeclineAmount = sale.Amount
+			result.DeclineCurrency = sale.Currency
+			result.DeclineReason = sale.Evidence.Text
+			result.DeclineResponseCode, _ = strconv.Atoi(sale.Evidence.Code)
+			if dated {
+				latestDecline = sale.At
 			}
 		}
 	}
@@ -181,36 +130,26 @@ type SaleAction struct {
 	At            time.Time // zero when the report garbled the date
 	Amount        string
 	Currency      string
-	ResponseCode  string
-	ResponseText  string
+	// Evidence is the answer and the card, as the report gives them.
+	Evidence decline.Evidence
 }
 
-func saleActions(parsed saleQueryResponse, orderID string, since time.Time) []SaleAction {
+// saleActions is the transaction's sale actions on or after since. An action
+// with an unparseable date still counts: the server already filtered by date.
+func saleActions(txn QueryTransaction, since time.Time) []SaleAction {
 	var out []SaleAction
-	for _, txn := range parsed.Transactions {
-		if orderID != "" && strings.TrimSpace(txn.OrderID) != "" && strings.TrimSpace(txn.OrderID) != orderID {
+	for _, action := range txn.Actions {
+		if !action.Is("sale") {
 			continue
 		}
-		if txn.reversed() {
+		at, _ := action.At()
+		if !since.IsZero() && !at.IsZero() && at.Before(since.UTC()) {
 			continue
 		}
-		for _, action := range txn.Actions {
-			if strings.ToLower(strings.TrimSpace(action.ActionType)) != "sale" {
-				continue
-			}
-			at, err := time.ParseInLocation(queryAPITimeFormat, strings.TrimSpace(action.Date), time.UTC)
-			if err != nil {
-				at = time.Time{}
-			}
-			if !since.IsZero() && !at.IsZero() && at.Before(since.UTC()) {
-				continue
-			}
-			out = append(out, SaleAction{
-				TransactionID: strings.TrimSpace(txn.TransactionID), Success: strings.TrimSpace(action.Success) == "1", At: at,
-				Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency),
-				ResponseCode: strings.TrimSpace(action.ResponseCode), ResponseText: strings.TrimSpace(action.ResponseText),
-			})
-		}
+		out = append(out, SaleAction{
+			TransactionID: strings.TrimSpace(txn.TransactionID), Success: action.Succeeded(), At: at,
+			Amount: strings.TrimSpace(action.Amount), Currency: strings.TrimSpace(txn.Currency), Evidence: txn.Evidence(action),
+		})
 	}
 	return out
 }

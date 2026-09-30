@@ -2,7 +2,6 @@ package nmi
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"strconv"
@@ -24,34 +23,13 @@ type OrderAttempts struct {
 	DeclineTransactionID string
 }
 
-// queryTransaction is one transaction of a Query API transaction report.
-type queryTransaction struct {
-	TransactionID   string `xml:"transaction_id"`
-	OrderID         string `xml:"order_id"`
-	CustomerVaultID string `xml:"customer_vault_id"`
-	Currency        string `xml:"currency"`
-	Actions         []struct {
-		Amount       string `xml:"amount"`
-		ActionType   string `xml:"action_type"`
-		Success      string `xml:"success"`
-		Date         string `xml:"date"`
-		ResponseCode string `xml:"response_code"`
-	} `xml:"action"`
-}
-
-type transactionReport struct {
-	XMLName       xml.Name           `xml:"nm_response"`
-	Transactions  []queryTransaction `xml:"transaction"`
-	ErrorResponse string             `xml:"error_response"`
-}
-
 // at is the transaction's first action time; a transaction without one is
 // unreadable.
-func (t queryTransaction) at() (time.Time, error) {
+func (t QueryTransaction) at() (time.Time, error) {
 	var first time.Time
 	for _, action := range t.Actions {
-		ts, err := time.ParseInLocation(queryAPITimeFormat, strings.TrimSpace(action.Date), time.UTC)
-		if err != nil {
+		ts, ok := action.At()
+		if !ok {
 			return time.Time{}, fmt.Errorf("transaction %s has an unreadable date", t.TransactionID)
 		}
 		if first.IsZero() || ts.Before(first) {
@@ -65,9 +43,9 @@ func (t queryTransaction) at() (time.Time, error) {
 }
 
 // approvedSale is the amount of the transaction's approved sale, or 0.
-func (t queryTransaction) approvedSale() int64 {
+func (t QueryTransaction) approvedSale() int64 {
 	for _, action := range t.Actions {
-		if strings.EqualFold(strings.TrimSpace(action.ActionType), "sale") && strings.TrimSpace(action.Success) == "1" {
+		if action.Is("sale") && action.Succeeded() {
 			if cents, ok := exactMinorAmount(action.Amount, t.Currency); ok && cents > 0 {
 				return cents
 			}
@@ -86,21 +64,6 @@ func (c *NMIClient) scoped() *NMIClient {
 	return &scoped
 }
 
-func (c *NMIClient) transactionReport(ctx context.Context, filter QueryFilter) (transactionReport, error) {
-	raw, err := c.SearchTransactions(ctx, filter)
-	if err != nil {
-		return transactionReport{}, err
-	}
-	var report transactionReport
-	if err := xml.Unmarshal([]byte(raw), &report); err != nil {
-		return transactionReport{}, err
-	}
-	if report.ErrorResponse != "" {
-		return transactionReport{}, errors.New(report.ErrorResponse)
-	}
-	return report, nil
-}
-
 // ReadOrderAttempts reads every transaction under an order owned by one
 // operation. An error is an inconclusive read; zero transactions is the
 // gateway's answer that nothing was recorded under the order.
@@ -114,11 +77,11 @@ func (c *NMIClient) ReadOrderAttemptsSince(ctx context.Context, orderReference s
 	if strings.TrimSpace(orderReference) == "" {
 		return OrderAttempts{}, errors.New("order reference is required")
 	}
-	report, err := c.transactionReport(ctx, QueryFilter{OrderID: orderReference})
+	report, err := c.TransactionReport(ctx, QueryFilter{OrderID: orderReference})
 	if err != nil {
 		return OrderAttempts{}, err
 	}
-	var mine []queryTransaction
+	var mine []QueryTransaction
 	for _, txn := range report.Transactions {
 		if txn.OrderID != orderReference {
 			return OrderAttempts{}, receiptMismatch("order search returned another order's transaction")
@@ -141,10 +104,10 @@ func (c *NMIClient) ReadOrderAttemptsSince(ctx context.Context, orderReference s
 	}
 	txn := mine[0]
 	for _, action := range txn.Actions {
-		if !strings.EqualFold(strings.TrimSpace(action.ActionType), "sale") {
+		if !action.Is("sale") {
 			continue
 		}
-		if strings.TrimSpace(action.Success) == "1" {
+		if action.Succeeded() {
 			return OrderAttempts{Transactions: 1}, nil
 		}
 		code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
@@ -183,7 +146,7 @@ func (c *NMIClient) ReadVaultTransactions(ctx context.Context, vaultID string, s
 	}
 	var out []VaultTransaction
 	for page := 0; page < vaultMaxPages; page++ {
-		report, err := c.transactionReport(ctx, QueryFilter{CustomerVaultID: vaultID, StartDate: since.UTC().Format(queryAPITimeFormat), ResultLimit: vaultPageSize, PageNumber: page})
+		report, err := c.TransactionReport(ctx, QueryFilter{CustomerVaultID: vaultID, StartDate: since.UTC().Format(queryAPITimeFormat), ResultLimit: vaultPageSize, PageNumber: page})
 		if err != nil {
 			return nil, err
 		}

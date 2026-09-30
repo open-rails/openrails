@@ -333,8 +333,8 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 					return Retryable("remove the refused replacement card: " + err.Error())
 				}
 			}
-			answer.Code = strconv.Itoa(refused.ResponseCode)
-			if err := h.recordVerification(ctx, intent, payload, attempts.Attempt{Answer: answer, TransactionID: refused.TransactionID, CardBrand: stagedCard.CardType, CardLast4: stagedCard.LastFour}); err != nil {
+			answer.Code, answer.CardBrand, answer.CardLast4 = strconv.Itoa(refused.ResponseCode), stagedCard.CardType, stagedCard.LastFour
+			if err := h.recordVerification(ctx, intent, payload, attempts.Attempt{Answer: answer, TransactionID: refused.TransactionID}); err != nil {
 				return Ambiguous("record the refused replacement card verification: " + err.Error())
 			}
 			// The customer-facing decline code: NMI's localization id when it
@@ -421,7 +421,7 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		if err := NewStore(d).RecordProgress(ctx, intent.ID, map[string]any{"finalized": true}); err != nil {
 			return err
 		}
-		if err := recordReplacementVerification(ctx, d, intent, pm.CustomerID, pm.ID, now, attempts.Attempt{Approved: true, TransactionID: ref, CardBrand: card.CardType, CardLast4: card.LastFour}); err != nil {
+		if err := recordReplacementVerification(ctx, d, intent, pm.CustomerID, pm.ID, now, attempts.Attempt{Approved: true, TransactionID: ref, Answer: decline.Evidence{CardBrand: card.CardType, CardLast4: card.LastFour}}); err != nil {
 			return err
 		}
 		return subscriptions.WakeForReplacedMethod(ctx, d, intent.MerchantID, pm.ID, now)

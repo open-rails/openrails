@@ -17,6 +17,11 @@ type Card struct {
 	// AVS and CVV are the verification letters every answer for this card
 	// carries (avsresponse, cvvresponse); CVV "N" is a security-code mismatch.
 	AVS, CVV string
+	// BIN is the card's first six digits; empty derives one from Brand.
+	BIN string
+	// NetworkToken: the network token stands in for the card number, and the
+	// Query API reports network_token_used on its charges.
+	NetworkToken bool
 }
 
 // Vault is a Customer Vault record: its priority-1 billing entry, then Extra.

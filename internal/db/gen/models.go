@@ -977,6 +977,12 @@ type OpenrailsPaymentAttempt struct {
 	Step            string
 	CreatedAt       time.Time
 	CycleID         *uuid.UUID
+	CardBin         *string
+	// #1114 the issuer's raw answer (NMI processor_response_code); response_code is the gateway's.
+	IssuerCode *string
+	IssuerText *string
+	// #1114 when the row was filled from the PSP's transaction read; NULL rows are read by the enrichment pass.
+	EnrichedAt *time.Time
 }
 
 // Generalized payment method table supporting multiple rails.

@@ -88,7 +88,8 @@ type Result struct {
 // NeedsMapping reports a code the rail's table does not know.
 func (r Result) NeedsMapping() bool { return r.Coverage == Unmapped }
 
-// Evidence is everything a rail returned about one refusal.
+// Evidence is everything a rail returned about one authorization: its answer
+// and the card it used.
 type Evidence struct {
 	Rail string
 	// Code is the rail's code: NMI response_code (or its localization id),
@@ -101,6 +102,13 @@ type Evidence struct {
 	AVS, CVV string
 	// Text is the gateway's response text.
 	Text string
+	// IssuerCode and IssuerText are the issuer's raw answer (NMI
+	// processor_response_code/text).
+	IssuerCode, IssuerText string
+	// The card the PSP reports: BIN, brand, last four, and whether a network
+	// token stood in for the card number.
+	CardBIN, CardBrand, CardLast4 string
+	NetworkToken                  bool
 }
 
 // Classify answers what a rail code means.

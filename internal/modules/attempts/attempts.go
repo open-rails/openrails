@@ -81,7 +81,8 @@ type Attempt struct {
 	// our request), "webhook" or "pull".
 	ObservedVia string
 	Approved    bool
-	// Answer is the PSP's code, AVS/CVV letters and text (Rail is set here).
+	// Answer is the PSP's code, AVS/CVV letters, text and card (Rail is set
+	// here). A card brand or last four it lacks comes from the payment method.
 	Answer        decline.Evidence
 	TransactionID string
 	// Amount is in micros; a verification has 0 and no currency.
@@ -93,8 +94,11 @@ type Attempt struct {
 	Target                                                   string
 	SubscriptionID, PaymentMethodID, PaymentID, RailIntentID *uuid.UUID
 	// Step keys an operation's attempts that carry no transaction id.
-	Step                            string
-	CardBrand, CardLast4, TokenType string
+	Step      string
+	TokenType string
+	// EnrichedAt is when Answer was read from the PSP's transaction report
+	// (#1114); zero when it is the PSP's reply to our request.
+	EnrichedAt time.Time
 	// Cycle is the rebill a rebill, dunning or customer retry belongs to.
 	Cycle *Cycle
 }
@@ -134,7 +138,10 @@ func ObservedFrom(ctx context.Context, fallback string) string {
 	return fallback
 }
 
-var last4Shape = regexp.MustCompile(`^[0-9]{4}$`)
+var (
+	last4Shape = regexp.MustCompile(`^[0-9]{4}$`)
+	binShape   = regexp.MustCompile(`^[0-9]{6,8}$`)
+)
 
 // Record writes an attempt once: a replay with the same transaction id, or the
 // same operation step, is a no-op.
@@ -150,8 +157,13 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		Amount: a.Amount, Currency: optional(strings.ToUpper(a.Currency)), AttemptedAt: a.At.UTC(),
 		SubscriptionID: a.SubscriptionID, PaymentMethodID: a.PaymentMethodID, PaymentID: a.PaymentID,
 		RailIntentID: a.RailIntentID, Step: a.Step,
-		TransactionID: optional(a.TransactionID), AvsResult: optional(a.Answer.AVS), CvvResult: optional(a.Answer.CVV),
-		ResponseText: optional(truncate(a.Answer.Text, 128)), CardBrand: optional(strings.ToLower(a.CardBrand)),
+		TransactionID: optional(a.TransactionID), ResponseText: optional(truncate(a.Answer.Text, 128)),
+	}
+	c := cardOf(a.Answer)
+	row.CardBin, row.CardBrand, row.CardLast4, row.AvsResult, row.CvvResult, row.IssuerCode, row.IssuerText = c.bin, c.brand, c.last4, c.avs, c.cvv, c.issuerCode, c.issuerText
+	if !a.EnrichedAt.IsZero() {
+		at := a.EnrichedAt.UTC()
+		row.EnrichedAt = &at
 	}
 	if a.Owner != "" {
 		row.Owner = string(a.Owner)
@@ -165,8 +177,11 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 	if a.ObservedVia != "" {
 		row.ObservedVia = a.ObservedVia
 	}
-	if last4Shape.MatchString(a.CardLast4) {
-		row.CardLast4 = &a.CardLast4
+	if err := cardFromMethod(ctx, q, a, &row); err != nil {
+		return err
+	}
+	if a.Answer.NetworkToken {
+		a.TokenType = "network_token"
 	}
 	switch a.TokenType {
 	case "network_token", "pan_via_proxy", "psp_token":
@@ -214,6 +229,58 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 	}
 	_, err := q.InsertPaymentAttempt(ctx, row)
 	return err
+}
+
+// Enrich fills an attempt from the PSP's transaction read (#1114), once and
+// only where the row is empty. A zero answer marks it read with nothing.
+func Enrich(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, answer decline.Evidence, at time.Time) error {
+	c := cardOf(answer)
+	_, err := q.EnrichPaymentAttempt(ctx, gen.EnrichPaymentAttemptParams{
+		MerchantID: merchantID, ID: id, EnrichedAt: at.UTC(), NetworkToken: answer.NetworkToken,
+		CardBin: c.bin, CardBrand: c.brand, CardLast4: c.last4, AvsResult: c.avs, CvvResult: c.cvv, IssuerCode: c.issuerCode, IssuerText: c.issuerText,
+	})
+	return err
+}
+
+// card is an answer's card and issuer columns, as stored.
+type card struct {
+	bin, brand, last4, avs, cvv, issuerCode, issuerText *string
+}
+
+func cardOf(e decline.Evidence) card {
+	c := card{
+		brand: optional(strings.ToLower(e.CardBrand)), avs: optional(e.AVS), cvv: optional(e.CVV),
+		issuerCode: optional(truncate(e.IssuerCode, 32)), issuerText: optional(truncate(e.IssuerText, 128)),
+	}
+	if binShape.MatchString(e.CardBIN) {
+		c.bin = &e.CardBIN
+	}
+	if last4Shape.MatchString(e.CardLast4) {
+		c.last4 = &e.CardLast4
+	}
+	return c
+}
+
+// cardFromMethod fills a brand or last four the answer lacked from the
+// payment method row.
+func cardFromMethod(ctx context.Context, q *gen.Queries, a Attempt, row *gen.InsertPaymentAttemptParams) error {
+	if a.PaymentMethodID == nil || (row.CardBrand != nil && row.CardLast4 != nil) {
+		return nil
+	}
+	pm, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: a.MerchantID, ID: *a.PaymentMethodID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if row.CardBrand == nil && pm.CardType != nil {
+		row.CardBrand = optional(strings.ToLower(*pm.CardType))
+	}
+	if row.CardLast4 == nil && pm.LastFour != nil && last4Shape.MatchString(*pm.LastFour) {
+		row.CardLast4 = pm.LastFour
+	}
+	return nil
 }
 
 // checkoutFor continues the buyer's open checkout on this target, or opens a

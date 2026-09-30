@@ -212,6 +212,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
+	// #1114: NMI attempts are filled from the Query API's transaction report.
+	if err := addTrackedWorker(r, workers, &riverjobs.AttemptEnrichmentWorker{
+		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
+	}); err != nil {
+		return fmt.Errorf("add attempt enrichment worker: %w", err)
+	}
 	// #1112: rebills that never happened are recorded as missed.
 	if err := addTrackedWorker(r, workers, &riverjobs.RebillWatchWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
@@ -498,6 +504,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.RebillWatchArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.RebillWatchInterval},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// #1114: hourly, NMI attempts are enriched from the transaction report.
+	jobs = append(jobs, r.healthPeriodic(
+		riverjobs.AttemptEnrichmentInterval,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.AttemptEnrichmentArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.AttemptEnrichmentInterval},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

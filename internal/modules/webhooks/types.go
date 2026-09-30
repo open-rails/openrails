@@ -132,69 +132,23 @@ type NMIWebhookEvent struct {
 	EventBody json.RawMessage     `json:"event_body" validate:"required"`
 }
 
+// NMI webhooks are wake-ups (#1114): OpenRails reads what happened from the
+// Query API, so a body carries only the references that find it.
 type NMIRecurringEventBody struct {
-	SubscriptionID    Stringish          `json:"subscription_id"`
-	AttemptedPayments Intish             `json:"attempted_payments"`
-	CompletedPayments Intish             `json:"completed_payments"`
-	BillingAddress    *NMIBillingAddress `json:"billing_address"`
-	Card              *NMICard           `json:"card"`
-	Features          *NMIFeatures       `json:"features"`
-	Merchant          *NMIMerchant       `json:"merchant"`
-	NextChargeDate    Stringish          `json:"next_charge_date"`
-	OrderDescription  Stringish          `json:"order_description"`
-	OrderID           Stringish          `json:"order_id"`
-	Plan              *NMIPlan           `json:"plan"`
-	PONumber          Stringish          `json:"ponumber"`
-	RailID            Stringish          `json:"processor_id"`
-	RemainingPayments Stringish          `json:"remaining_payments"`
-	Shipping          Stringish          `json:"shipping"`
-	SubscriptionType  Stringish          `json:"subscription_type"`
-	Tax               Stringish          `json:"tax"`
-	Website           Stringish          `json:"website"`
+	SubscriptionID Stringish `json:"subscription_id"`
 }
 
 type NMITransactionEventBody struct {
-	TransactionID         Stringish             `json:"transaction_id"`
-	TransactionType       Stringish             `json:"transaction_type"`
-	Condition             Stringish             `json:"condition"`
-	Amount                Stringish             `json:"amount"`
-	RequestedAmount       Stringish             `json:"requested_amount"`
-	Currency              Stringish             `json:"currency"`
-	OrderID               Stringish             `json:"order_id"`
-	OrderDescription      Stringish             `json:"order_description"`
-	PONumber              Stringish             `json:"ponumber"`
-	RailID                Stringish             `json:"processor_id"`
-	CustomerID            Stringish             `json:"customerid"`
-	CustomerTaxID         Stringish             `json:"customertaxid"`
-	CustomerVaultID       Stringish             `json:"customer_vault_id"`
-	Website               Stringish             `json:"website"`
-	Shipping              Stringish             `json:"shipping"`
-	ShippingCarrier       Stringish             `json:"shipping_carrier"`
-	TrackingNumber        Stringish             `json:"tracking_number"`
-	ShippingDate          Stringish             `json:"shipping_date"`
-	Tax                   Stringish             `json:"tax"`
-	Surcharge             Stringish             `json:"surcharge"`
-	ConvenienceFee        Stringish             `json:"convenience_fee"`
-	MiscFee               Stringish             `json:"misc_fee"`
-	MiscFeeName           Stringish             `json:"misc_fee_name"`
-	CashDiscount          Stringish             `json:"cash_discount"`
-	Tip                   Stringish             `json:"tip"`
-	PartialPaymentID      Stringish             `json:"partial_payment_id"`
-	PartialPaymentBalance Stringish             `json:"partial_payment_balance"`
-	PlatformID            Stringish             `json:"platform_id"`
-	AuthorizationCode     Stringish             `json:"authorization_code"`
-	SocialSecurityNumber  Stringish             `json:"social_security_number"`
-	DriversLicenseNumber  Stringish             `json:"drivers_license_number"`
-	DriversLicenseState   Stringish             `json:"drivers_license_state"`
-	DriversLicenseDOB     Stringish             `json:"drivers_license_dob"`
-	Merchant              *NMIMerchant          `json:"merchant"`
-	Features              *NMIFeatures          `json:"features"`
-	Subscription          *NMISubscriptionRef   `json:"subscription"`
-	Action                *NMIAction            `json:"action"`
-	TransactionDetail     *NMITransactionDetail `json:"transaction"`
-	BillingAddress        *NMIBillingAddress    `json:"billing_address"`
-	ShippingAddress       *NMIBillingAddress    `json:"shipping_address"`
-	Card                  *NMICard              `json:"card"`
+	TransactionID     Stringish             `json:"transaction_id"`
+	Amount            Stringish             `json:"amount"`
+	Currency          Stringish             `json:"currency"`
+	OrderID           Stringish             `json:"order_id"`
+	PONumber          Stringish             `json:"ponumber"`
+	CustomerID        Stringish             `json:"customerid"`
+	CustomerVaultID   Stringish             `json:"customer_vault_id"`
+	Subscription      *NMISubscriptionRef   `json:"subscription"`
+	Action            *NMIAction            `json:"action"`
+	TransactionDetail *NMITransactionDetail `json:"transaction"`
 }
 
 type NMITransactionDetail struct {
@@ -255,85 +209,18 @@ type NMISubscriptionRef struct {
 }
 
 type NMIAction struct {
-	Amount                        Stringish `json:"amount"`
-	ActionType                    string    `json:"action_type"`
-	Date                          string    `json:"date"`
-	Success                       Stringish `json:"success"`
-	IPAddress                     string    `json:"ip_address"`
-	Source                        string    `json:"source"`
-	APIMethod                     string    `json:"api_method"`
-	Username                      string    `json:"username"`
-	Response                      Stringish `json:"response"`
-	ResponseCode                  Stringish `json:"response_code"`
-	ResponseText                  string    `json:"response_text"`
-	RailResponseText              string    `json:"processor_response_text"`
-	RailResponseCode              string    `json:"rail_response_code"`
-	NetworkTokenUsed              bool      `json:"network_token_used"`
-	NetworkTokenCryptogramCreated bool      `json:"network_token_cryptogram_created"`
-	DeviceLicenseNumber           string    `json:"device_license_number"`
-	DeviceNickname                string    `json:"device_nickname"`
-	Type                          string    `json:"type"`
+	Amount Stringish `json:"amount"`
 }
 
-// NMIPaymentInfo represents updated payment method information from ACU
 type NMIPaymentInfo struct {
 	LastFour   Stringish `json:"last_four"`
 	CardType   Stringish `json:"card_type"`
 	ExpiryDate Stringish `json:"expiry_date"`
 }
 
-type NMIBillingAddress struct {
-	Address1   string `json:"address_1"`
-	Address2   string `json:"address_2"`
-	CellPhone  string `json:"cell_phone"`
-	City       string `json:"city"`
-	Company    string `json:"company"`
-	Country    string `json:"country"`
-	Email      string `json:"email" validate:"required,email"`
-	Fax        string `json:"fax"`
-	FirstName  string `json:"first_name"`
-	LastName   string `json:"last_name"`
-	Phone      string `json:"phone"`
-	PostalCode string `json:"postal_code"`
-	State      string `json:"state"`
-}
-
-type NMICard struct {
-	AVSResponse          string `json:"avs_response"`
-	CardAvailableBalance string `json:"card_available_balance"`
-	CardBalance          string `json:"card_balance"`
-	CardholderAuth       string `json:"cardholder_auth"`
-	CAVV                 string `json:"cavv"`
-	CAVVResult           string `json:"cavv_result"`
-	CCBin                string `json:"cc_bin"`
-	CCExp                string `json:"cc_exp"`
-	CCIssueNumber        string `json:"cc_issue_number"`
-	CCNumber             string `json:"cc_number"`
-	CCStartDate          string `json:"cc_start_date"`
-	CCType               string `json:"cc_type"`
-	CSCResponse          string `json:"csc_response"`
-	ECI                  string `json:"eci"`
-	EntryMode            string `json:"entry_mode"`
-	XID                  string `json:"xid"`
-}
-
 type NMIMerchant struct {
 	ID   Stringish `json:"id"`
 	Name string    `json:"name"`
-}
-
-type NMIPlan struct {
-	Name           string    `json:"name"`
-	Amount         Stringish `json:"amount"`
-	Payments       Stringish `json:"payments"`
-	DayOfMonth     *Intish   `json:"day_of_month"`
-	DayFrequency   *Intish   `json:"day_frequency"`
-	MonthFrequency *Intish   `json:"month_frequency"`
-	ID             Stringish `json:"id"`
-}
-
-type NMIFeatures struct {
-	IsTestMode bool `json:"is_test_mode"`
 }
 
 // -------------------------------- CCBill Webhook Types --------------------------------

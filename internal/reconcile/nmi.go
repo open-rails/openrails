@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
 	"strings"
 	"time"
@@ -223,33 +222,6 @@ func parseNMIV5Date(raw string) (time.Time, error) {
 
 // --- report_type=transaction ---
 
-type nmiTransactionResponse struct {
-	XMLName       xml.Name            `xml:"nm_response"`
-	Transactions  []nmiTransactionXML `xml:"transaction"`
-	ErrorResponse string              `xml:"error_response"`
-}
-
-type nmiTransactionXML struct {
-	TransactionID   string         `xml:"transaction_id"`
-	Condition       string         `xml:"condition"`
-	OrderID         string         `xml:"order_id"`
-	CustomerID      string         `xml:"customerid"`
-	CustomerVaultID string         `xml:"customer_vault_id"`
-	Email           string         `xml:"email"`
-	Currency        string         `xml:"currency"`
-	Actions         []nmiActionXML `xml:"action"`
-}
-
-type nmiActionXML struct {
-	Amount       string `xml:"amount"`
-	ActionType   string `xml:"action_type"`
-	Date         string `xml:"date"`
-	Success      string `xml:"success"`
-	Source       string `xml:"source"`
-	ResponseText string `xml:"response_text"`
-	ResponseCode string `xml:"response_code"`
-}
-
 // fetchTransactions runs a date-ranged transaction search. No condition or
 // action_type filter is sent, so NMI returns transactions in EVERY condition
 // — including failed/declined ones, which the dunning-forensics report needs.
@@ -273,7 +245,7 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 		if err != nil {
 			return nil, err
 		}
-		parsed, err := parseNMITransactionPage(raw)
+		parsed, err := nmi.ParseTransactionReport(raw)
 		if err != nil {
 			return nil, err
 		}
@@ -295,25 +267,10 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	return out, nil
 }
 
-func parseNMITransactionPage(raw string) (nmiTransactionResponse, error) {
-	var parsed nmiTransactionResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return parsed, fmt.Errorf("parse transaction XML: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return parsed, fmt.Errorf("nmi error_response: %s", msg)
-	}
-	return parsed, nil
-}
-
-func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
-	actions := make([]nmi.TransactionAction, 0, len(t.Actions))
-	for _, a := range t.Actions {
-		actions = append(actions, nmi.TransactionAction{Type: a.ActionType, Success: a.Success, Amount: a.Amount})
-	}
+func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 	// A voided or fully refunded sale paid nothing: its sale is neither a
 	// payment nor a decline. Its refunds stay visible to the refund plane.
-	reversed := nmi.SaleReversed(t.Condition, actions)
+	reversed := t.Reversed()
 	var out []RemoteTransaction
 	for _, a := range t.Actions {
 		txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
@@ -325,7 +282,7 @@ func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
 			// charge-level event the diff engine consumes.
 			continue
 		}
-		success := strings.TrimSpace(a.Success) == "1"
+		success := a.Succeeded()
 		if txnType == TransactionTypeSale && !success {
 			txnType = TransactionTypeDecline
 		}
@@ -337,6 +294,7 @@ func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
 			Type:           txnType,
 			Success:        success,
 			Currency:       strings.TrimSpace(t.Currency),
+			Answer:         t.Evidence(a),
 			Raw: rawJSON(map[string]any{
 				"source":            "nmi_transaction",
 				"condition":         strings.TrimSpace(t.Condition),
@@ -350,12 +308,11 @@ func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
 		if cents, err := parseAmountCents(a.Amount); err == nil {
 			txn.AmountCents = cents
 		}
-		if ts, err := time.ParseInLocation(nmiQueryTimeFormat, strings.TrimSpace(a.Date), time.UTC); err == nil {
+		if ts, ok := a.At(); ok {
 			txn.OccurredAt = ts
 		}
 		if !success {
-			txn.DeclineReason = strings.TrimSpace(a.ResponseText)
-			txn.DeclineCode = strings.TrimSpace(a.ResponseCode)
+			txn.DeclineReason, txn.DeclineCode = txn.Answer.Text, txn.Answer.Code
 		}
 		out = append(out, txn)
 	}

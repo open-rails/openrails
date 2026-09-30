@@ -39,8 +39,11 @@
 //     subscription_id (comma list), action_type, start_date, end_date,
 //     result_limit and page_number. Other filters are ignored. Transactions
 //     carry the fields OpenRails reads plus condition, cc_number and
-//     response_text; the recurring report returns subscription id, order,
-//     next charge date and plan id only. A refund is its own transaction.
+//     response_text. Card fields come from the Card (cc_bin defaults by
+//     brand); processor_response_code is "00" on approval, "51" behind 202
+//     and "05" behind any other decline. The recurring report returns
+//     subscription id, order, next charge date and plan id only. A refund is
+//     its own transaction.
 //   - Indexing lag: a sale is invisible to the Query API until
 //     Options.IndexLag has passed on the mock clock (or HideSales/Reveal).
 //     v5 payment reads see it at once.
