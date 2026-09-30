@@ -25,7 +25,7 @@ GRANT ALL ON FUNCTION openrails.pending_merchant_secret_cleanups(p_after uuid, p
 GRANT ALL ON FUNCTION openrails.psp_owner_by_identity(p_rail text, p_environment text, p_account_id text) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit integer) TO :"runtime_user";
-GRANT ALL ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_after uuid, p_limit integer) TO :"runtime_user";
+GRANT ALL ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_attempt_cutoff timestamp with time zone, p_after uuid, p_limit integer) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.unenriched_attempt_merchant_ids(p_since timestamp with time zone, p_before timestamp with time zone, p_limit integer) TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.destructive_action_switch TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO :"runtime_user";

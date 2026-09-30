@@ -62,7 +62,7 @@ func TestPublicMeasureVocabulary(t *testing.T) {
 		"churn_rate", "chargeback_rate", "credit_utilization",
 		"attempts", "approved_attempts", "failed_attempts", "attempt_failure_rate",
 		"checkouts", "failed_checkouts", "checkout_failure_rate", "attempts_per_checkout", "checkout_recovery_rate",
-		"rebills_due", "rebills_open", "rebill_first_failures", "rebill_first_failure_rate", "rebills_missed",
+		"rebills_due", "rebills_open", "rebills_attempted", "rebill_first_failures", "rebill_first_failure_rate", "rebills_missed",
 		"rebill_missed_rate", "dunning_recovered", "dunning_recovery_rate", "rebill_collection_rate", "rebill_loss_rate",
 		"repeat_topup_rate", "realized_revenue_per_customer", "avg_membership_duration_days",
 		"mrr", "subscriptions", "billable_subscriptions", "entitled_customers",

@@ -66,3 +66,15 @@ LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 -- name: GetRebillCycle :one
 SELECT * FROM openrails.rebill_cycle_facts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- #1118: cycles due before the retention cutoff whose attempts are all gone,
+-- batched like the attempt purge that runs first.
+-- name: DeleteRebillCyclesBefore :execrows
+DELETE FROM openrails.rebill_cycles
+WHERE id IN (
+    SELECT c.id FROM openrails.rebill_cycles c
+    WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND c.due_at < sqlc.arg(cutoff)::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM openrails.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)
+    LIMIT sqlc.arg(row_limit)::int
+);

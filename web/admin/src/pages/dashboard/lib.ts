@@ -286,6 +286,7 @@ const HEALTH_MEASURES = new Set([
   "checkout_recovery_rate",
   "rebills_due",
   "rebills_open",
+  "rebills_attempted",
   "rebill_first_failures",
   "rebill_first_failure_rate",
   "rebills_missed",

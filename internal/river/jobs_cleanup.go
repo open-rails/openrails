@@ -64,6 +64,10 @@ type CleanupConfig struct {
 	// are NEVER pruned — an unread shutoff or restore instruction is not
 	// garbage, it is undone work.
 	HostLifecycleEventAckedRetention time.Duration
+
+	// PaymentAttemptRetention is how long payment attempts and rebill cycles
+	// (#1110, #1111) are kept. Default: 25 months.
+	PaymentAttemptRetention time.Duration
 }
 
 // DefaultCleanupConfig is the ONE defaults path (#711): worker registration
@@ -90,12 +94,13 @@ func DefaultCleanupConfig() CleanupConfig {
 
 		PaymentSettlementAckedRetention:  30 * 24 * time.Hour,
 		HostLifecycleEventAckedRetention: 30 * 24 * time.Hour,
+		PaymentAttemptRetention:          761 * 24 * time.Hour, // 25 months
 	}
 }
 
 func (c CleanupConfig) validate() error {
 	if c.NotificationSeenRetention <= 0 || c.NotificationUnseenRetention <= 0 || c.WebhookEventRetention <= 0 ||
-		c.PaymentSettlementAckedRetention <= 0 || c.HostLifecycleEventAckedRetention <= 0 {
+		c.PaymentSettlementAckedRetention <= 0 || c.HostLifecycleEventAckedRetention <= 0 || c.PaymentAttemptRetention <= 0 {
 		return fmt.Errorf("cleanup worker config requires positive retentions (wire DefaultCleanupConfig()): %+v", c)
 	}
 	return nil
@@ -126,6 +131,8 @@ type CleanupResult struct {
 	WebhookEvents           int64
 	PaymentSettlements      int64
 	HostLifecycleEvents     int64
+	PaymentAttempts         int64
+	RebillCycles            int64
 	// MerchantsBudgetCapped counts merchants whose backlog exceeded one pass's
 	// row budget. Nonzero over many passes = the retention window is losing to
 	// the write rate.
@@ -204,6 +211,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			WebhookCutoff:          now.Add(-config.WebhookEventRetention),
 			SettlementCutoff:       now.Add(-config.PaymentSettlementAckedRetention),
 			LifecycleCutoff:        now.Add(-config.HostLifecycleEventAckedRetention),
+			AttemptCutoff:          now.Add(-config.PaymentAttemptRetention),
 			After:                  after,
 			MerchantLimit:          limit,
 		})
@@ -272,6 +280,8 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"webhook_events":            result.WebhookEvents,
 		"payment_settlements":       result.PaymentSettlements,
 		"lifecycle_events":          result.HostLifecycleEvents,
+		"payment_attempts":          result.PaymentAttempts,
+		"rebill_cycles":             result.RebillCycles,
 	})
 
 	if cleanupErr != nil {
@@ -280,7 +290,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	return visited, result, nil
 }
 
-// sweepMerchant runs the six retention sweeps for ONE merchant, already inside
+// sweepMerchant runs the retention sweeps for ONE merchant, already inside
 // its scope. Each BATCH gets its own transaction, so a failing sweep cannot roll
 // back another's deletes and no single statement holds a transaction open across
 // a large backlog (or#837, inherited from or#846).
@@ -360,6 +370,18 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	sweep("delete host lifecycle events", &result.HostLifecycleEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteDeliveredHostLifecycleEventsBefore(ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.HostLifecycleEventAckedRetention), RowLimit: limit,
+		})
+	})
+
+	// 6. Payment attempts and then the rebill cycles they leave empty (#1118).
+	sweep("delete payment attempts", &result.PaymentAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeletePaymentAttemptsBefore(ctx, gen.DeletePaymentAttemptsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
+		})
+	})
+	sweep("delete rebill cycles", &result.RebillCycles, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteRebillCyclesBefore(ctx, gen.DeleteRebillCyclesBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
 		})
 	})
 

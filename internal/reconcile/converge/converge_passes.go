@@ -13,7 +13,6 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -574,6 +573,11 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		if held != nil {
 			out = append(out, *held)
 		}
+		health, err := p.paymentHealthFindings(ctx, now)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, health...)
 	}
 
 	paidPending, err := q.ListPaidPendingSubscriptions(ctx, gen.ListPaidPendingSubscriptionsParams{
@@ -1224,7 +1228,8 @@ func (*derivePass) Standing() []string {
 func (*lifePass) Standing() []string {
 	return []string{"life.checkout_session.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
 		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
-		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld}
+		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld,
+		findingNewCardDeclineSpike, findingRebillFailureSpike, findingSystemErrors, findingDeclineUnmapped}
 }
 
 func (*notifyPass) Standing() []string { return []string{"notify.access_ended.missing"} }
@@ -1232,9 +1237,6 @@ func (*notifyPass) Standing() []string { return []string{"notify.access_ended.mi
 func (*conPass) Standing() []string {
 	return []string{"consistency.reference.source_reference", findingDuplicateCharge, "consistency.duplicate.ownership"}
 }
-
-// declineCodeLookback bounds the unmapped decline-code scan of the funnel.
-const declineCodeLookback = 30 * 24 * time.Hour
 
 // heldRenewalsFinding reports engine renewals with no outcome past their
 // allowance: collection is stopped (fleet halted, admission hold, breaker,
@@ -1259,9 +1261,10 @@ func (p *lifePass) heldRenewalsFinding(ctx context.Context, scope Scope, now tim
 }
 
 // funnelFinding is the merchant's recovery funnel (#1089 §9): live
-// subscriptions by state, the oldest unverified entry, open unknown provider
-// operations and decline codes no table maps. Raised only while something is
-// in recovery or needs attention; it resolves when the funnel is empty.
+// subscriptions by state, the oldest unverified entry and open unknown
+// provider operations (unmapped decline codes are life.decline.unmapped).
+// Raised only while something is in recovery or needs attention; it resolves
+// when the funnel is empty.
 func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time) (*ConvergeFinding, error) {
 	q := p.e.DB.Gen(ctx)
 	mid := scope.Merchant.UUID()
@@ -1273,22 +1276,12 @@ func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time
 	if err != nil {
 		return nil, fmt.Errorf("life: count unknown operations: %w", err)
 	}
-	codes, err := q.ListSubscriptionDeclineCodes(ctx, gen.ListSubscriptionDeclineCodesParams{MerchantID: mid, Since: now.Add(-declineCodeLookback)})
-	if err != nil {
-		return nil, fmt.Errorf("life: list decline codes: %w", err)
-	}
-	var unmapped []map[string]any
-	for _, c := range codes {
-		if decline.Classify(c.Rail, c.FailureCode).NeedsMapping() {
-			unmapped = append(unmapped, map[string]any{"rail": c.Rail, "code": c.FailureCode, "declines": c.Declines})
-		}
-	}
-	if f.PastDue+f.AwaitingMethod+f.Unverified+unknown.OpenCount == 0 && len(unmapped) == 0 {
+	if f.PastDue+f.AwaitingMethod+f.Unverified+unknown.OpenCount == 0 {
 		return nil, nil
 	}
 	evidence := map[string]any{
 		"subscriptions":      funnelStates{Active: f.Active, PastDue: f.PastDue, AwaitingMethod: f.AwaitingMethod, Unverified: f.Unverified},
-		"unknown_operations": unknown.OpenCount, "unmapped_decline_codes": unmapped,
+		"unknown_operations": unknown.OpenCount,
 	}
 	severity := SeverityLow
 	if f.Unverified > 0 {
@@ -1302,9 +1295,6 @@ func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time
 		if time.Duration(unknown.OldestAgeSeconds)*time.Second >= stuckVerifyAge {
 			severity = SeverityMedium
 		}
-	}
-	if len(unmapped) > 0 {
-		severity = SeverityMedium
 	}
 	return &ConvergeFinding{
 		Type: findingDunningFunnel, Shape: ShapeMismatch, Class: ClassAuto, Severity: severity,
