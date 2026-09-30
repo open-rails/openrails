@@ -5694,7 +5694,7 @@
     "internal/http/routes/catalog_policy.go": "c9253148ba35c685a13ba222f57c623201446c5cfbe23c48997f4b3751673555",
     "internal/http/routes/owner_catalog.go": "a716a7cc50177eba494f24b641103dfa5441cfa744680791895fa017c2356288",
     "internal/http/routes/platform.go": "3267b370846d1aa6b105e096080ee386cdc1a83dab4fce1206941c409533a3f9",
-    "internal/http/routes/routes.go": "12af7e8a2c83a75aa7178c16610deb57e26532f1aac90120cf77a0e3cffa23da",
+    "internal/http/routes/routes.go": "069de3d827cf24a2baa08a35c23c39e60379c8ab164950d6c5f87b8dba716805",
     "internal/http/routes/self.go": "dd8d42f75dce7dbde1b505b8e3b92a32a00556fa84a1aad3d057f412f1e8eb4b",
     "internal/http/routes_admin.go": "464d56a21d2710e87da9024a314f9294a6671373bd089e1e7d2b81efed32a179",
     "internal/http/routes_admin_console.go": "c6a547be9fa921c0ca1ab9372f125423a185206a5447aa2147cd948f61651cf3",

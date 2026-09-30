@@ -287,7 +287,7 @@ type serviceCreditLimitRequest = openrails.CreditLimitRequest
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
 // AdmitHold denies insufficient_credit when a new hold would exceed it. 0 = off.
-// Merchant-admin gated at the route (`merchant:customer-settings:update`) - NOT self-serve.
+// Owner authority at the route (`merchant:credits:grant`) - NOT self-serve.
 func ServiceSetCreditLimit(r *httprequest.Request) {
 	var req serviceCreditLimitRequest
 	if !r.BindJSON(&req) {

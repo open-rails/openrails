@@ -195,6 +195,9 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
 	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsUpdate)}, dbMW...)
 	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantAdmissionsCreate)}, dbMW...)
+	// Minting balance and opening a credit line are owner authority, never
+	// customer-settings editing (which support holds).
+	creditsGrantMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCreditsGrant)}, dbMW...)
 	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantUsageRead)}, dbMW...)
 
 	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantHostEventsRead)}, dbMW...)
@@ -276,7 +279,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodPost, "/admissions", h(httphandlers.ServiceAdmitBatch), admissionMW...)
 	group.Handle(http.MethodGet, "/trust-level", h(httphandlers.ServiceGetTrustLevel), readMW...)
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
-	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
+	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), creditsGrantMW...)
 	group.Handle(http.MethodGet, "/credit-limit", h(httphandlers.ServiceGetCreditLimit), readMW...)
 	group.Handle(http.MethodGet, "/delinquency", h(httphandlers.ServiceListDelinquency), readMW...)
 
@@ -305,7 +308,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// limiter, or#906): the limiter is a HUMAN-velocity guard and machine
 	// credentials pass it unmetered anyway; rail settlement bursts are
 	// legitimate, and once-only is a database fact now (migration 0004).
-	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), writeMW...)
+	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), creditsGrantMW...)
 	// or#906 key-qualified lookup: what did this deposit key do. GET on the
 	// same path the POST writes — read gate.
 	credits.Handle(http.MethodGet, "/deposit", h(httphandlers.ServiceGetDeposit), readMW...)
