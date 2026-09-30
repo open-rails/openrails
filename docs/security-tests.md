@@ -20,6 +20,7 @@ unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 | Tier change into or out of an ungrouped product (SEC-26) | `TestSecurityTierChangeStaysInGroup` | Both products must share a declared tier group |
 | Refunded stacked pass or revoked future grant restored by convergence (SEC-25) | `TestSecurityRevokedAccessStaysRevoked` | Retracting a window terminates its grant |
 | Replayed completion after a full refund grants again (SEC-25) | `ci/greenfield/security_test.go` `TestSecurityRefundedPurchaseIsNotRegranted` | A purchase projects access once |
+| Support member or support API key mints prepaid credit or opens an unsecured credit line | `ci/greenfield/credit_authority_test.go` `TestSecuritySupportCannotMintCredit` | The machine deposit and the credit-limit write need owner-level `merchant:credits:grant` |
 | Automation or unknown-class customer credential starts a card charge (SEC-27) | `TestSecurityAutomationCredentialCannotCharge` | Upgrade and saved-card checkout require the customer's interactive session |
 | `findings:resolve` retargets a recommendation at another payment or subscription (SEC-28) | `TestSecurityFindingOverrideCannotRetarget` | Overrides cannot change the ids a recommendation names |
 | Browser-chosen cheaper price, archived price, negative price or duration, tampered confirm fields | `TestSecurityCheckoutTermsAreServerSide` | Catalog-derived terms; DB amount and duration checks |

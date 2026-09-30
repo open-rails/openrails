@@ -55,9 +55,10 @@ const (
 	// customer/provider references and historical financial records. It is not a
 	// viewer/support grant. Restoration uses MerchantBillingImport.
 	MerchantBillingExport = "merchant:billing:export"
-	// MerchantCreditsGrant gates the human-admin credit grant
-	// (or#906: POST /v1/merchant/customers/{id}/credits). Money-in is the one
-	// grant-shaped act whose blast radius is monetary, so it does NOT ride on
+	// MerchantCreditsGrant gates minting balance and credit: the human credit
+	// grant (POST /v1/merchant/customers/{id}/credits), the machine deposit
+	// (POST /v1/merchant/credits/deposit) and the arrears credit line
+	// (PUT /v1/merchant/credit-limit). It does NOT ride on
 	// merchant:customer-settings:update (which the fixed #567 support role
 	// holds): a support agent who can edit settings must not be able to mint
 	// balance. Owner-level (merchant:*) by default, grantable narrowly by a
