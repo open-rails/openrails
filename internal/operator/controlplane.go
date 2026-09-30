@@ -222,6 +222,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	}
 
 	if a.Runtime != nil {
+		a.Runtime.ReserveAPIHosts(opts.Auth.Issuer, opts.Auth.RequestOrigin, opts.Frontend.BaseURL)
 		// The standalone control plane explicitly opts billing into AuthKit's
 		// public directory API. Preserve independently injected host adapters.
 		directory := billingauthkit.NewDirectory(cp.Core())

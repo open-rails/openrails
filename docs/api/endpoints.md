@@ -335,7 +335,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/configuration/applications` | `merchant:settings:update` | Apply a configuration document with an application ID and expected revision; returns a durable receipt ([configuration applications](../merchant-configuration-applications.md)) |
 | PUT | `/v1/merchant/settings` | `merchant:settings:update` | Replace the merchant settings document atomically ([merchant-settings.md](merchant-settings.md)), incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
 | GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's canonical API host (#734 Host routing); `api_host` null when unset |
-| PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Assign the canonical API host: `{ api_host }` (bare lowercase hostname; `""` clears). Owner-only in the fixed role catalog; 409 when taken by another merchant |
+| PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Assign the canonical API host: `{ api_host }` (bare lowercase hostname; `""` clears). Owner-only in the fixed role catalog; 400 `api_host_reserved` for the deployment's own hosts (public billing URL, console, issuer); 409 `api_host_taken` when another merchant holds it |
 | GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |
 | GET | `/v1/merchant/credit-limit` | `merchant:customer-settings:read` | Read a customer's credit limit |
 | PUT | `/v1/merchant/credit-limit` | `merchant:credits:grant` | Set a customer's credit limit |

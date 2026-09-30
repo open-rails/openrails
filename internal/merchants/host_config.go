@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +18,30 @@ import (
 // ErrAPIHostTaken indicates apiHost is already assigned to a different active
 // merchant (#734: api_host is globally unique).
 var ErrAPIHostTaken = errors.New("merchants: api host already assigned to another merchant")
+
+// ErrAPIHostReserved indicates a host the deployment itself serves (its public
+// API, console or issuer): a merchant claiming it would take every other
+// merchant's traffic on that host.
+var ErrAPIHostReserved = errors.New("merchants: api host is reserved for the deployment")
+
+// DeploymentHost is the normalized hostname of one of the deployment's own
+// URLs, "" when rawURL names none.
+func DeploymentHost(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return NormalizeAPIHost(u.Hostname())
+}
+
+// ClaimableAPIHost refuses a normalized host the deployment serves. A
+// merchant's own configuration checks it; operators bind hosts freely.
+func ClaimableAPIHost(host string, reserved []string) error {
+	if host != "" && slices.Contains(reserved, host) {
+		return fmt.Errorf("%w: %q", ErrAPIHostReserved, host)
+	}
+	return nil
+}
 
 // ErrInvalidAPIHost indicates a host that is not a plausible DNS hostname
 // (#850: api_host is operator-supplied, so the format is enforced here).

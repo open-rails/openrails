@@ -490,6 +490,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
+	runtime.ReserveAPIHosts(cfg.PublicBillingBaseURL, cfg.DashboardBaseURL)
 
 	return runtime, nil
 }
