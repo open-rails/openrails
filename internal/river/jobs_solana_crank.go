@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -341,7 +342,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			// confirm. Solana never uses a scheduled-cancel (the card "cancel at period
 			// end" deferral) — Solana cancels are immediate and on-chain.
 			llog.Warn("Solana cranker: terminal pull failure (delegate revoked); cancelling subscription (no dunning)")
-			if err := w.recordPullAttempt(ctx, row, plan, string(cf.Code), crankErr.Error()); err != nil {
+			if err := w.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err
 			}
 			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
@@ -373,7 +374,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			reason := crankErr.Error()
 			code := string(cf.Code)
 			subID := row.SubscriptionID
-			if err := w.recordPullAttempt(ctx, row, plan, code, reason); err != nil {
+			if err := w.recordPullAttempt(ctx, row, plan, memoLocalID, code, reason); err != nil {
 				return crankOutcome{}, err
 			}
 			if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
@@ -456,17 +457,28 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 }
 
 // recordPullAttempt records a refused on-chain pull as its cycle's attempt
-// (#1111): the cycle's rebill, or a dunning retry after an earlier failure.
-func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan, code, text string) error {
+// (#1111): the cycle's rebill, or a dunning retry after an earlier failure. It
+// is keyed on the pull's durable intent (one per subscription and pull slot),
+// so a crank retried before the lifecycle applied the failure records nothing
+// new (#1119). The failpoint after it lets tests crash there.
+func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan, pullIntent uuid.UUID, code, text string) error {
 	if plan.periodEnd == nil {
 		return nil // no paid period: nothing came due
 	}
-	return attempts.Record(ctx, w.DB.Gen(ctx), attempts.Attempt{
+	var intent *uuid.UUID
+	if pullIntent != uuid.Nil {
+		intent = &pullIntent
+	}
+	if err := attempts.Record(ctx, w.DB.Gen(ctx), attempts.Attempt{
 		MerchantID: row.MerchantID, CustomerID: plan.customerID, PSPID: plan.pspID, Rail: string(models.RailSolana),
 		Kind: attempts.RebillKind(false, plan.retryAttempts), Owner: attempts.OwnerOf(plan.policy),
 		Answer: decline.Evidence{Code: code, Text: text}, Amount: plan.fiatAmount, Currency: plan.currency, At: w.now(),
 		SubscriptionID: &row.SubscriptionID, Cycle: &attempts.Cycle{SubscriptionID: row.SubscriptionID, DueAt: *plan.periodEnd},
-	})
+		RailIntentID: intent, Step: "pull",
+	}); err != nil {
+		return err
+	}
+	return failpoint.Hit(ctx, failpoint.Site{Point: failpoint.AfterAttempt, Kind: TypeSolanaPull, Operation: pullIntent, Subscription: row.SubscriptionID})
 }
 
 // resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat
