@@ -297,6 +297,18 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	}
 	staff := w.auth.token(t, "staff")
 	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, w.slug))
+	// A staff session revoked after its token was minted is a credential
+	// failure: the live permission check finds it, and the answer is 401,
+	// never the 503 of an authorization outage.
+	sid := uuid.NewString()
+	session := w.auth.sessionToken(t, "staff", sid)
+	status, body := w.merchantCall(session, http.MethodGet, "/v1/merchant/findings")
+	require.Equal(t, http.StatusOK, status, body)
+	w.auth.revoked.Store(sid, struct{}{})
+	status, body = w.merchantCall(session, http.MethodGet, "/v1/merchant/findings")
+	require.Equal(t, http.StatusUnauthorized, status, body)
+	require.Contains(t, body, `"credential_revoked"`)
+	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, w.slug), "another session is unaffected")
 	for _, server := range []string{w.server.URL, r.server.URL} {
 		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict}, merchantGet(server, staff, r.slug))
 	}

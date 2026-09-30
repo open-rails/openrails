@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,16 +58,25 @@ const (
 )
 
 // verifier is a neutral host identity provider: HS256 tokens, a staff subject
-// with merchant authority and UUID subjects as native customers.
+// with merchant authority and UUID subjects as native customers. Like AuthKit,
+// its permission check is live: a session revoked after its token was minted
+// fails the check as a revoked credential.
 type verifier struct {
-	secret []byte
-	slug   string
+	secret  []byte
+	slug    string
+	revoked sync.Map // session id -> struct{}
 }
 
-type principal struct{ id auth.Identity }
+type principal struct {
+	id auth.Identity
+	v  *verifier
+}
 
 func (p principal) Identity() auth.Identity { return p.id }
 func (p principal) Can(context.Context, auth.Scope, string) (bool, error) {
+	if _, gone := p.v.revoked.Load(p.id.SessionID); gone {
+		return false, errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
+	}
 	return p.id.Subject == "staff", nil
 }
 
@@ -79,11 +90,20 @@ func (v *verifier) AuthenticateRequest(_ context.Context, r *http.Request) (auth
 	if err != nil || subject == "" {
 		return nil, auth.ErrUnauthenticated
 	}
-	return principal{auth.Identity{Kind: auth.KindUser, Issuer: issuer, Subject: subject}}, nil
+	sid, _ := token.Claims.(jwt.MapClaims)["sid"].(string)
+	return principal{auth.Identity{Kind: auth.KindUser, Issuer: issuer, Subject: subject, SessionID: sid}, v}, nil
 }
 
 func (v *verifier) token(t testing.TB, subject string) string {
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix()}).SignedString(v.secret)
+	return v.sessionToken(t, subject, "")
+}
+
+func (v *verifier) sessionToken(t testing.TB, subject, sid string) string {
+	claims := jwt.MapClaims{"sub": subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix()}
+	if sid != "" {
+		claims["sid"] = sid
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(v.secret)
 	require.NoError(t, err)
 	return token
 }
@@ -508,9 +528,16 @@ func (w *world) advance(d time.Duration) { w.clock.Advance(d) }
 // status and raw body.
 func (w *world) staff(method, path string) (int, string) {
 	w.t.Helper()
+	return w.merchantCall(w.auth.token(w.t, "staff"), method, path)
+}
+
+// merchantCall calls a merchant route with token and returns the status and
+// raw body.
+func (w *world) merchantCall(token, method, path string) (int, string) {
+	w.t.Helper()
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, nil)
 	require.NoError(w.t, err)
-	req.Header.Set("Authorization", "Bearer "+w.auth.token(w.t, "staff"))
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-OpenRails-Merchant-Slug", w.slug)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
