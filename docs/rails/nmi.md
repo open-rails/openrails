@@ -104,6 +104,12 @@ Subscription-state events are treated as wake-up signals only: OpenRails marks
 the subscription dirty and converges from freshly *fetched* gateway truth, so a
 lost or reordered webhook cannot corrupt state.
 
+Attempt details come from the Query API too. Every hour, NMI attempts at least
+10 minutes old are filled from the transaction report, 50 transaction ids per
+query and each attempt once: card BIN and brand, AVS/CVV the reply lacked, the
+issuer's raw answer (`processor_response_code`) and whether a network token was
+used. Attempts found by a provider read are filled from that read at once.
+
 For local development, tunnel a stable public hostname to your dev server —
 see `docs/dev/local-webhooks.md`.
 

@@ -148,6 +148,7 @@ var OwnedFunctions = []string{
 	"retention_work_merchant_ids(timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, uuid, integer)",
 	"subscriptions_record_status_transition()",
 	"subscriptions_set_tier_group()",
+	"unenriched_attempt_merchant_ids(timestamp with time zone, timestamp with time zone, integer)",
 }
 
 var OwnedTypes = []string{"payment_status", "subscription_status"}

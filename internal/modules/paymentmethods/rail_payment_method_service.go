@@ -344,7 +344,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 	databaseDuration = time.Since(databaseStartedAt)
 	s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Approved: true, TransactionID: agreementRef, PaymentMethodID: &methodID, Step: "verify",
-		CardBrand: normalize.FromPtr(pm.CardType), CardLast4: normalize.FromPtr(pm.LastFour), TokenType: charge.TokenTypePSPToken})
+		Answer: decline.Evidence{CardBrand: normalize.FromPtr(pm.CardType), CardLast4: normalize.FromPtr(pm.LastFour)}, TokenType: charge.TokenTypePSPToken})
 
 	outcome = "success"
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")

@@ -67,8 +67,10 @@ type QueryFilter struct {
 	SubscriptionID string
 	// CustomerVaultID filters to one vault's transactions.
 	CustomerVaultID string
-	PageNumber      int
-	ResultLimit     int
+	// TransactionID filters to transaction ids (a comma list).
+	TransactionID string
+	PageNumber    int
+	ResultLimit   int
 }
 
 type AddSubscriptionResponse struct {
@@ -580,6 +582,9 @@ func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) 
 	}
 	if filter.CustomerVaultID != "" {
 		values.Set("customer_vault_id", filter.CustomerVaultID)
+	}
+	if filter.TransactionID != "" {
+		values.Set("transaction_id", filter.TransactionID)
 	}
 	if filter.PageNumber > 0 {
 		values.Set("page_number", fmt.Sprintf("%d", filter.PageNumber))

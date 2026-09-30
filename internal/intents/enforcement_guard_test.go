@@ -117,6 +117,7 @@ var providerWriteSurface = map[string]string{
 	"ReadVaultTransactions":        "read",
 	"ProbeTestMode":                "read",
 	"SearchTransactions":           "read",
+	"TransactionReport":            "read",
 }
 
 // solanaWriteFuncs are the sign-and-submit entry points: everything that puts a

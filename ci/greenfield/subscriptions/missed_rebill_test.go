@@ -3,6 +3,8 @@
 package subscriptions_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -18,7 +20,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/nmimock"
 )
 
 type rebillWatchPass struct{}
@@ -66,9 +67,8 @@ func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	require.Len(t, w.openFindings("life.rebill.missed"), 1)
 	w.watchRebills()
 	require.Len(t, w.openFindings("life.rebill.missed"), 1, "one finding per cycle")
-	require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status, "the period is OpenRails' to collect")
 
-	w.runRenewals()
+	w.runRenewals() // the due pass may already have run on its own
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, "active", sub.Status)
 	next := *sub.CurrentPeriodEndsAt
@@ -158,9 +158,30 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)
 		l, due := skipped(t, w, skip)
+		// Once the period is handed over, NMI's schedule shows it due again.
+		// Keyed on the recorded miss, so the due pass may run at any moment.
+		handedOver := func(r *http.Request) bool {
+			if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/subscriptions/"+l.railSub) {
+				return false
+			}
+			var missed bool
+			err := w.pool.QueryRow(r.Context(), w.q(`SELECT EXISTS (SELECT 1 FROM openrails.rebill_cycles WHERE subscription_id = $1 AND missed_at IS NOT NULL)`), l.sub.UUID()).Scan(&missed)
+			return err == nil && missed
+		}
+		w.nmi.Intercept(handedOver, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+			res := serve()
+			var body map[string]any
+			raw, _ := io.ReadAll(res.Body)
+			if err := json.Unmarshal(raw, &body); err != nil {
+				return nil, err
+			}
+			body["next_billing_date"] = due.UTC().Format(time.DateOnly)
+			raw, _ = json.Marshal(body)
+			res.Body, res.ContentLength = io.NopCloser(bytes.NewReader(raw)), int64(len(raw))
+			return res, nil
+		})
 		w.watchRebills()
-		require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status)
-		w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.NextBilling = due })
+		require.Equal(t, "provider_skipped", w.missReason(l.sub, due))
 		w.runRenewals()
 		require.Zero(t, len(w.nmi.Attempts()), "NMI's schedule must show the next period when OpenRails charges")
 	})
@@ -186,6 +207,10 @@ func TestNMIScheduleLostWebhookFoundByPull(t *testing.T) {
 			rows := w.cycleAttempts(l.sub)
 			require.Len(t, rows, 1)
 			require.Equal(t, []string{"rebill", "provider_schedule", "pull"}, []string{rows[0].Kind, rows[0].Source, rows[0].ObservedVia})
+			read := w.enrichedAttempts(l.c.id)
+			require.Len(t, read, 1)
+			require.NotNil(t, read[0].EnrichedAt, "the probe's read fills the attempt at once (#1114)")
+			require.Equal(t, "411111", str(read[0].BIN))
 			require.Empty(t, w.missReason(l.sub, due))
 			sub := w.subscription(embedded, l.sub)
 			require.Zero(t, len(w.nmi.Attempts()), "a charge NMI made is never made again")

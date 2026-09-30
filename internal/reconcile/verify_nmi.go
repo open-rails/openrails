@@ -233,15 +233,17 @@ func (a *attribution) add(sale nmi.ScheduleSale) {
 		}
 		return
 	}
-	a.txns[target.ID] = append(a.txns[target.ID], saleTransaction(sale, target.RailSubscriptionID))
+	a.txns[target.ID] = append(a.txns[target.ID], remoteSale(sale.SaleAction, target.RailSubscriptionID))
 }
 
-func saleTransaction(sale nmi.ScheduleSale, railSubID string) RemoteTransaction {
+// remoteSale is one sale action of NMI's transaction report as a snapshot
+// transaction of the schedule railSubID.
+func remoteSale(sale nmi.SaleAction, railSubID string) RemoteTransaction {
 	amount, _ := parseAmountCents(sale.Amount)
 	t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
-		AmountCents: amount, Currency: sale.Currency, OccurredAt: sale.At}
+		AmountCents: amount, Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
 	if !sale.Success {
-		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.ResponseText, sale.ResponseCode
+		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.Evidence.Text, sale.Evidence.Code
 	}
 	return t
 }
@@ -348,7 +350,7 @@ func (v *Verifier) bulkRead(ctx context.Context, mid merchant.ID) error {
 					}
 				}
 				if sub := byRail[id]; sub != nil {
-					perSub[sub] = append(perSub[sub], saleTransaction(sale, sub.RailSubscriptionID))
+					perSub[sub] = append(perSub[sub], remoteSale(sale.SaleAction, sub.RailSubscriptionID))
 				}
 			}
 			for sub, txns := range perSub {

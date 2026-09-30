@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -153,8 +154,11 @@ type RemoteTransaction struct {
 	// DeclineCode is the rail's decline CODE verbatim (NMI response_code,
 	// Stripe failure_code) — the payments.failure_code stamp (#796): a
 	// backfilled decline without it reads failure_reason='unknown'.
-	DeclineCode string          `json:"decline_code,omitempty"`
-	Raw         json.RawMessage `json:"raw,omitempty"`
+	DeclineCode string `json:"decline_code,omitempty"`
+	// Answer is the provider's full answer and card, when its read gives
+	// them (NMI's Query API); attempts record it.
+	Answer decline.Evidence `json:"-"`
+	Raw    json.RawMessage  `json:"raw,omitempty"`
 }
 
 // RemotePaymentMethod is one stored payment method as the rail declares it.

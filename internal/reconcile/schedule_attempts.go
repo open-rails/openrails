@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -19,7 +20,7 @@ import (
 // paid period's end is that cycle's rebill, and each approval moves on to the
 // next cycle. Older history has no cycle here. OpenRails' own retries carry
 // the same transaction ids and were recorded when they completed.
-func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction) error {
+func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction, now time.Time) error {
 	if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(*sub.CurrentPeriodStartsAt) {
 		return nil
 	}
@@ -47,12 +48,19 @@ func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Sub
 		if currency == "" {
 			continue
 		}
+		answer := t.Answer
+		if answer.Rail == "" {
+			answer = decline.Evidence{Code: strings.TrimSpace(t.DeclineCode), Text: t.DeclineReason}
+		}
 		a := attempts.Attempt{
 			MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: string(sub.Rail),
 			Kind: attempts.Rebill, Owner: attempts.OwnerNMISchedule, ProviderSchedule: true, ObservedVia: via,
-			Approved: t.Success, Answer: decline.Evidence{Code: strings.TrimSpace(t.DeclineCode), Text: t.DeclineReason},
+			Approved: t.Success, Answer: answer,
 			TransactionID: t.TransactionID, Amount: amount, Currency: currency, At: t.OccurredAt,
 			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due}, PaymentMethodID: sub.PaymentMethodID, TokenType: charge.TokenTypePSPToken,
+		}
+		if t.Answer.Rail != "" {
+			a.EnrichedAt = now // the transaction report's full answer
 		}
 		if err := attempts.Record(ctx, q, a); err != nil {
 			return err

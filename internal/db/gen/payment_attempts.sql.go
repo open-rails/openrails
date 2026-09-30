@@ -46,12 +46,63 @@ func (q *Queries) CheckoutVerifiedPaymentMethod(ctx context.Context, arg Checkou
 	return verified, err
 }
 
+const enrichPaymentAttempt = `-- name: EnrichPaymentAttempt :execrows
+UPDATE openrails.payment_attempts SET
+    card_bin = COALESCE(card_bin, $1::text),
+    card_brand = COALESCE(card_brand, $2::text),
+    card_last4 = COALESCE(card_last4, $3::text),
+    avs_result = COALESCE(avs_result, $4::text),
+    cvv_result = COALESCE(cvv_result, $5::text),
+    issuer_code = COALESCE(issuer_code, $6::text),
+    issuer_text = COALESCE(issuer_text, $7::text),
+    token_type = CASE WHEN $8::boolean THEN 'network_token' ELSE token_type END,
+    enriched_at = $9::timestamptz
+WHERE merchant_id = $10::uuid AND id = $11::uuid AND enriched_at IS NULL
+`
+
+type EnrichPaymentAttemptParams struct {
+	CardBin      *string
+	CardBrand    *string
+	CardLast4    *string
+	AvsResult    *string
+	CvvResult    *string
+	IssuerCode   *string
+	IssuerText   *string
+	NetworkToken bool
+	EnrichedAt   time.Time
+	MerchantID   uuid.UUID
+	ID           uuid.UUID
+}
+
+// #1114: fills what the attempt's own reply lacked from the PSP's
+// transaction read, once. A network token used replaces the token type.
+func (q *Queries) EnrichPaymentAttempt(ctx context.Context, arg EnrichPaymentAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enrichPaymentAttempt,
+		arg.CardBin,
+		arg.CardBrand,
+		arg.CardLast4,
+		arg.AvsResult,
+		arg.CvvResult,
+		arg.IssuerCode,
+		arg.IssuerText,
+		arg.NetworkToken,
+		arg.EnrichedAt,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertPaymentAttempt = `-- name: InsertPaymentAttempt :execrows
 INSERT INTO openrails.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
-    subscription_id, payment_method_id, payment_id, rail_intent_id, step, cycle_id
+    subscription_id, payment_method_id, payment_id, rail_intent_id, step, cycle_id,
+    card_bin, issuer_code, issuer_text, enriched_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::text, $8::text,
@@ -62,7 +113,9 @@ INSERT INTO openrails.payment_attempts (
     $22::bigint, $23::text, $24::timestamptz,
     $25::uuid, $26::text, $27::uuid,
     $28::uuid, $29::uuid, $30::uuid,
-    $31::text, $32::uuid
+    $31::text, $32::uuid,
+    $33::text, $34::text, $35::text,
+    $36::timestamptz
 )
 ON CONFLICT DO NOTHING
 `
@@ -100,6 +153,10 @@ type InsertPaymentAttemptParams struct {
 	RailIntentID    *uuid.UUID
 	Step            string
 	CycleID         *uuid.UUID
+	CardBin         *string
+	IssuerCode      *string
+	IssuerText      *string
+	EnrichedAt      *time.Time
 }
 
 // #1110: idempotent on the gateway transaction id, else on the operation step.
@@ -137,6 +194,10 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 		arg.RailIntentID,
 		arg.Step,
 		arg.CycleID,
+		arg.CardBin,
+		arg.IssuerCode,
+		arg.IssuerText,
+		arg.EnrichedAt,
 	)
 	if err != nil {
 		return 0, err
@@ -179,4 +240,90 @@ func (q *Queries) LatestPaymentCheckoutAttempt(ctx context.Context, arg LatestPa
 	var i LatestPaymentCheckoutAttemptRow
 	err := row.Scan(&i.CheckoutID, &i.Kind, &i.Category)
 	return i, err
+}
+
+const listUnenrichedAttemptMerchants = `-- name: ListUnenrichedAttemptMerchants :many
+SELECT merchant_id FROM openrails.unenriched_attempt_merchant_ids(
+    $1::timestamptz, $2::timestamptz, $3::int)
+`
+
+type ListUnenrichedAttemptMerchantsParams struct {
+	Since         time.Time
+	Before        time.Time
+	MerchantLimit int32
+}
+
+func (q *Queries) ListUnenrichedAttemptMerchants(ctx context.Context, arg ListUnenrichedAttemptMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnenrichedAttemptMerchants, arg.Since, arg.Before, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnenrichedNMIAttempts = `-- name: ListUnenrichedNMIAttempts :many
+SELECT id, psp_id, transaction_id::text AS transaction_id, attempted_at
+FROM openrails.payment_attempts
+WHERE merchant_id = $1::uuid
+  AND enriched_at IS NULL AND rail = 'nmi' AND transaction_id IS NOT NULL
+  AND attempted_at >= $2::timestamptz AND attempted_at < $3::timestamptz
+ORDER BY attempted_at, id
+LIMIT $4::int
+`
+
+type ListUnenrichedNMIAttemptsParams struct {
+	MerchantID uuid.UUID
+	Since      time.Time
+	Before     time.Time
+	RowLimit   int32
+}
+
+type ListUnenrichedNMIAttemptsRow struct {
+	ID            uuid.UUID
+	PspID         uuid.UUID
+	TransactionID string
+	AttemptedAt   time.Time
+}
+
+// #1114: NMI attempts in [since, before) the enrichment pass has not read.
+func (q *Queries) ListUnenrichedNMIAttempts(ctx context.Context, arg ListUnenrichedNMIAttemptsParams) ([]ListUnenrichedNMIAttemptsRow, error) {
+	rows, err := q.db.Query(ctx, listUnenrichedNMIAttempts,
+		arg.MerchantID,
+		arg.Since,
+		arg.Before,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnenrichedNMIAttemptsRow
+	for rows.Next() {
+		var i ListUnenrichedNMIAttemptsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PspID,
+			&i.TransactionID,
+			&i.AttemptedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

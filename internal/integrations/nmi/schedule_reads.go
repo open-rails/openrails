@@ -113,69 +113,21 @@ func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since, un
 		filter.EndDate = until.UTC().Format(queryAPITimeFormat)
 	}
 	filter.ResultLimit, filter.PageNumber = QueryPageLimit, page
-	raw, err := c.SearchTransactions(ctx, filter)
+	report, err := c.TransactionReport(ctx, filter)
 	if err != nil {
 		return nil, 0, err
 	}
-	var parsed struct {
-		XMLName       xml.Name `xml:"nm_response"`
-		ErrorResponse string   `xml:"error_response"`
-		Transactions  []struct {
-			TransactionID   string `xml:"transaction_id"`
-			SubscriptionID  string `xml:"subscription_id"`
-			OrderID         string `xml:"order_id"`
-			CustomerVaultID string `xml:"customer_vault_id"`
-			Condition       string `xml:"condition"`
-			Currency        string `xml:"currency"`
-			Actions         []struct {
-				Amount       string `xml:"amount"`
-				ActionType   string `xml:"action_type"`
-				Success      string `xml:"success"`
-				Date         string `xml:"date"`
-				ResponseCode string `xml:"response_code"`
-				ResponseText string `xml:"response_text"`
-			} `xml:"action"`
-		} `xml:"transaction"`
-	}
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return nil, 0, fmt.Errorf("parse transaction query response: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return nil, 0, fmt.Errorf("transaction query error_response: %s", msg)
-	}
 	var out []ScheduleSale
-	for _, t := range parsed.Transactions {
-		actions := make([]TransactionAction, 0, len(t.Actions))
-		for _, a := range t.Actions {
-			actions = append(actions, TransactionAction{Type: a.ActionType, Success: a.Success, Amount: a.Amount})
-		}
-		if SaleReversed(t.Condition, actions) {
+	for _, t := range report.Transactions {
+		if t.Reversed() {
 			continue // voided or refunded in full: no payment, no decline
 		}
-		for _, a := range t.Actions {
-			if !strings.EqualFold(strings.TrimSpace(a.ActionType), "sale") {
-				continue
-			}
-			at, err := time.ParseInLocation(queryAPITimeFormat, strings.TrimSpace(a.Date), time.UTC)
-			if err != nil {
-				at = time.Time{}
-			}
-			if !since.IsZero() && !at.IsZero() && at.Before(since.UTC()) {
-				continue
-			}
-			out = append(out, ScheduleSale{
-				SaleAction: SaleAction{
-					TransactionID: strings.TrimSpace(t.TransactionID), Success: strings.TrimSpace(a.Success) == "1", At: at,
-					Amount: strings.TrimSpace(a.Amount), Currency: strings.TrimSpace(t.Currency),
-					ResponseCode: strings.TrimSpace(a.ResponseCode), ResponseText: strings.TrimSpace(a.ResponseText),
-				},
-				SubscriptionID: strings.TrimSpace(t.SubscriptionID),
-				OrderID:        strings.TrimSpace(t.OrderID),
-				VaultID:        strings.TrimSpace(t.CustomerVaultID),
-			})
+		for _, sale := range saleActions(t, since) {
+			out = append(out, ScheduleSale{SaleAction: sale, SubscriptionID: strings.TrimSpace(t.SubscriptionID),
+				OrderID: strings.TrimSpace(t.OrderID), VaultID: strings.TrimSpace(t.CustomerVaultID)})
 		}
 	}
-	return out, len(parsed.Transactions), nil
+	return out, len(report.Transactions), nil
 }
 
 func idList(ids []string) (string, error) {

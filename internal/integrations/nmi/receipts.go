@@ -2,7 +2,6 @@ package nmi
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"math/big"
@@ -194,21 +193,14 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 	if strings.TrimSpace(orderReference) == "" {
 		return SaleEvidence{}, false, errors.New("order reference is required")
 	}
-	raw, err := c.SearchTransactions(ctx, QueryFilter{OrderID: orderReference})
+	query, err := c.TransactionReport(ctx, QueryFilter{OrderID: orderReference})
 	if err != nil {
 		return SaleEvidence{}, false, err
-	}
-	var query saleQueryResponse
-	if err := xml.Unmarshal([]byte(raw), &query); err != nil {
-		return SaleEvidence{}, false, err
-	}
-	if query.ErrorResponse != "" {
-		return SaleEvidence{}, false, errors.New(query.ErrorResponse)
 	}
 	id := ""
 	for _, txn := range query.Transactions {
 		for _, action := range txn.Actions {
-			if !strings.EqualFold(strings.TrimSpace(action.ActionType), "sale") || strings.TrimSpace(action.Success) != "1" {
+			if !action.Is("sale") || !action.Succeeded() {
 				continue
 			}
 			if txn.OrderID != orderReference || strings.TrimSpace(txn.TransactionID) == "" {

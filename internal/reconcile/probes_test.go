@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -71,7 +72,8 @@ func TestNMISubscriptionProber(t *testing.T) {
 		require.True(t, snap.Coverage.SubscriptionsExhaustive, "the per-subscription GET is authoritative for its subject")
 		require.Len(t, snap.Transactions, 1)
 		require.Equal(t, RemoteTransaction{TransactionID: "txn_1", SubscriptionID: "psub_1", Type: TransactionTypeSale, Success: true,
-			AmountCents: 999, Currency: "usd", OccurredAt: chargedAt.Truncate(time.Second)}, snap.Transactions[0])
+			AmountCents: 999, Currency: "usd", OccurredAt: chargedAt.Truncate(time.Second),
+			Answer: decline.Evidence{Rail: "nmi", Code: "202", Text: "Insufficient funds"}}, snap.Transactions[0])
 		require.Equal(t, SubscriptionStatusActive, snap.Subscriptions[0].Status)
 		d := decideUnknown("psub_1", &periodEnd, snap, now)
 		require.Equal(t, TransitionRenew, d.Kind)

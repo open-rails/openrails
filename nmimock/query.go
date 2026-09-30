@@ -33,13 +33,16 @@ func (m *Mock) query(rec *httptest.ResponseRecorder, form url.Values) {
 }
 
 type xmlAction struct {
-	Amount       string `xml:"amount"`
-	ActionType   string `xml:"action_type"`
-	Date         string `xml:"date"`
-	Success      string `xml:"success"`
-	Source       string `xml:"source"`
-	ResponseText string `xml:"response_text"`
-	ResponseCode string `xml:"response_code"`
+	Amount                string `xml:"amount"`
+	ActionType            string `xml:"action_type"`
+	Date                  string `xml:"date"`
+	Success               string `xml:"success"`
+	Source                string `xml:"source"`
+	ResponseText          string `xml:"response_text"`
+	ResponseCode          string `xml:"response_code"`
+	ProcessorResponseCode string `xml:"processor_response_code"`
+	ProcessorResponseText string `xml:"processor_response_text"`
+	NetworkTokenUsed      string `xml:"network_token_used"`
 }
 
 type xmlTransaction struct {
@@ -49,9 +52,46 @@ type xmlTransaction struct {
 	Condition       string    `xml:"condition"`
 	OrderID         string    `xml:"order_id"`
 	CCNumber        string    `xml:"cc_number"`
+	CCBin           string    `xml:"cc_bin"`
+	CCType          string    `xml:"cc_type"`
+	AVSResponse     string    `xml:"avs_response"`
+	CSCResponse     string    `xml:"csc_response"`
 	CustomerVaultID string    `xml:"customer_vault_id"`
 	Currency        string    `xml:"currency"`
 	Action          xmlAction `xml:"action"`
+}
+
+// cardTransaction is a transaction on card c with the card fields and the
+// issuer's answer the Query API reports: the processor code is "00" on an
+// approval, else the issuer code behind NMI's response code.
+func cardTransaction(id, condition, order, vault, currency string, c Card, a xmlAction) xmlTransaction {
+	a.ProcessorResponseCode, a.ProcessorResponseText = "00", "Approved"
+	if a.Success != "1" {
+		a.ProcessorResponseCode, a.ProcessorResponseText = "05", "Do not honor"
+		if a.ResponseCode == "202" {
+			a.ProcessorResponseCode, a.ProcessorResponseText = "51", "Insufficient funds"
+		}
+	}
+	if c.NetworkToken {
+		a.NetworkTokenUsed = "1"
+	}
+	return xmlTransaction{TransactionID: id, TransactionType: "cc", Condition: condition, OrderID: order, CCNumber: maskedNumber(c), CCBin: binFor(c), CCType: c.Brand,
+		AVSResponse: c.AVS, CSCResponse: c.CVV, CustomerVaultID: vault, Currency: currency, Action: a}
+}
+
+func binFor(c Card) string {
+	if c.BIN != "" {
+		return c.BIN
+	}
+	switch c.Brand {
+	case "mastercard":
+		return "555555"
+	case "amex":
+		return "378282"
+	case "discover":
+		return "601111"
+	}
+	return "411111"
 }
 
 // search is the transaction report: every sale, validation and refund in
@@ -96,15 +136,17 @@ func (m *Mock) search(form url.Values) string {
 		if s.Voided {
 			condition = "canceled"
 		}
-		add(xmlTransaction{TransactionID: s.TransactionID, TransactionType: "cc", Condition: condition, OrderID: s.OrderID, CCNumber: maskedNumber(s.Card),
-			CustomerVaultID: s.Vault, Currency: s.Currency, Action: xmlAction{Amount: s.Amount, ActionType: "sale", Date: s.At.UTC().Format(queryTime),
-				Success: success, Source: "api", ResponseText: text, ResponseCode: code}}, s.At, s.ScheduleID)
+		source := "api"
+		if s.ScheduleID != "" {
+			source = "recurring"
+		}
+		add(cardTransaction(s.TransactionID, condition, s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: s.Amount, ActionType: "sale", Date: s.At.UTC().Format(queryTime),
+			Success: success, Source: source, ResponseText: text, ResponseCode: code}), s.At, s.ScheduleID)
 	}
 	for _, r := range m.refunds {
 		s := r.Sale
-		add(xmlTransaction{TransactionID: r.ID, TransactionType: "cc", Condition: "pendingsettlement", OrderID: s.OrderID, CCNumber: maskedNumber(s.Card),
-			CustomerVaultID: s.Vault, Currency: s.Currency, Action: xmlAction{Amount: decimalCents(r.Cents), ActionType: "refund", Date: r.At.UTC().Format(queryTime),
-				Success: "1", Source: "api", ResponseText: "SUCCESS", ResponseCode: "100"}}, r.At, s.ScheduleID)
+		add(cardTransaction(r.ID, "pendingsettlement", s.OrderID, s.Vault, s.Currency, s.Card, xmlAction{Amount: decimalCents(r.Cents), ActionType: "refund", Date: r.At.UTC().Format(queryTime),
+			Success: "1", Source: "api", ResponseText: "SUCCESS", ResponseCode: "100"}), r.At, s.ScheduleID)
 	}
 	if !schedules {
 		for _, v := range m.validations {
@@ -112,9 +154,8 @@ func (m *Mock) search(form url.Values) string {
 			if !v.Approved {
 				success, code, text, condition = "0", v.Card.Decline, "DECLINE", "failed"
 			}
-			add(xmlTransaction{TransactionID: v.TransactionID, TransactionType: "cc", Condition: condition, OrderID: v.Form.Get("orderid"), CCNumber: maskedNumber(v.Card),
-				CustomerVaultID: v.Vault, Currency: "USD", Action: xmlAction{Amount: "0.00", ActionType: "validate", Date: v.At.UTC().Format(queryTime),
-					Success: success, Source: "api", ResponseText: text, ResponseCode: code}}, v.At, "")
+			add(cardTransaction(v.TransactionID, condition, v.Form.Get("orderid"), v.Vault, "USD", v.Card, xmlAction{Amount: "0.00", ActionType: "validate", Date: v.At.UTC().Format(queryTime),
+				Success: success, Source: "api", ResponseText: text, ResponseCode: code}), v.At, "")
 		}
 	}
 	limit, _ := strconv.Atoi(form.Get("result_limit"))

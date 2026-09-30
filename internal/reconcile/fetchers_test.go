@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
@@ -144,14 +145,14 @@ func TestNMIFetcher(t *testing.T) {
 		require.Equal(t, int64(999), stale.AmountCents, "empty amount falls back to the plan amount")
 
 		require.Len(t, snap.Transactions, 3, "settle actions are not charge events")
-		sale, decline, refund := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
+		sale, declined, refund := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
 		require.Equal(t, RemoteTransaction{TransactionID: "12030573544", Type: TransactionTypeSale, Success: true, AmountCents: 2399, Currency: "USD",
-			OccurredAt: time.Date(2026, 5, 5, 19, 35, 42, 0, time.UTC)}, withoutRaw(sale))
+			OccurredAt: time.Date(2026, 5, 5, 19, 35, 42, 0, time.UTC), Answer: decline.Evidence{Rail: "nmi", Code: "100"}}, withoutRaw(sale))
 		require.Contains(t, string(sale.Raw), "119f105d-6f72-4257-ab53-353ed2c99e69")
-		require.Equal(t, TransactionTypeDecline, decline.Type)
-		require.False(t, decline.Success)
-		require.Equal(t, "Insufficient funds", decline.DeclineReason)
-		require.Equal(t, int64(999), decline.AmountCents)
+		require.Equal(t, TransactionTypeDecline, declined.Type)
+		require.False(t, declined.Success)
+		require.Equal(t, "Insufficient funds", declined.DeclineReason)
+		require.Equal(t, int64(999), declined.AmountCents)
 		require.Equal(t, TransactionTypeRefund, refund.Type)
 		require.Equal(t, int64(500), refund.AmountCents)
 

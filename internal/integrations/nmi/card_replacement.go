@@ -2,7 +2,6 @@ package nmi
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
@@ -71,16 +70,9 @@ func (c *NMIClient) ReadVerificationByOrderID(ctx context.Context, orderID strin
 	if orderID == "" {
 		return v, false, errors.New("order id is required")
 	}
-	raw, err := c.SearchTransactions(ctx, QueryFilter{OrderID: orderID})
+	parsed, err := c.TransactionReport(ctx, QueryFilter{OrderID: orderID})
 	if err != nil {
 		return v, false, err
-	}
-	var parsed saleQueryResponse
-	if err := xml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return v, false, fmt.Errorf("parse transaction query response: %w", err)
-	}
-	if msg := strings.TrimSpace(parsed.ErrorResponse); msg != "" {
-		return v, false, fmt.Errorf("transaction query error_response: %s", msg)
 	}
 	found := false
 	for _, txn := range parsed.Transactions {
@@ -88,10 +80,10 @@ func (c *NMIClient) ReadVerificationByOrderID(ctx context.Context, orderID strin
 			continue
 		}
 		for _, action := range txn.Actions {
-			if !strings.EqualFold(strings.TrimSpace(action.ActionType), "validate") {
+			if !action.Is("validate") {
 				continue
 			}
-			approved := strings.TrimSpace(action.Success) == "1"
+			approved := action.Succeeded()
 			if found && !approved {
 				continue // an approval decides the order reference
 			}

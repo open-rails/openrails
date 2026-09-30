@@ -162,7 +162,7 @@ func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.S
 		return 0, false, fmt.Errorf("converge: backfill %s: %w", sub.ID, err)
 	}
 	if !d.Declared {
-		if err := recordScheduleAttempts(ctx, q, sub, d.Backfill); err != nil {
+		if err := recordScheduleAttempts(ctx, q, sub, d.Backfill, now); err != nil {
 			return backfilled, false, fmt.Errorf("converge: record schedule attempts %s: %w", sub.ID, err)
 		}
 	}
