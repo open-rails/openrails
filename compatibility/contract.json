@@ -5761,7 +5761,7 @@
     "pkg/billingauth/delegated_gate.go": "c50f809a36e9d4637f422875fbbb6cc8c27304b357f66d967b7e9244436bb380",
     "pkg/billingauth/gate.go": "8a96485f89878e5d855ef6df4ad077020aba64db26fe2149f48b2599cdd141b2",
     "pkg/billingauth/integration.go": "6ae0ec57a2290b8c7cc9a37b8a79139f91082db8408a68d59b1b7ad6c44cf290",
-    "pkg/billingauth/provider.go": "a1b6cb66c3e46555f769997c8d55cfd5499373228768b4256cbb0b6d5f93fb87",
+    "pkg/billingauth/provider.go": "e090d74e62b9e1c071882b87a6e7a061718a1aec1e4999b34d8c3b5fb5d1dd32",
     "pkg/billingauth/token.go": "0731f6ad20b1d7e8fd7911cbe31d2b154d9ab3a8c14f34ff4fc87f9324a0abb7",
     "pkg/billingauth/user_context.go": "d26d00cb4c8ab3f7afb88a18d41491dacacaa525213c009c1922786d2e53a9bb",
     "testdata/wire/billing_status.json": "264a1823c9d7db04de8e067b946b12cb579c261c6d4248e7de823a91329b71bc",
