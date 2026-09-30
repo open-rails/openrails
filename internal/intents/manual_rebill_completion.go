@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -15,10 +16,12 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -179,6 +182,9 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.Openra
 		if current.Status == StatusSucceeded {
 			return NewStore(d).CompleteManualRebill(ctx, in, outcome, h.now())
 		}
+		if err := recordRebillAttempt(ctx, d, in, p, sub, attempts.Attempt{Approved: true, TransactionID: retained.TransactionID()}, h.now()); err != nil {
+			return err
+		}
 		lifecycle := h.lifecycle(d)
 		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, Rail: models.Rail(p.Rail), RailSubscriptionID: p.RailSubscriptionID, TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal || (sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(p.Renewal.PeriodEnd)) {
@@ -222,6 +228,9 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 		}
 		if current.Status == StatusFailedTerminal {
 			return NewStore(d).CompleteManualRebill(ctx, in, outcome, h.now())
+		}
+		if err := recordRebillAttempt(ctx, d, in, p, sub, attempts.Attempt{Answer: decline.Evidence{Code: code}, TransactionID: refusal.ProviderReference}, h.now()); err != nil {
+			return err
 		}
 		kind := payments.AttemptRenewal
 		failed := &models.Payment{ID: uuidutil.NewV7(), CustomerID: p.Renewal.CustomerID, PriceID: p.Renewal.PriceID, SubscriptionID: &p.Renewal.SubscriptionID, Rail: models.Rail(p.Rail), PspID: &p.Instrument.PSPID, TransactionID: "rebill_declined:" + in.ID.String(), Amount: p.Renewal.Amount, ListAmount: p.Renewal.Amount, Currency: p.Renewal.Currency, Status: payments.PaymentStatusFailedValue, FailureCode: &code, FailureReason: &failureReason, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(p.Renewal.Entitlements), PurchasedAt: h.now(), CreatedAt: h.now()}
@@ -273,4 +282,15 @@ func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.Op
 		return Ambiguous("cannot release accepted rebill: " + err.Error())
 	}
 	return outcome
+}
+
+// recordRebillAttempt records an OpenRails rebill's answer for its cycle
+// (#1111) in the completion transaction.
+func recordRebillAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, sub *models.Subscription, a attempts.Attempt, at time.Time) error {
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Renewal.CustomerID, p.Instrument.PSPID, p.Rail
+	a.Kind, a.Owner, a.At, a.Step = attempts.RebillKind(p.Initiator == charge.InitiatorCustomer, p.FailureCount), attempts.OwnerOf(sub.CollectionPolicy), at, "charge"
+	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
+	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.Renewal.PeriodStart}
+	a.TokenType = payments.DefaultTokenType(p.Rail, p.Instrument.Custodian)
+	return attempts.Record(ctx, d.Gen(ctx), a)
 }

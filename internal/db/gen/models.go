@@ -976,6 +976,7 @@ type OpenrailsPaymentAttempt struct {
 	RailIntentID    *uuid.UUID
 	Step            string
 	CreatedAt       time.Time
+	CycleID         *uuid.UUID
 }
 
 // Generalized payment method table supporting multiple rails.
@@ -1263,6 +1264,21 @@ type OpenrailsRailRefreshWatermark struct {
 	WatermarkAt time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+// #1111 one expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id.
+type OpenrailsRebillCycle struct {
+	ID             uuid.UUID
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Owner          string
+	DueAt          time.Time
+	Amount         int64
+	Currency       string
+	CreatedAt      time.Time
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).

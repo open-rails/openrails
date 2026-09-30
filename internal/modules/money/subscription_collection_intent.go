@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -184,7 +185,11 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 		return intents.Ambiguous("engine submission requires exact receipt recovery: " + err.Error())
 	}
 	if refusal != nil {
-		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal.ResponseCode, result.TransactionID); err != nil {
+		reference := result.TransactionID
+		if reference == "" {
+			reference = refusal.TransactionID
+		}
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal.ResponseCode, reference); err != nil {
 			return intents.Ambiguous("retain engine refusal: " + err.Error())
 		}
 		return h.Verify(ctx, in)
@@ -335,7 +340,7 @@ func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in
 		return intents.Ambiguous(err.Error()), true
 	} else if found {
 		outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "failure_code": code, "stripe_payment_intent_id": reference})
-		return h.completeDecline(ctx, in, p, code, outcome), true
+		return h.completeDecline(ctx, in, p, code, reference, outcome), true
 	}
 	if code, reference, found, err := intents.LoadRecurringDecline(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -396,6 +401,9 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 	}
 	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: retained.TransactionID()}, h.now()); err != nil {
+			return err
+		}
 		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 		current := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && sub.PriceID == p.Renewal.FromPriceID && sub.ProductID == p.Renewal.FromProductID
 		replay := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodEnd) && sub.PriceID == p.Renewal.PriceID && sub.ProductID == p.Renewal.ProductID
@@ -423,10 +431,13 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 }
 func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
 	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
-	return h.completeDecline(ctx, in, p, strconv.Itoa(response), outcome)
+	return h.completeDecline(ctx, in, p, strconv.Itoa(response), reference, outcome)
 }
-func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, code string, outcome intents.Outcome) intents.Outcome {
+func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, code, reference string, outcome intents.Outcome) intents.Outcome {
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Answer: decline.Evidence{Code: code}, TransactionID: reference}, h.now()); err != nil {
+			return err
+		}
 		reason := decline.ReasonFor(in.Rail, code)
 		kind := payments.AttemptRenewal
 		failed := &models.Payment{ID: uuid.NewSHA1(in.ID, []byte("decline")), CustomerID: p.Renewal.CustomerID, PriceID: p.Renewal.PriceID, SubscriptionID: &p.Renewal.SubscriptionID, Rail: models.Rail(in.Rail), PspID: &p.Instrument.PSPID, TransactionID: "engine_declined:" + in.ID.String(), Amount: p.Renewal.Amount, ListAmount: p.Renewal.Amount, Currency: p.Renewal.Currency, Status: payments.PaymentStatusFailedValue, FailureCode: &code, FailureReason: &reason, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(p.Renewal.Entitlements), PurchasedAt: h.now(), CreatedAt: h.now()}
@@ -469,3 +480,14 @@ func (h *SubscriptionCollectionHandler) completeNotExecuted(ctx context.Context,
 }
 
 var _ intents.Handler = (*SubscriptionCollectionHandler)(nil)
+
+// recordEngineAttempt records an engine charge's answer for its rebill cycle
+// (#1111) in the completion transaction.
+func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, a attempts.Attempt, at time.Time) error {
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Renewal.CustomerID, p.Instrument.PSPID, in.Rail
+	a.Kind, a.Owner, a.At, a.Step = attempts.RebillKind(p.Initiator == charge.InitiatorCustomer, p.FailureCount), attempts.OwnerEngine, at, "charge"
+	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
+	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd}
+	a.TokenType = payments.DefaultTokenType(in.Rail, p.Instrument.Custodian)
+	return attempts.Record(ctx, d.Gen(ctx), a)
+}

@@ -159,6 +159,17 @@ func (q *Queries) CountMerchantRowsRailCustomers(ctx context.Context, merchantID
 	return count, err
 }
 
+const countMerchantRowsRebillCycles = `-- name: CountMerchantRowsRebillCycles :one
+SELECT count(*) FROM openrails.rebill_cycles WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsRebillCycles(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsRebillCycles, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsSubscriptions = `-- name: CountMerchantRowsSubscriptions :one
 SELECT count(*) FROM openrails.subscriptions WHERE merchant_id = $1
 `
@@ -284,6 +295,15 @@ DELETE FROM openrails.rail_customer_accounts WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsRailCustomers, merchantID)
+	return err
+}
+
+const purgeMerchantRowsRebillCycles = `-- name: PurgeMerchantRowsRebillCycles :exec
+DELETE FROM openrails.rebill_cycles WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsRebillCycles(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsRebillCycles, merchantID)
 	return err
 }
 
