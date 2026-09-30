@@ -65,8 +65,9 @@ type CleanupConfig struct {
 	// garbage, it is undone work.
 	HostLifecycleEventAckedRetention time.Duration
 
-	// PaymentAttemptRetention is how long payment attempts and rebill cycles
-	// (#1110, #1111) are kept. Default: 25 months.
+	// PaymentAttemptRetention is how long payment attempts, rebill cycles
+	// and NMI history months (#1110, #1111, #1120) are kept. Default: 25
+	// months.
 	PaymentAttemptRetention time.Duration
 }
 
@@ -133,6 +134,7 @@ type CleanupResult struct {
 	HostLifecycleEvents     int64
 	PaymentAttempts         int64
 	RebillCycles            int64
+	NMIHistoryMonths        int64
 	// MerchantsBudgetCapped counts merchants whose backlog exceeded one pass's
 	// row budget. Nonzero over many passes = the retention window is losing to
 	// the write rate.
@@ -282,6 +284,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"lifecycle_events":          result.HostLifecycleEvents,
 		"payment_attempts":          result.PaymentAttempts,
 		"rebill_cycles":             result.RebillCycles,
+		"nmi_history_months":        result.NMIHistoryMonths,
 	})
 
 	if cleanupErr != nil {
@@ -381,6 +384,12 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	})
 	sweep("delete rebill cycles", &result.RebillCycles, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteRebillCyclesBefore(ctx, gen.DeleteRebillCyclesBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
+		})
+	})
+	// 7. NMI history months (#1120), kept as long as attempts.
+	sweep("delete nmi history months", &result.NMIHistoryMonths, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteNMIHistoryMonthsBefore(ctx, gen.DeleteNMIHistoryMonthsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
 		})
 	})

@@ -55,6 +55,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.NotificationEmailSweepArgs{}.Kind():    {10 * time.Minute, false},
 		riverjobs.RebillWatchArgs{}.Kind():               {riverjobs.RebillWatchInterval, false},
 		riverjobs.AttemptEnrichmentArgs{}.Kind():         {riverjobs.AttemptEnrichmentInterval, false},
+		riverjobs.NMIHistoryArgs{}.Kind():                {riverjobs.NMIHistoryInterval, false},
 	}
 	rt := &Runtime{}
 	jobs, err := rt.buildRiverPeriodicJobs(context.Background())

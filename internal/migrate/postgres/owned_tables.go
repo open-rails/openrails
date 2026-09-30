@@ -46,6 +46,8 @@ var OwnedTables = []string{
 	"metered_rating_watermarks",
 	"money_settings",
 	"nmi_bulk_checkpoints",
+	"nmi_history_months",
+	"nmi_history_reads",
 	"notifications",
 	"operation_authorizations",
 	"payment_attempts",

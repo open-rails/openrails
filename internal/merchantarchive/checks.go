@@ -45,6 +45,8 @@ var excludedTables = map[string]string{
 	"provider_billing_observations":   "unsupported opaque byte-exact provider bodies; any rows refused",
 	"subscription_verifications":      "derived: re-detected from unverified subscriptions",
 	"nmi_bulk_checkpoints":            "transient read progress",
+	"nmi_history_months":              "decline analytics re-read from NMI, kept 25 months",
+	"nmi_history_reads":               "read progress: the destination backfills its own",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -73,6 +75,8 @@ var excludedColumns = map[string]string{
 	"rail_mutation_logs":              "id merchant_id rail psp_id rail_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",
 	"subscription_verifications":      "merchant_id subscription_id since reads last_read_at last_error",
 	"nmi_bulk_checkpoints":            "merchant_id psp_id since until next_page started_at",
+	"nmi_history_months":              "merchant_id psp_id month kind category reason authorizations",
+	"nmi_history_reads":               "merchant_id psp_id read_at",
 	"product_archive_operations":      "merchant_id id idempotency_key request_sha256 product_id purchase_action purchased_since reason created_at",
 	"reconciliation_findings":         "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class",
 	"account_updater_batches":         "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",

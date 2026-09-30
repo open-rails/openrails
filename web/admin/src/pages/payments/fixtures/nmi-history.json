@@ -1,0 +1,727 @@
+{
+  "metrics": {
+    "months": {
+      "query": {
+        "by": [
+          "time",
+          "nmi_kind"
+        ],
+        "grain": "month",
+        "measures": [
+          "nmi_history_authorizations",
+          "nmi_history_refusal_rate"
+        ],
+        "range": {
+          "from": "2020-09-21T00:00:00Z",
+          "to": "2022-10-21T00:00:00Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "time",
+            "name": "time"
+          },
+          {
+            "kind": "dimension",
+            "name": "nmi_kind"
+          },
+          {
+            "kind": "measure",
+            "name": "nmi_history_authorizations",
+            "unit": "count"
+          },
+          {
+            "kind": "measure",
+            "name": "nmi_history_refusal_rate",
+            "unit": "ratio"
+          }
+        ],
+        "grain": "month",
+        "range": {
+          "from": "2020-09-21T00:00:00Z",
+          "to": "2022-10-21T00:00:00Z"
+        },
+        "rows": [
+          [
+            "2020-09-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2020-09-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2020-09-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2020-10-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2020-10-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2020-10-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2020-11-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2020-11-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2020-11-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2020-12-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2020-12-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2020-12-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-01-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-01-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-01-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-02-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-02-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-02-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-03-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-03-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-03-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-04-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-04-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-04-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-05-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-05-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-05-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-06-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-06-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-06-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-07-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-07-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-07-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-08-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-08-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-08-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-09-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-09-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-09-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-10-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-10-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-10-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-11-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-11-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-11-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2021-12-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2021-12-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2021-12-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-01-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-01-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-01-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-02-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-02-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-02-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-03-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-03-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-03-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-04-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-04-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-04-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-05-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-05-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-05-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-06-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-06-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-06-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-07-01T00:00:00Z",
+            "one_off_sale",
+            3,
+            0.3333333333333333
+          ],
+          [
+            "2022-07-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-07-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-08-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-08-01T00:00:00Z",
+            "scheduled_rebill",
+            2,
+            0.5
+          ],
+          [
+            "2022-08-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-09-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-09-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-09-01T00:00:00Z",
+            "verification",
+            0,
+            null
+          ],
+          [
+            "2022-10-01T00:00:00Z",
+            "one_off_sale",
+            0,
+            null
+          ],
+          [
+            "2022-10-01T00:00:00Z",
+            "scheduled_rebill",
+            0,
+            null
+          ],
+          [
+            "2022-10-01T00:00:00Z",
+            "verification",
+            1,
+            0
+          ]
+        ]
+      }
+    },
+    "reasons": {
+      "query": {
+        "by": [
+          "nmi_kind",
+          "category",
+          "reason"
+        ],
+        "filters": {
+          "category": [
+            "card_data",
+            "issuer_soft",
+            "issuer_hard",
+            "gateway_rule",
+            "system_error",
+            "unknown"
+          ]
+        },
+        "measures": [
+          "nmi_history_refused"
+        ],
+        "range": {
+          "from": "2020-09-21T00:00:00Z",
+          "to": "2022-10-21T00:00:00Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "dimension",
+            "name": "nmi_kind"
+          },
+          {
+            "kind": "dimension",
+            "name": "category"
+          },
+          {
+            "kind": "dimension",
+            "name": "reason"
+          },
+          {
+            "kind": "measure",
+            "name": "nmi_history_refused",
+            "unit": "count"
+          }
+        ],
+        "range": {
+          "from": "2020-09-21T00:00:00Z",
+          "to": "2022-10-21T00:00:00Z"
+        },
+        "rows": [
+          [
+            "one_off_sale",
+            "issuer_soft",
+            "insufficient_funds",
+            1
+          ],
+          [
+            "scheduled_rebill",
+            "issuer_soft",
+            "do_not_honor",
+            1
+          ]
+        ]
+      }
+    },
+    "recorded": {
+      "query": {
+        "by": [
+          "time"
+        ],
+        "filters": {
+          "rail": [
+            "nmi"
+          ]
+        },
+        "grain": "month",
+        "measures": [
+          "attempts"
+        ],
+        "range": {
+          "from": "2020-09-21T00:00:00Z",
+          "to": "2022-10-21T00:00:00Z"
+        }
+      },
+      "result": {
+        "columns": [
+          {
+            "kind": "time",
+            "name": "time"
+          },
+          {
+            "kind": "measure",
+            "name": "attempts",
+            "unit": "count"
+          }
+        ],
+        "grain": "month",
+        "range": {
+          "from": "2020-09-21T00:00:00Z",
+          "to": "2022-10-21T00:00:00Z"
+        },
+        "rows": [
+          [
+            "2020-09-01T00:00:00Z",
+            0
+          ],
+          [
+            "2020-10-01T00:00:00Z",
+            0
+          ],
+          [
+            "2020-11-01T00:00:00Z",
+            0
+          ],
+          [
+            "2020-12-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-01-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-02-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-03-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-04-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-05-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-06-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-07-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-08-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-09-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-10-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-11-01T00:00:00Z",
+            0
+          ],
+          [
+            "2021-12-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-01-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-02-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-03-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-04-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-05-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-06-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-07-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-08-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-09-01T00:00:00Z",
+            0
+          ],
+          [
+            "2022-10-01T00:00:00Z",
+            1
+          ]
+        ]
+      }
+    }
+  }
+}

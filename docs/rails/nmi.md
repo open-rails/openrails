@@ -114,6 +114,16 @@ query and each attempt once: card BIN and brand, AVS/CVV the reply lacked, the
 issuer's raw answer (`processor_response_code`) and whether a network token was
 used. Attempts found by a provider read are filled from that read at once.
 
+NMI's own history is kept too, as monthly aggregates per NMI PSP
+(`nmi_history_months`): the numbers `openrails nmi decline-report` prints,
+through the same read. Once a day each PSP's transaction report is read, one
+calendar month per query in pages of 1000: 25 months the first time, then from
+the month before the last read. A read replaces the months it covers in one
+transaction; a failed one keeps them and is tried again the next hour. It only
+reads NMI. The history cannot tell initial sales from retries of declined
+rebills, so one-off sales mix both; scheduled rebills are NMI's own charges.
+Payments → Health shows it beside OpenRails' own attempts.
+
 For local development, tunnel a stable public hostname to your dev server —
 see `docs/dev/local-webhooks.md`.
 

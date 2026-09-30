@@ -1382,7 +1382,7 @@
     "internal/hosttools": [
       "type declineMonth struct {\n\tMonth    string `json:\"month\"`\n\tKind     string `json:\"kind\"`\n\tAttempts int    `json:\"attempts\"`\n\tApproved int    `json:\"approved\"`\n\tRefused  int    `json:\"refused\"`\n\n\tRefusalRate float64 `json:\"refusal_rate\"`\n}",
       "type declineRefusal struct {\n\tKind     string `json:\"kind\"`\n\tCategory string `json:\"category\"`\n\tReason   string `json:\"reason\"`\n\tCount    int    `json:\"count\"`\n}",
-      "type declineReport struct {\n\tPSP      uuid.UUID        `json:\"psp_id\"`\n\tSince    time.Time        `json:\"since\"`\n\tUntil    time.Time        `json:\"until\"`\n\tMonths   []declineMonth   `json:\"months\"`\n\tRefusals []declineRefusal `json:\"refusals\"`\n\tNotes    []string         `json:\"notes\"`\n}",
+      "type declineReport struct {\n\tPSP      uuid.UUID        `json:\"psp_id\"`\n\tSince    time.Time        `json:\"since\"`\n\tUntil    time.Time        `json:\"until\"`\n\tMonths   []declineMonth   `json:\"months\"`\n\tRefusals []declineRefusal `json:\"refusals\"`\n\n\tUndated int      `json:\"undated,omitempty\"`\n\tNotes   []string `json:\"notes\"`\n}",
       "type pullProviderConvergeLog struct {\n\tRunID             *uuid.UUID\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tRequiresReview    int `json:\"requires_review\"`\n\tAdminRequired     int `json:\"-\"`\n}"
     ],
     "internal/http/embedhttp": [
@@ -5824,9 +5824,10 @@
     "internal/migrate/postgres/0033_rebill_cycle_facts.up.sql": "a706287b13dbe0ef5211c741524cfc7fd44d7698b917ee18b2e0662b3c373bef",
     "internal/migrate/postgres/0034_fleet_rail_health_attempts.up.sql": "482d6117074f37d1a5dbbdb10c549472e4da30e3acc5f670e49bef162ebb8959",
     "internal/migrate/postgres/0035_attempt_retention.up.sql": "47ac9f4c12993b4e628cc28085bd123a6e17dd01f9030c5e299c753f947e2dab",
+    "internal/migrate/postgres/0036_nmi_history.up.sql": "ac3d96ec6d47811363ccc480f369a3421bb6481c8dd9fdbbdaf1994b21b426e2",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
-    "internal/migrate/postgres/owned_tables.go": "e9fb3f6a17d7ae0481ef79a1c66d00ebf97f73092134d29f45444f6538ab8474",
+    "internal/migrate/postgres/owned_tables.go": "797f34742e003f6a96bf6c3ef08df83a47cd607da220d544296e39a1d39d35ad",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "8891a0cdffb892a5ec42f4b3433dcdb50781c36d5132d2546eadda2cf46fad94",
