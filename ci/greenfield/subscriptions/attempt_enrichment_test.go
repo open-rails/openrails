@@ -58,6 +58,8 @@ func TestNMIAttemptEnrichment(t *testing.T) {
 	c := w.newCustomer()
 	c.saveCard("nmi", card)
 	e := enroll(t, w, "nmi", embedded)
+	w.advance(time.Hour)
+	w.enrichAttempts() // the pass reads the last 30 days
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
 	e.toPeriodEnd()
 	w.runRenewals()
