@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/pkg/api"
@@ -55,14 +56,22 @@ func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
 		"Too many declined card attempts. Try again later."))
 }
 
-// recordCardFailure counts one refused card attempt against subjects.
-// Best-effort: the response is unchanged when the ledger write fails.
+// recordCardFailure counts one refused card attempt: against subjects in the
+// durable ledger, and against this request's captcha subjects and merchant in
+// the captcha escalation (#371). Best-effort: the response is unchanged when
+// either write fails.
 func recordCardFailure(r *httprequest.Request, subjects ...string) {
+	if r == nil || r.State == nil {
+		return
+	}
+	ctx := r.Request.Context()
+	id, _ := merchant.FromContext(ctx)
+	r.State.CardAbuseGuard.RecordChargeFailure(ctx, id.UUID(), middleware.SubjectKeysFromContext(ctx))
 	ledger, merchantID, ok := cardAttemptLedger(r)
 	if !ok {
 		return
 	}
-	if err := ledger.Record(r.Request.Context(), merchantID, subjects...); err != nil {
+	if err := ledger.Record(ctx, merchantID, subjects...); err != nil {
 		log.WithError(err).WithField("request_id", r.RequestID()).Error("record card attempt failure")
 	}
 }

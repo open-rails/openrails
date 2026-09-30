@@ -11,12 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type stubVerifier struct {
@@ -41,6 +43,7 @@ func okHandler() http.Handler {
 
 type call struct {
 	method, path, ip, xff, user, token string
+	merchant                           merchant.ID
 	want                               int
 	body                               string
 }
@@ -61,6 +64,9 @@ func (c call) do(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	}
 	if c.token != "" {
 		req.Header.Set(captcha.TokenHeader, c.token)
+	}
+	if !c.merchant.IsZero() {
+		req = req.WithContext(merchant.WithID(req.Context(), c.merchant))
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -243,14 +249,29 @@ func TestCaptchaChallenges(t *testing.T) {
 		call{path: "/v1/checkout", ip: ip, token: "anything", want: 403, body: "captcha verification failed"}.do(t, engine(deps, okHandler()))
 	})
 
-	// #371: attack mode challenges everyone, and one solve does not lift it.
+	// #371: attack mode challenges everyone on the attacked merchant's card
+	// routes, and one solve does not lift it. Other merchants, and every
+	// merchant or API route, are never challenged.
 	t.Run("card attack mode", func(t *testing.T) {
+		attacked, other := merchant.ID(uuid.New()), merchant.ID(uuid.New())
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
-		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject, time.Minute))
+		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute))
 		h := engine(deps, okHandler())
-		call{path: "/v1/checkout", ip: ip, want: 403, body: "captcha_required"}.do(t, h)
-		call{path: "/v1/checkout", ip: ip, token: "good", want: 200}.do(t, h)
-		call{path: "/v1/checkout", ip: "198.51.100.3", want: 403}.do(t, h)
+		call{path: "/v1/checkout", ip: ip, merchant: attacked, want: 403, body: "captcha_required"}.do(t, h)
+		call{path: "/v1/checkout", ip: ip, merchant: attacked, token: "good", want: 200}.do(t, h)
+		call{path: "/v1/checkout", ip: "198.51.100.3", merchant: attacked, want: 403}.do(t, h)
+		call{method: "GET", path: "/v1/merchant/findings", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
+		call{path: "/v1/checkout", ip: "198.51.100.3", merchant: other, want: 200}.do(t, h)
+		call{path: "/v1/checkout", ip: "198.51.100.4", want: 200}.do(t, h)
+	})
+
+	t.Run("a challenged subject meets the captcha on card routes only", func(t *testing.T) {
+		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
+		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
+		h := engine(deps, okHandler())
+		call{path: "/v1/me/payment-methods", ip: ip, want: 403, body: "captcha_required"}.do(t, h)
+		call{method: "GET", path: "/v1/merchant/findings", ip: ip, want: 200}.do(t, h)
+		call{path: "/v1/merchant/credits/deposit", ip: ip, want: 200}.do(t, h)
 	})
 
 	// Without a captcha to solve, a card-abuse block is a refusal on card buckets.
@@ -322,7 +343,7 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 			limit, bucket := resolveRateLimitPolicy(&limits, r)
 			require.Equal(t, tc.bucket, bucket)
 			require.Same(t, limits[tc.limit], limit)
-			require.Equal(t, tc.captcha, captchaShouldEnforce(captchaOn, r, bucket))
+			require.Equal(t, tc.captcha, captcha.ShouldApply(captchaOn, bucket))
 		})).ServeHTTP(httptest.NewRecorder(), req)
 	}
 

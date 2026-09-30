@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -22,10 +20,9 @@ func TestEnabledCaptchaAlwaysHasVerifier(t *testing.T) {
 		require.True(t, cfg.IsEnabled())
 		require.NotNil(t, captcha.NewVerifier(cfg, nil), "provider %q", provider)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/checkout", nil)
 	for _, cfg := range []*config.CaptchaConfig{nil, {}, {SiteKey: "site"}, {SecretKey: "secret"}, {SiteKey: " ", SecretKey: "secret"}} {
 		require.False(t, cfg.IsEnabled())
 		require.Nil(t, captcha.NewVerifier(cfg, nil))
-		require.False(t, captchaShouldEnforce(cfg, req, "checkout"), "disabled captcha must never enforce")
+		require.False(t, captcha.ShouldApply(cfg, "checkout"), "disabled captcha must never enforce")
 	}
 }

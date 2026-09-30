@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -236,7 +235,6 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		recordCardFailure(r, abuse.CustomerSubject(user.ID), abuse.AddressSubject(r.ClientIP()), abuse.MerchantSubject)
 		var pmErr *paymentmethods.PaymentMethodError
 		if errors.As(err, &pmErr) {
-			r.State.CardAbuseGuard.RecordChargeFailure(r.Request.Context(), middleware.SubjectKeysFromContext(r.Request.Context()))
 			writePaymentMethodError(r, pmErr)
 			return
 		}
