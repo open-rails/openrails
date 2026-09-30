@@ -65,7 +65,7 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 				w.runRenewals()
 				require.Zero(t, len(w.nmi.Attempts()), "no OpenRails charge against this card")
 				if tc.status == "cancelled" {
-					w.settle()
+					w.wake() // past the system delete's 24h cooling-off
 					require.False(t, w.nmi.ScheduleLive(l.railSub), "the NMI schedule is ended")
 				}
 				return
