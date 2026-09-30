@@ -7,9 +7,9 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| Merchant | The billing/isolation namespace — scopes subscriptions, payments, credits, catalog, webhooks, analytics. `openrails.merchants`; RLS pins every tenant-scoped query to the `app.merchant_id` GUC. Deliberately controlled by exactly **one** AuthKit group (1:1). |
+| Merchant | The billing/isolation namespace — scopes subscriptions, payments, credits, catalog, webhooks, analytics. `openrails.merchants`; every tenant-scoped query carries an explicit `merchant_id` (or `psp_id`) predicate, backed by composite foreign keys. Deliberately controlled by exactly **one** AuthKit group (1:1). |
 | Org / permission-group | The AuthKit-side controller of a merchant. The merchant row stores `permission_group_id`; AuthKit decides which users, API keys, and remote applications act for that group. OpenRails carries no auth of its own. |
-| Customer (payer / tenant_subject) | The payable subject under a merchant — a UUID; identity is `(merchant, subject)`. "Tenant" survives only in RLS and payer contexts, never as a top-level identity word. |
+| Customer (payer / tenant_subject) | The payable subject under a merchant — a UUID; identity is `(merchant, subject)`. "Tenant" survives only in payer contexts, never as a top-level identity word. |
 | `delegated_sub` | External OIDC subject from a registered issuer — the host app's end user, carried in AuthKit delegated access tokens. OpenRails resolves the issuer to its merchant and touches the customer `(merchant_id, delegated_sub)`; tokens never carry merchant claims. |
 | Remote application | AuthKit-registered issuer/JWKS principal that signs delegated and service tokens. A credential nested under a permission-group, not an owner. |
 | Invoker | The principal that caused usage when it differs from the payable customer (spend-delegation budgets meter per-invoker). |

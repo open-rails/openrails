@@ -416,9 +416,9 @@ func verifyCapabilities(ctx context.Context, client *vaultapi.Client, sup *vault
 }
 
 // enforceEncryptionPosture is the #667 boot gate on the DB-backed (fallback)
-// secret store, mirroring db.EnforceRLSPosture: outside development a disabled
-// encryptor refuses boot (secrets would persist plaintext at rest); development
-// proceeds with one loud warning. Vault-backed deployments never reach this.
+// secret store: outside development a disabled encryptor refuses boot (secrets
+// would persist plaintext at rest); development proceeds with one loud warning.
+// Vault-backed deployments never reach this.
 func enforceEncryptionPosture(encryptionEnabled, _ bool) error {
 	if encryptionEnabled {
 		return nil

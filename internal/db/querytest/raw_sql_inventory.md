@@ -18,11 +18,11 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
   `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for the query performance harness.
   Keep raw because these are harness operations, not application queries.
 
-### Session state, RLS, advisory locks, and wrappers
+### Session state, advisory locks, and wrappers
 
-- `internal/db/db_pgx.go`, `internal/db/rls.go`,
-  `internal/controlplane/customer.go`: `set_config` / RLS session setup. Keep raw
-  because this is session state, not a domain query.
+- `internal/db/db_pgx.go`, `internal/controlplane/customer.go`: `set_config`
+  of the `app.merchant_id` session setting. Keep raw because this is session
+  state, not a domain query.
 - `internal/db/schema_rewrite.go`: wrapper methods rewrite already-authored SQL
   before delegating to pgx/sqlc. Keep raw wrapper calls.
 - `internal/bootstrap/merchant_manifest.go`,

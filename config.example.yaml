@@ -33,8 +33,8 @@ db:
   host: localhost
   port: "5434"
   database: openrails_db
-  # Unprivileged, NOBYPASSRLS. Boot refuses a superuser/BYPASSRLS role in EVERY
-  # environment; the privileged role is for `openrails migrate up` only.
+  # The runtime login; the privileged role is for `openrails migrate up` only.
+  # Merchant isolation is per-query merchant predicates, not login flags.
   username: app
   password: app_password
   sslmode: disable

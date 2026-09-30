@@ -104,7 +104,7 @@ committed receipt. An identical retry is a no-op even after normal destination
 activity; a different artifact refuses. Lost responses therefore do not create
 additional rows or provider work.
 
-Integration tests use the RLS-enforcing application role and isolated PostgreSQL
+Integration tests use the normal application role and isolated PostgreSQL
 18 databases. They cover populated profiles across three schemas, production NMI
 one-off sale and recurring creation through CheckoutSessionService/CheckoutService
 against a loopback provider, new destination authority, atomic tamper refusal,

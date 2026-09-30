@@ -41,10 +41,8 @@ const (
 	CustodyBlocked         = custodymigration.OutcomeBlocked
 )
 
-// MigrateCustody plans or applies one custodian vault-export manifest. The
-// host's pool passes the same RLS-posture gate `embedded.New` applies
-// (or#885): custody flips are merchant-scoped writes, and under a privileged
-// role the merchant_isolation policies that make that scoping real are skipped.
+// MigrateCustody plans or applies one custodian vault-export manifest. Custody
+// flips are merchant-scoped writes (or#885).
 func MigrateCustody(ctx context.Context, opts CustodyMigrationOptions) (CustodyMigrationResult, error) {
 	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {

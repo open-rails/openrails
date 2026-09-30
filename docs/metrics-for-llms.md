@@ -9,7 +9,7 @@ token-lean tables. No SDK.
 
 - Bearer merchant **API key** (`Authorization: Bearer <key>`) carrying the
   `merchant:metrics:read` permission; mint one from the console (Settings) or the API.
-- Everything is scoped to the key's merchant at the database layer (RLS); the API serves
+- Every query is scoped to the key's merchant (an explicit merchant predicate); the API serves
   **aggregates only**, never entity rows.
 - Prefix: standalone `/v1`, embedded typically `/billing/v1`.
 

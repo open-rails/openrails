@@ -32,7 +32,7 @@
 # NOT DUPLICATED — the repo's bespoke guards each check something no golangci
 # linter does, so none is subsumed:
 #   config/env_boundary_test.go               os.Getenv outside binary boundaries
-#   internal/db/queryguard                    RLS / merchant scoping of SQL
+#   internal/db/queryguard                    merchant scoping of SQL
 #   internal/river/merchant_scope_lint_test   workers running in merchant conns
 #   internal/intents/enforcement_guard_test   provider writes behind intents
 #   internal/shared/moneyutil/float_guard     floats in money packages

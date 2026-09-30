@@ -145,7 +145,7 @@ is the host's policy (openrails-saas owns its own, with its own notices).
   group-bound merchants created before `req.CreatedBefore`, oldest first,
   excluding reserved slugs (`merchant.ReservedHostedSlugs` plus
   `MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
-  under the merchant's own RLS scope.
+  with the merchant's own scoped queries.
 - `cp.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
   row, refuses a missing/retired merchant, a different group UUID, a reserved
   slug or any activity, and otherwise commits the irreversible tombstone, which

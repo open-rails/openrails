@@ -22,18 +22,12 @@ with neither `totp.key` nor an email or SMS sender.
 
 Postgres specifics worth knowing:
 
-- RLS is enforced for the host application login (`NOSUPERUSER NOBYPASSRLS`);
-  every merchant-scoped table has a
-  `merchant_isolation` policy keyed on the `app.merchant_id` GUC. Run MIGRATIONS
-  as a privileged owner and the SERVER as the normal host login — in EVERY environment,
-  local development included. The server refuses to boot on a role that
-  bypasses RLS, because a privileged role does not just disable isolation, it
-  hides bugs: an unscoped read of an RLS-forced table returns zero rows with no
-  error, so the component logs success and does nothing. Also, the cross-merchant
-  directory functions (webhook routing by PSP, the hosted portal's
-  merchant list) are `SECURITY DEFINER` — they need an owner that can read
-  across merchants, and they raise rather than return an empty result if it
-  cannot.
+- There is no row-level security. Merchant isolation is the explicit
+  `merchant_id` (or `psp_id`) predicate on every tenant query, backed by
+  composite foreign keys, so it does not depend on the login's flags. Run
+  MIGRATIONS as a privileged owner and the SERVER as the normal host login. The
+  cross-merchant directory functions (webhook routing by PSP, the hosted
+  portal's merchant list) are `SECURITY DEFINER`.
 - Security defaults are independent of payment posture. Managed database secrets
   always require encryption. Local issuer/signing/sender exceptions are explicit
   Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is
@@ -235,7 +229,7 @@ checkout_routing:
 
 - **Metrics / analytics API**: `GET /v1/merchant/metrics/schema` (self-describing
   measure/dimension registry) + `POST /v1/merchant/metrics/query` — aggregate-only,
-  RLS-scoped to the API key's merchant, designed to be driven by an LLM agent.
+  scoped to the API key's merchant, designed to be driven by an LLM agent.
   [metrics-for-llms.md](metrics-for-llms.md).
 - **Logs**: structured logrus to stdout; level via `logger.level` in
   config.yaml. Every `pull-provider` local write is logged with finding id +

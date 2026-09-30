@@ -323,7 +323,7 @@ team, payment providers, API keys, credit limit, trust level), **Dashboard**.
   requires `llm.api_key`; without it everything else still works and the add-widget
   button explains the fix.
 - **Ask your metrics** (opt-in `llm.ask_enabled`): free-form Q&A where the model runs
-  validated, RLS-pinned aggregate queries and shows every result as evidence tables —
+  validated, merchant-scoped aggregate queries and shows every result as evidence tables —
   numbers come from the API, never model prose.
 - **Catalog copilot** (opt-in `llm.catalog_copilot_enabled`): Q&A over products,
   prices, subscriber counts, and pending migrations. With
