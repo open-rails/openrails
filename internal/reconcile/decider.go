@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
@@ -570,7 +571,7 @@ func decideFromSnapshot(railSubID string, localStart, localEnd *time.Time, perio
 		// book the decline arrived with the data and can be years older than
 		// anything this deployment observed.
 		d := Decision{Kind: TransitionCancel, RemoteGone: remoteGone, EvidenceAt: declineTxn.OccurredAt, Reason: "declined_renewal_beyond_window"}
-		if collection.ClassifyDecline(string(snap.Provider), declineTxn.DeclineCode) == collection.DeclineNonRecoverable {
+		if decline.Classify(string(snap.Provider), declineTxn.DeclineCode).Action == decline.NonRecoverable {
 			d.Certainty = collection.CertaintyNonRetryableDecline
 		}
 		return with(d)

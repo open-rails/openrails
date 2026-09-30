@@ -10,8 +10,8 @@ var ErrPaymentRefused = errors.New("openrails: payment refused")
 // Payment refusal codes. They are stable; human messages are not.
 const (
 	// CodeCardDeclined is a provider decline of the presented card (type
-	// card_error, 402). Metadata: decline_reason is the normalized category
-	// (insufficient_funds, expired_card, cvv_avs, card_declined, ...);
+	// card_error, 402). Metadata: decline_reason is the decline reason
+	// (insufficient_funds, do_not_honor, expired_card, incorrect_cvc, ...);
 	// failure_code is the provider's verbatim code.
 	CodeCardDeclined = "card_declined"
 	// CodePaymentMethodStale means the saved payment method the request named

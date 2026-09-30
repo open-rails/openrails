@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -284,7 +286,8 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 			if code == "" && nmiErr.ResponseCode != 0 {
 				code = fmt.Sprintf("nmi_response_%d", nmiErr.ResponseCode)
 			}
-			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error())}
+			failure := decline.ClassifyEvidence(decline.Evidence{Rail: "nmi", Code: code, AVS: nmiErr.AVSResponse, CVV: nmiErr.CVVResponse, Text: nmiErr.ResponseText}).PaymentFailure()
+			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error()), Rail: "nmi", Failure: &failure}
 		}
 		return nil, fmt.Errorf("card verification did not complete; add the card again: %w", err)
 	}

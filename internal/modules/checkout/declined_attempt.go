@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -63,7 +64,7 @@ func recordDeclinedAttempt(ctx context.Context, paymentService *payments.Payment
 		MoneyMovement: models.MoneyMovementNone, // or#827: a decline moved nothing.
 	}
 	if code := strings.TrimSpace(a.FailureCode); code != "" {
-		reason := payments.NormalizeFailureReason(string(failed.Rail), code)
+		reason := decline.ReasonFor(string(failed.Rail), code)
 		failed.FailureCode = &code
 		failed.FailureReason = &reason
 	}

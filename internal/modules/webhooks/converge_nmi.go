@@ -13,11 +13,11 @@ import (
 
 	"database/sql"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -257,7 +257,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 			}
 			if probe.DeclineResponseCode != 0 {
 				code := strconv.Itoa(probe.DeclineResponseCode)
-				reason := payments.NormalizeFailureReason(rail, code)
+				reason := decline.ReasonFor(rail, code)
 				failed.FailureCode = &code
 				failed.FailureReason = &reason
 			}
@@ -285,7 +285,7 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		FailureCode:    failureCode,
 		// or#870: the same ONE classifier the dunning worker uses, so a decline
 		// arriving over the webhook plane gets the identical three-way answer.
-		Decline: collection.ClassifyDecline(rail, normalize.FromPtr(failureCode)),
+		Decline: decline.Classify(rail, normalize.FromPtr(failureCode)).Action,
 		// The failed payments row for this decline was written above, so a real
 		// provider attempt underlies this failure (#840 certainty input).
 		AttemptRecorded: true,

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -345,7 +346,7 @@ func (w *DunningWorker) processSubscription(
 			// Only the member can fix this: wait for a new card on the
 			// dunning clock, under the merchant's dunning access policy.
 			reason, code := "payment_method_unusable", "payment_method_unusable"
-			if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: collection.DeclineFixPaymentMethod}); err != nil {
+			if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
 				return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
 			}
 			return dunningOutcomeFailed, nil

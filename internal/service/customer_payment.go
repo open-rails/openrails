@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 
 	"github.com/google/uuid"
@@ -17,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -131,7 +131,7 @@ func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID
 			return nil, err
 		}
 		if len(attempts) > 0 && attempts[0].Status == "failed" && attempts[0].Rail != nil && attempts[0].FailureCode != nil {
-			out.LastFailureReason = payments.NormalizeFailureReason(*attempts[0].Rail, *attempts[0].FailureCode)
+			out.LastFailureReason = decline.ReasonFor(*attempts[0].Rail, *attempts[0].FailureCode)
 		}
 	}
 	return out, nil
@@ -190,7 +190,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 				// A valid historical account/refusal remains valid custody after a cutover,
 				// but it is not a failure of the replacement provider binding.
 				if accepted.Renewal.PSPID == sub.PspID && accepted.Rail == string(sub.Rail) && accepted.RailSubscriptionID == sub.RailSubscriptionID {
-					out.LastFailureReason = payments.NormalizeFailureReason(accepted.Rail, refusal.Code)
+					out.LastFailureReason = decline.ReasonFor(accepted.Rail, refusal.Code)
 				}
 			} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
 				return nil, err

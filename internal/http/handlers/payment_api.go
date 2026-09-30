@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -163,7 +163,7 @@ func paymentFailure(p *models.Payment, status string) *openrails.PaymentFailure 
 	if p.FailureCode != nil {
 		code = *p.FailureCode
 	}
-	failure := payments.CustomerDecline(payments.DeclineDetail{Rail: string(p.Rail), Code: code})
+	failure := decline.Classify(string(p.Rail), code).PaymentFailure()
 	return &failure
 }
 

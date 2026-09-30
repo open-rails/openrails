@@ -6,10 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -81,7 +81,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	err = customerPaymentRefusal(latest)
 	if errors.As(err, &refusal) {
 		if accepted.Instrument.PSPID == sub.PspID && latest.Rail == string(sub.Rail) {
-			out.LastFailureReason = payments.NormalizeFailureReason(latest.Rail, refusal.Code)
+			out.LastFailureReason = decline.ReasonFor(latest.Rail, refusal.Code)
 		}
 	} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
 		return nil, err

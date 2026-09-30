@@ -202,11 +202,11 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 		typ, code, message string
 		reason, failure    any
 	}{
-		{&paymentmethods.PaymentMethodError{LocalizationID: "do_not_honor", Message: raw}, 402, "card_error", "card_declined", declined, "card_declined", "do_not_honor"},
-		{&paymentmethods.PaymentMethodError{LocalizationID: "225", Message: raw}, 402, "card_error", "card_declined", "The card's security code is incorrect.", "cvv_avs", "225"},
-		{&paymentmethods.PaymentMethodError{LocalizationID: "fraudulent_card", Message: raw}, 402, "card_error", "card_declined", declined, "fraud_suspected", "fraudulent_card"},
+		{&paymentmethods.PaymentMethodError{LocalizationID: "do_not_honor", Message: raw}, 402, "card_error", "card_declined", declined, "do_not_honor", "do_not_honor"},
+		{&paymentmethods.PaymentMethodError{LocalizationID: "225", Message: raw}, 402, "card_error", "card_declined", "The card's security code is incorrect.", "incorrect_cvc", "225"},
+		{&paymentmethods.PaymentMethodError{LocalizationID: "fraudulent_card", Message: raw}, 402, "card_error", "card_declined", declined, "fraudulent", "fraudulent_card"},
 		{&paymentmethods.PaymentMethodError{LocalizationID: "unmapped_gateway_response", Message: raw}, 402, "card_error", "card_declined", declined, "unknown", "unmapped_gateway_response"},
-		{&paymentmethods.PaymentMethodError{LocalizationID: "300", Message: raw}, 502, "api_error", "payment_provider_rejected", "The payment processor could not complete this payment. Please try again later.", "processor_error", "300"},
+		{&paymentmethods.PaymentMethodError{LocalizationID: "300", Message: raw}, 502, "api_error", "payment_provider_rejected", "The payment processor could not complete this payment. Please try again later.", "gateway_rejected", "300"},
 		{fmt.Errorf("%w: %s", checkout.ErrPaymentMethodStale, raw), 402, "card_error", "payment_method_stale", "This saved payment method can no longer be used. Add the card again.", nil, nil},
 	} {
 		for name, write := range surfaces {

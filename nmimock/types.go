@@ -14,6 +14,9 @@ type Card struct {
 	// Decline is the issuer's answer: "" approves, an NMI response_code such
 	// as "202" declines, and "vault" refuses storing the card.
 	Decline string
+	// AVS and CVV are the verification letters every answer for this card
+	// carries (avsresponse, cvvresponse); CVV "N" is a security-code mismatch.
+	AVS, CVV string
 }
 
 // Vault is a Customer Vault record: its priority-1 billing entry, then Extra.

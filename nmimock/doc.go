@@ -26,7 +26,8 @@
 //   - Cards: a Collect.js token made by Tokenize names its card. Any other
 //     token ending in four digits is a visa with those last four; last four
 //     DeclineLast4 declines sales with 202. Tokens stay valid after use,
-//     except when adding a billing entry.
+//     except when adding a billing entry. A card's AVS and CVV letters ride
+//     every answer for it; real NMI derives them per request.
 //   - Declines: responsetext is always "DECLINE" (real text varies by
 //     processor). A card declined "vault" is refused when stored. Card
 //     verification (type=validate) approves funds declines 202 and 203.

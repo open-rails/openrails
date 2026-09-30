@@ -508,11 +508,19 @@ clear):
 The window always ends inside one cycle (1h → 30m, 1d → 12h). An unknown
 cycle (≤ 0, e.g. a one-time price behind a membership) is never given a
 schedule: collection refuses to charge, retry or end it and raises
-`life.cadence.unknown` for the operator. **Hard declines**
-(stolen/lost card, do-not-honor, expired card, "stop recurring" codes) are
-terminal immediately regardless of schedule — retrying cannot succeed and
-risks card-network flags; soft declines (insufficient funds, comms errors,
-merchant-config errors) follow the schedule. The staleness window ("never
+`life.cadence.unknown` for the operator. What a decline does comes from one
+table (`internal/billing/decline`), the same for every owner:
+
+- **Retry on the schedule:** issuer soft and generic declines (insufficient
+  funds, over limit, do-not-honor, call issuer, retry later) and gateway,
+  processor or configuration errors.
+- **Wait for a new card** (`awaiting_method`): bad card data (expired, wrong
+  number or security code) and codes the networks forbid retrying on the same
+  card (transaction not allowed, lost or picked-up card). A new card resumes
+  dunning at the next due pass.
+- **Terminal at once:** stolen or fraudulent card, and "stop recurring" codes.
+
+The staleness window ("never
 charge a months-old failure") derives from the same schedule — last offset +
 min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is cancelled +
 downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements

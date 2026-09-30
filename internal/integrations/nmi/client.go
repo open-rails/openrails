@@ -16,6 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/decline"
 )
 
 const (
@@ -90,6 +91,11 @@ type CustomerVaultError struct {
 	// verification results (classic avsresponse/cvvresponse).
 	AVSResponse string
 	CVVResponse string
+	// TransactionID is the gateway's id for the refused request; NMI returns
+	// one for declines and verifications too.
+	TransactionID string
+	// ResponseText is the gateway's responsetext.
+	ResponseText string
 }
 
 func (e *CustomerVaultError) Error() string {
@@ -107,92 +113,6 @@ func (e *CustomerVaultError) Error() string {
 		return e.Message
 	}
 	return fmt.Sprintf("%s (%s)", e.Message, strings.Join(extras, ", "))
-}
-
-var nmiResponseMessages = map[int]string{
-	100: "Transaction was approved.",
-	200: "Transaction was declined by rail.",
-	201: "Do not honor.",
-	202: "Insufficient funds.",
-	203: "Over limit.",
-	204: "Transaction not allowed.",
-	220: "Incorrect payment information.",
-	221: "No such card issuer.",
-	222: "No card number on file with issuer.",
-	223: "Expired card.",
-	224: "Invalid expiration date.",
-	225: "Invalid card security code.",
-	226: "Invalid PIN.",
-	240: "Call issuer for further information.",
-	250: "Pick up card.",
-	251: "Lost card.",
-	252: "Stolen card.",
-	253: "Fraudulent card.",
-	260: "Declined with further instructions available. (See response text)",
-	261: "Declined-Stop all recurring payments.",
-	262: "Declined-Stop this recurring program.",
-	263: "Declined-Update cardholder data available.",
-	264: "Declined-Retry in a few days.",
-	300: "Transaction was rejected by gateway.",
-	400: "Transaction error returned by rail.",
-	410: "Invalid merchant configuration.",
-	411: "Merchant account is inactive.",
-	420: "Communication error.",
-	421: "Communication error with issuer.",
-	430: "Duplicate transaction at rail.",
-	440: "Rail format error.",
-	441: "Invalid transaction information.",
-	460: "Rail feature not available.",
-	461: "Unsupported card type.",
-}
-
-var nmiLocalizationIDs = map[int]string{
-	100: "transaction_was_approved",
-	200: "transaction_was_declined_by_processor",
-	201: "do_not_honor",
-	202: "insufficient_funds",
-	203: "over_limit",
-	204: "transaction_not_allowed",
-	220: "incorrect_payment_information",
-	221: "no_such_card_issuer",
-	222: "no_card_number_on_file_with_issuer",
-	223: "expired_card",
-	224: "invalid_expiration_date",
-	225: "invalid_card_security_code",
-	226: "invalid_pin",
-	240: "call_issuer_for_further_information",
-	250: "pick_up_card",
-	251: "lost_card",
-	252: "stolen_card",
-	253: "fraudulent_card",
-	260: "declined_with_further_instructions_available_see_response_text",
-	261: "declined_stop_all_recurring_payments",
-	262: "declined_stop_this_recurring_program",
-	263: "declined_update_cardholder_data_available",
-	264: "declined_retry_in_a_few_days",
-	300: "transaction_was_rejected_by_gateway",
-	400: "transaction_error_returned_by_processor",
-	410: "invalid_merchant_configuration",
-	411: "merchant_account_is_inactive",
-	420: "communication_error",
-	421: "communication_error_with_issuer",
-	430: "duplicate_transaction_at_rail",
-	440: "rail_format_error",
-	441: "invalid_transaction_information",
-	460: "rail_feature_not_available",
-	461: "unsupported_card_type",
-}
-
-// LocalizationIDForResponseCode is the customer-facing decline code NMI's
-// response code maps to ("" when it maps to none).
-func LocalizationIDForResponseCode(code int) string { return nmiLocalizationID(code) }
-
-func nmiLocalizationID(code int) string {
-	return nmiLocalizationIDs[code]
-}
-
-func nmiResponseDetail(code int) string {
-	return nmiResponseMessages[code]
 }
 
 // newClient builds an unbound client. Every caller outside this package goes
@@ -327,11 +247,13 @@ func newAddSubscriptionError(rawResponse string, output url.Values) error {
 	rejection := &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
-		LocalizationID: nmiLocalizationID(responseCode),
-		Detail:         nmiResponseDetail(responseCode),
+		LocalizationID: decline.NMILocalizationID(responseCode),
+		Detail:         decline.NMIMessage(responseCode),
 		RawResponse:    rawResponse,
 		AVSResponse:    strings.TrimSpace(output.Get("avsresponse")),
 		CVVResponse:    strings.TrimSpace(output.Get("cvvresponse")),
+		TransactionID:  strings.TrimSpace(output.Get("transactionid")),
+		ResponseText:   strings.TrimSpace(output.Get("responsetext")),
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
 		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
@@ -347,9 +269,13 @@ func newSaleError(rawResponse string, output url.Values) error {
 	rejection := &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
-		LocalizationID: nmiLocalizationID(responseCode),
-		Detail:         nmiResponseDetail(responseCode),
+		LocalizationID: decline.NMILocalizationID(responseCode),
+		Detail:         decline.NMIMessage(responseCode),
 		RawResponse:    rawResponse,
+		AVSResponse:    strings.TrimSpace(output.Get("avsresponse")),
+		CVVResponse:    strings.TrimSpace(output.Get("cvvresponse")),
+		TransactionID:  strings.TrimSpace(output.Get("transactionid")),
+		ResponseText:   strings.TrimSpace(output.Get("responsetext")),
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
 		unknown := ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
