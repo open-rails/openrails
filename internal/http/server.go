@@ -401,9 +401,9 @@ func (s *Server) Handler() http.Handler { return s.publicHandler }
 // policy only to the billing surface, never to the mounted AuthKit transport.
 func (s *Server) billingCredentialsHTTP(next http.Handler) http.Handler {
 	billing := billingauth.ExplicitCredentials(next)
-	base := s.authAPIBase()
+	prefix := s.controlPlane.AuthPrefix()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == base || strings.HasPrefix(r.URL.Path, base+"/") {
+		if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
 			next.ServeHTTP(w, r)
 			return
 		}

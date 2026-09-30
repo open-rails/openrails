@@ -161,7 +161,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 func authConfig(issuer string) authkit.Config {
 	return authkit.Config{
 		Schema:       AuthSchema,
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth/v1"},
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth"},
 		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{Audience}},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},

@@ -19,7 +19,7 @@ go 1.26.6
 
 require (
  github.com/open-rails/openrails v0.157.1
- github.com/open-rails/helpers v0.3.0
+ github.com/open-rails/helpers v1.0.0
 )
 MOD
 cat > "$consumer_dir/main.go" <<'GO'

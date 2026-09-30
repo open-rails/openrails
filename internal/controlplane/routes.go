@@ -37,17 +37,20 @@ func (c *ControlPlane) MountedRouteGroups() []iam.RouteGroup {
 	return append([]iam.RouteGroup(nil), hostedRouteGroups...)
 }
 
-// AuthKit's JSON API lives at the issuer's path, AuthKit's base path, or at
-// /auth when the issuer is an origin. JWKS is served at the issuer plus
-// /.well-known/jwks.json.
-func authAPIBase(issuer string) string {
+// AuthKit's routes live beneath the issuer's path, AuthKit's base path, or
+// beneath /auth when the issuer is an origin. Its JSON API is that prefix plus
+// authAPIVersion. JWKS is served at the issuer plus /.well-known/jwks.json.
+func authPrefix(issuer string) string {
 	if path := issuerPath(issuer); path != "" {
 		return path
 	}
 	return "/auth"
 }
 
-// authAPIPath is authAPIBase beneath AuthKit's base path.
+// authAPIVersion is the HTTP API version AuthKit appends to its APIPath.
+const authAPIVersion = "/v1"
+
+// authAPIPath is AuthKit's APIPath: authPrefix beneath AuthKit's base path.
 func authAPIPath(issuer string) string {
 	if issuerPath(issuer) != "" {
 		return "/"
@@ -63,13 +66,16 @@ func issuerPath(issuer string) string {
 	return "/" + strings.Trim(u.Path, "/")
 }
 
-// AuthAPIBase is the path AuthKit's JSON API is served at.
-func (c *ControlPlane) AuthAPIBase() string {
-	if c == nil || c.authBase == "" {
+// AuthPrefix is the path prefix AuthKit's JSON API is served beneath.
+func (c *ControlPlane) AuthPrefix() string {
+	if c == nil || c.authPrefix == "" {
 		return "/auth"
 	}
-	return c.authBase
+	return c.authPrefix
 }
+
+// AuthAPIBase is the path AuthKit's JSON API is served at.
+func (c *ControlPlane) AuthAPIBase() string { return c.AuthPrefix() + authAPIVersion }
 
 // AuthRoutes is the mounted AuthKit route catalog, each served by AuthHandler.
 // A GET route's pattern also serves HEAD.

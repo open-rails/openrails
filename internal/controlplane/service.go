@@ -48,8 +48,8 @@ type ControlPlane struct {
 	naming merchant.NamingPolicy
 	// pool is the schema-aware wrapper for OpenRails' own tables (#471).
 	pool *db.Pool
-	// authBase is the path AuthKit's JSON API is served at.
-	authBase string
+	// authPrefix is the path prefix AuthKit's JSON API is served beneath.
+	authPrefix string
 
 	// users authenticates the control plane's own user tokens; the actor of
 	// a request-driven permission check comes from its verification.
@@ -348,7 +348,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	cp := &ControlPlane{
 		hosted: options.hosted, merchantCreation: options.merchantCreation,
 		merchantCreationPattern: pattern, naming: naming,
-		pool: db.WrapPool(pool, cfg.DB.SchemaName()), authBase: authAPIBase(auth.Issuer),
+		pool: db.WrapPool(pool, cfg.DB.SchemaName()), authPrefix: authPrefix(auth.Issuer),
 	}
 	httpCfg, err := clientIPPosture(cfg, auth, options)
 	if err != nil {

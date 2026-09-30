@@ -442,8 +442,9 @@ type VaultConfig struct {
 type AdminConsoleConfig struct {
 	Enabled bool `koanf:"enabled,omitempty"`
 	// AuthBaseURL is the base under which the AuthKit authhttp surface lives.
-	// Empty defaults to "/auth" (the standalone control plane mount). Embedded
-	// hosts set their host AuthKit base (may be absolute, another origin).
+	// Empty defaults to the standalone control plane's, "/auth/v1" beneath an
+	// origin issuer. Embedded hosts set their AuthKit JSON API, "/api/v1" by
+	// default (may be absolute, another origin).
 	AuthBaseURL string `koanf:"auth_base_url,omitempty"`
 	// APIBaseURL is the base of the merchant API. Empty defaults to "/v1"
 	// (standalone). Embedded hosts typically use "/billing/v1".

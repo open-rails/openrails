@@ -55,7 +55,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 		handler, err := cp.Handler()
 		require.NoError(t, err)
 		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+f.schema+"/capabilities", nil))
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+f.schema+"/v1/capabilities", nil))
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var caps struct {
 			TwoFactor struct{ Methods []string } `json:"two_factor"`

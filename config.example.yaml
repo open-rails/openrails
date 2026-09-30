@@ -148,7 +148,7 @@ captcha:
 # or, embedded, pass embed.WithAdminConsole. Enabled without assets = boot error.
 admin_console:
   enabled: false
-  # auth_base_url: /auth   # AuthKit authhttp base; embedded hosts set their host issuer base
+  # auth_base_url: /auth/v1   # AuthKit JSON API; embedded hosts set theirs (AuthKit default /api/v1)
   # api_base_url: /v1      # merchant API base; embedded hosts typically /billing/v1
 
 # Server-side LLM for the dashboard natural-language widget generator (#741)

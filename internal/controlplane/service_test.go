@@ -74,16 +74,17 @@ func TestPostureIsCodeOnlyOptIn(t *testing.T) {
 	require.True(t, login.passwordlessLogin && !login.passwordlessAutoRegistration)
 }
 
-// The JSON API sits at /auth beneath an origin issuer, else at the issuer's
-// path, which is AuthKit's base path.
+// The JSON API sits at /auth/v1 beneath an origin issuer, else at the
+// issuer's path, which is AuthKit's base path, plus /v1.
 func TestAuthAPIPath(t *testing.T) {
 	for issuer, want := range map[string][2]string{
-		"https://openrails.example":       {"/auth", "/auth"},
-		"https://openrails.example/":      {"/auth", "/auth"},
-		"https://api.example/auth":        {"/", "/auth"},
-		"https://api.example/identity/v2": {"/", "/identity/v2"},
+		"https://openrails.example":       {"/auth", "/auth/v1"},
+		"https://openrails.example/":      {"/auth", "/auth/v1"},
+		"https://api.example/auth":        {"/", "/auth/v1"},
+		"https://api.example/identity/v2": {"/", "/identity/v2/v1"},
 	} {
-		require.Equal(t, want, [2]string{authAPIPath(issuer), authAPIBase(issuer)}, issuer)
+		cp := &ControlPlane{authPrefix: authPrefix(issuer)}
+		require.Equal(t, want, [2]string{authAPIPath(issuer), cp.AuthAPIBase()}, issuer)
 	}
 }
 
