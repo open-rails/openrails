@@ -104,8 +104,12 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 		return nil, apperr.Invalidf("display_name must not be empty")
 	}
 	if params.APIHost != nil && strings.TrimSpace(*params.APIHost) != "" {
-		if err := merchants.ValidateAPIHost(merchants.NormalizeAPIHost(*params.APIHost)); err != nil {
+		host := merchants.NormalizeAPIHost(*params.APIHost)
+		if err := merchants.ValidateAPIHost(host); err != nil {
 			return nil, apperr.Invalidf("invalid api_host")
+		}
+		if merchants.ClaimableAPIHost(host, s.rt.ReservedAPIHosts) != nil {
+			return nil, apperr.New(400, "api_host_reserved", "that api_host serves this deployment; use a host of your own")
 		}
 	}
 	digest, err := merchantApplicationDigest(params)
@@ -166,6 +170,9 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 		}
 		if directory.SetDisplayName || directory.SetApiHost {
 			if err := q.ApplyMerchantConfigurationDirectory(ctx, directory); err != nil {
+				if db.IsUniqueViolation(err) {
+					return apperr.New(409, "api_host_taken", "that api_host is already assigned to another merchant")
+				}
 				return err
 			}
 		}

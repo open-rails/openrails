@@ -7,6 +7,8 @@ package handlers
 // in the merchant manifest instead; this route and the manifest write the same
 // merchants.Service.SetHostConfig seam the saas wrapper's assign-api-host
 // action uses (engine.SetMerchantAPIHost -> SetHostConfig).
+// The deployment's own hosts (Runtime.ReservedAPIHosts) are never claimable
+// here: one merchant pinning the shared host locks every other merchant out.
 
 import (
 	"errors"
@@ -29,6 +31,11 @@ func apiHostMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
 		return merchant.ID{}, false
 	}
 	return mid, true
+}
+
+func apiHostReserved() *api.APIError {
+	return api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "api_host_reserved",
+		"that api_host serves this deployment; use a host of your own")
 }
 
 func apiHostResponse(host string) map[string]any {
@@ -81,6 +88,10 @@ func PutMerchantAPIHost(r *httprequest.Request) {
 				"api_host must be a bare lowercase hostname (no scheme, port, or path), e.g. api.myapp.example"))
 			return
 		}
+	}
+	if merchants.ClaimableAPIHost(host, r.State.ReservedAPIHosts) != nil {
+		r.APIError(apiHostReserved())
+		return
 	}
 	if err := r.State.Merchants.SetHostConfig(r.Request.Context(), mid, host); err != nil {
 		switch {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -102,6 +103,11 @@ type Runtime struct {
 	// resolves through this ONE instance instead of reading
 	// RemoteAddr/X-Forwarded-For itself.
 	TrustedProxies *iputil.TrustedProxies
+
+	// ReservedAPIHosts are the hostnames the deployment itself serves: its
+	// public billing URL, console and AuthKit issuer. No merchant may claim one
+	// as its api_host. Written before serving (ReserveAPIHosts).
+	ReservedAPIHosts []string
 
 	// RouteCapabilities is the advisory, boot-probed view of what OpenRails can
 	// actually do (#661), used to gate the provider route surface. Nil means
@@ -271,6 +277,15 @@ type Runtime struct {
 	// Verifier reads unverified subscriptions from their provider as soon as
 	// they become unverified (#1094); started with the billing workers.
 	Verifier *reconcile.Verifier
+}
+
+// ReserveAPIHosts adds the hostnames urls name to ReservedAPIHosts.
+func (r *Runtime) ReserveAPIHosts(urls ...string) {
+	for _, raw := range urls {
+		if host := merchants.DeploymentHost(raw); host != "" && !slices.Contains(r.ReservedAPIHosts, host) {
+			r.ReservedAPIHosts = append(r.ReservedAPIHosts, host)
+		}
+	}
 }
 
 // ConfiguredMerchant returns the current single-merchant binding. Zero means
