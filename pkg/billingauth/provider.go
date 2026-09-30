@@ -184,13 +184,22 @@ func (p *providerIntegration) Authorize(ctx context.Context, r *http.Request, id
 		}
 		allowed, err := checker.Can(ctx, mapping.Scope, mapping.Permission)
 		if err != nil {
-			return GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
+			return permissionCheckFailure(err)
 		}
 		if allowed {
 			return nil
 		}
 	}
 	return GateError{Status: http.StatusForbidden, Message: "permission_required"}
+}
+
+// permissionCheckFailure answers a failed live check. A credential the check
+// found revoked or expired since verification is a 401, not an outage.
+func permissionCheckFailure(err error) error {
+	if errors.Is(err, auth.ErrRevoked) || errors.Is(err, auth.ErrExpired) {
+		return authenticationFailure(err)
+	}
+	return GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
 }
 
 func authenticationFailure(err error) error {
