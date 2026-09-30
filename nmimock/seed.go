@@ -185,6 +185,15 @@ func (m *Mock) renew(s *Schedule, approve bool) Sale {
 	return out
 }
 
+// SkipSchedule is NMI's recurring engine passing a schedule's billing date
+// without charging it: the date advances and no sale is made.
+func (m *Mock) SkipSchedule(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.mustSchedule(id)
+	s.NextBilling = s.advance(s.NextBilling)
+}
+
 // RunDue plays NMI's recurring engine up to now: every live, unpaused
 // schedule bills each date due, approved or declined by its vault's card.
 func (m *Mock) RunDue() []Sale {

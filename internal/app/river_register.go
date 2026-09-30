@@ -212,6 +212,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
+	// #1112: rebills that never happened are recorded as missed.
+	if err := addTrackedWorker(r, workers, &riverjobs.RebillWatchWorker{
+		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
+	}); err != nil {
+		return fmt.Errorf("add rebill watch worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CatalogReconciliationPullWorker{
 		StripeClients: r.StripeClients,
 		DB:            r.DB,
@@ -482,6 +488,19 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
+	))
+
+	// #1112: every 15 minutes, overdue rebills with no attempt are probed
+	// (NMI) or recorded as missed.
+	jobs = append(jobs, r.healthPeriodic(
+		riverjobs.RebillWatchInterval,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.RebillWatchArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.RebillWatchInterval},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Every 4 hours: Provider Refresh scheduler (#574/#719) — fans out one

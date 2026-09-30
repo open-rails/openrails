@@ -1279,6 +1279,9 @@ type OpenrailsRebillCycle struct {
 	Amount         int64
 	Currency       string
 	CreatedAt      time.Time
+	// #1112 when the cycle passed its owner's deadline with no attempt; a later attempt still attaches to the cycle.
+	MissedAt   *time.Time
+	MissReason *string
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).

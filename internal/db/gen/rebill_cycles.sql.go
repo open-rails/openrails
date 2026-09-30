@@ -12,6 +12,187 @@ import (
 	"github.com/google/uuid"
 )
 
+const countOpenSubscriptionCollections = `-- name: CountOpenSubscriptionCollections :one
+SELECT count(*) FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+  AND intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+`
+
+type CountOpenSubscriptionCollectionsParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// An engine renewal still being attempted decides its cycle itself.
+func (q *Queries) CountOpenSubscriptionCollections(ctx context.Context, arg CountOpenSubscriptionCollectionsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenSubscriptionCollections, arg.MerchantID, arg.SubscriptionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const cycleHasAttempt = `-- name: CycleHasAttempt :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.rebill_cycles c JOIN openrails.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
+     WHERE c.merchant_id = $1::uuid AND c.subscription_id = $2::uuid AND c.due_at = $3::timestamptz
+)::boolean AS attempted
+`
+
+type CycleHasAttemptParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	DueAt          time.Time
+}
+
+func (q *Queries) CycleHasAttempt(ctx context.Context, arg CycleHasAttemptParams) (bool, error) {
+	row := q.db.QueryRow(ctx, cycleHasAttempt, arg.MerchantID, arg.SubscriptionID, arg.DueAt)
+	var attempted bool
+	err := row.Scan(&attempted)
+	return attempted, err
+}
+
+const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
+SELECT merchant_id FROM openrails.overdue_rebill_merchant_ids(
+    $1::timestamptz, $2::timestamptz, $3::int)
+`
+
+type ListOverdueRebillMerchantsParams struct {
+	EngineCutoff  time.Time
+	NmiCutoff     time.Time
+	MerchantLimit int32
+}
+
+func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdueRebillMerchantsParams) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listOverdueRebillMerchants, arg.EngineCutoff, arg.NmiCutoff, arg.MerchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOverdueRebills = `-- name: ListOverdueRebills :many
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy FROM openrails.subscriptions sub
+WHERE sub.merchant_id = $1::uuid
+  AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
+  AND ((sub.collection_policy = 'engine' AND sub.current_period_ends_at <= $2::timestamptz)
+       OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $3::timestamptz))
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.rebill_cycles c
+       WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
+         AND (c.missed_at IS NOT NULL OR EXISTS (SELECT 1 FROM openrails.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)))
+ORDER BY sub.current_period_ends_at, sub.id
+LIMIT $4::int
+`
+
+type ListOverdueRebillsParams struct {
+	MerchantID   uuid.UUID
+	EngineCutoff time.Time
+	NmiCutoff    time.Time
+	RowLimit     int32
+}
+
+// #1112: auto-renewing subscriptions whose period ended before its owner's
+// deadline with neither an attempt nor a recorded miss for that cycle.
+func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]OpenrailsSubscription, error) {
+	rows, err := q.db.Query(ctx, listOverdueRebills,
+		arg.MerchantID,
+		arg.EngineCutoff,
+		arg.NmiCutoff,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsSubscription
+	for rows.Next() {
+		var i OpenrailsSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.ProductID,
+			&i.Status,
+			&i.Rail,
+			&i.CollectionPolicy,
+			&i.RailSubscriptionID,
+			&i.UserEmail,
+			&i.PaymentMethodID,
+			&i.CurrentPeriodStartsAt,
+			&i.CurrentPeriodEndsAt,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.GraceEndsAt,
+			&i.ScheduledPriceID,
+			&i.LastRetryAt,
+			&i.RetryAttempts,
+			&i.NextRetryAt,
+			&i.CancelledAt,
+			&i.CancelType,
+			&i.CancelFeedback,
+			&i.EntitlementsSpecSnapshot,
+			&i.GatewayResponse,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TierGroup,
+			&i.DeletionScheduledAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.TransientRetries,
+			&i.LifecycleRev,
+			&i.RowVersion,
+			&i.DunningPolicy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markRebillCycleMissed = `-- name: MarkRebillCycleMissed :execrows
+UPDATE openrails.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND missed_at IS NULL
+`
+
+type MarkRebillCycleMissedParams struct {
+	MissedAt   time.Time
+	MissReason string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkRebillCycleMissed(ctx context.Context, arg MarkRebillCycleMissedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRebillCycleMissed,
+		arg.MissedAt,
+		arg.MissReason,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertRebillCycle = `-- name: UpsertRebillCycle :one
 INSERT INTO openrails.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,

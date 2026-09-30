@@ -17,7 +17,8 @@
 // and inject failures (SetDecline, DeclineValidations, LoseSales,
 // DropSaleResponses, RefuseDuplicates, QueryUnavailable, FailRequests, Hold,
 // Intercept).
-// RenewSchedule and RunDue play NMI's recurring engine.
+// RenewSchedule and RunDue play NMI's recurring engine; SkipSchedule is it
+// passing a date without charging.
 //
 // Only tests and sandbox commands may import it; guard_test.go enforces this.
 //

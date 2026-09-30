@@ -130,6 +130,7 @@ var OwnedFunctions = []string{
 	"ledger_transfers_apply_counters()",
 	"lock_merchant_configuration_write()",
 	"monthly_normalized_amount(bigint, integer)",
+	"overdue_rebill_merchant_ids(timestamp with time zone, timestamp with time zone, integer)",
 	"payment_method_default_candidate(uuid, uuid)",
 	"payment_methods_default_usable()",
 	"payment_methods_ensure_default()",
