@@ -60,7 +60,7 @@ var excludedColumns = map[string]string{
 	"admission_denials_hourly":        "merchant_id customer_id denial_reason hour_at denials updated_at",
 	"card_attempt_failures":           "merchant_id subject bucket_at failures",
 	"payment_attempts":                "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id rail_intent_id step created_at cycle_id",
-	"rebill_cycles":                   "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at",
+	"rebill_cycles":                   "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason",
 	"idempotency_keys":                "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"dashboard_configs":               "merchant_id layout updated_at updated_by",
 	"merchant_deks":                   "merchant_id wrapped_dek created_at updated_at",

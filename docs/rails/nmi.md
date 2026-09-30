@@ -93,7 +93,7 @@ Unsigned or mis-signed deliveries are rejected, and an account with no
 Enable these event types (what the handler consumes):
 
 - `recurring.subscription.add` / `.update` / `.delete`
-- `transaction.sale.success` / `.failure`
+- `transaction.sale.success` / `.failure` / `.unknown`
 - `transaction.refund.success` / `.failure`
 - `transaction.void.success` / `.failure`
 - `chargeback.batch.complete` — auto-reconciled: refund recorded, subscription

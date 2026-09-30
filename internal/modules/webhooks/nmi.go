@@ -77,6 +77,7 @@ const (
 	// Transaction events - sales
 	EventTypeNMITransactionSuccess NMIWebhookEventType = "transaction.sale.success"
 	EventTypeNMITransactionFailure NMIWebhookEventType = "transaction.sale.failure"
+	EventTypeNMITransactionUnknown NMIWebhookEventType = "transaction.sale.unknown"
 
 	// Transaction events - refunds
 	EventTypeNMIRefundSuccess NMIWebhookEventType = "transaction.refund.success"
@@ -293,7 +294,7 @@ func (s *NMIWebhookService) handleWebhook(ctx context.Context) error {
 	// never the payload, decides the transition.
 	case EventTypeNMIAddSubscription, EventTypeNMIUpdateSubscription, EventTypeNMIDeleteSubscription:
 		return s.markDirtyFromRecurringEvent(ctx)
-	case EventTypeNMITransactionSuccess, EventTypeNMITransactionFailure:
+	case EventTypeNMITransactionSuccess, EventTypeNMITransactionFailure, EventTypeNMITransactionUnknown:
 		return s.markDirtyFromTransactionEvent(ctx)
 
 	// Refund events

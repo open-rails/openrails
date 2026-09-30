@@ -837,6 +837,23 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 	return out, nil
 }
 
+// ListOverdueRebills returns auto-renewing subscriptions whose period ended
+// before its owner's cutoff with neither an attempt nor a recorded miss for
+// that cycle (#1112).
+func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, engineCutoff, nmiCutoff time.Time) ([]*models.Subscription, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := r.db.Gen(ctx).ListOverdueRebills(ctx, gen.ListOverdueRebillsParams{
+		MerchantID: scopeMerchantID.UUID(), EngineCutoff: engineCutoff, NmiCutoff: nmiCutoff, RowLimit: DueDunningBatch,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.manyWithDetails(ctx, rows)
+}
+
 // GetLatestResumableCancelled returns the payer's most recent cancelled
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.
