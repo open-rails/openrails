@@ -57,12 +57,13 @@ type AttachOptions struct {
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
 
-	// EmailSender and SMSSender deliver AuthKit's messages (#738). Hosted
-	// posture requires verified registration, so it needs at least one.
-	// Self-hosted posture registers nobody; a sender still powers the mounted
-	// verify and reset routes.
-	EmailSender func(context.Context, iam.EmailMessage) error
-	SMSSender   func(context.Context, iam.SMSMessage) error
+	// EmailSender and SMSSender deliver AuthKit's messages and report their
+	// health (#738; adapters/twilio provides both). Hosted posture requires
+	// verified registration, so it needs at least one. Self-hosted posture
+	// registers nobody; a sender still powers the mounted verify and reset
+	// routes.
+	EmailSender authkit.EmailSender
+	SMSSender   authkit.SMSSender
 
 	// Frontend is where emailed links point (#743). Left zero, they point at
 	// the control plane's issuer, which for a hosted product is an API host

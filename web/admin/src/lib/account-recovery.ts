@@ -1,4 +1,4 @@
-import { ApiError, authApi } from "@/lib/api/client"
+import { authApi } from "@/lib/api/client"
 
 export interface AccountRecovery {
   token: string
@@ -39,40 +39,26 @@ function readRecovery(value: unknown): RecoveryState {
   return { recovery: { token, expires_at, purge_at } }
 }
 
-// Move the proof out of the API error before React Query retains that error.
+// AccountRecoveryRequired is a sign-in that proved the account and found it
+// scheduled for deletion (AuthResult account_recovery_required). It carries
+// the recovery proof, which never becomes a session.
+export class AccountRecoveryRequired extends Error {
+  recovery?: unknown
+
+  constructor(recovery: unknown) {
+    super("This account is scheduled for deletion.")
+    this.name = "AccountRecoveryRequired"
+    this.recovery = recovery
+  }
+}
+
+// Move the proof out of the error before React Query retains that error.
 // It belongs only to the current confirmation screen, never session storage.
 export function takeAccountRecovery(error: unknown): RecoveryState | undefined {
-  if (
-    !(error instanceof ApiError) ||
-    error.status !== 409 ||
-    error.code !== "account_recovery_required"
-  )
-    return
-  const value = error.metadata?.recovery
-  if (error.metadata) delete error.metadata.recovery
+  if (!(error instanceof AccountRecoveryRequired)) return
+  const value = error.recovery
+  delete error.recovery
   return readRecovery(value)
-}
-
-export function readRecoveryFragment(): RecoveryState | undefined {
-  if (typeof window === "undefined") return
-  const params = new URLSearchParams(window.location.hash.slice(1))
-  if (params.get("error") !== "account_recovery_required") return
-  try {
-    return readRecovery(JSON.parse(params.get("recovery") ?? "null"))
-  } catch {
-    return { notice: invalidRecovery }
-  }
-}
-
-export function clearRecoveryFragment() {
-  const params = new URLSearchParams(window.location.hash.slice(1))
-  if (params.get("error") === "account_recovery_required") {
-    history.replaceState(
-      null,
-      "",
-      window.location.pathname + window.location.search
-    )
-  }
 }
 
 export async function confirmAccountRecovery(token: string): Promise<void> {

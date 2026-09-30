@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
@@ -23,10 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
-
-// unsentEmail satisfies the hosted posture's sender requirement; nothing here
-// sends email.
-func unsentEmail(context.Context, iam.EmailMessage) error { return nil }
 
 // SEC: adding a teammate by email never grants a merchant role to an account
 // that has not proved the address: anyone can register an address they do not
@@ -60,7 +57,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
 			if hosted {
-				opts.HostedPosture, opts.EmailSender = true, unsentEmail
+				opts.HostedPosture, opts.EmailSender = true, new(authtest.Outbox).Email()
 			}
 			cp, err := controlplane.Attach(ctx, rt, opts)
 			require.NoError(t, err)

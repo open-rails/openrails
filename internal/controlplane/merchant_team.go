@@ -244,16 +244,26 @@ func (c *ControlPlane) teamMember(ctx context.Context, mid merchant.ID, targetUs
 // team is the merchant group's users keyed by id, display fields hydrated.
 func (c *ControlPlane) team(ctx context.Context, group iam.GroupRef) (map[string]MerchantTeamMember, error) {
 	out := map[string]MerchantTeamMember{}
-	q := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, WithUsers: true, Page: iam.PageRequest{Limit: iam.MaxPageLimit}}
+	q := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, Page: iam.PageRequest{Limit: min(iam.MaxPageLimit, iam.MaxBatch)}}
 	for {
 		batch, err := c.client.ListGroupMembers(ctx, group, q)
 		if err != nil {
 			return nil, err
 		}
+		ids := make([]string, len(batch.Items))
+		for i, m := range batch.Items {
+			ids[i] = m.Subject.ID
+		}
+		// The staff roster shows teammates' contact details: the privileged
+		// user view, not the public one members carry.
+		users, err := c.client.Users(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
 		for _, m := range batch.Items {
 			member := MerchantTeamMember{UserID: m.Subject.ID, Role: m.Role.Name()}
-			if m.User != nil {
-				member.Email, member.Username = text(m.User.Email), m.User.Username
+			if u, ok := users[m.Subject.ID]; ok {
+				member.Email, member.Username = text(u.Email), u.Username
 			}
 			out[m.Subject.ID] = member
 		}

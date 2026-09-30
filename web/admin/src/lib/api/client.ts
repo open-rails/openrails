@@ -177,19 +177,22 @@ async function refreshTokens(tokens: TokenPair): Promise<TokenPair | null> {
     }),
   })
   if (!res.ok) return null
+  // An AuthResult; only a complete one carries the refreshed pair.
   const body = (await res.json()) as {
-    access_token?: string
-    refresh_token?: string
-    expires_in?: number
+    status?: string
+    token_set?: {
+      access_token?: string
+      refresh_token?: string | null
+      expires_in?: number
+    } | null
   }
-  if (!body.access_token) return null
+  const set = body.status === "complete" ? body.token_set : null
+  if (!set?.access_token) return null
   if (!sameStoredSession(tokens, getTokens())) return null
   const refreshed = {
-    access_token: body.access_token,
-    refresh_token: body.refresh_token ?? tokens.refresh_token,
-    expires_at: body.expires_in
-      ? Date.now() + body.expires_in * 1000
-      : undefined,
+    access_token: set.access_token,
+    refresh_token: set.refresh_token ?? tokens.refresh_token,
+    expires_at: set.expires_in ? Date.now() + set.expires_in * 1000 : undefined,
     merchant: tokens.merchant,
   }
   setTokens(refreshed)

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { getTokens, setTokens } from "@/lib/api/client"
 import { twoFactorVerificationBody, type TwoFactorChallenge } from "@/lib/auth"
-import { authStateQueryOptions, consumeOIDCFragment } from "@/lib/auth-state"
+import { authStateQueryOptions } from "@/lib/auth-state"
 import { client, server, type Reply } from "@/test/harness"
 
 const membership = (slug: string) => ({ id: `id-${slug}`, slug, role: "owner" })
@@ -76,19 +76,26 @@ describe("auth state", () => {
     expect(getTokens()).toEqual({ access_token: "second", merchant: "merchant-b" })
   })
 
-  it("stores callback tokens from the OIDC fragment and clears the URL", () => {
+  it("trades the OIDC callback's one-time code for the session and clears the URL", async () => {
     vi.stubGlobal("window", {
-      location: {
-        hash: "#access_token=access&refresh_token=refresh&expires_in=60&merchant=merchant-a",
-        pathname: "/admin", search: "?next=%2F",
-      },
+      location: { hash: "#code=one-time", pathname: "/admin", search: "?next=%2F" },
     })
-    expect(consumeOIDCFragment()).toBe(true)
+    routes["POST /oidc/exchange"] = ({ body }) =>
+      (body as { code?: string }).code === "one-time"
+        ? {
+            status: "complete", second_factor: null, recovery: null,
+            token_set: { access_token: "access", token_type: "Bearer", expires_in: 60, refresh_token: "refresh" },
+          }
+        : Response.json({ error: { code: "invalid_code" } }, { status: 400 })
+
+    const state = await load()
+
+    expect(history.replaceState).toHaveBeenCalledWith(null, "", "/admin?next=%2F")
+    expect(state.identity?.who).toEqual(who)
     expect(getTokens()).toEqual({
       access_token: "access", refresh_token: "refresh",
       expires_at: expect.any(Number), merchant: "merchant-a",
     })
-    expect(history.replaceState).toHaveBeenCalledWith(null, "", "/admin?next=%2F")
   })
 })
 
