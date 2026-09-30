@@ -942,6 +942,42 @@ type OpenrailsPayment struct {
 	MoneyMovement string
 }
 
+// #1110 one row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved.
+type OpenrailsPaymentAttempt struct {
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	PspID           uuid.UUID
+	Rail            string
+	Kind            string
+	Owner           string
+	CardEntry       string
+	Source          string
+	ObservedVia     string
+	Category        string
+	Reason          *string
+	Action          *string
+	ResponseCode    *string
+	ResponseText    *string
+	TransactionID   *string
+	AvsResult       *string
+	CvvResult       *string
+	CardBrand       *string
+	CardLast4       *string
+	TokenType       *string
+	Amount          int64
+	Currency        *string
+	AttemptedAt     time.Time
+	CheckoutID      *uuid.UUID
+	CheckoutTarget  *string
+	SubscriptionID  *uuid.UUID
+	PaymentMethodID *uuid.UUID
+	PaymentID       *uuid.UUID
+	RailIntentID    *uuid.UUID
+	Step            string
+	CreatedAt       time.Time
+}
+
 // Generalized payment method table supporting multiple rails.
 type OpenrailsPaymentMethod struct {
 	ID uuid.UUID

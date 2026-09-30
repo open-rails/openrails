@@ -20,10 +20,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -113,6 +116,10 @@ type CreatePaymentMethodRequest struct {
 	CardType     string
 	ExpiryDate   string
 	Metadata     map[string]any
+	// AttemptTarget and AttemptOwner place the card's verification in its
+	// checkout (#1110): the price being bought, or attempts.CardSave.
+	AttemptTarget string
+	AttemptOwner  attempts.Owner
 }
 
 type UpdatePaymentMethodRequest struct {
@@ -258,6 +265,9 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	providerDuration = time.Since(providerStartedAt)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"user_id": userID}).Error("Failed to create vault in NMI")
+		if errors.Is(err, nmi.ErrV5Refused) {
+			s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Step: "vault"})
+		}
 		var nmiErr *nmi.CustomerVaultError
 		if errors.As(err, &nmiErr) {
 			return nil, &PaymentMethodError{
@@ -286,8 +296,11 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 			if code == "" && nmiErr.ResponseCode != 0 {
 				code = fmt.Sprintf("nmi_response_%d", nmiErr.ResponseCode)
 			}
-			reason := decline.ClassifyEvidence(decline.Evidence{Rail: "nmi", Code: code, AVS: nmiErr.AVSResponse, CVV: nmiErr.CVVResponse, Text: nmiErr.ResponseText}).Reason
-			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error()), Rail: "nmi", Reason: reason}
+			answer := decline.Evidence{Rail: "nmi", Code: code, AVS: nmiErr.AVSResponse, CVV: nmiErr.CVVResponse, Text: nmiErr.ResponseText}
+			if !nmi.RequiresVerification(err) {
+				s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Answer: answer, TransactionID: nmiErr.TransactionID, Step: "verify"})
+			}
+			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error()), Rail: "nmi", Reason: decline.ClassifyEvidence(answer).Reason}
 		}
 		return nil, fmt.Errorf("card verification did not complete; add the card again: %w", err)
 	}
@@ -330,6 +343,8 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		return nil, fmt.Errorf("failed to store payment method locally: %w", err)
 	}
 	databaseDuration = time.Since(databaseStartedAt)
+	s.recordVerification(ctx, userID, pspID, req, attempts.Attempt{Approved: true, TransactionID: agreementRef, PaymentMethodID: &methodID, Step: "verify",
+		CardBrand: normalize.FromPtr(pm.CardType), CardLast4: normalize.FromPtr(pm.LastFour), TokenType: charge.TokenTypePSPToken})
 
 	outcome = "success"
 	log.WithFields(log.Fields{"user_id": userID, "vault_id": pm.RailCustomerRef}).Info("Successfully created payment method")
@@ -914,4 +929,21 @@ func (s *RailPaymentMethodService) ResolveClientForPaymentMethod(ctx context.Con
 // GetUserPaymentMethods lists all vaults for a user
 func (s *RailPaymentMethodService) GetUserPaymentMethods(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	return s.PaymentMethodService.GetByUserID(ctx, userID)
+}
+
+// recordVerification records the new card's verification answer (#1110). The
+// answer already reached the buyer; a failed write is logged, never returned.
+func (s *RailPaymentMethodService) recordVerification(ctx context.Context, userID string, pspID *uuid.UUID, req *CreatePaymentMethodRequest, a attempts.Attempt) {
+	merchantID, ok := merchant.FromContext(ctx)
+	if s.DB == nil || pspID == nil || !ok {
+		return
+	}
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = merchantID.UUID(), identity.CustomerIDFromString(userID).UUID(), *pspID, string(models.RailNMI)
+	a.Kind, a.Owner, a.NewCard, a.At, a.Target = attempts.Verify, req.AttemptOwner, true, s.now(), req.AttemptTarget
+	if a.Target == "" {
+		a.Target = attempts.CardSave
+	}
+	if err := attempts.Record(ctx, s.DB.Gen(ctx), a); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("user_id", userID).Error("record card verification attempt")
+	}
 }

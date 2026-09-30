@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 )
 
 type UserIdentity struct {
@@ -31,10 +32,12 @@ func customerIDFromUser(userID string) (uuid.UUID, error) {
 
 type CheckoutRequest struct {
 	acceptedPurchase *acceptedPurchaseTerms
-	PriceID          string `json:"price_id"`
-	PriceKey         string `json:"price_key,omitempty"`
-	PaymentMethodID  string `json:"payment_method_id,omitempty"`
-	PaymentToken     string `json:"payment_token,omitempty"`
+	// attempt places a new card's verification in its checkout (#1110).
+	attempt         cardAttempt
+	PriceID         string `json:"price_id"`
+	PriceKey        string `json:"price_key,omitempty"`
+	PaymentMethodID string `json:"payment_method_id,omitempty"`
+	PaymentToken    string `json:"payment_token,omitempty"`
 	// BTTokenIntentID (#795): the Basis Theory token-intent id from BT Elements
 	// — the ONLY card handle custodian-held-card checkout accepts (PAN firewall).
 	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`
@@ -97,4 +100,10 @@ type EligibilityResult struct {
 	Coverage             *CoverageInfo
 	ExistingSubscription *models.Subscription
 	ExistingProduct      *models.Product
+}
+
+// cardAttempt is the checkout a new card's verification belongs to (#1110).
+type cardAttempt struct {
+	target string
+	owner  attempts.Owner
 }

@@ -222,6 +222,10 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			require.Nil(t, sub.ScheduledPriceID)
 			require.True(t, l.c.entitled(old.ent))
 			require.False(t, l.c.entitled(next.ent))
+			rows := w.attempts(l.c.id)
+			require.Len(t, rows, 1, "the refused proration is one attempt")
+			require.Equal(t, []string{"upgrade", "nmi_schedule", "saved", "insufficient_funds", next.ID}, []string{rows[0].Kind, rows[0].Owner, rows[0].CardEntry, str(rows[0].Reason), str(rows[0].Target)})
+			require.NotEmpty(t, str(rows[0].TransactionID))
 		})
 	}
 }

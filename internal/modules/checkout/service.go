@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -595,6 +596,7 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 		return nil, errors.New("checkout enrollment executor unavailable")
 	}
 	key := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_subscription")
+	req.attempt = cardAttempt{target: price.ID.String(), owner: attempts.OwnerNMISchedule}
 	_, _, method, created, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
 		return nil, err

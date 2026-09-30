@@ -90,8 +90,10 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 			}
 			return req.LastFour
 		}(),
-		CardType:   req.CardType,
-		ExpiryDate: req.ExpiryDate,
+		CardType:      req.CardType,
+		ExpiryDate:    req.ExpiryDate,
+		AttemptTarget: req.attempt.target,
+		AttemptOwner:  req.attempt.owner,
 		Metadata: func() map[string]any {
 			if req.Metadata == nil {
 				return nil

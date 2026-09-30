@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
@@ -65,6 +66,9 @@ func (s *CheckoutSessionService) vaultEnrollmentCard(ctx context.Context, paymen
 		LastFour:     payment.LastFour,
 		CardType:     payment.CardType,
 		ExpiryDate:   payment.ExpiryDate,
+	}
+	if session.PriceID != nil {
+		req.attempt = cardAttempt{target: session.PriceID.String(), owner: attempts.OwnerEngine}
 	}
 	return vault.vaultEnrollmentCard(ctx, req, user, target)
 }

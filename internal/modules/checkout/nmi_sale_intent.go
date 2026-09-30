@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -127,7 +128,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 			evidence["failure_code"] = openrails.CodePaymentDuplicateRefused
 			reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
 		} else if errors.As(callErr, &refusal) {
-			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse}
+			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
 			reason = "sale declined"
 		}
 		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
@@ -362,6 +363,9 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 					return err
 				}
 			}
+			if err := recordSaleAttempt(ctx, d, in, p, customer, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &result.PaymentID}, now); err != nil {
+				return err
+			}
 			evidence["transaction_id"], evidence["payment_id"] = receipt.TransactionID(), result.PaymentID.String()
 			if result.DelayedStart != nil {
 				evidence["delayed_start"] = result.DelayedStart.UTC().Format(time.RFC3339Nano)
@@ -374,6 +378,12 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 				code, _ := evidence["localization_id"].(string)
 				if code == "" {
 					code, _ = evidence["decline_code"].(string)
+				}
+				avs, _ := evidence["avs_response"].(string)
+				cvv, _ := evidence["cvv_response"].(string)
+				transaction, _ := evidence["decline_transaction_id"].(string)
+				if err := recordSaleAttempt(ctx, d, in, p, customer, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
+					return err
 				}
 				reason := decline.ReasonFor(in.Rail, code)
 				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
@@ -430,4 +440,14 @@ func saleResultEvidence(evidence map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+// recordSaleAttempt records the sale's answer (#1110) in its completion
+// transaction.
+func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p payments.NMISalePayload, customer uuid.UUID, a attempts.Attempt, at time.Time) error {
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
+	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
+	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
+	a.TokenType = charge.TokenTypePSPToken
+	return attempts.Record(ctx, d.Gen(ctx), a)
 }

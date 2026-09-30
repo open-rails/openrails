@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	paymentattempts "github.com/open-rails/openrails/internal/modules/attempts"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
@@ -214,6 +216,13 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			if err = save("proration", progress.Proration); err != nil {
 				return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
 			}
+			var refusal *nmi.CustomerVaultError
+			if errors.As(callErr, &refusal) {
+				answer := decline.Evidence{Code: strconv.Itoa(refusal.ResponseCode), AVS: refusal.AVSResponse, CVV: refusal.CVVResponse, Text: refusal.ResponseText}
+				if err := h.recordProration(ctx, in, p, paymentattempts.Attempt{Answer: answer, TransactionID: refusal.TransactionID}); err != nil {
+					return intents.AmbiguousWithEvidence("record proration decline: "+err.Error(), evidence())
+				}
+			}
 			return h.terminal(ctx, in, intents.TerminalWithEvidence(callErr.Error(), evidence()))
 		}
 		if sale == nil || sale.TransactionID == "" {
@@ -389,17 +398,21 @@ func (h *NMIUpgradeIntentHandler) absentProration(ctx context.Context, in gen.Op
 	if h.Checkout.now().Before(step.SubmittedAt.Add(intents.LostSubmissionSettle)) {
 		return intents.Ambiguous("tier change proration receipt is not yet visible")
 	}
-	attempts, err := client.ReadOrderAttempts(ctx, in.ID.String())
+	order, err := client.ReadOrderAttempts(ctx, in.ID.String())
 	switch {
 	case err != nil:
 		h.raiseProrationUnresolved(ctx, in, p, "the provider's transaction search failed: "+err.Error())
 		return intents.Ambiguous("tier change proration cannot be read: " + err.Error())
-	case attempts.Transactions == 0:
+	case order.Transactions == 0:
 		step.refuseUnexecuted(openrails.CodeTierChangeRefused, absentProrationRefusal)
-	case attempts.Declined:
-		step.refuse(&nmi.CustomerVaultError{Message: "sale declined", ResponseCode: attempts.DeclineCode, LocalizationID: decline.NMILocalizationID(attempts.DeclineCode)})
+	case order.Declined:
+		refusal := &nmi.CustomerVaultError{Message: "sale declined", ResponseCode: order.DeclineCode, LocalizationID: decline.NMILocalizationID(order.DeclineCode)}
+		step.refuse(refusal)
+		if err := h.recordProration(ctx, in, p, paymentattempts.Attempt{Answer: decline.Evidence{Code: strconv.Itoa(order.DeclineCode)}, ObservedVia: "pull"}); err != nil {
+			return intents.Ambiguous("record proration decline: " + err.Error())
+		}
 	default:
-		h.raiseProrationUnresolved(ctx, in, p, fmt.Sprintf("the provider holds %d transaction(s) under this order but none qualifies as the accepted charge", attempts.Transactions))
+		h.raiseProrationUnresolved(ctx, in, p, fmt.Sprintf("the provider holds %d transaction(s) under this order but none qualifies as the accepted charge", order.Transactions))
 		return intents.Ambiguous("tier change proration receipt does not qualify")
 	}
 	if err := save("proration", step); err != nil {
@@ -544,6 +557,9 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 			if _, err := txDB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "unscheduled", Ref: payment.TransactionID}); err != nil {
 				return err
 			}
+			if err := recordProrationAttempt(ctx, txDB, in, p, customer, paymentattempts.Attempt{Approved: true, TransactionID: payment.TransactionID, PaymentID: &payment.ID}, h.Checkout.now()); err != nil {
+				return err
+			}
 		}
 		for finding, subject := range map[string]string{ProviderUpdateStuckFinding: p.OldSubscriptionID.String(), ProrationUnresolvedFinding: in.ID.String()} {
 			if row, err := txDB.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{MerchantID: in.MerchantID, FindingType: finding, SubjectKey: subject}); err == nil {
@@ -610,4 +626,23 @@ func (r upgradeReceiptResolver) ResolveNMIClient(context.Context, uuid.UUID, *uu
 
 func (h *NMIUpgradeIntentHandler) terminal(ctx context.Context, in gen.OpenrailsRailIntent, outcome intents.Outcome) intents.Outcome {
 	return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, outcome, h.Checkout.now())
+}
+
+// recordProration records a refused proration charge (#1110); an approved one
+// is recorded with its tier change.
+func (h *NMIUpgradeIntentHandler) recordProration(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, a paymentattempts.Attempt) error {
+	customer, err := customerIDFromUser(p.UserID)
+	if err != nil {
+		return err
+	}
+	database := h.Checkout.SubscriptionService.Database()
+	return recordProrationAttempt(ctx, database, in, p, customer, a, h.Checkout.now())
+}
+
+func recordProrationAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, customer uuid.UUID, a paymentattempts.Attempt, at time.Time) error {
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
+	a.Kind, a.Owner, a.At, a.Target, a.Step = paymentattempts.Upgrade, paymentattempts.OwnerNMISchedule, at, p.PriceID.String(), "proration"
+	a.Amount, a.Currency, a.TokenType = p.ProrationAmount, p.Currency, charge.TokenTypePSPToken
+	a.SubscriptionID, a.PaymentMethodID, a.RailIntentID = &p.OldSubscriptionID, &p.PaymentMethodID, &in.ID
+	return paymentattempts.Record(ctx, d.Gen(ctx), a)
 }

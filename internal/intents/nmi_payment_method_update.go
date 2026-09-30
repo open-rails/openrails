@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -15,11 +16,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -287,6 +291,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 	if ref == "" {
 		order := verificationOrderID(intent.ID)
 		var refused *nmi.Verification
+		var answer decline.Evidence // the refusal as NMI answered it (#1110)
 		if progress.VerificationSubmitted {
 			v, found, err := client.ReadVerificationByOrderID(ctx, order)
 			if err != nil {
@@ -305,7 +310,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 			// A verification moves no funds; one lost before NMI recorded it
 			// is sent again under the same order reference.
 			ref, err = client.EstablishRecurringAgreement(ctx, vault, staged, order)
-			var decline *nmi.CustomerVaultError
+			var rejection *nmi.CustomerVaultError
 			switch {
 			case errors.Is(err, nmi.ErrProviderReadOnly):
 				return Parked("nmi provider writes blocked (mode=readonly)")
@@ -313,8 +318,9 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 				// Refused unprocessed by NMI's duplicate window; the next pass
 				// finds nothing under the order and verifies again.
 				return Retryable("NMI refused the replacement card verification as a duplicate; retrying after its window")
-			case errors.As(err, &decline) && !nmi.UncertainResponseCode(decline.ResponseCode):
-				refused = &nmi.Verification{ResponseCode: decline.ResponseCode, ResponseText: strings.TrimSpace(decline.LocalizationID)}
+			case errors.As(err, &rejection) && !nmi.UncertainResponseCode(rejection.ResponseCode):
+				refused = &nmi.Verification{TransactionID: rejection.TransactionID, ResponseCode: rejection.ResponseCode, ResponseText: strings.TrimSpace(rejection.LocalizationID)}
+				answer = decline.Evidence{AVS: rejection.AVSResponse, CVV: rejection.CVVResponse, Text: rejection.ResponseText}
 			case err != nil:
 				return Ambiguous("replacement card verification outcome unknown: " + err.Error())
 			}
@@ -326,6 +332,10 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 				if err := client.DeleteCustomerBillingEntry(ctx, vault, staged); err != nil {
 					return Retryable("remove the refused replacement card: " + err.Error())
 				}
+			}
+			answer.Code = strconv.Itoa(refused.ResponseCode)
+			if err := h.recordVerification(ctx, intent, payload, attempts.Attempt{Answer: answer, TransactionID: refused.TransactionID, CardBrand: stagedCard.CardType, CardLast4: stagedCard.LastFour}); err != nil {
+				return Ambiguous("record the refused replacement card verification: " + err.Error())
 			}
 			// The customer-facing decline code: NMI's localization id when it
 			// named one, else its response code.
@@ -409,6 +419,9 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 			return errors.New("payment method changed before the replacement card could be recorded")
 		}
 		if err := NewStore(d).RecordProgress(ctx, intent.ID, map[string]any{"finalized": true}); err != nil {
+			return err
+		}
+		if err := recordReplacementVerification(ctx, d, intent, pm.CustomerID, pm.ID, now, attempts.Attempt{Approved: true, TransactionID: ref, CardBrand: card.CardType, CardLast4: card.LastFour}); err != nil {
 			return err
 		}
 		return subscriptions.WakeForReplacedMethod(ctx, d, intent.MerchantID, pm.ID, now)
@@ -650,4 +663,23 @@ func (h *NMIPaymentMethodUpdateHandler) dataGap(ctx context.Context, intent gen.
 		return Retryable("record card data gap finding: " + err.Error())
 	}
 	return Terminal(errNMICardDataGap.Error())
+}
+
+// recordVerification records a refused replacement card verification (#1110).
+func (h *NMIPaymentMethodUpdateHandler) recordVerification(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload, a attempts.Attempt) error {
+	customer, err := uuid.Parse(payload.UserID)
+	if err != nil {
+		return err
+	}
+	return recordReplacementVerification(ctx, h.DB, intent, customer, payload.PaymentMethodID, h.now(), a)
+}
+
+func recordReplacementVerification(ctx context.Context, d *db.DB, intent gen.OpenrailsRailIntent, customer, method uuid.UUID, at time.Time, a attempts.Attempt) error {
+	if intent.PspID == nil {
+		return errors.New("card replacement has no PSP")
+	}
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = intent.MerchantID, customer, *intent.PspID, intent.Rail
+	a.Kind, a.NewCard, a.At, a.Target, a.Step = attempts.Verify, true, at, attempts.CardSave, "verify"
+	a.PaymentMethodID, a.RailIntentID, a.TokenType = &method, &intent.ID, charge.TokenTypePSPToken
+	return attempts.Record(ctx, d.Gen(ctx), a)
 }

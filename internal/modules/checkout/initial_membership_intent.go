@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
@@ -526,6 +527,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				return err
 			}
 			if paid {
+				if err := recordInitialAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: transaction, PaymentID: &p.Terms.PaymentID}, h.Checkout.now()); err != nil {
+					return err
+				}
 				agreementRef := transaction
 				if in.Rail == "stripe" {
 					agreementRef = receipt.StripeEnginePaymentIntentID()
@@ -549,6 +553,11 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				evidence["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
 		} else {
+			if answer, transaction, declined := refusal.Declined(); declined && p.Terms.Amount > 0 {
+				if err := recordInitialAttempt(ctx, d, in, p, attempts.Attempt{Answer: answer, TransactionID: transaction}, h.Checkout.now()); err != nil {
+					return err
+				}
+			}
 			if outcome.Evidence["declined"] == true && p.Terms.Amount > 0 {
 				code := fmt.Sprint(outcome.Evidence["response_code"])
 				if in.Rail == "stripe" {
@@ -748,4 +757,21 @@ func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context
 		return intents.Ambiguous(err.Error())
 	}
 	return h.Verify(ctx, in)
+}
+
+// recordInitialAttempt records the enrollment charge's answer (#1110) in its
+// completion transaction.
+func recordInitialAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p InitialMembershipPayload, a attempts.Attempt, at time.Time) error {
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Terms.CustomerID, *in.PspID, in.Rail
+	a.Kind, a.Owner, a.At, a.Target, a.Step = attempts.Initial, attempts.OwnerOf(p.Terms.CollectionPolicy), at, p.Terms.PriceID.String(), "charge"
+	if p.Upgrade() {
+		a.Kind = attempts.Upgrade
+	}
+	a.Amount, a.Currency = p.Terms.Amount, p.Terms.Currency
+	a.SubscriptionID, a.PaymentMethodID, a.RailIntentID = &p.Terms.SubscriptionID, &p.Terms.PaymentMethodID, &in.ID
+	a.TokenType = charge.TokenTypePSPToken
+	if p.Instrument.CustodianHeld() {
+		a.TokenType = charge.TokenTypePANViaProxy
+	}
+	return attempts.Record(ctx, d.Gen(ctx), a)
 }

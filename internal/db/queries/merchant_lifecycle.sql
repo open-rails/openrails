@@ -45,6 +45,12 @@ SELECT count(*) FROM openrails.payments WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsPayments :exec
 DELETE FROM openrails.payments WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsPaymentAttempts :one
+SELECT count(*) FROM openrails.payment_attempts WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsPaymentAttempts :exec
+DELETE FROM openrails.payment_attempts WHERE merchant_id = $1;
+
 
 
 -- name: CountMerchantRowsNotificationQueue :one
