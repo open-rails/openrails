@@ -12,6 +12,7 @@ SELECT merchant_id FROM openrails.retention_work_merchant_ids(
     sqlc.arg(webhook_cutoff)::timestamptz,
     sqlc.arg(settlement_cutoff)::timestamptz,
     sqlc.arg(lifecycle_cutoff)::timestamptz,
+    sqlc.arg(attempt_cutoff)::timestamptz,
     sqlc.narg(after)::uuid,
     sqlc.arg(merchant_limit)::int);
 

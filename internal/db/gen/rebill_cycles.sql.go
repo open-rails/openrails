@@ -51,6 +51,33 @@ func (q *Queries) CycleHasAttempt(ctx context.Context, arg CycleHasAttemptParams
 	return attempted, err
 }
 
+const deleteRebillCyclesBefore = `-- name: DeleteRebillCyclesBefore :execrows
+DELETE FROM openrails.rebill_cycles
+WHERE id IN (
+    SELECT c.id FROM openrails.rebill_cycles c
+    WHERE c.merchant_id = $1::uuid
+      AND c.due_at < $2::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM openrails.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)
+    LIMIT $3::int
+)
+`
+
+type DeleteRebillCyclesBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// #1118: cycles due before the retention cutoff whose attempts are all gone,
+// batched like the attempt purge that runs first.
+func (q *Queries) DeleteRebillCyclesBefore(ctx context.Context, arg DeleteRebillCyclesBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRebillCyclesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getRebillCycle = `-- name: GetRebillCycle :one
 SELECT merchant_id, id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, missed_at, miss_reason, created_at, first_category, first_reason, first_at, won_attempt_id, won_kind, won_source, won_at, won_ordinal, first_failed, first_outcome, closed_at, recovered_by FROM openrails.rebill_cycle_facts
 WHERE merchant_id = $1::uuid AND id = $2::uuid

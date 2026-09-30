@@ -1713,51 +1713,6 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 	return items, nil
 }
 
-const listSubscriptionDeclineCodes = `-- name: ListSubscriptionDeclineCodes :many
-SELECT a.rail, a.response_code::text AS failure_code, count(*)::bigint AS declines
-FROM openrails.payment_attempts a
-WHERE a.merchant_id = $1::uuid
-  AND a.subscription_id IS NOT NULL
-  AND a.category <> 'approved'
-  AND a.response_code IS NOT NULL
-  AND a.attempted_at >= $2::timestamptz
-GROUP BY a.rail, a.response_code
-ORDER BY a.rail, a.response_code
-`
-
-type ListSubscriptionDeclineCodesParams struct {
-	MerchantID uuid.UUID
-	Since      time.Time
-}
-
-type ListSubscriptionDeclineCodesRow struct {
-	Rail        string
-	FailureCode string
-	Declines    int64
-}
-
-// life.dunning.funnel: recorded subscription decline codes since a cutoff,
-// classified in Go (decline.Classify) to count unmapped ones.
-func (q *Queries) ListSubscriptionDeclineCodes(ctx context.Context, arg ListSubscriptionDeclineCodesParams) ([]ListSubscriptionDeclineCodesRow, error) {
-	rows, err := q.db.Query(ctx, listSubscriptionDeclineCodes, arg.MerchantID, arg.Since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSubscriptionDeclineCodesRow
-	for rows.Next() {
-		var i ListSubscriptionDeclineCodesRow
-		if err := rows.Scan(&i.Rail, &i.FailureCode, &i.Declines); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listUnjustifiedEntitlementWindows = `-- name: ListUnjustifiedEntitlementWindows :many
 SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
        e.source_type, e.source_id, e.start_at, e.end_at,

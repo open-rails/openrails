@@ -551,6 +551,20 @@ period (`provider_skipped`), OpenRails charges the period itself, then duns a
 decline on the same schedule. A stalled or deleted NMI schedule only raises the
 finding: NMI may still bill it.
 
+**Payment health alerts.** Each LIFE sweep reads the decline measures per PSP
+account and owner and keeps these findings open while their condition holds
+(one notification per episode):
+
+| Finding | Fires when |
+|---|---|
+| `life.payments.new_card_decline_spike` | the last 24h's new-card decline rate is 10 points above the 28 days before, with 50 attempts on each side |
+| `life.payments.rebill_failure_spike` | the last 24h's rebill first-attempt failure rate is 10 points above that baseline, or above 25%, over 50 cycles |
+| `life.payments.system_errors` | system errors are over 2% of the last hour's attempts (at least 20); critical at once on NMI 410/411 (our account refused) |
+| `life.decline.unmapped` | a decline code of the last 30 days that no table maps, per rail and code |
+
+Payment attempts and rebill cycles are kept 25 months; the cleanup worker
+deletes older ones.
+
 **Engine outcomes.** A renewal allowance of min(24h, max(5m, period/10))
 follows each paid engine period (1h → 6m, 1d → 2h24m, 7d → 16h48m, 30d and
 longer → 24h), so unpaid access never exceeds a tenth of the period and a

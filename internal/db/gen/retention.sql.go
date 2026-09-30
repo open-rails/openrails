@@ -38,8 +38,9 @@ SELECT merchant_id FROM openrails.retention_work_merchant_ids(
     $4::timestamptz,
     $5::timestamptz,
     $6::timestamptz,
-    $7::uuid,
-    $8::int)
+    $7::timestamptz,
+    $8::uuid,
+    $9::int)
 `
 
 type ListRetentionWorkMerchantsParams struct {
@@ -49,6 +50,7 @@ type ListRetentionWorkMerchantsParams struct {
 	WebhookCutoff          time.Time
 	SettlementCutoff       time.Time
 	LifecycleCutoff        time.Time
+	AttemptCutoff          time.Time
 	After                  *uuid.UUID
 	MerchantLimit          int32
 }
@@ -66,6 +68,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.WebhookCutoff,
 		arg.SettlementCutoff,
 		arg.LifecycleCutoff,
+		arg.AttemptCutoff,
 		arg.After,
 		arg.MerchantLimit,
 	)

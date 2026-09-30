@@ -46,6 +46,32 @@ func (q *Queries) CheckoutVerifiedPaymentMethod(ctx context.Context, arg Checkou
 	return verified, err
 }
 
+const deletePaymentAttemptsBefore = `-- name: DeletePaymentAttemptsBefore :execrows
+DELETE FROM openrails.payment_attempts
+WHERE id IN (
+    SELECT a.id FROM openrails.payment_attempts a
+    WHERE a.merchant_id = $1::uuid
+      AND a.attempted_at < $2::timestamptz
+    LIMIT $3::int
+)
+`
+
+type DeletePaymentAttemptsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// #1118: attempts past their retention, batched: row_limit bounds one
+// statement and the cleanup worker loops.
+func (q *Queries) DeletePaymentAttemptsBefore(ctx context.Context, arg DeletePaymentAttemptsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePaymentAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const enrichPaymentAttempt = `-- name: EnrichPaymentAttempt :execrows
 UPDATE openrails.payment_attempts SET
     card_bin = COALESCE(card_bin, $1::text),

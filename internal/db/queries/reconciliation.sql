@@ -1013,19 +1013,6 @@ FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status = 'unknown_needs_verify';
 
--- life.dunning.funnel: recorded subscription decline codes since a cutoff,
--- classified in Go (decline.Classify) to count unmapped ones.
--- name: ListSubscriptionDeclineCodes :many
-SELECT a.rail, a.response_code::text AS failure_code, count(*)::bigint AS declines
-FROM openrails.payment_attempts a
-WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND a.subscription_id IS NOT NULL
-  AND a.category <> 'approved'
-  AND a.response_code IS NOT NULL
-  AND a.attempted_at >= sqlc.arg(since)::timestamptz
-GROUP BY a.rail, a.response_code
-ORDER BY a.rail, a.response_code;
-
 -- A LIFE repair's premise, re-checked under the row lock: a completed payment
 -- for the subscription (at or after since, when given).
 -- name: SubscriptionHasCompletedPayment :one

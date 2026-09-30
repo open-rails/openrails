@@ -109,3 +109,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 SELECT * FROM openrails.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND cycle_id = sqlc.arg(cycle_id)::uuid
 ORDER BY attempted_at, id;
+
+-- #1118: attempts past their retention, batched: row_limit bounds one
+-- statement and the cleanup worker loops.
+-- name: DeletePaymentAttemptsBefore :execrows
+DELETE FROM openrails.payment_attempts
+WHERE id IN (
+    SELECT a.id FROM openrails.payment_attempts a
+    WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND a.attempted_at < sqlc.arg(cutoff)::timestamptz
+    LIMIT sqlc.arg(row_limit)::int
+);

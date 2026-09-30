@@ -146,7 +146,7 @@ var OwnedFunctions = []string{
 	"redrivable_plan_change_merchant_ids(integer)",
 	"reject_immutable_billing_fact()",
 	"require_finished_billing_restore()",
-	"retention_work_merchant_ids(timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, uuid, integer)",
+	"retention_work_merchant_ids(timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, uuid, integer)",
 	"subscriptions_record_status_transition()",
 	"subscriptions_set_tier_group()",
 	"unenriched_attempt_merchant_ids(timestamp with time zone, timestamp with time zone, integer)",
