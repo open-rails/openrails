@@ -579,10 +579,6 @@ func (c *ControlPlane) AuthService() *authhttp.Service {
 // core-service enrichment) — no JWKS HTTP fetch, so mint and verify cannot
 // drift. It is exactly the authenticator the standalone server wires for its
 // user routes.
-//
-// Scope: hosts embedding the control plane use THIS for their own routes.
-// pkg/embedded/authkit.NewVerifierAuthenticator remains for verifying REMOTE
-// issuers over JWKS; a JWKS HTTP route exists purely for external verifiers.
 // Returns nil when the control plane or its verifier is absent.
 func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
 	if c == nil || c.authSvc == nil || c.authSvc.Verifier() == nil {
@@ -591,10 +587,7 @@ func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
 	// Native identity follows the accepted access-token lifetime. Permission
 	// gates still consult current group authority; machine/delegated credential
 	// validation remains the verifier's responsibility.
-	return auth.NewAuthenticator(auth.AuthenticatorConfig{
-		Verifier:       auth.RequestVerifierFunc(c.authSvc.Verifier().VerifyRequest),
-		OmitTokenRoles: true,
-	})
+	return auth.NewAuthenticator(auth.RequestVerifierFunc(c.authSvc.Verifier().VerifyRequest))
 }
 
 // Pool returns the control plane's schema-aware pgx pool (the pool holding the
