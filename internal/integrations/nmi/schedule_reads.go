@@ -107,10 +107,10 @@ func (c *NMIClient) SalesPage(ctx context.Context, since, until time.Time, page 
 
 func (c *NMIClient) salesPage(ctx context.Context, filter QueryFilter, since, until time.Time, page int) ([]ScheduleSale, int, error) {
 	if !since.IsZero() {
-		filter.StartDate = since.UTC().Format(queryAPITimeFormat)
+		filter.StartDate = since.UTC().Format(QueryTimeFormat)
 	}
 	if !until.IsZero() {
-		filter.EndDate = until.UTC().Format(queryAPITimeFormat)
+		filter.EndDate = until.UTC().Format(QueryTimeFormat)
 	}
 	filter.ResultLimit, filter.PageNumber = QueryPageLimit, page
 	report, err := c.TransactionReport(ctx, filter)

@@ -1354,6 +1354,9 @@
       "type planNode struct {\n\tNodeType     string     `json:\"Node Type\"`\n\tRelationName string     `json:\"Relation Name\"`\n\tSchema       string     `json:\"Schema\"`\n\tAlias        string     `json:\"Alias\"`\n\tIndexName    string     `json:\"Index Name\"`\n\tIndexCond    string     `json:\"Index Cond\"`\n\tRecheckCond  string     `json:\"Recheck Cond\"`\n\tFilter       string     `json:\"Filter\"`\n\tPlans        []planNode `json:\"Plans\"`\n}"
     ],
     "internal/hosttools": [
+      "type declineMonth struct {\n\tMonth    string `json:\"month\"`\n\tKind     string `json:\"kind\"`\n\tAttempts int    `json:\"attempts\"`\n\tApproved int    `json:\"approved\"`\n\tRefused  int    `json:\"refused\"`\n\n\tRefusalRate float64 `json:\"refusal_rate\"`\n}",
+      "type declineRefusal struct {\n\tKind     string `json:\"kind\"`\n\tCategory string `json:\"category\"`\n\tReason   string `json:\"reason\"`\n\tCount    int    `json:\"count\"`\n}",
+      "type declineReport struct {\n\tPSP      uuid.UUID        `json:\"psp_id\"`\n\tSince    time.Time        `json:\"since\"`\n\tUntil    time.Time        `json:\"until\"`\n\tMonths   []declineMonth   `json:\"months\"`\n\tRefusals []declineRefusal `json:\"refusals\"`\n\tNotes    []string         `json:\"notes\"`\n}",
       "type pullProviderConvergeLog struct {\n\tRunID             *uuid.UUID\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tRequiresReview    int `json:\"requires_review\"`\n\tAdminRequired     int `json:\"-\"`\n}"
     ],
     "internal/http/embedhttp": [
@@ -2432,6 +2435,26 @@
       "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
+    },
+    "internal/hosttools/nmi_decline_report.go": {
+      "cmp": "cmp",
+      "config": "github.com/open-rails/openrails/config",
+      "context": "context",
+      "decline": "github.com/open-rails/openrails/internal/billing/decline",
+      "errors": "errors",
+      "fmt": "fmt",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
+      "reconcile": "github.com/open-rails/openrails/internal/reconcile",
+      "slices": "slices",
+      "strings": "strings",
+      "tabwriter": "text/tabwriter",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/hosttools/psp_declaration.go": {
       "app": "github.com/open-rails/openrails/internal/app",

@@ -20,8 +20,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// nmiReader is the merchant's armed NMI client and the PSP it reads.
-func nmiReader(armed MerchantPullClients) (*nmi.NMIClient, uuid.UUID) {
+// NMIReader is the merchant's armed NMI client and the PSP it reads.
+func NMIReader(armed MerchantPullClients) (*nmi.NMIClient, uuid.UUID) {
 	p, ok := armed.Probers[ProviderNMI].(*NMISubscriptionProber)
 	if !ok || p.Client == nil {
 		return nil, uuid.Nil
@@ -300,7 +300,7 @@ func (v *Verifier) bulkRead(ctx context.Context, mid merchant.ID) error {
 	return v.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(ctx context.Context) error {
 		now := v.Clock.Now().UTC()
 		armed := v.Builder.Build(ctx, mid)
-		client, psp := nmiReader(armed)
+		client, psp := NMIReader(armed)
 		if client == nil {
 			return nil
 		}

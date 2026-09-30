@@ -146,7 +146,7 @@ func (c *NMIClient) ReadVaultTransactions(ctx context.Context, vaultID string, s
 	}
 	var out []VaultTransaction
 	for page := 0; page < vaultMaxPages; page++ {
-		report, err := c.TransactionReport(ctx, QueryFilter{CustomerVaultID: vaultID, StartDate: since.UTC().Format(queryAPITimeFormat), ResultLimit: vaultPageSize, PageNumber: page})
+		report, err := c.TransactionReport(ctx, QueryFilter{CustomerVaultID: vaultID, StartDate: since.UTC().Format(QueryTimeFormat), ResultLimit: vaultPageSize, PageNumber: page})
 		if err != nil {
 			return nil, err
 		}

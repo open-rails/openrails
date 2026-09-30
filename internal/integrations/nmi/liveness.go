@@ -17,9 +17,9 @@ import (
 // provider believe happened?" by READS — no direct-post mutation is reachable
 // from this file.
 
-// queryAPITimeFormat is the Query API start_date/end_date (and action <date>)
+// QueryTimeFormat is the Query API start_date/end_date (and action <date>)
 // timestamp layout: YYYYMMDDhhmmss.
-const queryAPITimeFormat = "20060102150405"
+const QueryTimeFormat = "20060102150405"
 
 // SaleProbeResult summarizes the sale actions found for an order reference.
 // SuccessFound wins over DeclineFound: a charge from ANY attempt counts as
@@ -80,7 +80,7 @@ func (c *NMIClient) ProbeSalesBySubscriptionID(ctx context.Context, subscription
 func (c *NMIClient) probeSales(ctx context.Context, filter QueryFilter, orderID string, since time.Time) (SaleProbeResult, error) {
 	var result SaleProbeResult
 	if !since.IsZero() {
-		filter.StartDate = since.UTC().Format(queryAPITimeFormat)
+		filter.StartDate = since.UTC().Format(QueryTimeFormat)
 	}
 	report, err := c.TransactionReport(ctx, filter)
 	if err != nil {

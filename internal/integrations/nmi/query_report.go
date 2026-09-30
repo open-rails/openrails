@@ -88,7 +88,7 @@ func (a QueryAction) Succeeded() bool { return strings.TrimSpace(a.Success) == "
 
 // At is the action's time; false when the report garbled it.
 func (a QueryAction) At() (time.Time, bool) {
-	at, err := time.ParseInLocation(queryAPITimeFormat, strings.TrimSpace(a.Date), time.UTC)
+	at, err := time.ParseInLocation(QueryTimeFormat, strings.TrimSpace(a.Date), time.UTC)
 	return at, err == nil
 }
 

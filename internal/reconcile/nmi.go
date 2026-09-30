@@ -62,9 +62,6 @@ func (f *NMIFetcher) Capabilities() Capabilities {
 	}
 }
 
-// nmiQueryTimeFormat is the Query API start_date/end_date (and action <date>)
-// timestamp layout: YYYYMMDDhhmmss.
-const nmiQueryTimeFormat = "20060102150405"
 const nmiQueryPageLimit = 1000
 
 // nmiV5PageLimit is the per_page for v5 cursor pagination.
@@ -231,10 +228,10 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	}
 	filter := nmi.QueryFilter{}
 	if !params.Since.IsZero() {
-		filter.StartDate = params.Since.UTC().Format(nmiQueryTimeFormat)
+		filter.StartDate = params.Since.UTC().Format(nmi.QueryTimeFormat)
 	}
 	if !params.Until.IsZero() {
-		filter.EndDate = params.Until.UTC().Format(nmiQueryTimeFormat)
+		filter.EndDate = params.Until.UTC().Format(nmi.QueryTimeFormat)
 	}
 	filter.ResultLimit = nmiQueryPageLimit
 	var out []RemoteTransaction
