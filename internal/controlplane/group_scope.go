@@ -7,60 +7,50 @@ import (
 
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
+
 	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func (c *ControlPlane) merchantGroupIdentity(ctx context.Context, mid merchant.ID) (authkit.GroupInstance, error) {
+// MerchantGroupRef addresses a merchant's AuthKit group by its immutable id
+// (#1106): AuthKit's group names are not OpenRails merchant names. The context
+// binds the reference to that id, so AuthKit never resolves it as a name, and
+// every use still rechecks that the group is live.
+func MerchantGroupRef(ctx context.Context, groupID string) (context.Context, authkit.GroupRef) {
+	groupID = strings.ToLower(strings.TrimSpace(groupID))
+	ctx = authcore.WithResolvedGroup(ctx, authkit.GroupInstance{ID: groupID, Persona: MerchantType}, groupID)
+	return ctx, authkit.GroupRef{Persona: MerchantType, Instance: groupID}
+}
+
+// merchantGroupScopeForID addresses the AuthKit group bound to an active
+// merchant.
+func (c *ControlPlane) merchantGroupScopeForID(ctx context.Context, mid merchant.ID) (context.Context, authkit.GroupRef, error) {
 	if c == nil || c.Core() == nil {
-		return authkit.GroupInstance{}, ErrNoControlPlane
+		return ctx, authkit.GroupRef{}, ErrNoControlPlane
 	}
-	directory, err := merchants.NewDirectoryService(c.pool)
+	directory, err := c.directory()
 	if err != nil {
-		return authkit.GroupInstance{}, err
+		return ctx, authkit.GroupRef{}, err
 	}
 	row, err := directory.Get(ctx, mid)
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
-		return authkit.GroupInstance{}, policy.ErrMerchantUnresolved
+		return ctx, authkit.GroupRef{}, policy.ErrMerchantUnresolved
 	}
 	if err != nil {
-		return authkit.GroupInstance{}, err
+		return ctx, authkit.GroupRef{}, err
 	}
 	if row.PermissionGroupID == "" || row.Status != merchants.StatusActive {
-		return authkit.GroupInstance{}, policy.ErrMerchantUnresolved
+		return ctx, authkit.GroupRef{}, policy.ErrMerchantUnresolved
 	}
-	group, err := c.Core().GroupInstanceByID(ctx, row.PermissionGroupID)
-	if errors.Is(err, authkit.ErrGroupNotFound) {
-		return authkit.GroupInstance{}, policy.ErrMerchantUnresolved
-	}
-	if err != nil {
-		return authkit.GroupInstance{}, err
-	}
-	if group.Persona != MerchantType || group.InstanceSlug == "" {
-		return authkit.GroupInstance{}, policy.ErrMerchantUnresolved
-	}
-	return group, nil
+	ctx, ref := MerchantGroupRef(ctx, row.PermissionGroupID)
+	return ctx, ref, nil
 }
 
-// BindMerchantGroupContext carries an already authorized billing identity into
-// name-addressed AuthKit operations. It grants no permission; core mutations
-// still enforce their actor checks against this captured group UUID.
-func (c *ControlPlane) BindMerchantGroupContext(ctx context.Context, mid merchant.ID, reference string) (context.Context, error) {
-	group, err := c.merchantGroupIdentity(ctx, mid)
-	if err != nil {
-		return ctx, err
+// directory is the merchant directory over the control plane's pool.
+func (c *ControlPlane) directory() (*merchants.Service, error) {
+	if c == nil || c.pool == nil {
+		return nil, ErrNoControlPlane
 	}
-	if strings.TrimSpace(reference) == "" {
-		return ctx, policy.ErrMerchantUnresolved
-	}
-	return authcore.WithResolvedGroup(ctx, group, reference), nil
-}
-
-func (c *ControlPlane) merchantGroupScopeForID(ctx context.Context, mid merchant.ID) (context.Context, string, error) {
-	group, err := c.merchantGroupIdentity(ctx, mid)
-	if err != nil {
-		return ctx, "", err
-	}
-	return authcore.WithResolvedGroup(ctx, group, group.InstanceSlug), group.InstanceSlug, nil
+	return merchants.NewDirectoryService(c.pool)
 }

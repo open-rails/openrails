@@ -102,11 +102,11 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
-	members, err := c.humanTeam(ctx, slug)
+	members, err := c.humanTeam(ctx, group)
 	if err != nil {
 		return nil, err
 	}
@@ -143,11 +143,11 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 	if email == "" {
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: invite email is required")
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return MerchantTeamInviteResult{}, err
 	}
-	actor, err := c.resolveTeamActor(ctx, slug, actorUserID)
+	actor, err := c.resolveTeamActor(ctx, group, actorUserID)
 	if err != nil {
 		return MerchantTeamInviteResult{}, err
 	}
@@ -156,7 +156,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 	user, err := c.Core().GetUserByEmail(ctx, email)
 	switch {
 	case err == nil && user != nil:
-		if aerr := c.Core().AssignGroupRoleAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(user.ID), authkit.Role(role)); aerr != nil {
+		if aerr := c.Core().AssignGroupRoleAs(ctx, actor, group, authkit.UserSubject(user.ID), authkit.Role(role)); aerr != nil {
 			return MerchantTeamInviteResult{}, aerr
 		}
 		return MerchantTeamInviteResult{Added: true, Member: &MerchantTeamMember{
@@ -176,8 +176,8 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 		return MerchantTeamInviteResult{}, ErrTeamInvitesDisabled
 	}
 	link, err := c.Core().CreateGroupInviteLink(ctx, authkit.CreateGroupInviteLinkRequest{
-		Persona:      MerchantType,
-		InstanceSlug: slug,
+		Persona:      group.Persona,
+		InstanceSlug: group.Instance,
 		Role:         authkit.Role(role),
 		InvitedBy:    actor,
 	})
@@ -199,11 +199,11 @@ func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
-	links, err := c.Core().ListGroupInviteLinks(ctx, MerchantGroup(slug))
+	links, err := c.Core().ListGroupInviteLinks(ctx, group)
 	if err != nil {
 		return nil, err
 	}
@@ -233,11 +233,11 @@ func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchan
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return false, err
 	}
-	err = c.Core().RevokeGroupInviteLink(ctx, MerchantGroup(slug), strings.TrimSpace(linkID))
+	err = c.Core().RevokeGroupInviteLink(ctx, group, strings.TrimSpace(linkID))
 	if err != nil {
 		if errors.Is(err, authkit.ErrInviteLinkNotFound) {
 			return false, nil
@@ -263,16 +263,16 @@ func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.
 	if targetUserID == "" {
 		return ErrNotATeamMember
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return err
 	}
-	actor, err := c.resolveTeamActor(ctx, slug, actorUserID)
+	actor, err := c.resolveTeamActor(ctx, group, actorUserID)
 	if err != nil {
 		return err
 	}
 
-	members, err := c.humanTeam(ctx, slug)
+	members, err := c.humanTeam(ctx, group)
 	if err != nil {
 		return err
 	}
@@ -290,10 +290,10 @@ func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.
 	// Assign the new role first, then strip the old — order keeps a promotion
 	// from ever transiently dropping a role. The pre-check above already guards
 	// the last-owner case; AuthKit's own refuseIfLastOwner is a backstop.
-	if err := c.Core().AssignGroupRoleAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(targetUserID), authkit.Role(newRole)); err != nil {
+	if err := c.Core().AssignGroupRoleAs(ctx, actor, group, authkit.UserSubject(targetUserID), authkit.Role(newRole)); err != nil {
 		return err
 	}
-	if err := c.Core().UnassignGroupRoleAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(targetUserID), authkit.Role(current.Role)); err != nil {
+	if err := c.Core().UnassignGroupRoleAs(ctx, actor, group, authkit.UserSubject(targetUserID), authkit.Role(current.Role)); err != nil {
 		if errors.Is(err, authkit.ErrCannotRemoveLastAdminRole) {
 			return ErrCannotRemoveLastOwner
 		}
@@ -313,15 +313,15 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 	if targetUserID == "" {
 		return ErrNotATeamMember
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return err
 	}
-	actor, err := c.resolveTeamActor(ctx, slug, actorUserID)
+	actor, err := c.resolveTeamActor(ctx, group, actorUserID)
 	if err != nil {
 		return err
 	}
-	members, err := c.humanTeam(ctx, slug)
+	members, err := c.humanTeam(ctx, group)
 	if err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 	if current.Role == MerchantRoleOwner && ownerCount(members) <= 1 {
 		return ErrCannotRemoveLastOwner
 	}
-	if err := c.Core().RemoveGroupSubjectAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(targetUserID)); err != nil {
+	if err := c.Core().RemoveGroupSubjectAs(ctx, actor, group, authkit.UserSubject(targetUserID)); err != nil {
 		if errors.Is(err, authkit.ErrCannotRemoveLastAdminRole) {
 			return ErrCannotRemoveLastOwner
 		}
@@ -345,8 +345,8 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 // display fields hydrated and the synthetic bootstrap api-key actor excluded.
 // Each member's Role is their highest-privilege catalog role (a subject may hold
 // several role rows; the console models one role per member).
-func (c *ControlPlane) humanTeam(ctx context.Context, slug string) (map[string]MerchantTeamMember, error) {
-	raw, err := c.Core().ListGroupMembers(ctx, MerchantGroup(slug))
+func (c *ControlPlane) humanTeam(ctx context.Context, group authkit.GroupRef) (map[string]MerchantTeamMember, error) {
+	raw, err := c.Core().ListGroupMembers(ctx, group)
 	if err != nil {
 		return nil, err
 	}
@@ -388,11 +388,11 @@ func (c *ControlPlane) humanTeam(ctx context.Context, slug string) (map[string]M
 // operator-CLI idiom shared with #757 api-key minting). The genesis actor holds
 // merchant:*, so AuthKit's no-escalation check passes; owner authority itself is
 // enforced by the route gate + the handler's no-escalation coverage check.
-func (c *ControlPlane) resolveTeamActor(ctx context.Context, slug, actorUserID string) (string, error) {
+func (c *ControlPlane) resolveTeamActor(ctx context.Context, group authkit.GroupRef, actorUserID string) (string, error) {
 	if actorUserID = strings.TrimSpace(actorUserID); actorUserID != "" {
 		return actorUserID, nil
 	}
-	return c.ensureMerchantAPIKeyActor(ctx, slug)
+	return c.ensureMerchantAPIKeyActor(ctx, group)
 }
 
 func ownerCount(members map[string]MerchantTeamMember) int {

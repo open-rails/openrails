@@ -135,24 +135,3 @@ func TestMerchantRoleCoveredByPreventsEscalation(t *testing.T) {
 		require.Equal(t, tc.want, MerchantRoleCoveredBy(tc.role, tc.grants), "%s by %v", tc.role, tc.grants)
 	}
 }
-
-func TestMerchantCreationOnlyTouchesMerchantPersona(t *testing.T) {
-	defs := withMerchantCreation(Groups(), MerchantCreationConfig{ReservedSlugs: []string{"acme"}, ReservedEscalationRole: "operator", SlugPattern: "[a-z]+"})
-	seen := false
-	for _, def := range defs {
-		if def.Name != MerchantType {
-			require.False(t, def.Creation.Enabled, "%s", def.Name)
-			continue
-		}
-		seen = true
-		require.True(t, def.Creation.Enabled)
-		require.Equal(t, "[a-z]+", def.Creation.SlugPattern)
-		require.Equal(t, "operator", string(def.Creation.ReservedEscalationRole))
-		require.Subset(t, def.Creation.ReservedSlugs, merchant.ReservedHostedSlugs, "hosted defaults are always reserved")
-		require.Contains(t, def.Creation.ReservedSlugs, "acme")
-	}
-	require.True(t, seen)
-	for _, def := range Groups() {
-		require.False(t, def.Creation.Enabled, "Groups() returns a fresh catalog")
-	}
-}

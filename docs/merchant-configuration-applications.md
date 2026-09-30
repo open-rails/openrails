@@ -22,9 +22,8 @@ credential backends, HTTP exposure or Vault paths.
 
 Local execution needs the runtime database configuration and uses trusted operator
 authority over an existing merchant. It publishes no HTTP routes and requires no
-provider secrets or standalone authentication issuer. Names resolve through the
-configured AuthKit group directory. Add `--unbound-merchants` for host-local
-merchants that have no AuthKit group binding:
+provider secrets or standalone authentication issuer. `--merchant` takes a
+current or former merchant name:
 
 ```sh
 openrails get-merchant-config --config config.yaml --merchant shop
@@ -56,7 +55,7 @@ openrails apply-merchant-config --server-url https://billing.example --token-fil
 ```
 
 Remote mode does not read local infrastructure configuration and rejects explicit
-`--config`, `--provider-write-mode`, `--test-mode` and `--unbound-merchants` flags. Merchant slugs select
+`--config`, `--provider-write-mode` and `--test-mode` flags. Merchant slugs select
 scope; they do not grant authority.
 
 The older `push-merchant-config` supports create-only initialization. Its

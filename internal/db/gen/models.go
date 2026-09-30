@@ -702,10 +702,10 @@ type OpenrailsMaintenanceRun struct {
 // Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. Global by design: it IS the tenant directory — the scope, not a scoped row.
 type OpenrailsMerchant struct {
 	ID uuid.UUID
-	// Mirror of the merchant permission-group's CURRENT instance slug (or#914): the group namespace is the naming authority — claim arbitration, renames (ak#264 tombstone forwarding) and release-on-delete happen there; this column is kept in sync for fast lookup (lazily re-synced after a rename) and is unique among LIVE rows only.
+	// The merchant's public name (#1106): unique among live rows and never equal to another merchant's unexpired former name (openrails.merchant_slug_aliases). OpenRails owns it; AuthKit groups carry no name.
 	Slug   string
 	Status string
-	// The merchant's own AuthKit permission-group id (#567/or#914): a merchant IS a top-level `merchant` group, child of `root`; the group is also the naming authority for the slug. Bare `text`, NO FK into the auth schema (#544 portability guard). NULL in embedded (no control plane). Used to resolve a merchant from its authenticated group id and from renamed slugs.
+	// The merchant's own AuthKit permission-group id (#567): a merchant IS a top-level `merchant` group, child of `root`. Bare `text`, NO FK into the auth schema (#544 portability guard). NULL for a host-owned merchant without a control plane.
 	PermissionGroupID *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -717,6 +717,8 @@ type OpenrailsMerchant struct {
 	RetiredAt               *time.Time
 	GroupReleaseCompletedAt *time.Time
 	CatalogRevision         int64
+	// When the merchant was last renamed (#1106); NULL if never. The rename interval counts from here.
+	SlugChangedAt *time.Time
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
@@ -766,6 +768,14 @@ type OpenrailsMerchantSecret struct {
 	Version    int32
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// #1106: former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.
+type OpenrailsMerchantSlugAlias struct {
+	Slug       string
+	MerchantID uuid.UUID
+	ExpiresAt  *time.Time
+	CreatedAt  time.Time
 }
 
 // #736 operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.

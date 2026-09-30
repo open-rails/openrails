@@ -250,11 +250,9 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		if err := deps.Runtime.EnsureMerchantsService(context.Background()); err != nil {
 			return nil, err
 		}
-		// The Runtime owns credential construction and lifetime. HTTP assembly
-		// attaches authority to the same service instead of opening another store.
+		// The Runtime owns credential construction and lifetime; HTTP assembly
+		// reuses its service instead of opening another store.
 		s.merchants = deps.Runtime.Merchants
-		s.merchants.WithGroupSlugResolver(deps.ControlPlane.MerchantGroupSlugResolver()).WithGroupIDResolver(deps.ControlPlane.MerchantGroupIDResolver()).WithGroupSearchResolver(deps.ControlPlane.MerchantGroupSearchResolver())
-
 	}
 
 	// Single (standalone-friendly) HTTP surface on the framework-neutral

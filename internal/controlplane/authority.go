@@ -18,45 +18,59 @@ import (
 // explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
-// ResolveAuthorizedMerchant captures one group UUID from the explicit name or,
-// when empty, the user's sole merchant membership. Live authorization and billing
-// selection use that same UUID; inference never resolves a mutable name again.
+// ResolveAuthorizedMerchant resolves merchantRef (a current or former name)
+// or, when empty, the user's sole merchant membership to one bound merchant,
+// then checks perm live on that merchant's group.
 func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRef, userID, perm string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
 		return merchant.ID{}, "", ErrNoControlPlane
 	}
-	if strings.TrimSpace(userID) == "" {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
 		return merchant.ID{}, "", policy.ErrPermissionRequired
 	}
-	ref := strings.ToLower(strings.TrimSpace(merchantRef))
-	var group authkit.GroupInstance
+	var groupID string
 	var err error
-	if ref == "" {
-		group, err = c.merchantGroupForUser(ctx, strings.TrimSpace(userID))
+	if ref := strings.TrimSpace(merchantRef); ref == "" {
+		groupID, err = c.merchantGroupForUser(ctx, userID)
 	} else {
-		group, err = c.Core().GroupInstanceForSlug(ctx, MerchantGroup(ref))
-	}
-	if errors.Is(err, authkit.ErrGroupNotFound) {
-		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+		groupID, err = c.merchantGroupByName(ctx, ref)
 	}
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
-	allowed, err := c.Core().CanOnGroup(ctx, authkit.UserSubject(strings.TrimSpace(userID)), group.ID, authkit.Perm(strings.TrimSpace(perm)))
+	allowed, err := c.Core().CanOnGroup(ctx, authkit.UserSubject(userID), groupID, authkit.Perm(strings.TrimSpace(perm)))
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
 	if !allowed {
 		return merchant.ID{}, "", policy.ErrPermissionRequired
 	}
-	mid, _, err := c.merchantForGroupID(ctx, group.ID)
+	mid, slug, err := c.merchantForGroupID(ctx, groupID)
 	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
 		return merchant.ID{}, "", policy.ErrMerchantUnresolved
 	}
+	return mid, slug, err
+}
+
+// merchantGroupByName resolves a current or former merchant name to the group
+// of a live, bound merchant.
+func (c *ControlPlane) merchantGroupByName(ctx context.Context, name string) (string, error) {
+	directory, err := c.directory()
 	if err != nil {
-		return merchant.ID{}, "", err
+		return "", err
 	}
-	return mid, group.InstanceSlug, nil
+	m, err := directory.GetBySlug(ctx, name)
+	if errors.Is(err, merchants.ErrMerchantNotFound) {
+		return "", policy.ErrMerchantUnresolved
+	}
+	if err != nil {
+		return "", err
+	}
+	if m.PermissionGroupID == "" || m.Status != merchants.StatusActive {
+		return "", policy.ErrMerchantUnresolved
+	}
+	return m.PermissionGroupID, nil
 }
 
 // HasRootPermission reports whether the user holds perm in the singleton ROOT
@@ -79,10 +93,10 @@ func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm strin
 // merchant groups are present in the user's live memberships.
 var ErrMerchantAmbiguous = credential.ErrMerchantAmbiguous
 
-func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) (authkit.GroupInstance, error) {
+func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) (string, error) {
 	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(userID))
 	if err != nil {
-		return authkit.GroupInstance{}, err
+		return "", err
 	}
 	var groupID string
 	for _, membership := range memberships {
@@ -90,18 +104,18 @@ func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) 
 			continue
 		}
 		if groupID != "" && groupID != membership.GroupID {
-			return authkit.GroupInstance{}, ErrMerchantAmbiguous
+			return "", ErrMerchantAmbiguous
 		}
 		groupID = membership.GroupID
 	}
 	if groupID == "" {
-		return authkit.GroupInstance{}, policy.ErrMerchantUnresolved
+		return "", policy.ErrMerchantUnresolved
 	}
-	return c.Core().GroupInstanceByID(ctx, groupID)
+	return groupID, nil
 }
 
-// ResolveMerchantForGroup resolves a merchant by its reference (the merchant slug,
-// the merchant group's resource ref). Route auth uses it after a live merchant
+// ResolveMerchantForGroup resolves a bound merchant by a current or former
+// name. Route auth uses it after a live merchant
 // permission check so user-session merchant routes pin the same merchant context
 // as API-key and delegated JWT principals.
 func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, string, error) {
@@ -122,56 +136,22 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 	return mid, mslug, nil
 }
 
-// MerchantGroupSlugResolver returns the or#914 rename-forwarding seam for the
-// merchants directory service: slug -> the bound merchant group's id and
-// CURRENT slug, following only aliases still reserved by AuthKit's naming policy. Wire it with merchants.Service.WithGroupSlugResolver
-// wherever both the control plane and a directory service exist.
-func (c *ControlPlane) MerchantGroupSlugResolver() merchants.GroupSlugResolver {
-	return func(ctx context.Context, slug string) (string, string, error) {
-		core := c.Core()
-		if core == nil {
-			return "", "", ErrNoControlPlane
-		}
-		gi, err := core.GroupInstanceForSlug(ctx, MerchantGroup(strings.ToLower(strings.TrimSpace(slug))))
-		if errors.Is(err, authkit.ErrGroupNotFound) {
-			return "", "", merchants.ErrMerchantNotFound
-		}
-		if err != nil {
-			return "", "", err
-		}
-		return gi.ID, gi.InstanceSlug, nil
-	}
-}
-
 // IsAdmin reports whether the user holds any merchant-staff grant in the named
-// merchant group via live AuthKit state (a proxy: it tests the broadest
-// merchant read perm the owner/viewer/support all hold).
+// merchant via live AuthKit state (a proxy: it tests the broadest merchant read
+// perm the owner/viewer/support all hold).
 func (c *ControlPlane) IsAdmin(ctx context.Context, merchantRef, userID string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	ref := strings.ToLower(strings.TrimSpace(merchantRef))
-	if ref == "" {
+	if strings.TrimSpace(merchantRef) == "" {
 		return false, nil
 	}
-	return c.Core().Can(ctx, authkit.UserSubject(strings.TrimSpace(userID)), MerchantGroup(ref), PermMerchantSettingsRead)
-}
-
-func (c *ControlPlane) MerchantGroupIDResolver() merchants.GroupIDResolver {
-	return func(ctx context.Context, groupID string) (string, error) {
-		if c == nil || c.Core() == nil {
-			return "", ErrNoControlPlane
-		}
-		group, err := c.Core().GroupInstanceByID(ctx, groupID)
-		if errors.Is(err, authkit.ErrGroupNotFound) {
-			return "", merchants.ErrMerchantNotFound
-		}
-		if err != nil {
-			return "", err
-		}
-		if group.Persona != MerchantType {
-			return "", merchants.ErrMerchantNotFound
-		}
-		return group.InstanceSlug, nil
+	groupID, err := c.merchantGroupByName(ctx, merchantRef)
+	if errors.Is(err, policy.ErrMerchantUnresolved) {
+		return false, nil
 	}
+	if err != nil {
+		return false, err
+	}
+	return c.Core().CanOnGroup(ctx, authkit.UserSubject(strings.TrimSpace(userID)), groupID, PermMerchantSettingsRead)
 }

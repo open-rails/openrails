@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -35,12 +36,14 @@ type Merchant struct {
 
 // ProvisionRequest parameterizes merchant provisioning.
 type ProvisionRequest struct {
-	// Slug is the current public name; PermissionGroupID owns billing identity.
-	Slug string `json:"slug"`
+	// ID optionally preallocates the billing identity; zero generates one.
+	ID merchant.ID
+	// Slug is the name the new merchant claims.
+	Slug string
 	// PermissionGroupID is the merchant's own AuthKit permission-group id (#567).
 	// Required for control-plane provisioning; embedded/no-AuthKit registration
-	// uses internal/db.RegisterMerchant.
-	PermissionGroupID string `json:"permission_group_id"`
+	// uses internal/db.RegisterUnboundMerchant.
+	PermissionGroupID string
 }
 
 // ErrMerchantNotFound indicates no openrails.merchants row matched.
@@ -49,7 +52,6 @@ var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 // ErrPermissionGroupRequired indicates control-plane merchant provisioning
 // tried to create a merchant namespace without its authkit permission-group id.
 var ErrPermissionGroupRequired = errors.New("merchants: permission group required")
-var ErrMerchantBindingConflict = errors.New("merchants: name belongs to a different billing identity")
 var ErrMerchantRetired = errors.New("merchants: billing identity retired")
 
 // DestructivePolicy is the destructive-action gate a merchant purge must clear
@@ -97,11 +99,6 @@ type Service struct {
 	// destructive gates the merchant purge (or#858). Never nil: NewService seeds
 	// it with deniedPolicy so an unwired service cannot purge.
 	destructive DestructivePolicy
-	// A configured group resolver owns the entire public namespace. With no
-	// resolver, name operations select only explicit unbound host rows.
-	groupSlugResolver   GroupSlugResolver
-	groupIDResolver     GroupIDResolver
-	groupSearchResolver GroupSearchResolver
 	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
 	clock                clockwork.Clock
 	webhookSecretOverlap time.Duration
@@ -165,8 +162,9 @@ func NewSecretManagementService(secrets MerchantSecretStore) (*Service, error) {
 // Secrets exposes the per-merchant secret store (may be nil).
 func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 
-// Provision binds billing identity to the immutable AuthKit group. A conflicting
-// name can never authorize replacing an existing group's binding.
+// Provision claims req.Slug for a new merchant bound to the AuthKit group.
+// Repeating it for a bound group returns that merchant, whatever its name now;
+// a name held by another merchant is ErrMerchantNameTaken.
 func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchant, bool, error) {
 	slug := normalizeSlug(req.Slug)
 	if err := merchant.ValidateSlug(slug); err != nil {
@@ -176,34 +174,29 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	if groupID == "" {
 		return nil, false, ErrPermissionGroupRequired
 	}
-
-	// Repeated provisioning (including after rename) settles by group, not name.
 	m, err := s.merchantByGroupID(ctx, groupID)
-	if err == nil {
-		// The caller already resolved this group; the supplied current name is
-		// a projection and cannot change the billing identity.
-		m.Slug = slug
-		return m, false, nil
-	}
 	if !errors.Is(err, ErrMerchantNotFound) {
-		return nil, false, err
+		return m, false, err
 	}
-	var insertedID string
-	err = s.pool.QueryRow(ctx, `
-  INSERT INTO openrails.merchants (slug, status, permission_group_id)
-  VALUES ($1, 'active', $2)
-  ON CONFLICT DO NOTHING
-  RETURNING id::text
- `, slug, groupID).Scan(&insertedID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, fmt.Errorf("merchants: provision %q: %w", slug, err)
+	id := req.ID.UUID()
+	if req.ID.IsZero() {
+		if id, err = uuid.NewV7(); err != nil {
+			return nil, false, err
+		}
 	}
-	created := err == nil
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
+		VALUES ($1, $2, 'active', $3)`, id, slug, groupID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_merchants_permission_group_id" {
+		m, err := s.merchantByGroupID(ctx, groupID)
+		return m, false, err
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("merchants: provision %q: %w", slug, nameClaimError(err))
+	}
 	m, err = s.merchantByGroupID(ctx, groupID)
-	if errors.Is(err, ErrMerchantNotFound) {
-		return nil, false, fmt.Errorf("%w: %q", ErrMerchantBindingConflict, slug)
-	}
-	return m, created, err
+	return m, err == nil, err
 }
 
 // merchantByGroupID includes retired rows so the same group cannot silently
@@ -220,17 +213,6 @@ func (s *Service) merchantByGroupID(ctx context.Context, groupID string) (*Merch
 // Get returns the merchant directory row by id.
 func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
 	return s.merchantByID(ctx, id)
-}
-
-// GetBySlug uses AuthKit as the naming authority when configured. A stale local
-// display projection must never override alias expiry or a new name owner.
-// AuthKit-free hosts resolve their explicitly configured local directory.
-func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error) {
-	norm := normalizeSlug(slug)
-	if s.groupSlugResolver != nil {
-		return s.merchantByGroupName(ctx, norm)
-	}
-	return s.merchantBySlug(ctx, norm)
 }
 
 // GetByGroupID selects the billing identity already authorized by the caller.
@@ -255,60 +237,24 @@ type DirectoryRef struct {
 // would read as "those merchants do not exist".
 const maxDirectoryRefSlugs = 200
 
-// ListDirectoryRefs returns the directory identity of each requested slug, for
-// the slugs that exist. It is the read counterpart of SetDisplayName: hosts that
-// hold a merchant membership know only slugs and need names to label their own
-// surfaces. Unknown slugs are omitted rather than erroring — the caller asked
-// about a set, not a specific row. Slugs are normalized and deduped like every
-// other directory lookup, and an empty request is not a query. Soft-deleted
-// merchants never resolve; suspended ones still do, since a host that holds a
-// membership must be able to label it whatever the merchant's status.
+// ListDirectoryRefs returns the directory identity of each requested live or
+// former name, for the names that resolve. Unknown names are omitted: the caller
+// asked about a set, not a specific row. Suspended merchants still resolve, so a
+// host holding a membership can label it whatever the merchant's status.
 func (s *Service) ListDirectoryRefs(ctx context.Context, slugs []string) ([]DirectoryRef, error) {
 	if len(slugs) > maxDirectoryRefSlugs {
 		return nil, fmt.Errorf("merchants: list directory refs: %d slugs exceeds the %d limit", len(slugs), maxDirectoryRefSlugs)
 	}
 	normalized := make([]string, 0, len(slugs))
-	seen := make(map[string]struct{}, len(slugs))
 	for _, slug := range slugs {
-		slug = normalizeSlug(slug)
-		if slug == "" {
-			continue
+		if slug = normalizeSlug(slug); slug != "" {
+			normalized = append(normalized, slug)
 		}
-		if _, dup := seen[slug]; dup {
-			continue
-		}
-		seen[slug] = struct{}{}
-		normalized = append(normalized, slug)
 	}
 	if len(normalized) == 0 {
 		return nil, nil
 	}
-	var rows []gen.ListMerchantDirectoryRefsRow
-	var err error
-	if s.groupSlugResolver != nil {
-		canonical := map[uuid.UUID]string{}
-		ids := make([]uuid.UUID, 0, len(normalized))
-		for _, name := range normalized {
-			found, e := s.GetBySlug(ctx, name)
-			if errors.Is(e, ErrMerchantNotFound) {
-				continue
-			}
-			if e != nil {
-				return nil, e
-			}
-			if _, exists := canonical[found.ID.UUID()]; !exists {
-				ids = append(ids, found.ID.UUID())
-			}
-			canonical[found.ID.UUID()] = found.Slug
-		}
-		resolved, e := gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefsByIDs(ctx, ids)
-		err = e
-		for _, row := range resolved {
-			rows = append(rows, gen.ListMerchantDirectoryRefsRow{ID: row.ID, Slug: canonical[row.ID], DisplayName: row.DisplayName})
-		}
-	} else {
-		rows, err = gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefs(ctx, normalized)
-	}
+	rows, err := gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefs(ctx, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("merchants: list directory refs: %w", err)
 	}
@@ -365,12 +311,6 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 	t.ID = id
 	t.Status = MerchantStatus(status)
 	return &t, nil
-}
-
-func (s *Service) merchantBySlug(ctx context.Context, slug string) (*Merchant, error) {
-	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
-		FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL AND permission_group_id IS NULL`, slug)
-	return scanMerchant(row)
 }
 
 func (s *Service) merchantByID(ctx context.Context, id merchant.ID) (*Merchant, error) {

@@ -107,7 +107,6 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	}{
 		"local config flag":      {append([]string{"get-merchant-config", "--config", "local.yaml"}, remote...), "local-only"},
 		"local posture flag":     {append([]string{"get-merchant-config", "--test-mode", "live"}, remote...), "local-only"},
-		"unbound selector":       {append([]string{"get-merchant-config", "--unbound-merchants"}, remote...), "local-only"},
 		"remote without token":   {[]string{"get-merchant-config", "--merchant", "shop", "--server-url", server.URL}, "--token-file"},
 		"token without remote":   {[]string{"get-merchant-config", "--merchant", "shop", "--token-file", tokenPath}, "requires --server-url"},
 		"missing merchant":       {[]string{"get-merchant-config", "--server-url", server.URL, "--token-file", tokenPath}, "--merchant is required"},

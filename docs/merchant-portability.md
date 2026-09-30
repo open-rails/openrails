@@ -87,14 +87,14 @@ For an OpenRails control plane:
 
 ```sh
 openrails --config destination.yaml --provider-write-mode readonly \
-  billing prepare-target --merchant "$MERCHANT_UUID" \
+  billing prepare-target --merchant "$MERCHANT_UUID" --slug shop \
   --authkit-group-id "$DESTINATION_GROUP_UUID" \
   --owner-user-id "$DESTINATION_OWNER_UUID"
 ```
 
 The destination group must already exist. Preparation checks live ownership and
-uses the group's current slug. It creates only the merchant identity with the
-original merchant UUID and the destination group binding. It cannot adopt an
+claims `--slug` as the merchant name. It creates only the merchant identity with
+the original merchant UUID and the destination group binding. It cannot adopt an
 existing merchant with different identity or authority.
 
 For a host that manages its own authentication and uses an unbound billing
@@ -108,7 +108,7 @@ openrails --config destination.yaml --provider-write-mode readonly \
 
 Go hosts can perform the same explicit preparation before binding their client:
 `embedoperator.New(rt).RegisterMerchantForRestore(ctx, merchantID, slug)` for an unbound engine, or
-`cp.ProvisionMerchantForRestore(ctx, controlplane.ProvisionMerchantForRestoreRequest{MerchantID: merchantID, ExistingGroupID: groupID, OwnerUserID: ownerID})`
+`cp.ProvisionMerchantForRestore(ctx, controlplane.ProvisionMerchantForRestoreRequest{MerchantID: merchantID, Slug: slug, ExistingGroupID: groupID, OwnerUserID: ownerID})`
 for an attached control plane. Neither method imports billing data or provider
 credentials. Repeating the same identity preparation is safe; conflicting
 identity or group bindings are refused.

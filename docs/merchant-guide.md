@@ -163,8 +163,6 @@ CLI mutation flags. Keep the same artifact across restarts; review current state
 before authoring a new application ID. The returned receipt proves what committed,
 not that no one has edited the catalog since.
 
-For host-local merchants without AuthKit bindings, add `--unbound-merchants`.
-Name resolution does not fall back between AuthKit and host-local namespaces.
 Catalog exports are inspection snapshots; author explicit application identity and
 revision before applying changes from an export.
 

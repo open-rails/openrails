@@ -71,11 +71,6 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service, store merchants.Me
 	if r == nil || svc == nil {
 		return
 	}
-	if r.MerchantGroupResolver != nil {
-		// or#914: a control plane attached before this service existed left
-		// its rename-forwarding seam on the runtime; apply it now.
-		svc.WithGroupSlugResolver(r.MerchantGroupResolver).WithGroupIDResolver(r.MerchantGroupCanonicalResolver).WithGroupSearchResolver(r.MerchantGroupSearchResolver)
-	}
 	svc.StripeClients = r.StripeClients
 	r.Merchants = svc
 	if r.AlertService != nil {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/credential"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -30,34 +31,20 @@ const (
 // (resolved to `merchant:*` perms).
 type ResolvedServiceCredential = credential.ResolvedServiceCredential
 
-// MerchantScope resolves an external name through AuthKit before selecting its
-// immutable billing binding. A local display projection never owns the name.
+// MerchantScope resolves a current or former merchant name to its bound
+// merchant and current name.
 func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, error) {
-	if c == nil || c.pool == nil {
+	if c == nil || c.pool == nil || c.Core() == nil || strings.TrimSpace(ref) == "" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	if strings.TrimSpace(ref) == "" {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
-	}
-	core := c.Core()
-	if core == nil {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
-	}
-	gi, err := core.GroupInstanceForSlug(ctx, MerchantGroup(strings.ToLower(strings.TrimSpace(ref))))
-	if errors.Is(err, authkit.ErrGroupNotFound) {
+	groupID, err := c.merchantGroupByName(ctx, ref)
+	if errors.Is(err, policy.ErrMerchantUnresolved) {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
-	mid, slug, err := c.merchantForGroupID(ctx, gi.ID)
-	if err != nil {
-		return merchant.ID{}, "", err
-	}
-	if current := strings.TrimSpace(gi.InstanceSlug); current != "" && current != slug {
-		slug = current
-	}
-	return mid, slug, nil
+	return c.merchantForGroupID(ctx, groupID)
 }
 
 // TokenPrefix returns the fixed shared-secret API-key brand prefix used to

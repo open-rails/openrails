@@ -14,16 +14,14 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/pkg/catalog"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // CatalogApplyOptions is local operator authority. The file never selects its
 // own merchant or enables public catalog mutation routes.
 type CatalogApplyOptions struct {
-	NameAuthority merchant.NameAuthority
-	Config        *config.Config
-	PGXPool       *pgxpool.Pool
-	App           *app.App
+	Config  *config.Config
+	PGXPool *pgxpool.Pool
+	App     *app.App
 	// MerchantManifestPath optionally supplies the host-owned credential snapshot.
 	// Managed DB/Vault deployments always use their configured backend instead.
 	MerchantManifestPath string

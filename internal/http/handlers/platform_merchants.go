@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,11 +44,14 @@ type platformMerchantListQuery struct {
 	// Status filters the directory: active (default — soft-deleted excluded),
 	// deleted, or all.
 	Status string `form:"status"`
+	// Query matches a substring of the current merchant name.
+	Query  string `form:"q"`
 	Limit  int    `form:"limit"`
 	Offset int    `form:"offset"`
 }
 
-// PlatformListMerchants is GET /v1/platform/merchants (root:merchants:read).
+// PlatformListMerchants is GET /v1/platform/merchants (root:merchants:read);
+// ?q= searches current merchant names.
 // Stable ordering: created_at DESC, id DESC.
 func PlatformListMerchants(r *httprequest.Request) {
 	ctx := r.Request.Context()
@@ -79,14 +83,19 @@ func PlatformListMerchants(r *httprequest.Request) {
 		q.Offset = 0
 	}
 
+	var query *string
+	if trimmed := strings.TrimSpace(q.Query); trimmed != "" {
+		query = &trimmed
+	}
 	queries := r.State.DB.Gen(ctx)
-	total, err := queries.CountPlatformMerchants(ctx, statusFilter)
+	total, err := queries.CountPlatformMerchants(ctx, gen.CountPlatformMerchantsParams{Status: statusFilter, Query: query})
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to count merchants")
 		return
 	}
 	rows, err := queries.ListPlatformMerchants(ctx, gen.ListPlatformMerchantsParams{
 		Status:     statusFilter,
+		Query:      query,
 		PageLimit:  int64(q.Limit),
 		PageOffset: int64(q.Offset),
 	})
@@ -201,6 +210,10 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 		var constraint *pgconn.PgError
 		if errors.As(err, &constraint) && constraint.Code == "23514" {
 			r.ErrorJSON(http.StatusConflict, "retired or purged merchant cannot be restored")
+			return
+		}
+		if errors.As(err, &constraint) && constraint.Code == "23505" {
+			r.ErrorJSON(http.StatusConflict, "merchant name is taken")
 			return
 		}
 		r.ErrorJSON(http.StatusInternalServerError, "failed to restore merchant")

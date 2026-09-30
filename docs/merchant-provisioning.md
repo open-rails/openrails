@@ -42,26 +42,21 @@ Runtime construction; the issuer-as-owner path below is the standalone mechanism
 
 ## Merchant identity and names
 
-The merchant's name is its AuthKit group's instance slug. The group UUID owns
-authorization; the billing merchant UUID owns payments, credits, customers and
+OpenRails owns merchant names (`openrails.merchants.slug`). AuthKit groups carry
+authority only and are addressed by UUID; a group's AuthKit name is not the
+merchant's name. The billing merchant UUID owns payments, credits, customers and
 secrets. A non-null billing-to-group binding is immutable, including after
-retirement. Repeated provisioning of the same group returns the same billing
-UUID. A different group claiming an old name cannot take over that billing row.
+retirement.
 
-For AuthKit-bound merchants, resolve the requested name through AuthKit first,
-then authorize and select billing data by the captured group UUID. The local
-`openrails.merchants.slug` is a display projection. API writes keep their method,
-body, authorization and idempotency key; forwarding is internal resolution, not
-an HTTP redirect to another owner. Webhooks retain provider signature/account
-checks after name resolution.
+A name is unique among live merchants. A rename keeps the former name as an alias
+that forwards to the merchant and that no other merchant can claim until it
+expires; the merchant itself can take it back. Deleting or retiring a merchant
+releases its name and aliases. Resolution follows live names and unexpired
+aliases; API writes keep their method, body, authorization and idempotency key.
 
-AuthKit owns one site policy for usernames and group names. Defaults allow a
-rename every **72 hours** and reserve/forward each former name for **90 days**.
-Aliases point directly to the immutable owner. Expiry is checked when resolving
-or claiming a name; cleanup is not required before an expired name is available.
-Later policy changes do not alter promises already recorded for former names.
-
-Standalone configuration (these are the defaults):
+The site naming policy (`auth.naming`, shared with AuthKit usernames) governs
+renames. Defaults allow a rename every **72 hours** and keep each former name
+for **90 days**; later policy changes do not alter recorded expiries.
 
 ```yaml
 auth:
@@ -78,26 +73,14 @@ eligibility. Former-name modes are `finite`, `forever`, and `immediate`; omit
 `duration` for the latter two. Environment equivalents are
 `AUTH_NAMING_ENABLED`, `AUTH_NAMING_RENAME_INTERVAL`,
 `AUTH_NAMING_FORMER_NAMES_MODE`, and `AUTH_NAMING_FORMER_NAMES_DURATION`.
+Embedded hosts pass it through `cfg.Auth.Naming`; a non-nil
+`AttachOptions.Naming` replaces it.
 
-Embedded hosts pass the same `authkit.NamingConfig` through `cfg.Auth.Naming`.
-A non-nil `AttachOptions.Naming` replaces that whole input; AuthKit alone validates
-and supplies defaults. `AttachOptions.NameAdmission` adds a host namespace rule
-for both creation and rename. Creation allowance/payment-method checks remain
-creation-only. The merchant persona's reserved names and slug pattern apply to
-renames too. Customer group handles encode immutable payer IDs and cannot be
-renamed; their display names can change.
-
-Use `ResolveAuthorizedMerchant` at a host authorization boundary. With an empty
-selector it infers the user's sole merchant group by UUID. If an authorized
-operation subsequently calls a name-addressed AuthKit API, carry
-`BindMerchantGroupContext(ctx, merchantID, originalReference)` into that call.
-This pins its target without granting permissions; a deleted target fails closed
-rather than resolving the same spelling to a new owner. Team/API-key wrappers
-already accept the billing UUID and carry this scope themselves.
-
-AuthKit-free embedded hosts explicitly own their local merchant names and
-provide their own authorization. They do not gain AuthKit alias policy by
-attaching a name to an unbound billing row.
+Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
+(`merchant:settings:update`), subject to the rename interval and, on hosted
+deployments, the reserved names and creation pattern. Hosts rename as the
+operator with `ControlPlane.RenameMerchant`. `GET /v1/platform/merchants?q=`
+searches current names.
 
 ### Hosted creation recipe (registration is provisioning)
 
@@ -117,16 +100,11 @@ cp, err := controlplane.Attach(ctx, rt, controlplane.Options{
 })
 ```
 
-That one option: (1) mounts authkit's `POST /merchant` — authenticated users
-claim a slug behind authkit's per-IP/per-user velocity limits, the reserved
-list, and your admission gate — and OpenRails attaches the
-`openrails.merchants` directory row on success, so one call is the whole
-"registration is provisioning" flow (re-POSTing the same slug is the
-idempotent repair; the response carries `group_id`); (2) holds in-process
-`ProvisionMerchant` calls that name an `OwnerUserID` to the SAME policy
-(typed refusals `controlplane.ErrSlugReserved` / `controlplane.ErrCreationRefused`).
-Ownerless `ProvisionMerchant` and Bootstrap are operator acts and stay
-ungated — that is how a platform merchant claims a reserved name.
+That policy holds in-process `ProvisionMerchant` calls that name an
+`OwnerUserID` (typed refusals `controlplane.ErrSlugReserved` /
+`controlplane.ErrCreationRefused`) and merchant renames. Ownerless
+`ProvisionMerchant` and Bootstrap are operator acts and stay ungated — that is
+how a platform merchant claims a reserved name.
 
 For the Admission gate itself, `controlplane.MerchantCreationAdmission` composes the
 standard hosted policy from openrails' own state — verified email always; a
@@ -143,11 +121,10 @@ admission, err := controlplane.MerchantCreationAdmission(rt, controlplane.Mercha
 })
 ```
 
-The predicate is repair-safe: after verifying the owner, it resolves the
-claimed slug to AuthKit's stable group ID. Re-posting a live or renamed-away
-slug that resolves to a merchant the caller already owns bypasses the
-allowance and vault checks because it creates nothing. A genuinely new slug
-still runs the full gate.
+The predicate is repair-safe: a name that resolves to a merchant the caller
+already owns bypasses the allowance and vault checks because it creates
+nothing. A genuinely new name still runs the full gate. The allowance counts
+live merchants the caller owns.
 
 Typed refusals: `controlplane.ErrEmailUnverified`, `controlplane.ErrVaultedPaymentMethodRequired`.
 
@@ -163,12 +140,11 @@ is the host's policy (openrails-saas owns its own, with its own notices).
   under the merchant's own RLS scope.
 - `cp.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
   row, refuses a missing/retired merchant, a different group UUID, a reserved
-  slug or any activity, and otherwise commits the irreversible tombstone before
-  deleting exactly that AuthKit group with `ReleaseSlug: true`. Refusals are
+  slug or any activity, and otherwise commits the irreversible tombstone, which
+  releases the name, before deleting exactly that AuthKit group. Refusals are
   returned in the result.
 - `cp.CompletePendingMerchantRetirements(ctx, limit)` retries committed
-  retirements whose group release failed, by UUID, so a released name reclaimed
-  in between is never deleted.
+  retirements whose group release failed, by UUID.
 
 Activity is any customer (and everything owned through customers), payment or
 subscription history including tombstones, ledger account, provider connection

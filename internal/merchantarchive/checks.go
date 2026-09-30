@@ -22,6 +22,7 @@ import (
 var excludedTables = map[string]string{
 	"credential_publications":   "deployment credential custody receipts; secrets are re-entered at destination",
 	"merchants":                 "destination identity and host authority are explicitly provisioned",
+	"merchant_slug_aliases":     "former names are directory identity, not billing history",
 	"worker_state":              "deployment-wide worker health and fair sweep cursors",
 	"destructive_action_switch": "deployment-wide safety switch",
 	"webhook_health":            "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
@@ -48,7 +49,8 @@ var excludedColumns = map[string]string{
 	"credential_publications":         "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
 	"destructive_action_switch":       "id singleton enabled updated_by reason updated_at",
 	"worker_state":                    "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
-	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision",
+	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at",
+	"merchant_slug_aliases":           "slug merchant_id expires_at created_at",
 	"webhook_health":                  "merchant_id rail last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":            "merchant_id rail day_at rejected drift",
 	"admission_denials_hourly":        "merchant_id customer_id denial_reason hour_at denials updated_at",

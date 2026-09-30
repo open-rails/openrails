@@ -17,7 +17,6 @@ import (
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 	jwtkit "github.com/open-rails/authkit/jwtkit"
 	log "github.com/sirupsen/logrus"
 
@@ -367,9 +366,6 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		if err != nil {
 			return nil, err
 		}
-		if req.ControlPlane != nil {
-			directory.WithNameAuthority(controlplane.MerchantNameAuthority(req.ControlPlane.Core()))
-		}
 	}
 	var tn *merchants.Merchant
 	var err error
@@ -397,7 +393,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 			return nil, err
 		}
 	} else if req.ControlPlane != nil && mt.RemoteApplication != nil && req.Options.Overwrite {
-		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, tn.PermissionGroupID, mt.RemoteApplication); err != nil {
+		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, tn.PermissionGroupID, tn.Slug, mt.RemoteApplication); err != nil {
 			return nil, fmt.Errorf("merchant bootstrap: update merchant group/remote_application for %q: %w", slug, err)
 		}
 	}
@@ -435,10 +431,8 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 
 func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database *db.DB, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (*merchants.Merchant, error) {
 	if cp == nil {
-		// Embedded: OpenRails runs no AuthKit, so it creates/records no permission-group.
-		// The merchant's permission-group is the host's AuthKit permission-group of the SAME slug
-		// (#541 — merchant slug == group slug); permission_group_id stays NULL here and
-		// is set only in standalone, where OpenRails owns the group.
+		// Embedded: OpenRails runs no AuthKit, so it records no permission-group;
+		// permission_group_id stays NULL and the host owns authority.
 		id, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
 		if err != nil {
 			return nil, err
@@ -457,22 +451,13 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	// #567: the merchant IS a top-level permission-group (child of root). When
 	// the merchant declares a remote_application, AuthKit nests it under the
 	// merchant group with the `owner` role so host-app delegated tokens
-	// administer this merchant only.
-	groupID, err := provisionMerchantGroup(ctx, cp, slug, mt)
-	if err != nil {
-		return nil, fmt.Errorf("merchant bootstrap: provision merchant group/remote_application for %q: %w", slug, err)
-	}
-	svc, err := merchants.NewService(cp.Pool(), nil, config.ExpectedProviderEnvironment(cfg != nil && cfg.IsTestMode()))
-	if err != nil {
+	// administer this merchant only. It is configured before the name is
+	// claimed, so a failure leaves nothing to repair.
+	if err := merchant.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
-	canonical, err := cp.Core().GroupInstanceByID(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	tn, _, err := svc.Provision(ctx, merchants.ProvisionRequest{
-		Slug:              canonical.InstanceSlug,
-		PermissionGroupID: groupID,
+	tn, err := cp.CreateMerchant(ctx, slug, "", func(ctx context.Context, groupID string) error {
+		return configureMerchantRemoteApplication(ctx, cp, groupID, slug, mt.RemoteApplication)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: provision %q: %w", slug, err)
@@ -484,9 +469,6 @@ func lookupManifestMerchant(ctx context.Context, database *db.DB, cp *controlpla
 	dir, err := merchants.NewDirectoryService(database.DataPool())
 	if err != nil {
 		return nil, false, err
-	}
-	if cp != nil {
-		dir.WithNameAuthority(controlplane.MerchantNameAuthority(cp.Core()))
 	}
 	row, err := dir.GetBySlug(ctx, slug)
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
@@ -530,71 +512,17 @@ func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) ([]authkit.
 	return keys, nil
 }
 
-// provisionMerchantGroup ensures the merchant's top-level permission-group exists
-// (`type=merchant`, `resourceRef=slug`, child of `root` — #567) and,
-// when the merchant declares a remote_application, registers it as a
-// remote_application nested under the merchant group and grants it the merchant
-// `owner` role (full `merchant:*` authority, scoped to this merchant alone since
-// federated authority claims are stripped). Idempotent: re-applying converges the
-// group + remote_application state. Returns the merchant group's internal id.
-func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (string, error) {
-	slug = merchant.NormalizeSlug(slug)
-	if slug == "" {
-		return "", fmt.Errorf("merchant slug is required")
-	}
-	// #548: validate the merchant slug as a legal slug up front for a clear error.
-	if err := merchant.ValidateSlug(slug); err != nil {
-		return "", err
-	}
-	core := cp.Core()
-	if core == nil {
-		return "", fmt.Errorf("merchant bootstrap: control plane core unavailable")
-	}
-
-	// Idempotently create the merchant permission-group (resolve, else create).
-	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
-	if errors.Is(err, authkit.ErrGroupNotFound) {
-		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
-			Persona:       controlplane.MerchantType,
-			InstanceSlug:  slug,
-			ParentPersona: authkit.RootPersona,
-		})
-		if err != nil {
-			// #844: concurrent first-create loser — re-read and adopt the
-			// winner's group (the Reconcile path holds an advisory lock, but
-			// ProvisionMerchant callers do not).
-			id, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
-			if rerr != nil {
-				return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
-			}
-			groupID = id
-		}
-	} else if err != nil {
-		return "", fmt.Errorf("merchant bootstrap: resolve merchant group %q: %w", slug, err)
-	}
-
-	if err := configureMerchantRemoteApplication(ctx, cp, groupID, mt.RemoteApplication); err != nil {
-		return "", err
-	}
-	return groupID, nil
-}
-
-// Configure the remote application under the already captured group. The public
-// name may be renamed or reclaimed between provisioning and role assignment.
-func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, groupID string, app *RemoteApplicationConfig) error {
+// configureMerchantRemoteApplication registers the merchant's manifest
+// remote_application under its group, granted the merchant `owner` role (full
+// `merchant:*` authority, scoped to this merchant alone since federated
+// authority claims are stripped). Idempotent.
+func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, groupID, merchantSlug string, app *RemoteApplicationConfig) error {
 	if app == nil {
 		return nil
 	}
 	core := cp.Core()
-	group, err := core.GroupInstanceByID(ctx, groupID)
-	if err != nil {
-		return err
-	}
-	if group.Persona != controlplane.MerchantType {
-		return merchants.ErrMerchantNotFound
-	}
-	ctx = authcore.WithResolvedGroup(ctx, group, group.InstanceSlug)
-	ra, err := manifestRemoteApplicationToAuthKit(group.InstanceSlug, group.ID, app)
+	ctx, group := controlplane.MerchantGroupRef(ctx, groupID)
+	ra, err := manifestRemoteApplicationToAuthKit(merchantSlug, groupID, app)
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", groupID, err)
 	}
@@ -602,7 +530,7 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
 	}
-	if err := core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
+	if err := core.OperatorAssignGroupRole(ctx, group, authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
 		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
 	}
 	return nil

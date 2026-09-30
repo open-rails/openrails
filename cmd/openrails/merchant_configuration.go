@@ -26,7 +26,6 @@ import (
 // Both modes use the public Client. Remote mode never loads local infrastructure.
 func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 	var serverURL, tokenFile, slug, file string
-	var unbound bool
 	name := "get-merchant-config"
 	if apply {
 		name = "apply-merchant-config"
@@ -40,7 +39,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 				return fmt.Errorf("--merchant is required")
 			}
 			if serverURL != "" {
-				for _, flag := range []string{"config", "provider-write-mode", "test-mode", "unbound-merchants"} {
+				for _, flag := range []string{"config", "provider-write-mode", "test-mode"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s is local-only and cannot be used with --server-url", flag)
 					}
@@ -93,7 +92,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			} else {
 				cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 				var cleanup func()
-				client, cleanup, err = localMerchantConfigurationClient(cmd.Context(), cfg, slug, unbound)
+				client, cleanup, err = localMerchantConfigurationClient(cmd.Context(), cfg, slug)
 				if cleanup != nil {
 					defer cleanup()
 				}
@@ -113,7 +112,6 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 		},
 	}
-	cmd.Flags().BoolVar(&unbound, "unbound-merchants", false, "Resolve host-local merchant names without AuthKit group bindings (local mode only)")
 	cmd.Flags().StringVar(&slug, "merchant", "", "existing merchant slug (selector, not authority)")
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "remote OpenRails base URL; omit for trusted local operator execution")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file containing the remote API bearer credential")
@@ -125,7 +123,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 
 // Local metadata administration needs database access, not credential custody,
 // payment-provider clients, workers, or standalone authentication infrastructure.
-func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, slug string, unbound bool) (*openrails.Client, func(), error) {
+func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, slug string) (*openrails.Client, func(), error) {
 	database, err := openCLIDB(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
@@ -134,14 +132,6 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	directory, err := merchants.NewDirectoryService(database.DataPool())
 	if err != nil {
 		return nil, cleanup, err
-	}
-	if !unbound {
-		var closeAuthority func()
-		directory, _, closeAuthority, err = openCLINameDirectory(ctx, cfg)
-		if err != nil {
-			return nil, cleanup, err
-		}
-		defer closeAuthority()
 	}
 	selected, err := directory.GetBySlug(ctx, slug)
 	if err != nil {

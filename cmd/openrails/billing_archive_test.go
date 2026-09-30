@@ -133,9 +133,10 @@ func TestBillingArchiveFlagsRejectedBeforeOpeningRuntime(t *testing.T) {
 		"missing input":              {newBillingImportCmd, []string{"--merchant", mid}, "--in"},
 		"input is a directory":       {newBillingImportCmd, []string{"--merchant", mid, "--in", "."}, "regular file"},
 		"extra argument":             {newBillingImportCmd, []string{"extra"}, "unknown command"},
-		"prepare without owner":      {newBillingPrepareTargetCmd, []string{"--merchant", mid, "--authkit-group-id", mid}, "--owner-user-id"},
+		"prepare without owner":      {newBillingPrepareTargetCmd, []string{"--merchant", mid, "--slug", "shop", "--authkit-group-id", mid}, "--owner-user-id"},
 		"prepare mixed identity":     {newBillingPrepareTargetCmd, []string{"--merchant", mid, "--unbound-merchants", "--slug", "shop", "--owner-user-id", mid}, "cannot use"},
-		"prepare unbound no slug":    {newBillingPrepareTargetCmd, []string{"--merchant", mid, "--unbound-merchants"}, "requires --slug"},
+		"prepare unbound no slug":    {newBillingPrepareTargetCmd, []string{"--merchant", mid, "--unbound-merchants"}, "--slug is required"},
+		"prepare bound no slug":      {newBillingPrepareTargetCmd, []string{"--merchant", mid, "--authkit-group-id", mid, "--owner-user-id", mid}, "--slug is required"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cmd := tc.cmd()
@@ -146,7 +147,7 @@ func TestBillingArchiveFlagsRejectedBeforeOpeningRuntime(t *testing.T) {
 		})
 	}
 	require.NoError(t, validateBillingPrepareTarget(true, "shop", "", ""))
-	require.NoError(t, validateBillingPrepareTarget(false, "", "group", "owner"))
+	require.NoError(t, validateBillingPrepareTarget(false, "shop", "group", "owner"))
 }
 
 func TestBillingArchiveBearerFile(t *testing.T) {

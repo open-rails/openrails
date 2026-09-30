@@ -96,6 +96,7 @@ var (
 	ErrMerchantNotFound             = operator.ErrMerchantNotFound
 	ErrInvalidSlug                  = operator.ErrInvalidSlug
 	ErrSlugReserved                 = operator.ErrSlugReserved
+	ErrMerchantNameTaken            = operator.ErrMerchantNameTaken
 	ErrCreationRefused              = operator.ErrCreationRefused
 	ErrEmailUnverified              = operator.ErrEmailUnverified
 	ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired
@@ -105,8 +106,8 @@ var (
 	ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified
 )
 
-// MerchantGroup and CustomerGroup name the AuthKit persona groups.
-func MerchantGroup(slug string) authkit.GroupRef       { return operator.MerchantGroup(slug) }
+// CustomerGroup names a customer's AuthKit persona group. Merchant groups are
+// addressed by id only; OpenRails owns merchant names.
 func CustomerGroup(customerID string) authkit.GroupRef { return operator.CustomerGroup(customerID) }
 func CustomerGroupSlug(userID string) string           { return operator.CustomerGroupSlug(userID) }
 
@@ -195,13 +196,21 @@ func (c *ControlPlane) RunBootstrap(ctx context.Context, opts BootstrapOptions) 
 	return c.cp.Bootstrap(ctx, opts)
 }
 
-// ProvisionMerchant idempotently creates a merchant and its AuthKit group.
+// ProvisionMerchant returns the merchant a name resolves to, or creates one
+// claiming the name, bound to a new AuthKit group.
 func (c *ControlPlane) ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*ProvisionMerchantResult, error) {
 	return operator.ProvisionMerchant(ctx, c.app, req)
 }
 
 func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id merchant.ID, displayName string) error {
 	return operator.SetMerchantDisplayName(ctx, c.app, id, displayName)
+}
+
+// RenameMerchant renames a merchant as the operator. OpenRails owns merchant
+// names: the former name keeps forwarding to the merchant, and stays
+// unclaimable by others, under the site naming policy.
+func (c *ControlPlane) RenameMerchant(ctx context.Context, id merchant.ID, name string) error {
+	return operator.RenameMerchant(ctx, c.app, id, name)
 }
 
 // ListMerchantRefs resolves directory identity for merchants the caller

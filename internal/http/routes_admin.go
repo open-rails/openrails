@@ -53,6 +53,12 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 		team.Handle(http.MethodDelete, "/:user_id", router.Handler(standalonehandlers.MerchantRemoveTeamMember(s.controlPlane)), membersManage)
 	}
 
+	// #1106: OpenRails owns merchant names; renaming is a settings change.
+	if s.controlPlane != nil {
+		rr.Handle(http.MethodPut, "/name", router.Handler(standalonehandlers.MerchantRename(s.controlPlane)),
+			opts.RequireMerchantPermission(permissions.MerchantSettingsUpdate))
+	}
+
 	// #555 HARD CUT: the merchant API surface is `/v1/merchant/*`. Standalone
 	// mounts every merchant route set here: human admin/support, settings/catalog,
 	// and the machine billing API.

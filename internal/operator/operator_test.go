@@ -54,7 +54,6 @@ func TestAttachRefusesBeforeBuildingResources(t *testing.T) {
 	require.Nil(t, late.ControlPlane)
 	require.Nil(t, Get(late))
 	require.Nil(t, Get(nil))
-	require.Nil(t, NameAuthority(late))
 }
 
 // Every operator verb is a wiring error without an attached control plane;
@@ -72,6 +71,7 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 		"ListMerchantRefs":        func() error { _, err := ListMerchantRefs(ctx, a, []string{"shop"}); return err },
 		"ListActiveMerchantIDs":   func() error { _, err := ListActiveMerchantIDs(ctx, a, 10, 0); return err },
 		"SetMerchantDisplayName":  func() error { return SetMerchantDisplayName(ctx, a, id, "Shop") },
+		"RenameMerchant":          func() error { return RenameMerchant(ctx, a, id, "shop") },
 		"SetMerchantAPIHost":      func() error { return SetMerchantAPIHost(ctx, a, id, "api.shop.example") },
 		"GetMerchantAPIHost":      func() error { _, err := GetMerchantAPIHost(ctx, a, id); return err },
 		"FleetAnalytics":          func() error { _, err := FleetAnalytics(ctx, a, merchant.ID{}, 30); return err },

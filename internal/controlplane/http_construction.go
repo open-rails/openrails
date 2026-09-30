@@ -46,9 +46,7 @@ func (c controlPlaneHTTP) BuildHTTP(backend authcore.HTTPBackend) (authcore.HTTP
 		return surface, nil
 	}
 	mount, err := authhttp.NewMount(service, authhttp.MountOptions{
-		APIPrefix: "/auth", Groups: groups,
-		ExcludeRoutes: []authhttp.RouteRef{{Method: http.MethodGet, Path: authhttp.JWKSPath}},
-		Wrap:          c.controlPlane.WrapAuthRoute,
+		APIPrefix: "/auth", Groups: groups, ExcludeRoutes: excludedAuthRoutes,
 	})
 	if err != nil {
 		service.Close()

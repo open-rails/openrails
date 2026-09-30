@@ -16,10 +16,8 @@ const (
 	CustomerType = controlplane.CustomerType
 )
 
-// MerchantGroup / CustomerGroup address a merchant (by slug) or customer (by
-// owning user id) permission-group for typed AuthKit calls.
-func MerchantGroup(slug string) authkit.GroupRef { return controlplane.MerchantGroup(slug) }
-
+// CustomerGroup addresses a customer's own permission-group (by owning user
+// id) for typed AuthKit calls. Merchant groups are addressed by id only.
 func CustomerGroup(customerID string) authkit.GroupRef {
 	return controlplane.CustomerGroup(customerID)
 }

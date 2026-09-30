@@ -111,18 +111,18 @@ func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, 
 	if !slices.Contains(MerchantAPIKeyRoles(), role) {
 		return MerchantAPIKey{}, "", ErrUnknownMerchantRole
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return MerchantAPIKey{}, "", err
 	}
 	actorUserID = strings.TrimSpace(actorUserID)
 	if actorUserID == "" {
-		actorUserID, err = c.ensureMerchantAPIKeyActor(ctx, slug)
+		actorUserID, err = c.ensureMerchantAPIKeyActor(ctx, group)
 		if err != nil {
 			return MerchantAPIKey{}, "", err
 		}
 	}
-	key, secret, err := c.Core().MintAPIKeyWithOptions(ctx, MerchantGroup(slug), authkit.APIKeyMintOptions{
+	key, secret, err := c.Core().MintAPIKeyWithOptions(ctx, group, authkit.APIKeyMintOptions{
 		Name:      strings.TrimSpace(name),
 		Role:      authkit.Role(role),
 		CreatedBy: actorUserID,
@@ -140,11 +140,11 @@ func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid merchant.ID)
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
-	keys, err := c.Core().ListAPIKeys(ctx, MerchantGroup(slug))
+	keys, err := c.Core().ListAPIKeys(ctx, group)
 	if err != nil {
 		return nil, err
 	}
@@ -162,11 +162,11 @@ func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
+	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return false, err
 	}
-	return c.Core().RevokeAPIKey(ctx, MerchantGroup(slug), strings.TrimSpace(id))
+	return c.Core().RevokeAPIKey(ctx, group, strings.TrimSpace(id))
 }
 
 func (c *ControlPlane) merchantAPIKeyView(k authkit.APIKey) MerchantAPIKey {

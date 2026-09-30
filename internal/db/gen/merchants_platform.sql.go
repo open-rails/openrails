@@ -16,10 +16,16 @@ const countPlatformMerchants = `-- name: CountPlatformMerchants :one
 SELECT count(*)
 FROM openrails.merchants
 WHERE ($1::text IS NULL OR status = $1::text)
+  AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
 `
 
-func (q *Queries) CountPlatformMerchants(ctx context.Context, status *string) (int64, error) {
-	row := q.db.QueryRow(ctx, countPlatformMerchants, status)
+type CountPlatformMerchantsParams struct {
+	Status *string
+	Query  *string
+}
+
+func (q *Queries) CountPlatformMerchants(ctx context.Context, arg CountPlatformMerchantsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPlatformMerchants, arg.Status, arg.Query)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -143,12 +149,14 @@ const listPlatformMerchants = `-- name: ListPlatformMerchants :many
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
 FROM openrails.merchants
 WHERE ($1::text IS NULL OR status = $1::text)
+  AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
 ORDER BY created_at DESC, id DESC
-LIMIT $3::bigint OFFSET $2::bigint
+LIMIT $4::bigint OFFSET $3::bigint
 `
 
 type ListPlatformMerchantsParams struct {
 	Status     *string
+	Query      *string
 	PageOffset int64
 	PageLimit  int64
 }
@@ -168,8 +176,14 @@ type ListPlatformMerchantsRow struct {
 // soft-delete/restore tombstone. Soft delete here is DIRECTORY state (list
 // exclusion + merchant-auth resolution failure); it is NOT the #225 gated purge
 // (internal/merchants/delete.go), which stays the only row-destroying path.
+// query searches current names only; former names are not listed.
 func (q *Queries) ListPlatformMerchants(ctx context.Context, arg ListPlatformMerchantsParams) ([]ListPlatformMerchantsRow, error) {
-	rows, err := q.db.Query(ctx, listPlatformMerchants, arg.Status, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listPlatformMerchants,
+		arg.Status,
+		arg.Query,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
