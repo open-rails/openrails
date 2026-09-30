@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,13 +18,16 @@ func acuNotice(kind, vault string) obj {
 	return nmiEvent("acu.summary."+kind, obj{"customer_vault_id": vault})
 }
 
-// vaultOf is the NMI vault a stored card lives in.
-func (w *world) vaultOf(method string) string {
+// methodRow is a stored card's column, by its public id.
+func (w *world) methodRow(method, column string) string {
 	w.t.Helper()
-	var vault string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT rail_customer_ref FROM openrails.payment_methods WHERE id = $1`), method).Scan(&vault))
-	return vault
+	var v string
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT `+column+` FROM openrails.payment_methods WHERE id = $1`), strings.TrimPrefix(method, "pm_")).Scan(&v))
+	return v
 }
+
+// vaultOf is the NMI vault a stored card lives in.
+func (w *world) vaultOf(method string) string { return w.methodRow(method, "rail_customer_ref") }
 
 // cardUpdates is the recorded card updates of a stored card, as source/kind.
 func (w *world) cardUpdates(vault string) []string {
@@ -82,9 +86,7 @@ func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 	w.runRenewals()
 	require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "the NMI-owned membership collects")
 	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the engine membership collects")
-	var last4 string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT last_four FROM openrails.payment_methods WHERE id = $1`), e.method).Scan(&last4))
-	require.Equal(t, "1881", last4, "the stored card takes the details NMI now holds")
+	require.Equal(t, "1881", w.methodRow(e.method, "last_four"), "the stored card takes the details NMI now holds")
 }
 
 // NMI cannot update a card and asks for the customer: the member is asked
@@ -104,8 +106,6 @@ func TestNMIAccountUpdaterContactCustomer(t *testing.T) {
 	require.Equal(t, "active", w.subscription(embedded, e.sub).Status, "the card is not parked: it may still work")
 
 	require.Equal(t, http.StatusOK, w.deliver("nmi", acuNotice("closedaccount", vault)))
-	var parked string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT park_reason FROM openrails.payment_methods WHERE id = $1`), e.method).Scan(&parked))
-	require.Equal(t, "nmi_acu_closed_account", parked, "a closed account is never charged again")
+	require.Equal(t, "nmi_acu_closed_account", w.methodRow(e.method, "park_reason"), "a closed account is never charged again")
 	require.Equal(t, 1, e.c.notificationCount("payment_method_update_required"), "the member was already asked this period")
 }
