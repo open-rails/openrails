@@ -182,7 +182,7 @@ func (n *Node) Land(tx *solanago.Transaction, blockTime time.Time) (solanago.Sig
 	n.txs[sig.String()] = &landed{
 		slot: n.slot, blockTime: blockTime.Unix(), raw: raw, failed: failed,
 		meta: map[string]any{
-			"err": failed, "fee": 5000, "preBalances": []any{}, "postBalances": []any{},
+			"err": failed, "preBalances": []any{}, "postBalances": []any{},
 			"preTokenBalances": pre, "postTokenBalances": n.tokenBalances(tx),
 			"innerInstructions": []any{}, "logMessages": []any{},
 			"loadedAddresses": map[string]any{"writable": []any{}, "readonly": []any{}},

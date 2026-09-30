@@ -8,4 +8,4 @@ SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '5min';
 
 CREATE UNIQUE INDEX uq_checkout_sessions_solana_signature ON openrails.checkout_sessions USING btree (transaction_id)
-WHERE rail = 'solana' AND transaction_id IS NOT NULL;
+WHERE rail = 'solana' AND transaction_id IS NOT NULL AND deleted_at IS NULL;
