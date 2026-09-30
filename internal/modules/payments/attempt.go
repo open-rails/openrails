@@ -35,7 +35,7 @@ func DefaultTokenType(rail, custodian string) string {
 			return charge.TokenTypePSPToken
 		default:
 			// Custody unstated: stamp nothing. A guessed form would skew the
-			// approval_rate dimension token_type exists to measure.
+			// token_type dimension of the decline metrics.
 			return ""
 		}
 	default:

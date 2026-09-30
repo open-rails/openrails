@@ -41,6 +41,9 @@ const (
 	FamDepletion      Family = "depletion"       // per-payer balance vs trailing-7d burn
 	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks (#786)
 	FamWebhookDaily   Family = "webhook_daily"   // flow over webhook_health_daily counter buckets (#786)
+	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at, #1116)
+	FamCheckouts      Family = "checkouts"       // flow over checkouts, one per checkout_id (first attempt)
+	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -137,13 +140,32 @@ var Dimensions = []Dimension{
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
-	{Name: "token_type", Description: "credential form presented at charge time (#796): network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); approval_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
+	{Name: "token_type", Description: "credential form presented at charge time (#796): network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); attempt_failure_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
 	{Name: "attempt_kind", Description: "payment attempt kind stamped at write time: initial | renewal | unknown (pre-instrumentation or imported rows)", Values: []string{"initial", "renewal", "unknown"}},
-	{Name: "failure_reason", Description: "decline reason on failed payments, from internal/billing/decline (raw code kept verbatim in failure_code)", Values: declineReasonValues()},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
 	{Name: "denial_reason", Description: "admission denial reason", Values: []string{"insufficient_balance", "insufficient_credit", "budget_exceeded", "failure_rate_limited", "delegated_spend_not_allowed"}},
+	// #1116 attempt and rebill-cycle dimensions.
+	{Name: "owner", Description: "who collects the subscription: engine (OpenRails) | nmi_schedule (NMI charges, OpenRails duns) | provider (Stripe Billing, CCBill) | none (no subscription)", Values: []string{"engine", "nmi_schedule", "provider", "none"}},
+	{Name: "kind", Description: "attempt kind: verify ($0 card verification) | initial | upgrade | rebill (a cycle's first try) | dunning_retry | customer_retry | invoice", Values: []string{"verify", "initial", "upgrade", "rebill", "dunning_retry", "customer_retry", "invoice"}},
+	{Name: "card_entry", Description: "new (card entered in this checkout or card add) | saved", Values: []string{"new", "saved"}},
+	{Name: "source", Description: "who sent the attempt: openrails | provider_schedule (the PSP's own schedule) | external", Values: []string{"openrails", "provider_schedule", "external"}},
+	{Name: "observed_via", Description: "how OpenRails learned the answer: response | webhook | pull", Values: []string{"response", "webhook", "pull"}},
+	{Name: "category", Description: "decline category from the one classifier: approved | card_data | issuer_soft | issuer_hard | gateway_rule | system_error | unknown", Values: []string{"approved", "card_data", "issuer_soft", "issuer_hard", "gateway_rule", "system_error", "unknown"}},
+	{Name: "reason", Description: "decline reason from the one classifier (empty on approvals)", Values: append([]string{""}, declineReasonValues()...)},
+	{Name: "response_code", Description: "the PSP's response code verbatim (group with limit for the top codes)"},
+	{Name: "issuer_code", Description: "the issuer's raw answer (NMI processor_response_code); empty until enriched"},
+	{Name: "avs_result", Description: "AVS result letter or check (empty when absent)"},
+	{Name: "cvv_result", Description: "CVV result letter or check (empty when absent)"},
+	{Name: "card_bin", Description: "card BIN (first 6-8 digits; empty until known)"},
+	{Name: "first_outcome", Description: "a rebill cycle's first outcome: approved | declined | error | missed | pending (nothing yet)", Values: []string{"approved", "declined", "error", "missed", "pending"}},
+	{Name: "first_failure_category", Description: "the category of a cycle's failed first attempt (empty otherwise)"},
+	{Name: "first_failure_reason", Description: "the decline reason of a cycle's failed first attempt (empty otherwise)"},
+	{Name: "miss_reason", Description: "why a cycle's rebill never happened (empty when it did)", Values: []string{"", "held", "refused", "method_unusable", "not_attempted", "provider_skipped", "provider_stalled", "schedule_gone"}},
+	{Name: "recovered_by", Description: "what collected a cycle whose first outcome failed: dunning_retry | customer_retry | updated_card | late_provider_charge (empty otherwise)", Values: []string{"", "dunning_retry", "customer_retry", "updated_card", "late_provider_charge"}},
+	{Name: "recovery_attempt", Description: "the attempt that collected a failed cycle, counting the first: 1 (a missed cycle's first attempt) | 2 | 3 | 4 | 5+ (empty otherwise)", Values: []string{"", "1", "2", "3", "4", "5+"}},
+	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},
 }
 
 // families declares each family's SQL skeleton inputs.
@@ -158,18 +180,17 @@ var families = map[Family]familySpec{
 			"rail_account":  `LEFT JOIN openrails.psps rma ON rma.id = p.psp_id`,
 		},
 		DimExprs: map[string]string{
-			"currency":       `p.currency`,
-			"rail":           `p.rail`,
-			"rail_account":   `COALESCE(rma.account_id, 'unknown')`,
-			"stream":         streamExpr,
-			"product_id":     `COALESCE('prod_' || pr.product_id::text, '')`,
-			"price_id":       `'price_' || p.price_id::text`,
-			"billing_cycle":  billingCycleExpr,
-			"card_brand":     `COALESCE(p.card_brand, '')`,
-			"token_type":     `COALESCE(p.token_type, 'unknown')`,
-			"attempt_kind":   `COALESCE(p.attempt_kind, 'unknown')`,
-			"failure_reason": `COALESCE(p.failure_reason, 'unknown')`,
-			"discount_code":  `COALESCE(p.discount_code, '')`,
+			"currency":      `p.currency`,
+			"rail":          `p.rail`,
+			"rail_account":  `COALESCE(rma.account_id, 'unknown')`,
+			"stream":        streamExpr,
+			"product_id":    `COALESCE('prod_' || pr.product_id::text, '')`,
+			"price_id":      `'price_' || p.price_id::text`,
+			"billing_cycle": billingCycleExpr,
+			"card_brand":    `COALESCE(p.card_brand, '')`,
+			"token_type":    `COALESCE(p.token_type, 'unknown')`,
+			"attempt_kind":  `COALESCE(p.attempt_kind, 'unknown')`,
+			"discount_code": `COALESCE(p.discount_code, '')`,
 		},
 	},
 	FamSubsNew: {
@@ -319,7 +340,124 @@ var families = map[Family]familySpec{
 			"rail": `whd.rail`,
 		},
 	},
+	FamAttempts: {
+		Kind:     "flow",
+		From:     `openrails.payment_attempts a`,
+		TimeExpr: `a.attempted_at`,
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = a.psp_id`},
+		DimExprs: map[string]string{
+			"currency":      `COALESCE(a.currency, '')`,
+			"rail":          `a.rail`,
+			"rail_account":  `COALESCE(rma.account_id, 'unknown')`,
+			"owner":         `a.owner`,
+			"kind":          `a.kind`,
+			"card_entry":    `a.card_entry`,
+			"source":        `a.source`,
+			"observed_via":  `a.observed_via`,
+			"category":      `a.category`,
+			"reason":        `COALESCE(a.reason, '')`,
+			"response_code": `COALESCE(a.response_code, '')`,
+			"issuer_code":   `COALESCE(a.issuer_code, '')`,
+			"avs_result":    `COALESCE(a.avs_result, '')`,
+			"cvv_result":    `COALESCE(a.cvv_result, '')`,
+			"card_brand":    `COALESCE(a.card_brand, '')`,
+			"card_bin":      `COALESCE(a.card_bin, '')`,
+			"token_type":    `COALESCE(a.token_type, 'unknown')`,
+		},
+	},
+	FamCheckouts: {
+		Kind:     "flow",
+		From:     checkoutsFrom,
+		TimeExpr: `ck.started_at`,
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = ck.psp_id`},
+		DimExprs: map[string]string{
+			"currency":     `ck.currency`,
+			"rail":         `ck.rail`,
+			"rail_account": `COALESCE(rma.account_id, 'unknown')`,
+			"owner":        `ck.owner`,
+			"card_entry":   `CASE WHEN ck.new_card THEN 'new' ELSE 'saved' END`,
+		},
+	},
+	FamRebillCycles: {
+		Kind:     "flow",
+		From:     rebillCyclesFrom,
+		TimeExpr: `cy.due_at`,
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = cy.psp_id`},
+		DimExprs: map[string]string{
+			"currency":               `cy.currency`,
+			"rail":                   `cy.rail`,
+			"rail_account":           `COALESCE(rma.account_id, 'unknown')`,
+			"owner":                  `cy.owner`,
+			"first_outcome":          cycleFirstOutcome,
+			"first_failure_category": `CASE WHEN cy.first_category <> 'approved' THEN cy.first_category ELSE '' END`,
+			"first_failure_reason":   `COALESCE(cy.first_reason, '')`,
+			"miss_reason":            `COALESCE(cy.miss_reason, '')`,
+			"recovered_by":           cycleRecoveredBy,
+			"recovery_attempt": `CASE WHEN NOT ` + cycleFirstFailed + ` OR cy.won_ordinal IS NULL THEN ''
+				WHEN cy.won_ordinal >= 5 THEN '5+' ELSE cy.won_ordinal::text END`,
+			"days_to_recover": `CASE WHEN NOT ` + cycleFirstFailed + ` OR cy.won_at IS NULL THEN ''
+				ELSE floor(EXTRACT(EPOCH FROM cy.won_at - COALESCE(cy.missed_at, cy.first_at)) / 86400)::bigint::text END`,
+		},
+	},
 }
+
+// #1116: a checkout is one buyer's attempts on one target (checkout_id). It
+// is approved when its target is: a verification for a card save, an initial
+// or upgrade charge for a purchase.
+const checkoutsFrom = `(SELECT a.merchant_id, a.checkout_id,
+		MIN(a.attempted_at) AS started_at, MAX(a.attempted_at) AS last_at, COUNT(*) AS attempts,
+		bool_or(a.category = 'approved' AND CASE WHEN a.checkout_target = 'card_save' THEN a.kind = 'verify' ELSE a.kind IN ('initial', 'upgrade') END) AS approved,
+		bool_or(a.category <> 'approved') AS had_failure,
+		bool_or(a.card_entry = 'new') AS new_card,
+		(array_agg(a.rail ORDER BY a.attempted_at, a.id))[1] AS rail,
+		(array_agg(a.psp_id ORDER BY a.attempted_at, a.id))[1] AS psp_id,
+		(array_agg(a.owner ORDER BY a.attempted_at, a.id))[1] AS owner,
+		COALESCE((array_agg(a.currency ORDER BY a.attempted_at, a.id) FILTER (WHERE a.currency IS NOT NULL))[1], '') AS currency
+	FROM openrails.payment_attempts a
+	WHERE a.checkout_id IS NOT NULL
+	GROUP BY a.merchant_id, a.checkout_id) ck`
+
+// checkoutSettled: approved, or quiet for an hour before the query's end.
+const checkoutSettled = `(ck.approved OR ck.last_at < @to - interval '1 hour')`
+
+// #1116: a rebill cycle with its first attempt and the attempt that collected
+// it (the first approval), and the subscription it belongs to.
+const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
+		f.category AS first_category, f.reason AS first_reason, f.attempted_at AS first_at,
+		w.kind AS won_kind, w.source AS won_source, w.attempted_at AS won_at, w.payment_method_id AS won_method, w.ordinal AS won_ordinal,
+		s.status AS sub_status, s.current_period_ends_at AS sub_paid_through
+	FROM openrails.rebill_cycles c
+	LEFT JOIN LATERAL (SELECT a.category, a.reason, a.attempted_at FROM openrails.payment_attempts a
+		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
+	LEFT JOIN LATERAL (SELECT a.kind, a.source, a.attempted_at, a.payment_method_id,
+			(SELECT COUNT(*) FROM openrails.payment_attempts b WHERE b.merchant_id = c.merchant_id AND b.cycle_id = c.id
+				AND (b.attempted_at, b.id) <= (a.attempted_at, a.id)) AS ordinal
+		FROM openrails.payment_attempts a
+		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved' ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
+	LEFT JOIN openrails.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id) cy`
+
+const (
+	// cycleFirstFailed: the cycle's rebill was missed, or its first attempt failed.
+	cycleFirstFailed = `(cy.missed_at IS NOT NULL OR COALESCE(cy.first_category <> 'approved', false))`
+	// cycleClosed: collected, the subscription ended, a later period is paid,
+	// or the dunning window (at most 14 days) has passed by the query's end.
+	cycleClosed       = `(cy.won_at IS NOT NULL OR cy.sub_status = 'cancelled' OR cy.sub_paid_through > cy.due_at OR @to >= cy.due_at + interval '15 days')`
+	cycleFirstOutcome = `CASE WHEN cy.missed_at IS NOT NULL THEN 'missed' WHEN cy.first_category IS NULL THEN 'pending'
+		WHEN cy.first_category = 'approved' THEN 'approved' WHEN cy.first_category = 'system_error' THEN 'error' ELSE 'declined' END`
+	cycleRecoveredBy = `CASE WHEN NOT ` + cycleFirstFailed + ` OR cy.won_at IS NULL THEN ''
+		WHEN cy.won_source = 'provider_schedule' THEN 'late_provider_charge'
+		WHEN EXISTS (SELECT 1 FROM openrails.payment_method_updates u WHERE u.merchant_id = cy.merchant_id AND u.payment_method_id = cy.won_method
+			AND u.kind = 'updated' AND u.at >= COALESCE(cy.missed_at, cy.first_at) AND u.at <= cy.won_at) THEN 'updated_card'
+		WHEN cy.won_kind = 'customer_retry' THEN 'customer_retry'
+		ELSE 'dunning_retry' END`
+)
+
+// #1116 dimension sets.
+var (
+	attemptDims  = []string{"currency", "rail", "rail_account", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
+	checkoutDims = []string{"currency", "rail", "rail_account", "owner", "card_entry"}
+	cycleDims    = []string{"currency", "rail", "rail_account", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
+)
 
 // UnitMoney marks a measure whose cells are MoneyCell values: exact native
 // units of the row's currency (the registry scale, not always millionths).
@@ -358,11 +496,6 @@ var Measures = []Measure{
 		Formula:     "COUNT(settled sale payments)",
 		Expr:        `COUNT(*) FILTER (WHERE ` + saleSettled + `)`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "token_type", "attempt_kind", "discount_code"}},
-	{Name: "payment_failures", Class: ClassAdditive, Family: FamPayments, Unit: "count",
-		Description: "count of failed payment attempts (status=failed)",
-		Formula:     "COUNT(payments with status='failed')",
-		Expr:        `COUNT(*) FILTER (WHERE p.status = 'failed' AND p.refunded_payment_id IS NULL)`,
-		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand", "token_type", "attempt_kind", "failure_reason"}},
 	{Name: "refund_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
 		Description: "count of refunds issued",
 		Formula:     "COUNT(reversal_kind='refund' mirror rows)",
@@ -374,11 +507,6 @@ var Measures = []Measure{
 		Expr:        `COUNT(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'chargeback')`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
 	// --- payments: distinct ---------------------------------------------------
-	{Name: "unique_failed_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count",
-		Description: "distinct customers with at least one failed payment attempt in the bucket",
-		Formula:     "COUNT(DISTINCT customer_id) over failed payments",
-		Expr:        `COUNT(DISTINCT p.customer_id) FILTER (WHERE p.status = 'failed' AND p.refunded_payment_id IS NULL)`,
-		Dims:        []string{"currency", "rail", "rail_account", "attempt_kind", "failure_reason"}},
 	{Name: "unique_rebilled_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count",
 		Description: "distinct customers successfully rebilled (settled renewal payments) in the bucket",
 		Formula:     "COUNT(DISTINCT customer_id) over settled attempt_kind='renewal' payments",
@@ -387,14 +515,7 @@ var Measures = []Measure{
 	{Name: "paying_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count", Internal: true,
 		Expr: `COUNT(DISTINCT p.customer_id) FILTER (WHERE ` + saleSettled + `)`,
 		Dims: []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "payment_attempts", Class: ClassAdditive, Family: FamPayments, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE (` + saleSettled + `) OR (p.status = 'failed' AND p.refunded_payment_id IS NULL))`,
-		Dims: []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand", "token_type", "attempt_kind"}},
 	// --- payments: ratios ------------------------------------------------------
-	{Name: "approval_rate", Class: ClassRatio, Unit: "ratio", Num: "payment_count", Den: "payment_attempts",
-		Description: "parsed approvals / (parsed approvals + parsed declines): the denominator is settled sale payments plus status='failed' attempt rows ONLY — transport-ambiguous/parked outcomes never write failed rows and are excluded until resolved (verify-not-decline, #674); by token_type = the network-token auth-rate uplift (#796)",
-		Formula:     "payment_count / (payment_count + payment_failures)",
-		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand", "token_type", "attempt_kind"}},
 	{Name: "chargeback_rate", Class: ClassRatio, Unit: "ratio", Num: "chargeback_count", Den: "payment_count",
 		Description: "chargebacks / settled payments; group by rail_account for the per-account VAMP number",
 		Formula:     "chargeback_count / payment_count",
@@ -436,17 +557,122 @@ var Measures = []Measure{
 		Description: "cancellations in the bucket / subscriptions existing at bucket start; currency groups by price currency",
 		Formula:     "cancellations / subscriptions(at period start)",
 		Dims:        []string{"currency", "rail", "product_id", "price_id"}},
-	// --- transitions: dunning recovery -------------------------------------------
-	{Name: "dunning_recoveries", Class: ClassAdditive, Family: FamTransitions, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE st.from_status = 'past_due' AND st.to_status = 'active')`,
-		Dims: []string{"cancel_type"}},
-	{Name: "dunning_outcomes", Class: ClassAdditive, Family: FamTransitions, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE st.from_status = 'past_due' AND st.to_status IN ('active','cancelled'))`,
-		Dims: []string{"cancel_type"}},
-	{Name: "recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "dunning_recoveries", Den: "dunning_outcomes",
-		Description: "past_due->active / (past_due->active + past_due->cancelled) transitions in the bucket (data from transitions-table go-live)",
-		Formula:     "recovered / (recovered + lost) dunning exits",
-		Dims:        []string{}},
+	// --- attempts (#1116): every authorization a PSP answered --------------------
+	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
+		Description: "authorizations a PSP answered: card verifications, sales, rebills and retries",
+		Formula:     "COUNT(payment_attempts)",
+		Expr:        `COUNT(*)`,
+		Dims:        attemptDims},
+	{Name: "approved_attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
+		Description: "approved authorizations",
+		Formula:     "COUNT(attempts with category='approved')",
+		Expr:        `COUNT(*) FILTER (WHERE a.category = 'approved')`,
+		Dims:        attemptDims},
+	{Name: "failed_attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
+		Description: "refused or failed authorizations, by the one decline classifier's category and reason",
+		Formula:     "COUNT(attempts with category<>'approved')",
+		Expr:        `COUNT(*) FILTER (WHERE a.category <> 'approved')`,
+		Dims:        attemptDims},
+	{Name: "attempt_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "failed_attempts", Den: "attempts",
+		Description: "failed / all authorizations; the new-card decline rate is kind in (verify, initial) with card_entry=new",
+		Formula:     "failed_attempts / attempts",
+		Dims:        attemptDims},
+	// --- checkouts (#1116): one buyer's attempts on one target -------------------
+	{Name: "checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count",
+		Description: "checkouts (a buyer's attempts on one purchase or card save) started in the bucket",
+		Formula:     "COUNT(checkouts)",
+		Expr:        `COUNT(*)`,
+		Dims:        checkoutDims},
+	{Name: "settled_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ` + checkoutSettled + `)`,
+		Dims: checkoutDims},
+	{Name: "failed_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count",
+		Description: "checkouts that never reached an approval of their target and went quiet for an hour",
+		Formula:     "COUNT(checkouts without approval, idle > 1h)",
+		Expr:        `COUNT(*) FILTER (WHERE NOT ck.approved AND ` + checkoutSettled + `)`,
+		Dims:        checkoutDims},
+	{Name: "checkout_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "failed_checkouts", Den: "settled_checkouts",
+		Description: "failed / settled checkouts: the new-card failure rate per buyer rather than per attempt",
+		Formula:     "failed_checkouts / (approved + failed checkouts)",
+		Dims:        checkoutDims},
+	{Name: "checkout_attempts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
+		Expr: `COALESCE(SUM(ck.attempts), 0)::bigint`,
+		Dims: checkoutDims},
+	{Name: "attempts_per_checkout", Class: ClassRatio, Unit: "ratio", Num: "checkout_attempts", Den: "checkouts",
+		Description: "average authorizations per checkout",
+		Formula:     "SUM(attempts per checkout) / checkouts",
+		Dims:        checkoutDims},
+	{Name: "troubled_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ` + checkoutSettled + `)`,
+		Dims: checkoutDims},
+	{Name: "recovered_checkouts", Class: ClassAdditive, Family: FamCheckouts, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ck.had_failure AND ck.approved)`,
+		Dims: checkoutDims},
+	{Name: "checkout_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "recovered_checkouts", Den: "troubled_checkouts",
+		Description: "checkouts with a failure that still ended approved / settled checkouts with a failure",
+		Formula:     "recovered checkouts / settled checkouts with a failure",
+		Dims:        checkoutDims},
+	// --- rebill cycles (#1116): cohort by the period that came due ---------------
+	{Name: "rebills_due", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
+		Description: "rebill cycles: paid periods that came due in the bucket and were attempted or recorded missed",
+		Formula:     "COUNT(rebill_cycles)",
+		Expr:        `COUNT(*)`,
+		Dims:        cycleDims},
+	{Name: "rebills_open", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
+		Description: "cycles neither collected nor closed (subscription ended, a later period paid, or the dunning window passed)",
+		Formula:     "COUNT(open cycles)",
+		Expr:        `COUNT(*) FILTER (WHERE NOT ` + cycleClosed + `)`,
+		Dims:        cycleDims},
+	{Name: "rebills_attempted", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE cy.missed_at IS NOT NULL OR cy.first_category IS NOT NULL)`,
+		Dims: cycleDims},
+	{Name: "rebill_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
+		Description: "cycles whose rebill failed: the first attempt declined or errored, or no attempt happened (missed)",
+		Formula:     "COUNT(cycles with first_outcome in (declined, error, missed))",
+		Expr:        `COUNT(*) FILTER (WHERE ` + cycleFirstFailed + `)`,
+		Dims:        cycleDims},
+	{Name: "rebill_first_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "rebill_first_failures", Den: "rebills_attempted",
+		Description: "failed first rebills / cycles with a first outcome",
+		Formula:     "rebill_first_failures / (cycles attempted or missed)",
+		Dims:        cycleDims},
+	{Name: "rebills_missed", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
+		Description: "cycles whose rebill never happened by its owner's deadline, by miss_reason",
+		Formula:     "COUNT(cycles with missed_at)",
+		Expr:        `COUNT(*) FILTER (WHERE cy.missed_at IS NOT NULL)`,
+		Dims:        cycleDims},
+	{Name: "rebill_missed_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_missed", Den: "rebills_due",
+		Description: "missed / due rebills",
+		Formula:     "rebills_missed / rebills_due",
+		Dims:        cycleDims},
+	{Name: "rebills_closed", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ` + cycleClosed + `)`,
+		Dims: cycleDims},
+	{Name: "rebills_collected", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE cy.won_at IS NOT NULL)`,
+		Dims: cycleDims},
+	{Name: "rebills_lost", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE cy.won_at IS NULL AND ` + cycleClosed + `)`,
+		Dims: cycleDims},
+	{Name: "closed_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
+		Expr: `COUNT(*) FILTER (WHERE ` + cycleFirstFailed + ` AND ` + cycleClosed + `)`,
+		Dims: cycleDims},
+	{Name: "dunning_recovered", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
+		Description: "cycles whose first rebill failed and that were collected; group by recovery_attempt or days_to_recover for the recovery curve",
+		Formula:     "COUNT(cycles with a failed first outcome that were collected)",
+		Expr:        `COUNT(*) FILTER (WHERE ` + cycleFirstFailed + ` AND cy.won_at IS NOT NULL)`,
+		Dims:        cycleDims},
+	{Name: "dunning_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "dunning_recovered", Den: "closed_first_failures",
+		Description: "collected / closed cycles whose first rebill failed",
+		Formula:     "dunning_recovered / closed cycles with a failed first outcome",
+		Dims:        cycleDims},
+	{Name: "rebill_collection_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_collected", Den: "rebills_closed",
+		Description: "collected / closed cycles",
+		Formula:     "collected cycles / closed cycles",
+		Dims:        cycleDims},
+	{Name: "rebill_loss_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_lost", Den: "rebills_closed",
+		Description: "closed cycles never collected / closed cycles",
+		Formula:     "lost cycles / closed cycles",
+		Dims:        cycleDims},
 	// --- grants / usage-credits ---------------------------------------------------
 	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "money",
 		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
@@ -562,8 +788,8 @@ var Caveats = []string{
 	"money never sums across currencies; when a money measure is grouped without a single-currency filter, 'currency' is added as an implicit group-by dimension",
 	"snapshot measures reconstruct state from interval columns; the 'status' dimension reflects each subscription's CURRENT status, not its status at historical t",
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
-	"token_type exists from #796 instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; failure_reason/attempt_kind exist from instrumentation onward; older and imported rows read 'unknown'. CCBill renewal declines depend on CCBill webhook delivery; Stripe renewal-decline attempts are visible via subscription status transitions but may lack per-attempt failed payment rows; Solana has no card-decline taxonomy (on-chain failure codes are recorded verbatim)",
-	"recovery_rate and other transition-derived numbers begin at the transitions-table go-live; earlier history is not reconstructible",
+	"token_type exists from #796 instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; attempt_kind exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them (#1111b)",
+	"attempts, checkouts and rebill cycles begin at their instrumentation (#1110, #1111): earlier history lives in payments and the provider. Checkouts and cycles are dated by their first attempt and due date; a checkout quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
 	"admission_denials are hourly aggregates flushed periodically from Redis; the current hour can lag one flush cycle",
 	"avg_membership_duration_days only counts subscriptions that ENDED in the bucket (right-censored: long-lived survivors are not included until they end)",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",
@@ -629,7 +855,7 @@ func (m *Measure) components() []*Measure {
 	return out
 }
 
-// declineReasonValues are the failure_reason dimension's values.
+// declineReasonValues are the reason dimension's values.
 func declineReasonValues() []string {
 	var out []string
 	for _, r := range openrails.DeclineReasons() {

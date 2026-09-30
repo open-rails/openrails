@@ -18,7 +18,7 @@ func cell(t *testing.T, m *Measure, vals map[string]leaf) any {
 // Money cells are exact decimal strings, counts JSON numbers, ratios floats; full int64 range survives.
 func TestResultWireEncoding(t *testing.T) {
 	res := Result{
-		Columns: []Column{{Name: "currency", Kind: "dimension"}, {Name: "gross_revenue", Kind: "measure", Unit: UnitMoney}, {Name: "payment_count", Kind: "measure", Unit: "count"}, {Name: "approval_rate", Kind: "measure", Unit: "ratio"}},
+		Columns: []Column{{Name: "currency", Kind: "dimension"}, {Name: "gross_revenue", Kind: "measure", Unit: UnitMoney}, {Name: "payment_count", Kind: "measure", Unit: "count"}, {Name: "attempt_failure_rate", Kind: "measure", Unit: "ratio"}},
 		Rows:    [][]any{{"USD", MoneyCell(math.MaxInt64), int64(3), 0.5}, {"JPY", MoneyCell(math.MinInt64), int64(0), nil}},
 	}
 	raw, err := json.Marshal(res)

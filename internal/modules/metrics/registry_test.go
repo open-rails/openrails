@@ -56,10 +56,14 @@ func TestRegistryIsSelfConsistent(t *testing.T) {
 func TestPublicMeasureVocabulary(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"gross_revenue", "net_revenue", "refunds", "chargebacks", "credits_sold", "usage_revenue",
-		"payment_count", "payment_failures", "new_subscriptions", "cancellations", "chargeback_count",
+		"payment_count", "new_subscriptions", "cancellations", "chargeback_count",
 		"refund_count", "usage_units", "admission_denials",
-		"unique_failed_customers", "unique_rebilled_customers", "active_payers",
-		"churn_rate", "approval_rate", "chargeback_rate", "recovery_rate", "credit_utilization",
+		"unique_rebilled_customers", "active_payers",
+		"churn_rate", "chargeback_rate", "credit_utilization",
+		"attempts", "approved_attempts", "failed_attempts", "attempt_failure_rate",
+		"checkouts", "failed_checkouts", "checkout_failure_rate", "attempts_per_checkout", "checkout_recovery_rate",
+		"rebills_due", "rebills_open", "rebill_first_failures", "rebill_first_failure_rate", "rebills_missed",
+		"rebill_missed_rate", "dunning_recovered", "dunning_recovery_rate", "rebill_collection_rate", "rebill_loss_rate",
 		"repeat_topup_rate", "realized_revenue_per_customer", "avg_membership_duration_days",
 		"mrr", "subscriptions", "billable_subscriptions", "entitled_customers",
 		"payers_at_depletion_risk", "outstanding_credit_liability", "outstanding_owed",

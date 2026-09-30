@@ -389,7 +389,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			}).Warn("reconcile backfill: transaction reported no currency; denominating the attempt in the subscription's billing currency and recording the inheritance as provenance (CUR-9)")
 		}
 		// #796: backfilled declines carry the rail's code VERBATIM so
-		// approval_rate's failure_reason dimension sees them (attempt_kind
+		// decline analysis sees them (attempt_kind
 		// stays NULL — the mirror cannot distinguish initial vs renewal).
 		if !t.Success {
 			if code := strings.TrimSpace(t.DeclineCode); code != "" {

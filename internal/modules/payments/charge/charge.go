@@ -140,7 +140,7 @@ type Request struct {
 }
 
 // TokenType is the credential form the rail presented to the network for one
-// charge (#796): the approval_rate dimension that makes the network-token
+// charge (#796): the token_type dimension that makes the network-token
 // uplift measurable. Stamped by the rail at charge time; "" = unknown.
 const (
 	// TokenTypePSPToken: the PSP holds the card and charged its own stored

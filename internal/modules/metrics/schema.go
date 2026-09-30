@@ -105,9 +105,9 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "payment health per rail: approval and chargeback rates",
+			Intent: "payment health per rail: authorization failure and chargeback rates",
 			Query: Query{
-				Measures: []string{"approval_rate", "chargeback_rate"},
+				Measures: []string{"attempt_failure_rate", "chargeback_rate"},
 				By:       []string{"rail"},
 				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
 			},
@@ -123,13 +123,29 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
-			Intent: "how many distinct users had a failed FIRST payment each day, by decline reason",
+			Intent: "new-card decline rate per day and PSP, by decline reason",
 			Query: Query{
-				Measures: []string{"unique_failed_customers"},
-				By:       []string{"time", "failure_reason"},
+				Measures: []string{"failed_attempts", "attempt_failure_rate"},
+				By:       []string{"time", "rail_account", "reason"},
 				Grain:    "day",
 				Range:    &QueryRange{From: "2026-06-26", To: "2026-07-03"},
-				Filters:  map[string][]string{"attempt_kind": {"initial"}},
+				Filters:  map[string][]string{"kind": {"verify", "initial"}, "card_entry": {"new"}},
+			},
+		},
+		{
+			Intent: "rebill first-attempt failures and missed rebills by owner",
+			Query: Query{
+				Measures: []string{"rebill_first_failure_rate", "rebill_missed_rate"},
+				By:       []string{"owner", "rail_account"},
+				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
+			},
+		},
+		{
+			Intent: "dunning recovery curve: cycles collected after a failed first rebill, by attempt",
+			Query: Query{
+				Measures: []string{"dunning_recovered"},
+				By:       []string{"owner", "recovery_attempt"},
+				Range:    &QueryRange{From: "2026-05-01", To: "2026-06-30"},
 			},
 		},
 		{

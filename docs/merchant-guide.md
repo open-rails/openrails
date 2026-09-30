@@ -322,6 +322,15 @@ team, payment providers, API keys, credit limit, trust level), **Dashboard**.
   server-side LLM from natural language ("count of cancels per day, past 7 days") —
   requires `llm.api_key`; without it everything else still works and the add-widget
   button explains the fix.
+- **Decline metrics** (#1116), all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
+  (`rail_account`):
+  - `attempt_failure_rate`: the new-card decline rate is `kind` in (`verify`, `initial`)
+    with `card_entry=new`. It can also be grouped by `reason`, `category`, `response_code`,
+    `card_bin`, `card_brand` and AVS/CVV.
+  - `checkout_failure_rate`: the same per buyer rather than per attempt.
+  - `rebill_first_failure_rate` and `rebill_missed_rate`: rebills that failed on the first
+    attempt, and rebills that never happened.
+  - `dunning_recovered` by `recovery_attempt` or `days_to_recover`: the recovery curve.
 - **Ask your metrics** (opt-in `llm.ask_enabled`): free-form Q&A where the model runs
   validated, merchant-scoped aggregate queries and shows every result as evidence tables —
   numbers come from the API, never model prose.
