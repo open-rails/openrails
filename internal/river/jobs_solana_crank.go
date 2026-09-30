@@ -455,8 +455,6 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 	return repo.AdvanceAfterPull(ctx, row.ID, now, sig, periodEnd)
 }
 
-// resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat
-// amount/currency for the subscription's price.
 // recordPullAttempt records a refused on-chain pull as its cycle's attempt
 // (#1111): the cycle's rebill, or a dunning retry after an earlier failure.
 func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan, code, text string) error {
@@ -471,6 +469,8 @@ func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.S
 	})
 }
 
+// resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat
+// amount/currency for the subscription's price.
 func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaSubscription) (resolvedPlan, error) {
 	subRepo := subscriptions.NewSubscriptionRepo(w.DB)
 	sub, err := subRepo.GetByID(ctx, row.SubscriptionID)
