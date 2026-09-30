@@ -77,7 +77,7 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	}
 	paid := completed(w.payments(embedded, h.c.id))
 	require.Len(t, paid, 1)
-	require.Equal(t, paid[0].ID.String(), charged.Payment.String())
+	require.Equal(t, strings.TrimPrefix(paid[0].ID.String(), "pay_"), charged.Payment.String())
 }
 
 // An issuer decline on the sale is recorded with its reason; the next card in
