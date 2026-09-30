@@ -3,7 +3,11 @@
 package subscriptions_test
 
 import (
+	"errors"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +18,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 type rebillWatchPass struct{}
@@ -84,6 +89,83 @@ func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	require.Len(t, completed(w.payments(embedded, l.c.id)), 3)
 }
 
+// The guards between a skipped NMI period and OpenRails' charge (#1113):
+// without proof from NMI's records, with provider writes off, or when NMI's
+// schedule no longer shows the next period at charge time, nothing is charged.
+func TestNMISkippedRebillGuards(t *testing.T) {
+	t.Parallel()
+	skipped := func(t *testing.T, w *world, skip func(*legacy)) (*legacy, time.Time) {
+		l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
+		w.converge()
+		due := l.periodEnd()
+		skip(l)
+		w.advance(due.Sub(w.clock.Now()) + 25*time.Hour)
+		return l, due
+	}
+	skip := func(l *legacy) { l.w.nmi.SkipSchedule(l.railSub) }
+	t.Run("query_api_down", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		l, due := skipped(t, w, skip)
+		queryAPI := func(r *http.Request) bool {
+			form, err := url.ParseQuery(readBody(r))
+			return strings.HasSuffix(r.URL.Path, "/query.php") || (err == nil && form.Has("report_type"))
+		}
+		w.nmi.Intercept(queryAPI,
+			func(*http.Request, func() *http.Response) (*http.Response, error) {
+				return nil, errors.New("query api unreachable")
+			})
+		w.watchRebills()
+		w.runRenewals()
+		require.Empty(t, w.missReason(l.sub, due), "no proof, no miss")
+		require.Equal(t, "active", w.subscription(embedded, l.sub).Status)
+		require.Zero(t, len(w.nmi.Attempts()))
+		w.nmi.ClearIntercepts()
+		w.watchRebills()
+		require.Equal(t, "provider_skipped", w.missReason(l.sub, due), "the next pass decides")
+	})
+	t.Run("schedule_gone", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		l, due := skipped(t, w, func(l *legacy) { l.w.nmi.DeleteSchedule(l.railSub) })
+		// NMI answers 404 for a deleted schedule.
+		w.nmi.Intercept(func(r *http.Request) bool {
+			return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/subscriptions/"+l.railSub)
+		}, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
+			res := serve()
+			res.StatusCode, res.Body = http.StatusNotFound, io.NopCloser(strings.NewReader(`{"type":"notFound","error_code":"E_NOT_FOUND"}`))
+			return res, nil
+		})
+		w.watchRebills()
+		w.runRenewals()
+		require.Equal(t, "schedule_gone", w.missReason(l.sub, due))
+		require.NotEqual(t, "past_due", w.subscription(embedded, l.sub).Status)
+		require.Zero(t, len(w.nmi.Attempts()), "a deleted schedule only raises the finding")
+	})
+	t.Run("read_only", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		l, due := skipped(t, w, skip)
+		w.cfg = func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+		w.restart()
+		w.watchRebills()
+		w.runRenewals()
+		require.Equal(t, "provider_skipped", w.missReason(l.sub, due))
+		require.Equal(t, "active", w.subscription(embedded, l.sub).Status, "read-only records the miss and collects nothing")
+		require.Zero(t, len(w.nmi.Attempts()))
+	})
+	t.Run("schedule_moved_back", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		l, due := skipped(t, w, skip)
+		w.watchRebills()
+		require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status)
+		w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.NextBilling = due })
+		w.runRenewals()
+		require.Zero(t, len(w.nmi.Attempts()), "NMI's schedule must show the next period when OpenRails charges")
+	})
+}
+
 // NMI charged and its webhook never came: the watch finds the charge through
 // the Query API, records it as observed by pull, and renews the period.
 func TestNMIScheduleLostWebhookFoundByPull(t *testing.T) {
@@ -106,6 +188,7 @@ func TestNMIScheduleLostWebhookFoundByPull(t *testing.T) {
 			require.Equal(t, []string{"rebill", "provider_schedule", "pull"}, []string{rows[0].Kind, rows[0].Source, rows[0].ObservedVia})
 			require.Empty(t, w.missReason(l.sub, due))
 			sub := w.subscription(embedded, l.sub)
+			require.Zero(t, len(w.nmi.Attempts()), "a charge NMI made is never made again")
 			if paid {
 				require.Equal(t, "approved", rows[0].Category)
 				require.Equal(t, "active", sub.Status)
