@@ -19,13 +19,13 @@ type cycleAttempt struct {
 	Kind, Owner, Source, ObservedVia, Category string
 	Reason, TransactionID                      *string
 	Cycle                                      uuid.UUID
-	DueAt                                      time.Time
+	DueAt, AttemptedAt                         time.Time
 }
 
 func (w *world) cycleAttempts(sub openrails.SubscriptionID) []cycleAttempt {
 	w.t.Helper()
 	schema := pgx.Identifier{w.schema}.Sanitize()
-	rows, err := w.pool.Query(w.t.Context(), `SELECT a.kind, a.owner, a.source, a.observed_via, a.category, a.reason, a.transaction_id, c.id, c.due_at
+	rows, err := w.pool.Query(w.t.Context(), `SELECT a.kind, a.owner, a.source, a.observed_via, a.category, a.reason, a.transaction_id, c.id, c.due_at, a.attempted_at
 		FROM `+schema+`.payment_attempts a JOIN `+schema+`.rebill_cycles c ON c.merchant_id = a.merchant_id AND c.id = a.cycle_id
 		WHERE c.subscription_id = $1 ORDER BY a.attempted_at, a.id`, sub.UUID())
 	require.NoError(w.t, err)
@@ -33,7 +33,7 @@ func (w *world) cycleAttempts(sub openrails.SubscriptionID) []cycleAttempt {
 	var out []cycleAttempt
 	for rows.Next() {
 		var a cycleAttempt
-		require.NoError(w.t, rows.Scan(&a.Kind, &a.Owner, &a.Source, &a.ObservedVia, &a.Category, &a.Reason, &a.TransactionID, &a.Cycle, &a.DueAt))
+		require.NoError(w.t, rows.Scan(&a.Kind, &a.Owner, &a.Source, &a.ObservedVia, &a.Category, &a.Reason, &a.TransactionID, &a.Cycle, &a.DueAt, &a.AttemptedAt))
 		out = append(out, a)
 	}
 	require.NoError(w.t, rows.Err())

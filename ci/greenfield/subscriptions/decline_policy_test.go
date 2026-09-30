@@ -58,7 +58,7 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			w.converge()
 			w.nmi.SetDecline(visa.Last4, tc.code)
 			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
-			first := w.clock.Now()
+			first := l.periodEnd() // NMI declines on its schedule date
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 			w.settle()
 			sub := w.subscription(embedded, l.sub)

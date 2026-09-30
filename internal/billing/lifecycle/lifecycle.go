@@ -6,7 +6,8 @@
 //
 // Rules the table encodes:
 //   - only a payment fact extends the paid period or restores an unpaid one;
-//   - only a decline fact opens dunning;
+//   - only a decline fact, or proof that NMI's schedule skipped the period,
+//     opens dunning;
 //   - a clock reading alone moves a row to unverified, never further;
 //   - access is kept through dunning and verification (the default policy);
 //     only a confirmed outcome ends it.
@@ -105,6 +106,11 @@ type RenewalDeclined struct {
 	At          time.Time
 }
 
+// RenewalSkipped is proof from NMI's records that its schedule passed the
+// period starting at PeriodStart without charging it: OpenRails collects the
+// period instead (#1113).
+type RenewalSkipped struct{ PeriodStart time.Time }
+
 // Reinstate reactivates a cancelled subscription with a paid period on an
 // explicit decision (an operator override, a won dispute).
 type Reinstate struct{ PeriodStart, PeriodEnd time.Time }
@@ -152,6 +158,7 @@ func (InitialPaid) event() string      { return "initial_paid" }
 func (InitialFailed) event() string    { return "initial_failed" }
 func (RenewalPaid) event() string      { return "renewal_paid" }
 func (RenewalDeclined) event() string  { return "renewal_declined" }
+func (RenewalSkipped) event() string   { return "renewal_skipped" }
 func (MethodReplaced) event() string   { return "method_replaced" }
 func (Reinstate) event() string        { return "reinstate" }
 func (DunningExhausted) event() string { return "dunning_exhausted" }
@@ -324,6 +331,14 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			s.Status = PastDue
 			return s, effects, nil
 		}
+
+	case RenewalSkipped:
+		// The period is due and unpaid, with no decline to tell the member of.
+		if s.Owner != NMISchedule || (s.Status != Active && s.Status != Unverified) || !ev.PeriodStart.Equal(s.PaidThrough) {
+			return s, nil, nil
+		}
+		s.Status = PastDue
+		return s, []Effect{OpenDunning{ev.PeriodStart}}, nil
 
 	case Reinstate:
 		if (s.Status != Cancelled && !s.Status.Live()) || !ev.PeriodEnd.After(ev.PeriodStart) {

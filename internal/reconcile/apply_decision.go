@@ -140,6 +140,7 @@ func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.
 		Rail:              sub.Rail,
 		SubscriptionID:    &sub.ID,
 		FailureCode:       normalize.OptionalString(code),
+		DeclinedAt:        d.Decline.OccurredAt,
 		Decline:           action,
 		AttemptRecorded:   true,
 		TerminalCertainty: certainty,

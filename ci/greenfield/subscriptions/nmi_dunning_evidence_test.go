@@ -41,8 +41,9 @@ func TestNMIStaleRosterDateInsidePaidPeriod(t *testing.T) {
 
 // A decline first seen after its grace would have ended (the webhook was
 // lost) still enters dunning: the lapsed row is parked, read at once, and the
-// read finds the decline. Grace and the first retry run from discovery, and
-// the retry recovers the period.
+// read finds the decline. Grace runs from discovery; retries run from the
+// decline (#1113), so the overdue first retry runs at the next due pass and
+// recovers the period.
 func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -60,10 +61,9 @@ func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	require.NotNil(t, sub.GraceEndsAt)
 	require.WithinDuration(t, now.Add(48*time.Hour), *sub.GraceEndsAt, time.Second, "grace runs from discovery")
 	require.NotNil(t, sub.NextRetryAt)
-	require.WithinDuration(t, now.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from discovery")
+	require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from the decline")
 	require.Zero(t, len(w.nmi.Attempts()))
 
-	w.advance(sub.NextRetryAt.Sub(now) + time.Second)
 	w.runRenewals()
 	sub = w.subscription(embedded, l.sub)
 	require.Equal(t, "active", sub.Status)
@@ -89,7 +89,7 @@ func TestNMIRenewalThenDeclineDunsTheUnpaidPeriod(t *testing.T) {
 	require.Equal(t, "past_due", sub.Status, "the declined period is dunned")
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(paid), "one paid period granted (%s vs %s)", sub.CurrentPeriodEndsAt, paid)
 	require.NotNil(t, sub.NextRetryAt)
-	require.WithinDuration(t, w.clock.Now().Add(48*time.Hour), *sub.NextRetryAt, time.Second)
+	require.WithinDuration(t, paid.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "retries run from NMI's decline")
 	require.Len(t, completed(w.payments(embedded, l.c.id)), 2, "the initial charge and NMI's renewal")
 	require.Zero(t, len(w.nmi.Attempts()))
 }

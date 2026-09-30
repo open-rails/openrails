@@ -39,6 +39,10 @@ const (
 	// FindingRebillMissed is one cycle whose rebill never happened.
 	FindingRebillMissed = "life.rebill.missed"
 
+	// MissProviderSkipped: NMI's schedule moved past the period without
+	// charging it, and OpenRails collects it.
+	MissProviderSkipped = "provider_skipped"
+
 	rebillWatchMerchantBatch = 500
 )
 
@@ -51,7 +55,8 @@ func (RebillWatchArgs) Kind() string { return KindRebillWatch }
 // auto-renewing subscription whose period ended past its owner's deadline
 // with no attempt for that cycle. An NMI-owned one is probed first: the Query
 // API is the backstop for a lost webhook, so a charge found there is recorded
-// and converged, and only a proven absence is a miss.
+// and converged, and only a proven absence is a miss. A period NMI's schedule
+// skipped is then collected by OpenRails (#1113).
 type RebillWatchWorker struct {
 	river.WorkerDefaults[RebillWatchArgs]
 	DB          *db.DB
@@ -151,23 +156,30 @@ func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscripti
 	if err != nil || attempted {
 		return "", false, err
 	}
+	if len(snap.Transactions) > 0 {
+		return "", false, errors.New("NMI shows a charge in the cycle that no attempt records")
+	}
 	if len(snap.Subscriptions) == 0 {
 		return "schedule_gone", true, nil
 	}
 	next := snap.Subscriptions[0].NextBillingAt
 	if next != nil && next.After(due.Add(reconcile.AlignmentSlack(sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt))) {
-		return "provider_skipped", true, nil
+		return MissProviderSkipped, true, nil
 	}
 	return "provider_stalled", true, nil
 }
 
-// miss records the cycle as missed and raises its finding.
+// miss records the cycle as missed and raises its finding. A period NMI's
+// schedule skipped (its records show no charge and its next date moved on)
+// is handed to OpenRails' collection in the same transaction.
 func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, due time.Time, reason string, now time.Time) error {
 	if sub.Price == nil {
 		return errors.New("subscription price not loaded")
 	}
+	collect := reason == MissProviderSkipped && (w.Config == nil || !w.Config.IsProviderReadOnly())
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := w.DB.NewWithPgxTx(tx).Gen(ctx)
+		txdb := w.DB.NewWithPgxTx(tx)
+		q := txdb.Gen(ctx)
 		cycle, err := q.UpsertRebillCycle(ctx, gen.UpsertRebillCycleParams{
 			ID: uuidutil.NewV7(), MerchantID: sub.MerchantID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, PspID: sub.PspID, Rail: string(sub.Rail),
 			Owner: string(attempts.OwnerOf(sub.CollectionPolicy)), DueAt: due, Amount: sub.Price.Amount, Currency: sub.Price.Currency,
@@ -178,12 +190,18 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 		if n, err := q.MarkRebillCycleMissed(ctx, gen.MarkRebillCycleMissedParams{MerchantID: sub.MerchantID, ID: cycle, MissedAt: now, MissReason: reason}); err != nil || n == 0 {
 			return err
 		}
-		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "period_end": due, "owner": sub.CollectionPolicy, "reason": reason})
+		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "period_end": due, "owner": sub.CollectionPolicy, "reason": reason, "collected": collect})
 		action := fmt.Sprintf("subscription %s was due to rebill at %s and no attempt happened (%s). Check the provider's schedule and the due pass; the member keeps access until the rebill is resolved.", sub.ID, due.Format(time.RFC3339), reason)
-		_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		if collect {
+			action = fmt.Sprintf("NMI's schedule passed subscription %s's rebill due at %s without charging it. OpenRails charges the period now and duns a decline on the merchant's schedule; check the schedule at NMI.", sub.ID, due.Format(time.RFC3339))
+		}
+		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: sub.MerchantID, FindingType: FindingRebillMissed, SubjectKey: cycle.String(),
 			Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
-		})
+		}); err != nil || !collect {
+			return err
+		}
+		_, err = w.Lifecycle.CollectSkippedRenewal(ctx, txdb, sub)
 		return err
 	})
 }

@@ -76,6 +76,14 @@ func TestTransitions(t *testing.T) {
 		{name: "stale decline of a paid period", from: snap(Active, NMISchedule), event: RenewalDeclined{t0, Retry, t1}, want: Active, through: t1},
 		{name: "decline after cancellation ignored", from: snap(Cancelled, Engine), event: RenewalDeclined{t1, Retry, t1}, want: Cancelled, through: t1},
 
+		{name: "a skipped NMI period is collected", from: snap(Active, NMISchedule), event: RenewalSkipped{t1}, want: PastDue, through: t1,
+			effects: []Effect{OpenDunning{t1}}},
+		{name: "a skip resolves an unverified row", from: snap(Unverified, NMISchedule), event: RenewalSkipped{t1}, want: PastDue, through: t1,
+			effects: []Effect{OpenDunning{t1}}},
+		{name: "a skip is NMI's alone", from: snap(Active, Engine), event: RenewalSkipped{t1}, want: Active, through: t1},
+		{name: "a skip of a paid period", from: snap(Active, NMISchedule), event: RenewalSkipped{t0}, want: Active, through: t1},
+		{name: "a skip never touches dunning", from: snap(PastDue, NMISchedule), event: RenewalSkipped{t1}, want: PastDue, through: t1},
+
 		{name: "new card resumes dunning", from: snap(AwaitingMethod, Engine), event: MethodReplaced{}, want: PastDue, through: t1,
 			effects: []Effect{OpenDunning{t1}}},
 		{name: "new card on an active row", from: snap(Active, Engine), event: MethodReplaced{}, want: Active, through: t1},
@@ -164,7 +172,7 @@ func TestChargebackAfterCancel(t *testing.T) {
 func TestNoEvidenceNoChange(t *testing.T) {
 	t.Parallel()
 	events := []Event{
-		RenewalDeclined{t1, Retry, t1}, RenewalDeclined{t1, FixMethod, t1}, MethodReplaced{}, RenewalOverdue{},
+		RenewalDeclined{t1, Retry, t1}, RenewalDeclined{t1, FixMethod, t1}, MethodReplaced{}, RenewalOverdue{}, RenewalSkipped{t1},
 		Resume{half}, RenewalDeclined{t0, Retry, t1},
 	}
 	for _, owner := range []Owner{Engine, NMISchedule, Provider} {
