@@ -696,9 +696,9 @@ export interface TeamInvite {
   revoked_at?: string
 }
 
-// Outcome of inviting an email: either the address was an existing user (added
-// to the team immediately) or a single-use register+join link was minted (url
-// shown once for the owner to share).
+// Outcome of inviting an email: either a live account had verified the address
+// (added to the team immediately) or a single-use register+join link was minted
+// (url shown once for the owner to share).
 export interface TeamInviteResult {
   added: boolean
   member?: TeamMember

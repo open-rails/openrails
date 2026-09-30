@@ -13,9 +13,11 @@ package controlplane
 //   - The known-user "consent invite" flow (#147/#193 group_membership_invites)
 //     is NOT reachable via the embedded client. The only invite primitive a
 //     merchant owner can create+list+revoke is the group invite link. So an
-//     invite to an ALREADY-REGISTERED email is a direct role assignment (the
-//     invitee is added immediately); an invite to an UNREGISTERED email mints a
-//     single-use register+join link the owner shares (fail-soft copy-link).
+//     invite to an email a live account has VERIFIED is a direct role
+//     assignment (the invitee is added immediately); any other email
+//     (unregistered, unverified, deleted) mints a single-use register+join link
+//     the owner shares (fail-soft copy-link). An unverified address proves
+//     nothing: anyone can register one they do not own (#1107).
 //
 //   - Invite-link minting requires AuthKit's registration to be open/invite-only
 //     (ExternalInvitesEnabled). Locked-down standalone runs registration CLOSED,
@@ -48,10 +50,10 @@ var (
 	// role in the merchant group (so there is nothing to change or remove).
 	ErrNotATeamMember = errors.New("controlplane: user is not a member of this merchant")
 
-	// ErrTeamInvitesDisabled is returned when inviting an UNREGISTERED email but
-	// the deployment runs AuthKit registration closed (locked-down standalone):
-	// no self-registration link can be minted. The operator must provision the
-	// account first; then it can be added by email as an existing user.
+	// ErrTeamInvitesDisabled is returned when inviting an email no live account
+	// has verified but the deployment runs AuthKit registration closed
+	// (locked-down standalone): no self-registration link can be minted. The
+	// operator must provision the account and verify its email first.
 	ErrTeamInvitesDisabled = errors.New("controlplane: link invites for new users are disabled on this deployment")
 )
 
@@ -79,10 +81,10 @@ type MerchantTeamInvite struct {
 }
 
 // MerchantTeamInviteResult is the outcome of inviting an email. Exactly one of
-// Member (the email was an existing user, added to the team immediately) or
-// Invite+URL (a single-use link the owner shares with a new user) is set.
+// Member (a live account verified the email and was added immediately) or
+// Invite+URL (a single-use link the owner shares with the address) is set.
 type MerchantTeamInviteResult struct {
-	// Added is true when the email resolved to an existing user who was added to
+	// Added is true when a live account that verified the email was added to
 	// the team directly (no link needed).
 	Added bool `json:"added"`
 	// Member is set when Added: the member now on the team.
@@ -124,8 +126,8 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 	return out, nil
 }
 
-// InviteMerchantTeamMember adds a teammate by email. If the email belongs to an
-// existing user, that user is assigned role immediately (Added). Otherwise a
+// InviteMerchantTeamMember adds a teammate by email. If a live account has
+// verified the email, it is assigned role immediately (Added). Otherwise a
 // single-use register+join link is minted and returned (URL) — unless the
 // deployment runs registration closed, in which case ErrTeamInvitesDisabled is
 // returned. role must be a fixed catalog role. actorUserID is the acting AuthKit
@@ -152,10 +154,11 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 		return MerchantTeamInviteResult{}, err
 	}
 
-	// Existing user? Add them directly — no registration needed.
+	// Only a live account that proved the address joins directly. Any other
+	// account gets the answer an unregistered address gets.
 	user, err := c.Core().GetUserByEmail(ctx, email)
 	switch {
-	case err == nil && user != nil:
+	case err == nil && user != nil && user.EmailVerified && user.DeletedAt == nil:
 		if aerr := c.Core().AssignGroupRoleAs(ctx, actor, group, authkit.UserSubject(user.ID), authkit.Role(role)); aerr != nil {
 			return MerchantTeamInviteResult{}, aerr
 		}

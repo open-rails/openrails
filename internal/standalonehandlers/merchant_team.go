@@ -61,9 +61,9 @@ func MerchantListTeam(svc MerchantTeamManager) func(*httprequest.Request) {
 }
 
 // MerchantInviteTeamMember handles POST /v1/merchant/team/invites {email, role}.
-// An existing user is added immediately (201 {added:true, member}); an
-// unregistered email yields a single-use register+join link (201 {invite, url})
-// when the deployment permits self-registration, else 409.
+// A live account that verified the email is added immediately (201
+// {added:true, member}); any other email yields a single-use register+join link
+// (201 {invite, url}) when the deployment permits self-registration, else 409.
 func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		mid, ok := teamMerchantScope(r)
@@ -99,7 +99,7 @@ func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 			switch {
 			case errors.Is(err, controlplane.ErrTeamInvitesDisabled):
 				r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "invites_disabled",
-					"that email has no account yet, and self-registration invites are disabled on this deployment — the operator must provision the account first, then add it here by email"))
+					"that email has no verified account, and self-registration invites are disabled on this deployment — the operator must provision the account and verify its email first, then add it here by email"))
 			case errors.Is(err, authkit.ErrExternalInvitesDisabled):
 				r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "invites_disabled",
 					"self-registration invites are disabled on this deployment"))

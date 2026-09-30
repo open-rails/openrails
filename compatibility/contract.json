@@ -5550,7 +5550,7 @@
     "internal/controlplane/merchant_directory.go": "0f7a0558d14ec930063ea9886c1404dbb66a9d364f558d913cc77e929a09532e",
     "internal/controlplane/merchant_names.go": "29a7f8e7e070c3931e10814241c88430028b079f010d69228c472e3b816fa866",
     "internal/controlplane/merchant_provision.go": "147910382acc77e0b1106b3eab435c3f7470750ad66f148c3912a0ff7b3a85b8",
-    "internal/controlplane/merchant_team.go": "f49a3031d7c639dac99b480fce93f522cbe846823d016197d0eee11ff7248621",
+    "internal/controlplane/merchant_team.go": "18402d67d7de536073410ba5acee6300a8e7917b6a3a6fad9e84a56bd5c66dd3",
     "internal/controlplane/remote_application.go": "210889140ad297fd04429968f5bbe5c887550b5c6d4ab5a541b88ae205aaff1b",
     "internal/controlplane/routes.go": "19299aa7068d2db5266f2ee27fe4c58b9e941bd88f0126b6e22de1d540097812",
     "internal/controlplane/service.go": "7a58134ad19853cf76aab0a73ea6d3112d8f1524dc1191a3ca6e3187bc7d4003",
