@@ -210,8 +210,11 @@ merchants:
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, send("Bearer "+foreign.Value, "").Code, "an unregistered issuer is trusted for nothing")
 
 	// Disabling the application out of band applies without OpenRails
-	// reloading anything.
+	// reloading anything. A merchant keeps an owner: a person takes over
+	// before its only owner, the application, is disabled.
 	app, err := cp.Core().RemoteApplication(t.Context(), iam.AppByIssuer(issuer))
+	require.NoError(t, err)
+	_, err = cp.Core().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), iam.UserSubject(newAccount(t, cp).ID), controlplane.MerchantType.OwnerRole())
 	require.NoError(t, err)
 	app.Enabled = false
 	_, err = cp.Core().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), app)
@@ -260,20 +263,21 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.Equal(t, "owner", roles[iam.UserSubject(customer.ID)].Name())
 
 	directory := hostauth.NewDirectory(cp.Core())
-	username, email, ok, err := directory.EmailIdentity(ctx, customer.ID)
+	payer := newAccount(t, cp)
+	username, email, ok, err := directory.EmailIdentity(ctx, payer.ID)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, []string{customer.Username, customer.Email}, []string{username, email})
+	require.Equal(t, []string{payer.Username, payer.Email}, []string{username, email})
 	renamed := "r" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	_, err = cp.Core().UpdateUser(ctx, iam.UserActor(customer.ID), customer.ID, iam.UserUpdate{Username: &renamed})
+	_, err = cp.Core().UpdateUser(ctx, iam.UserActor(payer.ID), payer.ID, iam.UserUpdate{Username: &renamed})
 	require.NoError(t, err)
-	id, err := directory.GetUserIDByUsername(ctx, customer.Username)
+	id, err := directory.GetUserIDByUsername(ctx, payer.Username)
 	require.NoError(t, err)
-	require.Equal(t, customer.ID, id, "a former username still resolves")
-	results, err := cp.Core().DeleteUsers(ctx, iam.UserActor(customer.ID), []string{customer.ID})
+	require.Equal(t, payer.ID, id, "a former username still resolves")
+	results, err := cp.Core().DeleteUsers(ctx, iam.UserActor(payer.ID), []string{payer.ID})
 	require.NoError(t, err)
 	require.NoError(t, results[0].Err)
-	_, _, ok, err = directory.EmailIdentity(ctx, customer.ID)
+	_, _, ok, err = directory.EmailIdentity(ctx, payer.ID)
 	require.NoError(t, err)
 	require.False(t, ok, "billing mails no deleted account")
 
