@@ -75,16 +75,21 @@ UPDATE openrails.payment_attempts SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND enriched_at IS NULL;
 
 -- name: ListPaymentAttempts :many
--- #1116: the merchant's attempts, newest first; every filter is optional.
+-- #1116: the merchant's attempts, newest first; every filter is optional and
+-- a text filter matches any of its values.
 SELECT sqlc.embed(a), count(*) OVER () AS total
 FROM openrails.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(kind)::text IS NULL OR a.kind = sqlc.narg(kind)::text)
-  AND (sqlc.narg(owner)::text IS NULL OR a.owner = sqlc.narg(owner)::text)
-  AND (sqlc.narg(category)::text IS NULL OR a.category = sqlc.narg(category)::text)
-  AND (sqlc.narg(reason)::text IS NULL OR a.reason = sqlc.narg(reason)::text)
-  AND (sqlc.narg(response_code)::text IS NULL OR a.response_code = sqlc.narg(response_code)::text)
-  AND (sqlc.narg(card_entry)::text IS NULL OR a.card_entry = sqlc.narg(card_entry)::text)
+  AND (sqlc.narg(kinds)::text[] IS NULL OR a.kind = ANY(sqlc.narg(kinds)::text[]))
+  AND (sqlc.narg(owners)::text[] IS NULL OR a.owner = ANY(sqlc.narg(owners)::text[]))
+  AND (sqlc.narg(categories)::text[] IS NULL OR a.category = ANY(sqlc.narg(categories)::text[]))
+  AND (sqlc.narg(reasons)::text[] IS NULL OR a.reason = ANY(sqlc.narg(reasons)::text[]))
+  AND (sqlc.narg(response_codes)::text[] IS NULL OR a.response_code = ANY(sqlc.narg(response_codes)::text[]))
+  AND (sqlc.narg(card_entries)::text[] IS NULL OR a.card_entry = ANY(sqlc.narg(card_entries)::text[]))
+  AND (sqlc.narg(sources)::text[] IS NULL OR a.source = ANY(sqlc.narg(sources)::text[]))
+  AND (sqlc.narg(observed_vias)::text[] IS NULL OR a.observed_via = ANY(sqlc.narg(observed_vias)::text[]))
+  AND (sqlc.narg(avs_results)::text[] IS NULL OR a.avs_result = ANY(sqlc.narg(avs_results)::text[]))
+  AND (sqlc.narg(cvv_results)::text[] IS NULL OR a.cvv_result = ANY(sqlc.narg(cvv_results)::text[]))
   AND (sqlc.narg(psp_id)::uuid IS NULL OR a.psp_id = sqlc.narg(psp_id)::uuid)
   AND (sqlc.narg(customer_id)::uuid IS NULL OR a.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(checkout_id)::uuid IS NULL OR a.checkout_id = sqlc.narg(checkout_id)::uuid)

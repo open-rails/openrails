@@ -18,12 +18,14 @@ import type {
   MerchantSettings,
   MerchantWebhook,
   MintedAPIKey,
+  PaymentAttempt,
   PaymentMethodResponse,
   PaymentObject,
   PaymentProviderConfig,
   PaymentProviderDefinition,
   PriceKeyHistoryEntry,
   RawEntitlement,
+  RebillCycle,
   RepairAlert,
   RepriceBatch,
   RepriceBatchResult,
@@ -268,6 +270,84 @@ export const refundPayment = (
     headers: { "Idempotency-Key": crypto.randomUUID() },
     body: { amount, reason: reason || undefined, revoke_access: revokeAccess },
   })
+
+// --- Payment attempts and rebill cycles (#1116) ---
+// Filters are the API's query parameters verbatim; a text filter is one value
+// or a comma-separated list, so a console URL carries them unchanged.
+
+export type AttemptFilters = Partial<Record<(typeof ATTEMPT_FILTERS)[number], string>>
+export const ATTEMPT_FILTERS = [
+  "kind",
+  "owner",
+  "category",
+  "reason",
+  "response_code",
+  "card_entry",
+  "source",
+  "observed_via",
+  "avs_result",
+  "cvv_result",
+  "psp_id",
+  "customer_id",
+  "checkout_id",
+  "subscription_id",
+  "cycle_id",
+  "since",
+  "until",
+] as const
+
+export type CycleFilters = Partial<Record<(typeof CYCLE_FILTERS)[number], string>>
+export const CYCLE_FILTERS = [
+  "owner",
+  "first_outcome",
+  "miss_reason",
+  "outcome",
+  "psp_id",
+  "subscription_id",
+  "due_since",
+  "due_until",
+] as const
+
+// filtersFrom reads the named filters from a console URL.
+export function filtersFrom<K extends string>(
+  params: URLSearchParams,
+  keys: readonly K[]
+): Partial<Record<K, string>> {
+  const out: Partial<Record<K, string>> = {}
+  for (const key of keys) {
+    const v = params.get(key)?.trim()
+    if (v) out[key] = v
+  }
+  return out
+}
+
+export const listPaymentAttempts = (
+  filters: AttemptFilters,
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) =>
+  api<ListEnvelope<PaymentAttempt>>("/merchant/payment-attempts", {
+    query: { ...filters, limit, offset },
+    signal,
+  })
+
+export const getPaymentAttempt = (id: string, signal?: AbortSignal) =>
+  api<PaymentAttempt>(`/merchant/payment-attempts/${id}`, { signal })
+
+export const listRebillCycles = (
+  filters: CycleFilters,
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) =>
+  api<ListEnvelope<RebillCycle>>("/merchant/rebill-cycles", {
+    query: { ...filters, limit, offset },
+    signal,
+  })
+
+export const getRebillCycle = (id: string, signal?: AbortSignal) =>
+  api<RebillCycle>(`/merchant/rebill-cycles/${id}`, { signal })
 
 // Rails whose refunds route through a provider API today (admin_payments.go).
 export const REFUNDABLE_RAILS = ["nmi", "stripe"]

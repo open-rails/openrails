@@ -80,6 +80,41 @@ const router = createBrowserRouter(
             })),
         },
         {
+          path: "payments/health",
+          lazy: () =>
+            import("@/pages/payments/health").then((module) => ({
+              Component: module.PaymentHealthPage,
+            })),
+        },
+        {
+          path: "payments/attempts",
+          lazy: () =>
+            import("@/pages/payments/attempts").then((module) => ({
+              Component: module.AttemptsPage,
+            })),
+        },
+        {
+          path: "payments/attempts/:id",
+          lazy: () =>
+            import("@/pages/payments/attempts").then((module) => ({
+              Component: module.AttemptDetailPage,
+            })),
+        },
+        {
+          path: "payments/cycles",
+          lazy: () =>
+            import("@/pages/payments/attempts").then((module) => ({
+              Component: module.CyclesPage,
+            })),
+        },
+        {
+          path: "payments/cycles/:id",
+          lazy: () =>
+            import("@/pages/payments/attempts").then((module) => ({
+              Component: module.CycleDetailPage,
+            })),
+        },
+        {
           path: "invoices",
           lazy: () =>
             import("@/pages/invoices").then((module) => ({

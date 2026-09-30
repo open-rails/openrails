@@ -61,10 +61,12 @@ type PaymentAttempt struct {
 }
 
 // PaymentAttemptFilter selects attempts, newest first; every field is
-// optional. Since and Until bound attempted_at to [Since, Until).
+// optional, and a list matches any of its values. Since and Until bound
+// attempted_at to [Since, Until).
 type PaymentAttemptFilter struct {
 	PageOptions
-	Kind, Owner, Category, Reason, ResponseCode, CardEntry string
+	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
+	Source, ObservedVia, AVSResult, CVVResult              []string
 	// PSPID, CustomerID and CheckoutID are plain UUIDs.
 	PSPID, CustomerID, CheckoutID string
 	SubscriptionID                SubscriptionID
@@ -102,10 +104,11 @@ type RebillCycle struct {
 }
 
 // RebillCycleFilter selects cycles, latest due first; every field is
-// optional. DueSince and DueUntil bound due_at to [DueSince, DueUntil).
+// optional, and a list matches any of its values. DueSince and DueUntil bound
+// due_at to [DueSince, DueUntil).
 type RebillCycleFilter struct {
 	PageOptions
-	Owner, FirstOutcome, MissReason, Outcome string
+	Owner, FirstOutcome, MissReason, Outcome []string
 	// PSPID is the provider account's plain UUID.
 	PSPID              string
 	SubscriptionID     SubscriptionID
@@ -115,8 +118,10 @@ type RebillCycleFilter struct {
 // ListPaymentAttempts lists the merchant's payment attempts, newest first.
 func (c *Client) ListPaymentAttempts(ctx context.Context, filter PaymentAttemptFilter, requestOptions ...RequestOption) (*Page[PaymentAttempt], error) {
 	q := pageQuery(filter.PageOptions)
-	setQuery(q, map[string]string{"kind": filter.Kind, "owner": filter.Owner, "category": filter.Category, "reason": filter.Reason,
-		"response_code": filter.ResponseCode, "card_entry": filter.CardEntry, "psp_id": filter.PSPID, "customer_id": filter.CustomerID,
+	setQuery(q, map[string]string{"kind": commaList(filter.Kind), "owner": commaList(filter.Owner), "category": commaList(filter.Category), "reason": commaList(filter.Reason),
+		"response_code": commaList(filter.ResponseCode), "card_entry": commaList(filter.CardEntry), "source": commaList(filter.Source),
+		"observed_via": commaList(filter.ObservedVia), "avs_result": commaList(filter.AVSResult), "cvv_result": commaList(filter.CVVResult),
+		"psp_id": filter.PSPID, "customer_id": filter.CustomerID,
 		"checkout_id": filter.CheckoutID, "subscription_id": filter.SubscriptionID.String(), "cycle_id": filter.CycleID.String(),
 		"since": timeQuery(filter.Since), "until": timeQuery(filter.Until)})
 	var out Page[PaymentAttempt]
@@ -142,8 +147,8 @@ func (c *Client) GetPaymentAttempt(ctx context.Context, id PaymentAttemptID, req
 // ListRebillCycles lists the merchant's rebill cycles, latest due first.
 func (c *Client) ListRebillCycles(ctx context.Context, filter RebillCycleFilter, requestOptions ...RequestOption) (*Page[RebillCycle], error) {
 	q := pageQuery(filter.PageOptions)
-	setQuery(q, map[string]string{"owner": filter.Owner, "first_outcome": filter.FirstOutcome, "miss_reason": filter.MissReason,
-		"outcome": filter.Outcome, "psp_id": filter.PSPID, "subscription_id": filter.SubscriptionID.String(),
+	setQuery(q, map[string]string{"owner": commaList(filter.Owner), "first_outcome": commaList(filter.FirstOutcome), "miss_reason": commaList(filter.MissReason),
+		"outcome": commaList(filter.Outcome), "psp_id": filter.PSPID, "subscription_id": filter.SubscriptionID.String(),
 		"due_since": timeQuery(filter.DueSince), "due_until": timeQuery(filter.DueUntil)})
 	var out Page[RebillCycle]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/rebill-cycles?"+q.Encode(), nil, &out, requestOptions...); err != nil {
@@ -172,6 +177,8 @@ func setQuery(q url.Values, values map[string]string) {
 		}
 	}
 }
+
+func commaList(values []string) string { return strings.Join(values, ",") }
 
 func timeQuery(t time.Time) string {
 	if t.IsZero() {

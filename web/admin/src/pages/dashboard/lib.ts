@@ -153,7 +153,7 @@ export function groupSeries<T extends PivotSeries>(
 }
 
 export interface Pivoted {
-  data: Record<string, number | string>[]
+  data: Record<string, number | string | null>[]
   series: PivotSeries[]
 }
 
@@ -167,13 +167,14 @@ export function exactKey(seriesKey: string): string {
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
 // series per measure × dimension-value combination. Server-zero-filled
 // buckets render as-is; combos absent for a bucket fill 0 so stacks align.
+// A ratio with nothing to divide by is no data, not 0%: it stays null.
 export function pivotTimeSeries(
   result: MetricsResult,
   currency?: string
 ): Pivoted {
   const idx = indexColumns(result.columns)
   if (idx.time < 0) return { data: [], series: [] }
-  const buckets = new Map<string, Record<string, number | string>>()
+  const buckets = new Map<string, Record<string, number | string | null>>()
   const series = new Map<string, PivotSeries>()
   for (const row of result.rows) {
     const t = String(row[idx.time])
@@ -206,8 +207,9 @@ export function pivotTimeSeries(
         series.set(identity, item)
       }
       const cell = row[m.index]
-      entry[item.key] = Number(cell ?? 0)
-      entry[exactKey(item.key)] = cell ?? 0
+      const empty = m.unit === "ratio" ? null : 0
+      entry[item.key] = cell === null ? empty : Number(cell)
+      entry[exactKey(item.key)] = cell ?? empty
     }
   }
   const data = [...buckets.entries()]
@@ -217,8 +219,9 @@ export function pivotTimeSeries(
   for (const entry of data) {
     for (const s of keys)
       if (!(s.key in entry)) {
-        entry[s.key] = 0
-        entry[exactKey(s.key)] = 0
+        const empty = s.unit === "ratio" ? null : 0
+        entry[s.key] = empty
+        entry[exactKey(s.key)] = empty
       }
   }
   return { data, series: keys }
@@ -270,10 +273,39 @@ export function chartColor(i: number): string {
   return `var(--chart-${(i % 5) + 1})`
 }
 
-// deepLinkFor maps count widgets to the admin list page carrying the same
-// filter (#733 count→list contract). Null = no sensible link.
-export function deepLinkFor(query: MetricsQuery): string | null {
+// Decline and rebill-failure measures (#1116) open Payments → Health.
+const HEALTH_MEASURES = new Set([
+  "attempts",
+  "approved_attempts",
+  "failed_attempts",
+  "attempt_failure_rate",
+  "checkouts",
+  "failed_checkouts",
+  "checkout_failure_rate",
+  "attempts_per_checkout",
+  "checkout_recovery_rate",
+  "rebills_due",
+  "rebills_open",
+  "rebill_first_failures",
+  "rebill_first_failure_rate",
+  "rebills_missed",
+  "rebill_missed_rate",
+  "dunning_recovered",
+  "dunning_recovery_rate",
+  "rebill_collection_rate",
+  "rebill_loss_rate",
+])
+
+// deepLinkFor maps a widget to the admin page carrying the same filter (#733
+// count→list contract): decline measures in any viz open the health page,
+// count stats open their list. Null = no sensible link.
+export function deepLinkFor(
+  query: MetricsQuery,
+  viz: string = "stat"
+): string | null {
   const measures = query.measures ?? []
+  if (measures.some((m) => HEALTH_MEASURES.has(m))) return "/payments/health"
+  if (viz !== "stat") return null
   const status = query.filters?.status?.[0]
   const has = (...names: string[]) => names.some((n) => measures.includes(n))
   if (has("subscriptions", "billable_subscriptions")) {

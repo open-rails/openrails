@@ -52,7 +52,17 @@ const nav: NavItem[] = [
   { title: "Dashboard", url: "/", icon: DashboardCircleIcon },
   { title: "Customers", url: "/customers", icon: UserGroupIcon },
   { title: "Subscriptions", url: "/subscriptions", icon: RepeatIcon },
-  { title: "Payments", url: "/payments", icon: CreditCardIcon },
+  {
+    title: "Payments",
+    url: "/payments",
+    icon: CreditCardIcon,
+    items: [
+      { title: "Payments", url: "/payments" },
+      { title: "Health", url: "/payments/health" },
+      { title: "Attempts", url: "/payments/attempts" },
+      { title: "Rebill cycles", url: "/payments/cycles" },
+    ],
+  },
   { title: "Invoices", url: "/invoices", icon: CreditCardIcon },
   {
     title: "Catalog",
@@ -69,8 +79,8 @@ const nav: NavItem[] = [
   { title: "Settings", url: "/settings", icon: Settings01Icon },
 ]
 
-// The Products sub-page IS /catalog, so it can only be the active one when
-// nothing deeper is selected.
+// A section's first sub-page IS the section URL (/catalog, /payments), so it
+// can only be the active one when nothing deeper is selected.
 function subItemIsActive(pathname: string, url: string, sectionURL: string) {
   return url === sectionURL ? pathname === url : pathname.startsWith(url)
 }
