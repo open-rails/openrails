@@ -25,7 +25,7 @@ import (
 
 // attachControlPlane builds a runtime with an attached control plane that
 // mints real user tokens over the shared AuthKit schema.
-func (f *fixture) attachControlPlane(t *testing.T, opts controlplane.Options) *controlplane.ControlPlane {
+func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) controlplane.Options) *controlplane.ControlPlane {
 	t.Helper()
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
 	rt, err := embed.New(t.Context(), embed.Options{
@@ -40,6 +40,7 @@ func (f *fixture) attachControlPlane(t *testing.T, opts controlplane.Options) *c
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	opts := options(rt)
 	opts.Auth = &hostconfig.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
@@ -62,12 +63,36 @@ func newUser(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
 
 func uniqueName(prefix string) string { return prefix + "-" + uuid.NewString()[:8] }
 
+func reserving(names ...string) func(*embed.Runtime) controlplane.Options {
+	return func(*embed.Runtime) controlplane.Options {
+		return controlplane.Options{MerchantCreation: &controlplane.MerchantCreationConfig{ReservedSlugs: names}}
+	}
+}
+
+// call sends an authenticated JSON request to the standalone surface.
+func call(t *testing.T, handler http.Handler, token, method, path, selector string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var payload bytes.Buffer
+	if body != nil {
+		require.NoError(t, json.NewEncoder(&payload).Encode(body))
+	}
+	r := httptest.NewRequest(method, path, &payload)
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("Content-Type", "application/json")
+	if selector != "" {
+		r.Header.Set("X-OpenRails-Merchant", selector)
+	}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	return w
+}
+
 // OpenRails owns merchant names (#1106): claims, forwarding former names,
 // reserved names, release on retirement, and AuthKit groups that carry none.
 func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.attachControlPlane(t, controlplane.Options{MerchantCreation: &controlplane.MerchantCreationConfig{ReservedSlugs: []string{reserved}}})
+	cp := f.attachControlPlane(t, reserving(reserved))
 	ctx := t.Context()
 	owner, _ := newUser(t, cp)
 	other, _ := newUser(t, cp)
@@ -130,7 +155,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 func TestMerchantRenameRoute(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.attachControlPlane(t, controlplane.Options{MerchantCreation: &controlplane.MerchantCreationConfig{ReservedSlugs: []string{reserved}}})
+	cp := f.attachControlPlane(t, reserving(reserved))
 	ctx := t.Context()
 	owner, token := newUser(t, cp)
 	shop := uniqueName("shop")
@@ -143,19 +168,7 @@ func TestMerchantRenameRoute(t *testing.T) {
 	require.NoError(t, err)
 
 	do := func(method, path, selector string, body any) *httptest.ResponseRecorder {
-		var payload bytes.Buffer
-		if body != nil {
-			require.NoError(t, json.NewEncoder(&payload).Encode(body))
-		}
-		r := httptest.NewRequest(method, path, &payload)
-		r.Header.Set("Authorization", "Bearer "+token)
-		r.Header.Set("Content-Type", "application/json")
-		if selector != "" {
-			r.Header.Set("X-OpenRails-Merchant", selector)
-		}
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
-		return w
+		return call(t, handler, token, method, path, selector, body)
 	}
 	rename := func(selector, to string) *httptest.ResponseRecorder {
 		return do(http.MethodPut, "/v1/merchant/name", selector, map[string]string{"name": to})

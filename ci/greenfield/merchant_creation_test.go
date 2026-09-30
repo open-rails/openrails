@@ -1,0 +1,88 @@
+//go:build greenfield && integration
+
+package greenfield_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/embed/controlplane"
+)
+
+// Users create merchants through OpenRails' own route (#1106): the name claim,
+// reserved names, admission and the per-IP/per-user velocity limit.
+func TestMerchantCreationRoute(t *testing.T) {
+	f := newFixture(t)
+	reserved := uniqueName("house")
+	cp := f.attachControlPlane(t, func(rt *embed.Runtime) controlplane.Options {
+		admission, err := controlplane.MerchantCreationAdmission(rt, controlplane.MerchantCreationPolicy{
+			FreeAllowance:           1,
+			HasVaultedPaymentMethod: func(context.Context, string) (bool, error) { return false, nil },
+		})
+		require.NoError(t, err)
+		return controlplane.Options{MerchantCreation: &controlplane.MerchantCreationConfig{ReservedSlugs: []string{reserved}, Admission: admission}}
+	})
+	handler, err := cp.Handler()
+	require.NoError(t, err)
+	owner, ownerToken := newUser(t, cp)
+	other, otherToken := newUser(t, cp)
+	create := func(token string, body map[string]string) (*json.Decoder, int) {
+		w := call(t, handler, token, http.MethodPost, "/v1/merchants", "", body)
+		return json.NewDecoder(w.Body), w.Code
+	}
+	code := func(token string, body map[string]string) int {
+		_, status := create(token, body)
+		return status
+	}
+
+	shop := uniqueName("shop")
+	require.Equal(t, http.StatusForbidden, code(ownerToken, map[string]string{"name": shop}), "an unverified account claims no name")
+	require.NoError(t, cp.Core().MarkEmailVerified(t.Context(), owner))
+	require.NoError(t, cp.Core().MarkEmailVerified(t.Context(), other))
+
+	body, status := create(ownerToken, map[string]string{"name": shop, "display_name": "Shop One"})
+	require.Equal(t, http.StatusCreated, status)
+	var created struct {
+		ID      string `json:"id"`
+		Slug    string `json:"slug"`
+		Created bool   `json:"created"`
+	}
+	require.NoError(t, body.Decode(&created))
+	require.Equal(t, shop, created.Slug)
+	require.True(t, created.Created)
+	refs, err := cp.ListMerchantRefs(t.Context(), []string{shop})
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+	require.Equal(t, "Shop One", refs[0].DisplayName)
+	w := call(t, handler, ownerToken, http.MethodGet, "/v1/merchant/team", shop, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"role":"owner"`)
+
+	body, status = create(ownerToken, map[string]string{"name": shop})
+	require.Equal(t, http.StatusOK, status, "re-posting an owned name is the idempotent repair, past the allowance")
+	var repaired struct {
+		ID      string `json:"id"`
+		Created bool   `json:"created"`
+	}
+	require.NoError(t, body.Decode(&repaired))
+	require.Equal(t, created.ID, repaired.ID)
+	require.False(t, repaired.Created)
+	require.Equal(t, http.StatusPaymentRequired, code(ownerToken, map[string]string{"name": uniqueName("second")}), "past the allowance a vaulted payment method is required")
+
+	require.Equal(t, http.StatusConflict, code(otherToken, map[string]string{"name": shop}))
+	require.Equal(t, http.StatusConflict, code(otherToken, map[string]string{"name": reserved}))
+	require.Equal(t, http.StatusBadRequest, code(otherToken, map[string]string{"name": "Not A Name!"}))
+
+	// Seven claims so far from one client IP; the twelfth is the last allowed.
+	for range 5 {
+		require.Equal(t, http.StatusBadRequest, code(otherToken, map[string]string{"name": "Not A Name!"}))
+	}
+	w = call(t, handler, otherToken, http.MethodPost, "/v1/merchants", "", map[string]string{"name": uniqueName("late")})
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	require.NotEmpty(t, w.Header().Get("Retry-After"))
+}

@@ -506,8 +506,10 @@ func (s *RateLimitStore) Allow(subjectKey, bucket string, limit *config.RateLimi
 	if limit == nil {
 		return rateLimitResult{allowed: true}
 	}
+	return s.allowWindow(subjectKey, bucket, effectiveLimit(limit), time.Minute)
+}
 
-	threshold := effectiveLimit(limit)
+func (s *RateLimitStore) allowWindow(subjectKey, bucket string, threshold int, window time.Duration) rateLimitResult {
 	if threshold <= 0 {
 		return rateLimitResult{allowed: true}
 	}
@@ -520,7 +522,7 @@ func (s *RateLimitStore) Allow(subjectKey, bucket string, limit *config.RateLimi
 	counter, ok := s.counters[key]
 	if !ok || now.After(counter.reset) {
 		s.pruneLocked(now)
-		counter = &inMemoryCounter{count: 0, reset: now.Add(time.Minute)}
+		counter = &inMemoryCounter{count: 0, reset: now.Add(window)}
 		s.counters[key] = counter
 	}
 
@@ -620,25 +622,29 @@ func redisAllow(ctx context.Context, rdb *redis.Client, subjectKey, bucket strin
 	if limit == nil {
 		return rateLimitResult{allowed: true}, nil
 	}
-	threshold := effectiveLimit(limit)
+	return redisWindowAllow(ctx, rdb, subjectKey, bucket, effectiveLimit(limit), time.Minute)
+}
+
+func redisWindowAllow(ctx context.Context, rdb *redis.Client, subjectKey, bucket string, threshold int, window time.Duration) (rateLimitResult, error) {
 	if threshold <= 0 {
 		return rateLimitResult{allowed: true}, nil
 	}
-	window := currentRateLimitWindow()
-	key := rateLimitRedisKey(bucket, subjectKey, window)
+	seconds := int64(window / time.Second)
+	index := time.Now().Unix() / seconds
+	key := rateLimitRedisKey(bucket, subjectKey, index)
 	cnt, err := rdb.Incr(ctx, key).Result()
 	if err != nil {
 		return rateLimitResult{}, err
 	}
 	if cnt == 1 {
-		_ = rdb.Expire(ctx, key, time.Minute)
+		_ = rdb.Expire(ctx, key, window)
 	}
 	allowed := cnt <= int64(threshold)
 	remaining := threshold - int(cnt)
 	if remaining < 0 {
 		remaining = 0
 	}
-	reset := time.Until(time.Unix((window+1)*60, 0))
+	reset := time.Until(time.Unix((index+1)*seconds, 0))
 	return rateLimitResult{allowed: allowed, remaining: remaining, reset: reset, count: int(cnt)}, nil
 }
 

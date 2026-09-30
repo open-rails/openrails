@@ -35,8 +35,12 @@ type MerchantCreationConfig struct {
 var ErrMerchantSlugReserved = errors.New("controlplane: merchant slug is reserved")
 
 // ErrMerchantCreationRefused is the typed refusal from the deployment's
-// admission (cost) gate.
-var ErrMerchantCreationRefused = errors.New("controlplane: merchant creation refused")
+// admission (cost) gate. The standard gate's reasons wrap it too.
+var (
+	ErrMerchantCreationRefused               = errors.New("controlplane: merchant creation refused")
+	ErrMerchantCreationEmailUnverified       = errors.New("merchant creation requires a verified email")
+	ErrMerchantCreationPaymentMethodRequired = errors.New("merchant creation beyond the free allowance requires a payment method on file")
+)
 
 // ReservedMerchantSlugs is the deployment's reserved namespace:
 // merchant.ReservedHostedSlugs plus MerchantCreationConfig.ReservedSlugs.

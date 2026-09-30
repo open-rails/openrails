@@ -49,11 +49,7 @@ func SetMerchantDisplayName(ctx context.Context, a *app.App, id merchant.ID, dis
 	if cp == nil {
 		return fmt.Errorf("control plane set merchant display name: no control plane attached (call Attach first)")
 	}
-	dir, err := merchants.NewDirectoryService(cp.Pool())
-	if err != nil {
-		return fmt.Errorf("control plane set merchant display name: build merchant directory service: %w", err)
-	}
-	if err := dir.SetDisplayName(ctx, id, displayName); err != nil {
+	if err := cp.SetMerchantDisplayName(ctx, id, displayName); err != nil {
 		return fmt.Errorf("control plane set merchant display name: %w", err)
 	}
 	return nil

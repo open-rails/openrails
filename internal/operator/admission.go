@@ -23,13 +23,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ErrEmailUnverified: the creating user has no verified email. Always
-// enforced — an unverified account never claims a merchant name.
-var ErrEmailUnverified = errors.New("merchant creation requires a verified email")
-
-// ErrVaultedPaymentMethodRequired: the user is past the free allowance and has
-// no vaulted payment method on file.
-var ErrVaultedPaymentMethodRequired = errors.New("merchant creation beyond the free allowance requires a payment method on file")
+// ErrEmailUnverified / ErrVaultedPaymentMethodRequired are the admission
+// refusals: an unverified account never claims a merchant name, and a user past
+// the free allowance needs a vaulted payment method on file.
+var (
+	ErrEmailUnverified              = controlplane.ErrMerchantCreationEmailUnverified
+	ErrVaultedPaymentMethodRequired = controlplane.ErrMerchantCreationPaymentMethodRequired
+)
 
 // MerchantCreationPolicy parameterizes MerchantCreationAdmission.
 type MerchantCreationPolicy struct {
