@@ -331,6 +331,12 @@ team, payment providers, API keys, credit limit, trust level), **Dashboard**.
   - `rebill_first_failure_rate` and `rebill_missed_rate`: rebills that failed on the first
     attempt, and rebills that never happened.
   - `dunning_recovered` by `recovery_attempt` or `days_to_recover`: the recovery curve.
+- **NMI history** (#1120): `nmi_history_authorizations`, `nmi_history_approved`,
+  `nmi_history_refused` and `nmi_history_refusal_rate` by month (`time`), `nmi_kind`
+  (`verification`, `one_off_sale`, `scheduled_rebill`), PSP, `category` and `reason`. They
+  are NMI's own transaction history, read daily and kept 25 months, including the months
+  before OpenRails recorded attempts. `one_off_sale` cannot separate initial sales from
+  retries of declined rebills.
 - **Ask your metrics** (opt-in `llm.ask_enabled`): free-form Q&A where the model runs
   validated, merchant-scoped aggregate queries and shows every result as evidence tables —
   numbers come from the API, never model prose.

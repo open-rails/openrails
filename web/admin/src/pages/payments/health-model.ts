@@ -480,3 +480,132 @@ export function listURL(
   }
   return `/payments/${list}?${p.toString()}`
 }
+
+// --- NMI history (#1120) ---------------------------------------------------------------------
+
+// NMI's own transaction history, read daily per NMI PSP and kept 25 months. It
+// has no owner, so only the PSP scopes it.
+export const NMI_KINDS = [
+  { value: "verification", label: "Card verifications" },
+  { value: "one_off_sale", label: "One-off sales" },
+  { value: "scheduled_rebill", label: "NMI-scheduled rebills" },
+] as const
+
+export const nmiHistoryQueries = (scope: Scope) => {
+  const psp: Filters = scope.psp ? { rail_account: [scope.psp.account] } : {}
+  const range = { last: "25m" }
+  const months: MetricsQuery = {
+    measures: ["nmi_history_authorizations", "nmi_history_refusal_rate"],
+    by: ["time", "nmi_kind"],
+    grain: "month",
+    range,
+    filters: scope.psp ? psp : undefined,
+  }
+  const reasons: MetricsQuery = {
+    measures: ["nmi_history_refused"],
+    by: ["nmi_kind", "category", "reason"],
+    range,
+    filters: { ...psp, category: FAILED_CATEGORIES },
+  }
+  // OpenRails' own NMI attempts by month: the first marks where it began.
+  const recorded: MetricsQuery = {
+    measures: ["attempts"],
+    by: ["time"],
+    grain: "month",
+    range,
+    filters: { ...psp, rail: ["nmi"] },
+  }
+  return { months, reasons, recorded }
+}
+
+// recordingSince is the first month OpenRails recorded an NMI attempt in.
+export function recordingSince(
+  result: MetricsResult | undefined
+): string | null {
+  if (!result) return null
+  const idx = indexColumns(result.columns)
+  const count = idx.measures[0]?.index ?? -1
+  if (idx.time < 0 || count < 0) return null
+  const months = result.rows
+    .filter((r) => Number(r[count] ?? 0) > 0)
+    .map((r) => String(r[idx.time]))
+    .sort()
+  return months[0] ?? null
+}
+
+export interface NMIHistoryCell {
+  authorizations: number
+  refusalRate: number | null
+}
+
+export interface NMIHistoryMonth {
+  month: string
+  kinds: Record<string, NMIHistoryCell>
+  // recorded: OpenRails recorded its own attempts by this month.
+  recorded: boolean
+}
+
+// nmiHistoryMonths is newest first, only months NMI answered anything in.
+export function nmiHistoryMonths(
+  result: MetricsResult | undefined,
+  since: string | null
+): NMIHistoryMonth[] {
+  if (!result) return []
+  const idx = indexColumns(result.columns)
+  const kind = idx.dims.find((d) => d.name === "nmi_kind")?.index ?? -1
+  const count =
+    idx.measures.find((m) => m.name === "nmi_history_authorizations")?.index ??
+    -1
+  const rate =
+    idx.measures.find((m) => m.name === "nmi_history_refusal_rate")?.index ??
+    -1
+  if ([idx.time, kind, count, rate].includes(-1)) return []
+  const months = new Map<string, NMIHistoryMonth>()
+  for (const r of result.rows) {
+    const authorizations = Number(r[count] ?? 0)
+    if (authorizations === 0) continue
+    const month = String(r[idx.time])
+    let m = months.get(month)
+    if (!m) {
+      m = { month, kinds: {}, recorded: since !== null && month >= since }
+      months.set(month, m)
+    }
+    m.kinds[String(r[kind])] = {
+      authorizations,
+      refusalRate: r[rate] === null ? null : Number(r[rate]),
+    }
+  }
+  return [...months.values()].sort((a, b) => b.month.localeCompare(a.month))
+}
+
+export interface NMIRefusal {
+  kind: string
+  category: string
+  reason: string
+  count: number
+  // share is of every refusal in the range.
+  share: number
+}
+
+export function nmiRefusals(result: MetricsResult | undefined): NMIRefusal[] {
+  if (!result) return []
+  const idx = indexColumns(result.columns)
+  const col = (name: string) =>
+    idx.dims.find((d) => d.name === name)?.index ?? -1
+  const [kind, cat, rsn] = [col("nmi_kind"), col("category"), col("reason")]
+  const count = idx.measures[0]?.index ?? -1
+  if ([kind, cat, rsn, count].includes(-1)) return []
+  const rows = result.rows
+    .map((r) => ({
+      kind: String(r[kind] ?? ""),
+      category: String(r[cat] ?? ""),
+      reason: String(r[rsn] ?? ""),
+      count: Number(r[count] ?? 0),
+      share: 0,
+    }))
+    .filter((r) => r.count > 0)
+  const total = rows.reduce((sum, r) => sum + r.count, 0)
+  return rows
+    .map((r) => ({ ...r, share: total ? r.count / total : 0 }))
+    .sort((a, b) => b.count - a.count)
+}

@@ -273,7 +273,8 @@ export function chartColor(i: number): string {
   return `var(--chart-${(i % 5) + 1})`
 }
 
-// Decline and rebill-failure measures (#1116) open Payments → Health.
+// Decline and rebill-failure measures (#1116) and NMI's history (#1120) open
+// Payments → Health.
 const HEALTH_MEASURES = new Set([
   "attempts",
   "approved_attempts",
@@ -295,6 +296,10 @@ const HEALTH_MEASURES = new Set([
   "dunning_recovery_rate",
   "rebill_collection_rate",
   "rebill_loss_rate",
+  "nmi_history_authorizations",
+  "nmi_history_approved",
+  "nmi_history_refused",
+  "nmi_history_refusal_rate",
 ])
 
 // deepLinkFor maps a widget to the admin page carrying the same filter (#733

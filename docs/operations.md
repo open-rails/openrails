@@ -563,8 +563,8 @@ account and owner and keeps these findings open while their condition holds
 | `life.decline.unmapped` | a decline code of the last 30 days that no table maps, per rail and code |
 | `life.webhooks.silent` | a PSP account whose provider charges came by webhook (at least 10 in the 28 days before) sent none in the last 24h while pulls found at least 3; per PSP account |
 
-Payment attempts and rebill cycles are kept 25 months; the cleanup worker
-deletes older ones.
+Payment attempts, rebill cycles and NMI history months are kept 25 months;
+the cleanup worker deletes older ones.
 
 **Engine outcomes.** A renewal allowance of min(24h, max(5m, period/10))
 follows each paid engine period (1h → 6m, 1d → 2h24m, 7d → 16h48m, 30d and

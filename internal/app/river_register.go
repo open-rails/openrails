@@ -218,6 +218,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add attempt enrichment worker: %w", err)
 	}
+	// #1120: each NMI PSP's own history, as monthly aggregates.
+	if err := addTrackedWorker(r, workers, &riverjobs.NMIHistoryWorker{
+		DB: r.DB, Clock: clock, NMIResolver: r.CollectionResolver,
+	}); err != nil {
+		return fmt.Errorf("add nmi history worker: %w", err)
+	}
 	// #1112: rebills that never happened are recorded as missed.
 	if err := addTrackedWorker(r, workers, &riverjobs.RebillWatchWorker{
 		DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, Lifecycle: r.SubscriptionLifecycleService,
@@ -516,6 +522,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.AttemptEnrichmentArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.AttemptEnrichmentInterval},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// #1120: hourly, NMI PSPs due their daily history read are read.
+	jobs = append(jobs, r.healthPeriodic(
+		riverjobs.NMIHistoryInterval,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.NMIHistoryArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: riverjobs.NMIHistoryInterval},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

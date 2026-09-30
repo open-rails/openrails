@@ -44,6 +44,7 @@ const (
 	FamAttempts       Family = "attempts"        // flow over payment_attempts (attempted_at, #1116)
 	FamCheckouts      Family = "checkouts"       // flow over checkouts, one per checkout_id (first attempt)
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
+	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month, #1120)
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -166,6 +167,8 @@ var Dimensions = []Dimension{
 	{Name: "recovered_by", Description: "what collected a cycle whose first outcome failed: dunning_retry | customer_retry | updated_card | late_provider_charge (empty otherwise)", Values: []string{"", "dunning_retry", "customer_retry", "updated_card", "late_provider_charge"}},
 	{Name: "recovery_attempt", Description: "the attempt that collected a failed cycle, counting the first: 1 (a missed cycle's first attempt) | 2 | 3 | 4 | 5+ (empty otherwise)", Values: []string{"", "1", "2", "3", "4", "5+"}},
 	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},
+	// #1120 NMI history.
+	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
 
 // families declares each family's SQL skeleton inputs.
@@ -399,6 +402,18 @@ var families = map[Family]familySpec{
 				ELSE floor(EXTRACT(EPOCH FROM cy.won_at - COALESCE(cy.missed_at, cy.first_at)) / 86400)::bigint::text END`,
 		},
 	},
+	FamNMIHistory: {
+		Kind:     "flow",
+		From:     `openrails.nmi_history_months h`,
+		TimeExpr: `h.month`,
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = h.psp_id`},
+		DimExprs: map[string]string{
+			"rail_account": `COALESCE(rma.account_id, 'unknown')`,
+			"nmi_kind":     `h.kind`,
+			"category":     `h.category`,
+			"reason":       `h.reason`,
+		},
+	},
 }
 
 // #1116: a checkout is one buyer's attempts on one target (checkout_id). It
@@ -432,6 +447,7 @@ var (
 	attemptDims  = []string{"currency", "rail", "rail_account", "owner", "kind", "card_entry", "source", "observed_via", "category", "reason", "response_code", "issuer_code", "avs_result", "cvv_result", "card_brand", "card_bin", "token_type"}
 	checkoutDims = []string{"currency", "rail", "rail_account", "owner", "card_entry"}
 	cycleDims    = []string{"currency", "rail", "rail_account", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
+	nmiHistDims  = []string{"rail_account", "nmi_kind", "category", "reason"}
 )
 
 // UnitMoney marks a measure whose cells are MoneyCell values: exact native
@@ -650,6 +666,26 @@ var Measures = []Measure{
 		Description: "closed cycles never collected / closed cycles",
 		Formula:     "lost cycles / closed cycles",
 		Dims:        cycleDims},
+	// --- NMI history (#1120): NMI's own authorizations, by month ------------------
+	{Name: "nmi_history_authorizations", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
+		Description: "authorizations NMI answered, read daily from its transaction history: card verifications, one-off sales and NMI-scheduled rebills, whoever sent them; dated by month",
+		Formula:     "SUM(nmi_history_months.authorizations)",
+		Expr:        `COALESCE(SUM(h.authorizations), 0)::bigint`,
+		Dims:        nmiHistDims},
+	{Name: "nmi_history_approved", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
+		Description: "authorizations NMI approved",
+		Formula:     "SUM(authorizations with category='approved')",
+		Expr:        `COALESCE(SUM(h.authorizations) FILTER (WHERE h.category = 'approved'), 0)::bigint`,
+		Dims:        nmiHistDims},
+	{Name: "nmi_history_refused", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
+		Description: "authorizations NMI refused, by the one decline classifier's category and reason",
+		Formula:     "SUM(authorizations with category<>'approved')",
+		Expr:        `COALESCE(SUM(h.authorizations) FILTER (WHERE h.category <> 'approved'), 0)::bigint`,
+		Dims:        nmiHistDims},
+	{Name: "nmi_history_refusal_rate", Class: ClassRatio, Unit: "ratio", Num: "nmi_history_refused", Den: "nmi_history_authorizations",
+		Description: "refused / all authorizations in NMI's history; group by nmi_kind and time (month) for the decline report",
+		Formula:     "nmi_history_refused / nmi_history_authorizations",
+		Dims:        nmiHistDims},
 	// --- grants / usage-credits ---------------------------------------------------
 	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "money",
 		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
@@ -767,6 +803,7 @@ var Caveats = []string{
 	"snapshot series evaluate at each bucket's START instant (UTC); without a time grouping they evaluate at the range end (balance measures: strictly-before semantics)",
 	"token_type exists from #796 instrumentation onward: NULL/legacy rows read 'unknown' and are excluded from token_type-filtered analyses; attempt_kind exists from instrumentation onward; older and imported rows read 'unknown'. Declines are measured on attempts, not payments: Stripe- and CCBill-owned renewals are recorded as their providers report them (#1111b)",
 	"attempts, checkouts and rebill cycles begin at their instrumentation (#1110, #1111): earlier history lives in payments and the provider. Checkouts and cycles are dated by their first attempt and due date; a checkout quiet for an hour, and a cycle past its 15-day dunning window, count as settled as of the range end",
+	"nmi_history measures are NMI's own transaction history, read daily per NMI PSP and kept 25 months: they include what OpenRails sent and what came before it. Rows are dated by their month's first instant, so use month-aligned ranges. one_off_sale cannot separate initial sales from retries of declined rebills",
 	"admission_denials are hourly aggregates flushed periodically from Redis; the current hour can lag one flush cycle",
 	"avg_membership_duration_days only counts subscriptions that ENDED in the bucket (right-censored: long-lived survivors are not included until they end)",
 	"time buckets zero-fill: a bucket present with zeros means genuinely zero activity, not missing data",

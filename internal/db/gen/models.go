@@ -839,6 +839,24 @@ type OpenrailsNmiBulkCheckpoint struct {
 	StartedAt  time.Time
 }
 
+// #1120 authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers.
+type OpenrailsNmiHistoryMonth struct {
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	Month          time.Time
+	Kind           string
+	Category       string
+	Reason         string
+	Authorizations int64
+}
+
+// #1120 when each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
+type OpenrailsNmiHistoryRead struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	ReadAt     time.Time
+}
+
 // Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
 type OpenrailsNotification struct {
 	ID            uuid.UUID

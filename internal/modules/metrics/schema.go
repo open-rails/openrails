@@ -149,6 +149,15 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
+			Intent: "NMI's own refusal rate by month and kind, per PSP, over its history",
+			Query: Query{
+				Measures: []string{"nmi_history_authorizations", "nmi_history_refusal_rate"},
+				By:       []string{"time", "nmi_kind", "rail_account"},
+				Grain:    "month",
+				Range:    &QueryRange{Last: "25m"},
+			},
+		},
+		{
 			Intent: "net member change per week (plot new, cancelled)",
 			Query: Query{
 				Measures: []string{"new_subscriptions", "cancellations"},

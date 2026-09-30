@@ -63,6 +63,12 @@ SELECT count(*) FROM openrails.payment_method_updates WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsPaymentMethodUpdates :exec
 DELETE FROM openrails.payment_method_updates WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsNMIHistoryMonths :one
+SELECT count(*) FROM openrails.nmi_history_months WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsNMIHistoryMonths :exec
+DELETE FROM openrails.nmi_history_months WHERE merchant_id = $1;
+
 
 
 -- name: CountMerchantRowsNotificationQueue :one

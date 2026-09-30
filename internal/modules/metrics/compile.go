@@ -92,6 +92,7 @@ var merchantCols = map[Family]string{
 	FamAttempts:       "a.merchant_id",
 	FamCheckouts:      "ck.merchant_id",
 	FamRebillCycles:   "cy.merchant_id",
+	FamNMIHistory:     "h.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {

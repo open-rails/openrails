@@ -41,19 +41,6 @@ type NMIDeclineReportOptions struct {
 	Out          io.Writer
 }
 
-// Report kinds: what NMI's history can tell apart.
-const (
-	reportVerification    = "verification"
-	reportOneOffSale      = "one_off_sale"
-	reportScheduledRebill = "scheduled_rebill"
-)
-
-var reportNotes = []string{
-	"scheduled_rebill is NMI's own schedule charge (action source recurring). NMI never retries a declined one, so each is the first attempt of its period.",
-	"one_off_sale mixes initial sales, upgrades and retries of declined rebills, whether sent by OpenRails, an earlier billing system or the NMI dashboard. NMI's history cannot tell them apart, so rebill retries are not separated here.",
-	"Rates count authorizations, not buyers: a buyer who tries a card three times counts three times.",
-}
-
 // NMIDeclineReport reads an NMI account's authorization history through the
 // Query API and reports approval and refusal rates by month and kind, and
 // each refusal's reason and category from the one decline classifier
@@ -101,10 +88,11 @@ func NMIDeclineReport(ctx context.Context, opts NMIDeclineReportOptions) error {
 		if client == nil {
 			return errors.New("no armed NMI account for this merchant")
 		}
-		report, err := readDeclineHistory(ctx, client, since, until)
+		history, err := client.DeclineHistory(ctx, since, until)
 		if err != nil {
 			return err
 		}
+		report := newDeclineReport(history)
 		report.PSP = psp
 		return report.render(opts.Out, opts.Format)
 	})
@@ -116,7 +104,9 @@ type declineReport struct {
 	Until    time.Time        `json:"until"`
 	Months   []declineMonth   `json:"months"`
 	Refusals []declineRefusal `json:"refusals"`
-	Notes    []string         `json:"notes"`
+	// Undated authorizations carry a date NMI garbled.
+	Undated int      `json:"undated,omitempty"`
+	Notes   []string `json:"notes"`
 }
 
 type declineMonth struct {
@@ -136,60 +126,28 @@ type declineRefusal struct {
 	Count    int    `json:"count"`
 }
 
-// readDeclineHistory pages the transaction report over [since, until).
-func readDeclineHistory(ctx context.Context, client *nmi.NMIClient, since, until time.Time) (declineReport, error) {
-	report := declineReport{Since: since, Until: until, Notes: reportNotes}
+// newDeclineReport lays the history out as the report prints it: rates by
+// month and kind, then refusals by reason over the whole window.
+func newDeclineReport(h nmi.DeclineHistory) declineReport {
+	report := declineReport{Since: h.Since, Until: h.Until, Undated: h.Undated, Notes: nmi.HistoryNotes}
 	months := map[[2]string]*declineMonth{}
 	refusals := map[declineRefusal]int{}
-	seen := map[string]bool{}
-	for page := 1; ; page++ {
-		batch, err := client.TransactionReport(ctx, nmi.QueryFilter{StartDate: since.UTC().Format(nmi.QueryTimeFormat), EndDate: until.UTC().Format(nmi.QueryTimeFormat),
-			ResultLimit: nmi.QueryPageLimit, PageNumber: page})
-		if err != nil {
-			return report, fmt.Errorf("nmi transaction page %d: %w", page, err)
+	for _, c := range h.Counts {
+		key := [2]string{c.Month.Format("2006-01"), c.Kind}
+		m := months[key]
+		if m == nil {
+			m = &declineMonth{Month: key[0], Kind: c.Kind}
+			months[key] = m
 		}
-		if len(batch.Transactions) > 0 {
-			first := strings.TrimSpace(batch.Transactions[0].TransactionID)
-			if seen[first] {
-				return report, fmt.Errorf("nmi transaction pagination repeated page starting at %s", first)
-			}
-			seen[first] = true
+		m.Attempts += c.Count
+		if c.Category == string(decline.Approved) {
+			m.Approved += c.Count
+			continue
 		}
-		for _, t := range batch.Transactions {
-			action, ok := t.Authorization()
-			if !ok {
-				continue
-			}
-			kind := reportOneOffSale
-			switch {
-			case action.Is("validate"):
-				kind = reportVerification
-			case strings.EqualFold(strings.TrimSpace(action.Source), "recurring"):
-				kind = reportScheduledRebill
-			}
-			month := "undated"
-			if at, ok := action.At(); ok {
-				month = at.Format("2006-01")
-			}
-			m := months[[2]string{month, kind}]
-			if m == nil {
-				m = &declineMonth{Month: month, Kind: kind}
-				months[[2]string{month, kind}] = m
-			}
-			m.Attempts++
-			if action.Succeeded() {
-				m.Approved++
-				continue
-			}
-			m.Refused++
-			verdict := decline.ClassifyEvidence(t.Evidence(action))
-			refusals[declineRefusal{Kind: kind, Category: string(verdict.Category), Reason: string(verdict.Reason)}]++
-		}
-		if len(batch.Transactions) < nmi.QueryPageLimit {
-			break
-		}
+		m.Refused += c.Count
+		refusals[declineRefusal{Kind: c.Kind, Category: c.Category, Reason: c.Reason}] += c.Count
 	}
-	order := map[string]int{reportVerification: 0, reportOneOffSale: 1, reportScheduledRebill: 2}
+	order := map[string]int{nmi.HistoryVerification: 0, nmi.HistoryOneOffSale: 1, nmi.HistoryScheduledRebill: 2}
 	for _, m := range months {
 		m.RefusalRate = float64(m.Refused*1000/m.Attempts) / 10
 		report.Months = append(report.Months, *m)
@@ -204,7 +162,7 @@ func readDeclineHistory(ctx context.Context, client *nmi.NMIClient, since, until
 	slices.SortFunc(report.Refusals, func(a, b declineRefusal) int {
 		return cmp.Or(cmp.Compare(order[a.Kind], order[b.Kind]), cmp.Compare(b.Count, a.Count), cmp.Compare(a.Reason, b.Reason))
 	})
-	return report, nil
+	return report
 }
 
 func (r declineReport) render(out io.Writer, format string) error {
@@ -230,6 +188,9 @@ func (r declineReport) render(out io.Writer, format string) error {
 	}
 	if err := tw.Flush(); err != nil {
 		return err
+	}
+	if r.Undated > 0 {
+		fmt.Fprintf(out, "\n%d authorizations carry no readable date and are in no month.\n", r.Undated)
 	}
 	fmt.Fprintln(out, "\nNotes")
 	for _, n := range r.Notes {
