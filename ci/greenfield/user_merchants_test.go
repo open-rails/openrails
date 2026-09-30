@@ -22,6 +22,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	require.NoError(t, err)
 	member, memberToken := newUser(t, cp)
 	owner, ownerToken := newUser(t, cp)
+	require.NoError(t, cp.Core().MarkEmailVerified(ctx, member), "a team email add requires a verified address (#1107)")
 	u, err := cp.Core().AdminGetUser(ctx, member)
 	require.NoError(t, err)
 
