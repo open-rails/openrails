@@ -49,11 +49,12 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		r.SubscriptionLifecycleService,
 		subscriptions,
 		chainReader,
+		r.DB,
 		submitter,
 		network,
 		tokens,
 	)
-	r.SetSolanaRecurringServices(plan, enroll)
+	r.SetSolanaPlanService(plan)
 	r.SetSolanaPrepareCancelService(recurring.NewPrepareCancelService(
 		subscriptions,
 		chainReader,

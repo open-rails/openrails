@@ -167,11 +167,6 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		group.Handle(http.MethodGet, "/checkout/:id/solana-pay", h(httphandlers.GetSolanaPay))
 		group.Handle(http.MethodPost, "/checkout/:id/solana-pay", h(httphandlers.PostSolanaPay))
 	}
-	if providerRoutes.SolanaSigning {
-		// Solana recurring enrollment (#255): confirms after the wallet signs subscribe,
-		// then OpenRails charges the first cycle — so it needs a signer (#661).
-		group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment), required)
-	}
 }
 
 // RegisterMerchantArchiveRoutes mounts the complete portable billing archive

@@ -18,7 +18,6 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -26,97 +25,6 @@ import (
 // #528: AdminPublishSolanaPlan (#254 admin plan-publish) was dropped — it lived
 // only on the retired per-user admin surface. On-chain plan execution + the
 // self-service enroll/cancel/tier-change handlers below are unchanged.
-
-// confirmSolanaEnrollmentRequest is the user body for activating a recurring
-// subscription after the wallet has signed init_subscription_authority +
-// subscribe (#255). The financial terms are NOT taken from the client — they are
-// read server-side from the price's published plan config.
-type confirmSolanaEnrollmentRequest struct {
-	PriceID          openrails.PriceID `json:"price_id" binding:"required"`
-	SubscriberWallet string            `json:"subscriber_wallet" binding:"required"`
-	// Signature is the confirmed atomic subscribe-bundle tx signature the wallet
-	// submitted (#286). Optional; recorded on the membership/row when present.
-	Signature string `json:"signature,omitempty"`
-}
-
-// ConfirmSolanaEnrollment verifies the on-chain subscription, charges the first
-// cycle, and creates the local membership (#255). User-authenticated.
-func ConfirmSolanaEnrollment(r *httprequest.Request) {
-	svc := r.State.SolanaEnrollService
-	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Solana recurring billing is not configured")
-		return
-	}
-	user := r.GetUser()
-	if user == nil || user.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "authentication required")
-		return
-	}
-	var req confirmSolanaEnrollmentRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	if req.PriceID.IsZero() {
-		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
-		return
-	}
-	priceID := req.PriceID.UUID()
-	if r.State.PriceService == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "catalog is not configured")
-		return
-	}
-	price, err := r.State.PriceService.GetByID(r.Request.Context(), priceID)
-	if err != nil || price == nil {
-		r.ErrorJSON(http.StatusNotFound, "price not found")
-		return
-	}
-
-	// Read the canonical, immutable plan terms from the price's Solana config —
-	// these were stamped at publish time and must not be client-supplied.
-	cfg := price.PSPLinkForRail(models.RailSolana)
-	if cfg == nil {
-		r.ErrorJSON(http.StatusBadRequest, "price is not configured for Solana recurring billing")
-		return
-	}
-	planID, perr := strconv.ParseUint(cfg["plan_id"], 10, 64)
-	amount, aerr := strconv.ParseUint(cfg["amount_base_units"], 10, 64)
-	period, herr := strconv.ParseUint(cfg["period_hours"], 10, 64)
-	createdAt, _ := strconv.ParseInt(cfg["created_at"], 10, 64)
-	if perr != nil || aerr != nil || herr != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "price Solana plan config is malformed")
-		return
-	}
-
-	var email string
-	if user.Email != nil {
-		email = *user.Email
-	}
-	merchantID, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "no merchant resolved on request")
-		return
-	}
-	sub, err := svc.ConfirmEnrollment(r.Request.Context(), recurring.EnrollInput{
-		MerchantID:       merchantID,
-		UserID:           user.ID,
-		UserEmail:        email,
-		PriceID:          priceID,
-		SubscriberWallet: req.SubscriberWallet,
-		PlanID:           planID,
-		MintSymbol:       cfg["mint_symbol"],
-		AmountBaseUnits:  amount,
-		PeriodHours:      period,
-		PlanCreatedAt:    createdAt,
-		FiatAmount:       price.Amount,
-		Currency:         price.Currency,
-		Signature:        strings.TrimSpace(req.Signature),
-	})
-	if err != nil {
-		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
-		return
-	}
-	r.SuccessJSON(subscriptions.SubscriptionView(sub, sub.Price, r.Clock.Now()))
-}
 
 // PrepareSolanaCancelTx builds the UNSIGNED on-chain cancel_subscription
 // transaction the subscriber's wallet signs to TRUSTLESSLY revoke a recurring
@@ -613,22 +521,24 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		tokens,
 	)
 	result, err := svc.Confirm(r.Request.Context(), recurring.ConfirmTierChangeInput{
-		Signature:            req.Signature,
-		OldSubscriptionID:    subscriptionID,
-		UserID:               resolved.oldSub.CustomerID.String(),
-		UserEmail:            email,
-		NewPriceID:           resolved.newPrice.ID,
-		NewSubscriptionPDA:   prep.NewSubscriptionPDA,
-		NewPlanID:            resolved.newTerms.planID,
-		NewMintSymbol:        resolved.newTerms.mintSymbol,
-		NewAmountBaseUnits:   resolved.newTerms.amount,
-		NewPeriodHours:       resolved.newTerms.period,
-		NewPlanCreatedAt:     resolved.newTerms.createdAt,
-		NewFiatAmount:        resolved.newPrice.Amount,
-		NewCurrency:          resolved.newPrice.Currency,
-		IsUpgrade:            resolved.isUpgrade,
-		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
-		OldPeriodEndsAt:      resolved.oldSub.CurrentPeriodEndsAt,
+		Signature:          req.Signature,
+		OldSubscriptionID:  subscriptionID,
+		UserID:             resolved.oldSub.CustomerID.String(),
+		UserEmail:          email,
+		NewPriceID:         resolved.newPrice.ID,
+		NewSubscriptionPDA: prep.NewSubscriptionPDA,
+		NewPlanID:          resolved.newTerms.planID,
+		NewMintSymbol:      resolved.newTerms.mintSymbol,
+		NewAmountBaseUnits: resolved.newTerms.amount,
+		NewPeriodHours:     resolved.newTerms.period,
+		NewPlanCreatedAt:   resolved.newTerms.createdAt,
+		NewFiatAmount:      resolved.newPrice.Amount,
+		NewCurrency:        resolved.newPrice.Currency,
+		IsUpgrade:          resolved.isUpgrade,
+		// No FirstChargeBaseUnits: this route re-quotes the proration at confirm
+		// time and cannot reproduce the amount prepare quoted, so the landed,
+		// merchant-co-signed pull is the charge.
+		OldPeriodEndsAt: resolved.oldSub.CurrentPeriodEndsAt,
 	})
 	if err != nil {
 		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))

@@ -121,6 +121,13 @@ delegates a spending allowance on their token account. OpenRails then pulls one
 plan-amount per period via `transfer_subscription` — the merchant signer signs
 and pays gas; funds move from the subscriber's ATA to the merchant's ATA.
 
+A subscription activates only from its first payment. Confirm reads the landed
+transaction by signature and requires the bundle the checkout prepared: signed
+by the checkout's wallet, carrying the checkout's reference, subscribing to the
+plan's terms, and a merchant-co-signed pull of the full first period into the
+merchant's ATA, landed within the checkout's validity. A signature settles one
+checkout only, across every merchant and PSP.
+
 - Catalog prices bill in `currency: usd`. Declaring `psps: [solana]` creates or
   reattaches a USDC plan by default. Use `psp_links.solana.token: USD1` to select
   USD1 instead, or supply `plan_pda` to attach an existing plan and resolve its

@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -76,4 +77,46 @@ func DecodeTransferData(data []byte) (*TransferData, error) {
 		Delegator: solanago.PublicKeyFromBytes(data[9 : 9+pubkeyLen]),
 		Mint:      solanago.PublicKeyFromBytes(data[9+pubkeyLen : 9+2*pubkeyLen]),
 	}, nil
+}
+
+// SubscribeData mirrors subscribe's instruction data (the inverse of
+// BuildSubscribe): the plan and the terms the subscriber agreed to.
+type SubscribeData struct {
+	PlanID                 uint64
+	PlanBump               uint8
+	Mint                   solanago.PublicKey
+	Amount                 uint64
+	PeriodHours            uint64
+	CreatedAt              int64
+	SubscriptionAuthInitID int64
+}
+
+// subscribeDataLen = disc(1) + planId(8) + bump(1) + mint(32) + amount(8) +
+// periodHours(8) + createdAt(8) + initId(8).
+const subscribeDataLen = 1 + 8 + 1 + pubkeyLen + 8 + 8 + 8 + 8
+
+// DecodeSubscribeData parses subscribe instruction data.
+func DecodeSubscribeData(data []byte) (*SubscribeData, error) {
+	if len(data) < subscribeDataLen {
+		return nil, fmt.Errorf("subscriptions: subscribe data too short: got %d bytes, need %d", len(data), subscribeDataLen)
+	}
+	if data[0] != discSubscribe {
+		return nil, fmt.Errorf("subscriptions: not subscribe data: discriminator %d (want %d)", data[0], discSubscribe)
+	}
+	off := 1 + 8 + 1 + pubkeyLen
+	return &SubscribeData{
+		PlanID:                 binary.LittleEndian.Uint64(data[1:9]),
+		PlanBump:               data[9],
+		Mint:                   solanago.PublicKeyFromBytes(data[10:off]),
+		Amount:                 binary.LittleEndian.Uint64(data[off : off+8]),
+		PeriodHours:            binary.LittleEndian.Uint64(data[off+8 : off+16]),
+		CreatedAt:              i64FromLE(data[off+16 : off+24]),
+		SubscriptionAuthInitID: i64FromLE(data[off+24 : off+32]),
+	}, nil
+}
+
+func i64FromLE(b []byte) int64 {
+	var v int64
+	_ = binary.Read(bytes.NewReader(b), binary.LittleEndian, &v)
+	return v
 }

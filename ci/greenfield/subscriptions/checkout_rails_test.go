@@ -59,7 +59,7 @@ func (w *world) options(priceKey string) map[string]openrails.CheckoutRailOption
 }
 
 // withSolana declares a Solana PSP whose signer owns plans on a loopback node.
-func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PublicKey) {
+func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) {
 	fake := solanafake.New()
 	t.Cleanup(fake.Close)
 	signer := solanago.NewWallet().PrivateKey
@@ -78,7 +78,7 @@ func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PublicKey) {
 			Settings: map[string]any{"rpc_provider": "public", "tokens": map[string]any{"SOL": map[string]any{}, "DUSD": map[string]any{}}},
 		}}
 	}
-	return fake, signer.PublicKey()
+	return fake, signer
 }
 
 func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
@@ -86,7 +86,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	fake, merchant := withSolana(t, w)
 	w.start()
 
-	plan, err := fake.Plan(merchant, 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
+	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
 	require.NoError(t, err)
 	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
     currency: usd
