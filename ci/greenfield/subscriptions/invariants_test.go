@@ -15,7 +15,8 @@ import (
 // The providers' ledgers (the fakes) are the source of truth:
 //
 //	recorded:  every approved, unrefunded provider charge is a completed local
-//	           payment, unless its operation is still unresolved;
+//	           payment or a settled invoice payment, unless its operation is
+//	           still unresolved;
 //	evidenced: every completed local rail payment is a provider charge;
 //	once:      no subscription period holds two completed charges;
 //	moved:     payments holds only money that moved: a declined charge is a
@@ -72,6 +73,18 @@ func (w *world) checkMoneyInvariants() {
 		local[id] = true
 		if (rail == "nmi" || rail == "stripe") && !hasKey(provider, id) {
 			phantom = append(phantom, rail+":"+id)
+		}
+	}
+	rows.Close()
+	rows, err = w.pool.Query(ctx, `SELECT rail_payment_id FROM `+schema+`.invoice_payments WHERE status = 'settled' AND rail_payment_id IS NOT NULL`)
+	if err != nil {
+		t.Errorf("invariants: read invoice payments: %v", err)
+		return
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			local[id] = true
 		}
 	}
 	rows.Close()
