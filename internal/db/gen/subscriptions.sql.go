@@ -1523,26 +1523,23 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 	return items, nil
 }
 
-const listEngineSubscriptionsToWake = `-- name: ListEngineSubscriptionsToWake :many
+const listLiveSubscriptionsOnMethod = `-- name: ListLiveSubscriptionsOnMethod :many
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND payment_method_id = $2::uuid
-  AND collection_policy = 'engine'
-  AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > $3::timestamptz)))
+  AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND deleted_at IS NULL
 ORDER BY id
 `
 
-type ListEngineSubscriptionsToWakeParams struct {
+type ListLiveSubscriptionsOnMethodParams struct {
 	MerchantID      uuid.UUID
 	PaymentMethodID uuid.UUID
-	Now             time.Time
 }
 
-// The delinquent engine memberships a replaced card retries at the next due
-// pass, and those awaiting a card (subscriptions.WakeForReplacedMethod).
-func (q *Queries) ListEngineSubscriptionsToWake(ctx context.Context, arg ListEngineSubscriptionsToWakeParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listEngineSubscriptionsToWake, arg.MerchantID, arg.PaymentMethodID, arg.Now)
+// #1115: the memberships a stored card pays for.
+func (q *Queries) ListLiveSubscriptionsOnMethod(ctx context.Context, arg ListLiveSubscriptionsOnMethodParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listLiveSubscriptionsOnMethod, arg.MerchantID, arg.PaymentMethodID)
 	if err != nil {
 		return nil, err
 	}
@@ -1956,6 +1953,45 @@ func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscri
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptionsToWake = `-- name: ListSubscriptionsToWake :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid
+  AND payment_method_id = $2::uuid
+  AND collection_policy IN ('engine', 'nmi_schedule')
+  AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > $3::timestamptz)))
+  AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListSubscriptionsToWakeParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+	Now             time.Time
+}
+
+// The delinquent memberships OpenRails collects that a replaced card retries
+// at the next due pass, and those awaiting a card
+// (subscriptions.WakeForReplacedMethod).
+func (q *Queries) ListSubscriptionsToWake(ctx context.Context, arg ListSubscriptionsToWakeParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionsToWake, arg.MerchantID, arg.PaymentMethodID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

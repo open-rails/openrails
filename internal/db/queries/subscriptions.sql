@@ -411,13 +411,23 @@ FOR UPDATE;
 SELECT * FROM openrails.subscriptions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
--- name: ListEngineSubscriptionsToWake :many
--- The delinquent engine memberships a replaced card retries at the next due
--- pass, and those awaiting a card (subscriptions.WakeForReplacedMethod).
+-- name: ListSubscriptionsToWake :many
+-- The delinquent memberships OpenRails collects that a replaced card retries
+-- at the next due pass, and those awaiting a card
+-- (subscriptions.WakeForReplacedMethod).
 SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-  AND collection_policy = 'engine'
+  AND collection_policy IN ('engine', 'nmi_schedule')
   AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > sqlc.arg(now)::timestamptz)))
+  AND deleted_at IS NULL
+ORDER BY id;
+
+-- name: ListLiveSubscriptionsOnMethod :many
+-- #1115: the memberships a stored card pays for.
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+  AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND deleted_at IS NULL
 ORDER BY id;

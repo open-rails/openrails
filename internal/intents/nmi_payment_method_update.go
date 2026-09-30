@@ -421,6 +421,10 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		if err := NewStore(d).RecordProgress(ctx, intent.ID, map[string]any{"finalized": true}); err != nil {
 			return err
 		}
+		if err := paymentmethods.RecordCardUpdate(ctx, d.Gen(ctx), paymentmethods.CardUpdate{MerchantID: intent.MerchantID, PaymentMethodID: pm.ID, CustomerID: pm.CustomerID,
+			PSPID: pm.PspID, Source: paymentmethods.UpdateByCustomer, Kind: paymentmethods.CardUpdated, EventRef: intent.ID.String(), At: now}); err != nil {
+			return err
+		}
 		if err := recordReplacementVerification(ctx, d, intent, pm.CustomerID, pm.ID, now, attempts.Attempt{Approved: true, TransactionID: ref, Answer: decline.Evidence{CardBrand: card.CardType, CardLast4: card.LastFour}}); err != nil {
 			return err
 		}
@@ -458,6 +462,13 @@ func entryCard(customer nmi.V5Customer, billingID string) (nmiCard, error) {
 		return nmiCard{}, errNMIBillingEntryAbsent
 	}
 	return billingCard(b)
+}
+
+// NMIVaultCard is the masked card of one billing entry of an NMI vault ("" =
+// the primary): last four, brand and MMYY expiry.
+func NMIVaultCard(customer nmi.V5Customer, billingID string) (lastFour, cardType, expiry string, err error) {
+	card, err := entryCard(customer, billingID)
+	return card.LastFour, card.CardType, card.ExpiryDate, err
 }
 
 func billingCard(b nmi.V5CustomerBilling) (nmiCard, error) {

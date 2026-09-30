@@ -682,6 +682,39 @@ func (q *Queries) GetPaymentMethodForShare(ctx context.Context, arg GetPaymentMe
 	return i, err
 }
 
+const insertPaymentMethodUpdate = `-- name: InsertPaymentMethodUpdate :exec
+INSERT INTO openrails.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
+    $5::text, $6::text, $7::text, COALESCE($8::timestamptz, now()))
+ON CONFLICT DO NOTHING
+`
+
+type InsertPaymentMethodUpdateParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+	CustomerID      uuid.UUID
+	PspID           uuid.UUID
+	Source          string
+	Kind            string
+	EventRef        string
+	At              *time.Time
+}
+
+// #1115: idempotent on (source, event_ref, method); at defaults to now.
+func (q *Queries) InsertPaymentMethodUpdate(ctx context.Context, arg InsertPaymentMethodUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertPaymentMethodUpdate,
+		arg.MerchantID,
+		arg.PaymentMethodID,
+		arg.CustomerID,
+		arg.PspID,
+		arg.Source,
+		arg.Kind,
+		arg.EventRef,
+		arg.At,
+	)
+	return err
+}
+
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
 SELECT DISTINCT ON (s.payment_method_id)
     s.payment_method_id AS payment_method_id,
@@ -1093,6 +1126,68 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, arg ListPayment
 	return items, nil
 }
 
+const listVaultPaymentMethods = `-- name: ListVaultPaymentMethods :many
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, is_default FROM openrails.payment_methods
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND rail = 'nmi'
+  AND rail_customer_ref = $3::text AND park_reason NOT LIKE 'delete:%'
+ORDER BY created_at, id
+`
+
+type ListVaultPaymentMethodsParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	RailCustomerRef string
+}
+
+// #1115: the stored cards on one NMI vault of one PSP.
+func (q *Queries) ListVaultPaymentMethods(ctx context.Context, arg ListVaultPaymentMethodsParams) ([]OpenrailsPaymentMethod, error) {
+	rows, err := q.db.Query(ctx, listVaultPaymentMethods, arg.MerchantID, arg.PspID, arg.RailCustomerRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPaymentMethod
+	for rows.Next() {
+		var i OpenrailsPaymentMethod
+		if err := rows.Scan(
+			&i.ID,
+			&i.Rail,
+			&i.InitialTransactionID,
+			&i.LastFour,
+			&i.CardType,
+			&i.ExpiryDate,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.RailCustomerRef,
+			&i.RailMethodRef,
+			&i.StoredCredentialRecurringRef,
+			&i.StoredCredentialUnscheduledRef,
+			&i.Custodian,
+			&i.CustodianID,
+			&i.Fingerprint,
+			&i.NetworkTokenID,
+			&i.NetworkTokenStatus,
+			&i.NetworkTokenPar,
+			&i.ChargeVia,
+			&i.ParkReason,
+			&i.ParkedAt,
+			&i.AccountUpdaterCheckedAt,
+			&i.IsDefault,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCustomerDefaultPaymentMethod = `-- name: LockCustomerDefaultPaymentMethod :exec
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.default_payment_method:' || $1::uuid::text || ':' || $2::uuid::text, 0))
 `
@@ -1138,7 +1233,37 @@ func (q *Queries) MarkDefaultPaymentMethod(ctx context.Context, arg MarkDefaultP
 	return result.RowsAffected(), nil
 }
 
-const parkPaymentMethodByMethodRef = `-- name: ParkPaymentMethodByMethodRef :execrows
+const parkPaymentMethod = `-- name: ParkPaymentMethod :execrows
+UPDATE openrails.payment_methods SET
+    park_reason = $1::text,
+    parked_at = $2::timestamptz,
+    updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND park_reason = ''
+`
+
+type ParkPaymentMethodParams struct {
+	ParkReason string
+	ParkedAt   time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #1115: an account updater reported the card's account closed. The first
+// park stands.
+func (q *Queries) ParkPaymentMethod(ctx context.Context, arg ParkPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, parkPaymentMethod,
+		arg.ParkReason,
+		arg.ParkedAt,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const parkPaymentMethodByMethodRef = `-- name: ParkPaymentMethodByMethodRef :many
 UPDATE openrails.payment_methods SET
     park_reason = $1,
     parked_at = now(),
@@ -1148,6 +1273,7 @@ WHERE merchant_id = $2::uuid
   AND custodian = $4
   AND rail_method_ref = $5
   AND park_reason = ''
+RETURNING id, customer_id, psp_id
 `
 
 type ParkPaymentMethodByMethodRefParams struct {
@@ -1158,13 +1284,19 @@ type ParkPaymentMethodByMethodRefParams struct {
 	RailMethodRef string
 }
 
+type ParkPaymentMethodByMethodRefRow struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	PspID      uuid.UUID
+}
+
 // #795 cancellation-last-resort: a custody-side instrument problem (token
 // deleted/expired, closed account) PARKS the instrument — charges fail loudly,
 // the operator is notified, and nothing is terminally cancelled. Idempotent:
 // an already-parked instrument keeps its first park. Keyed on the custodian
 // that reported the problem (or#879), since the method ref is its token id.
-func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaymentMethodByMethodRefParams) (int64, error) {
-	result, err := q.db.Exec(ctx, parkPaymentMethodByMethodRef,
+func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaymentMethodByMethodRefParams) ([]ParkPaymentMethodByMethodRefRow, error) {
+	rows, err := q.db.Query(ctx, parkPaymentMethodByMethodRef,
 		arg.ParkReason,
 		arg.MerchantID,
 		arg.CustodianID,
@@ -1172,9 +1304,21 @@ func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaym
 		arg.RailMethodRef,
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []ParkPaymentMethodByMethodRefRow
+	for rows.Next() {
+		var i ParkPaymentMethodByMethodRefRow
+		if err := rows.Scan(&i.ID, &i.CustomerID, &i.PspID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const parkStripePaymentMethodByRef = `-- name: ParkStripePaymentMethodByRef :execrows
@@ -1252,6 +1396,43 @@ func (q *Queries) RefreshCustodianCardMetadata(ctx context.Context, arg RefreshC
 	return result.RowsAffected(), nil
 }
 
+const refreshPaymentMethodCard = `-- name: RefreshPaymentMethodCard :execrows
+UPDATE openrails.payment_methods SET
+    last_four = COALESCE(NULLIF($1::text, ''), last_four),
+    card_type = COALESCE(NULLIF($2::text, ''), card_type),
+    expiry_date = COALESCE(NULLIF($3::text, ''), expiry_date),
+    park_reason = '',
+    parked_at = NULL,
+    updated_at = $4::timestamptz
+WHERE merchant_id = $5::uuid AND id = $6::uuid AND park_reason NOT LIKE 'delete:%'
+`
+
+type RefreshPaymentMethodCardParams struct {
+	LastFour   string
+	CardType   string
+	ExpiryDate string
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #1115: an account updater reissued the card in place. Its details change,
+// and a park an earlier notice set is cleared.
+func (q *Queries) RefreshPaymentMethodCard(ctx context.Context, arg RefreshPaymentMethodCardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, refreshPaymentMethodCard,
+		arg.LastFour,
+		arg.CardType,
+		arg.ExpiryDate,
+		arg.UpdatedAt,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const replacePaymentMethodCard = `-- name: ReplacePaymentMethodCard :execrows
 UPDATE openrails.payment_methods SET
     rail_method_ref = $1::text,
@@ -1260,9 +1441,12 @@ UPDATE openrails.payment_methods SET
     expiry_date = $4,
     metadata = $5,
     stored_credential_recurring_ref = $6::text,
+    park_reason = '',
+    parked_at = NULL,
     updated_at = $7::timestamptz
 WHERE merchant_id = $8::uuid AND id = $9::uuid
   AND rail_method_ref = $10::text
+  AND park_reason NOT LIKE 'delete:%'
 `
 
 type ReplacePaymentMethodCardParams struct {
@@ -1299,7 +1483,7 @@ func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePayme
 	return result.RowsAffected(), nil
 }
 
-const rotateCustodianMethodRef = `-- name: RotateCustodianMethodRef :execrows
+const rotateCustodianMethodRef = `-- name: RotateCustodianMethodRef :many
 UPDATE openrails.payment_methods SET
     rail_method_ref = $1,
     fingerprint = COALESCE(NULLIF($2::text, ''), fingerprint),
@@ -1314,6 +1498,7 @@ WHERE merchant_id = $6::uuid
   AND custodian = $8
   AND rail_method_ref = $9
   AND park_reason NOT LIKE 'delete:%'
+RETURNING id, customer_id, psp_id
 `
 
 type RotateCustodianMethodRefParams struct {
@@ -1328,6 +1513,12 @@ type RotateCustodianMethodRefParams struct {
 	OldMethodRef   string
 }
 
+type RotateCustodianMethodRefRow struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	PspID      uuid.UUID
+}
+
 // #795 Account Updater UPD_* fold: the custodian minted a NEW token id —
 // re-point rail_method_ref and refresh card metadata. The old->new mapping is
 // the same machinery a future custodian swap remap uses.
@@ -1337,8 +1528,8 @@ type RotateCustodianMethodRefParams struct {
 // the park set kept charges refused (custodian_proxy_collection) and invoice
 // recovery skipping the method, which is the engine overruling the very
 // recovery the account updater exists to deliver.
-func (q *Queries) RotateCustodianMethodRef(ctx context.Context, arg RotateCustodianMethodRefParams) (int64, error) {
-	result, err := q.db.Exec(ctx, rotateCustodianMethodRef,
+func (q *Queries) RotateCustodianMethodRef(ctx context.Context, arg RotateCustodianMethodRefParams) ([]RotateCustodianMethodRefRow, error) {
+	rows, err := q.db.Query(ctx, rotateCustodianMethodRef,
 		arg.NewMethodRef,
 		arg.NewFingerprint,
 		arg.NewLastFour,
@@ -1350,9 +1541,21 @@ func (q *Queries) RotateCustodianMethodRef(ctx context.Context, arg RotateCustod
 		arg.OldMethodRef,
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []RotateCustodianMethodRefRow
+	for rows.Next() {
+		var i RotateCustodianMethodRefRow
+		if err := rows.Scan(&i.ID, &i.CustomerID, &i.PspID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setNetworkTokenStatusByNetworkTokenID = `-- name: SetNetworkTokenStatusByNetworkTokenID :execrows

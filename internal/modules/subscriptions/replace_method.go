@@ -26,10 +26,11 @@ func ReplaceMethod(sub *models.Subscription, now time.Time) error {
 	return nil
 }
 
-// WakeForReplacedMethod applies ReplaceMethod to every delinquent engine
-// membership charged to paymentMethodID whose card was replaced in place.
+// WakeForReplacedMethod applies ReplaceMethod to every delinquent membership
+// OpenRails collects (engine or NMI-owned) charged to paymentMethodID whose
+// card was replaced in place, by the customer or an account updater.
 func WakeForReplacedMethod(ctx context.Context, d *db.DB, merchantID, paymentMethodID uuid.UUID, now time.Time) error {
-	ids, err := d.Gen(ctx).ListEngineSubscriptionsToWake(ctx, gen.ListEngineSubscriptionsToWakeParams{MerchantID: merchantID, PaymentMethodID: paymentMethodID, Now: now})
+	ids, err := d.Gen(ctx).ListSubscriptionsToWake(ctx, gen.ListSubscriptionsToWakeParams{MerchantID: merchantID, PaymentMethodID: paymentMethodID, Now: now})
 	if err != nil {
 		return fmt.Errorf("list memberships to wake: %w", err)
 	}
@@ -40,7 +41,8 @@ func WakeForReplacedMethod(ctx context.Context, d *db.DB, merchantID, paymentMet
 			return err
 		}
 		waiting := sub.Status == models.StatusAwaitingMethod || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(now)))
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || sub.PaymentMethodID == nil || *sub.PaymentMethodID != paymentMethodID || !waiting {
+		collects := sub.CollectionPolicy == models.CollectionPolicyEngine || sub.CollectionPolicy == models.CollectionPolicyNMISchedule
+		if !collects || sub.PaymentMethodID == nil || *sub.PaymentMethodID != paymentMethodID || !waiting {
 			continue
 		}
 		if err := ReplaceMethod(sub, now); err != nil {

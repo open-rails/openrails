@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -176,7 +177,7 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 	if err != nil {
 		return fmt.Errorf("park custodian-held instrument for %s: %w", evt.Type, err)
 	}
-	if rows > 0 {
+	if len(rows) > 0 {
 		// Operator-visible: a parked instrument means renewals on it will fail
 		// loudly until re-collection (#657 cutover) or vault repair.
 		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-cancelled)")
@@ -318,7 +319,7 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("basistheory account updater: results for job %s: %w", jobID, err)
 	}
-	stats, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), rows)
+	stats, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), jobID, rows)
 	if err != nil {
 		return err
 	}
@@ -330,8 +331,8 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 
 // FoldAccountUpdaterRows applies parsed AU result rows. Exported for the
 // integration test to drive the fold without a live BT job.
-func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, rows []basistheory.AccountUpdaterResultRow) error {
-	_, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), rows)
+func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, jobRef string, rows []basistheory.AccountUpdaterResultRow) error {
+	_, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), jobRef, rows)
 	return err
 }
 
@@ -358,14 +359,24 @@ type AccountUpdaterFoldStats struct {
 // Doctrine: nothing is ever deleted and nothing is terminally cancelled. A
 // closed account or a contact-cardholder answer PARKS the instrument (or#870
 // bucket 2) so charges fail loudly and an operator decides.
-func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
+func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, jobRef string, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
 	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
 	mid, cid, err := custodianScopeIDs(ctx)
 	if err != nil {
 		return stats, err
 	}
-	park := func(token, reason, why string) error {
-		n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{MerchantID: mid, CustodianID: cid,
+	// #1115: each method a row changed is one card update.
+	record := func(token string, kind paymentmethods.CardUpdateKind, methods []gen.RotateCustodianMethodRefRow) error {
+		for _, m := range methods {
+			if err := paymentmethods.RecordCardUpdate(ctx, q, paymentmethods.CardUpdate{MerchantID: mid, PaymentMethodID: m.ID, CustomerID: m.CustomerID,
+				PSPID: m.PspID, Source: paymentmethods.UpdateBTAccountUpdater, Kind: kind, EventRef: strings.TrimSpace(jobRef) + ":" + token}); err != nil {
+				return fmt.Errorf("account updater: record %s: %w", token, err)
+			}
+		}
+		return nil
+	}
+	park := func(token, reason, why string, kind paymentmethods.CardUpdateKind) error {
+		parked, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{MerchantID: mid, CustodianID: cid,
 			Custodian:     models.CustodianBasisTheory,
 			RailMethodRef: token,
 			ParkReason:    reason,
@@ -373,7 +384,14 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basis
 		if err != nil {
 			return fmt.Errorf("account updater: park %s: %w", token, err)
 		}
-		if n > 0 {
+		methods := make([]gen.RotateCustodianMethodRefRow, 0, len(parked))
+		for _, p := range parked {
+			methods = append(methods, gen.RotateCustodianMethodRefRow(p))
+		}
+		if err := record(token, kind, methods); err != nil {
+			return err
+		}
+		if len(parked) > 0 {
 			stats.Parked++
 			log.WithContext(ctx).WithFields(log.Fields{
 				"bt_token_id": token, "park_reason": reason,
@@ -391,7 +409,7 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basis
 				// In-place update (dedup): metadata refresh only, same token id.
 				newRef = row.Token
 			}
-			n, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{MerchantID: mid, CustodianID: cid,
+			rotated, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{MerchantID: mid, CustodianID: cid,
 				Custodian:      models.CustodianBasisTheory,
 				OldMethodRef:   row.Token,
 				NewMethodRef:   newRef,
@@ -403,7 +421,10 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basis
 			if err != nil {
 				return stats, fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
 			}
-			if n > 0 {
+			if err := record(row.Token, paymentmethods.CardUpdated, rotated); err != nil {
+				return stats, err
+			}
+			if len(rotated) > 0 {
 				stats.Adopted++
 				if newRef != row.Token {
 					stats.Rotated++
@@ -413,11 +434,11 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basis
 				}
 			}
 		case basistheory.AUOutcomeClosed:
-			if err := park(row.Token, "bt_au_closed_account", "closed account"); err != nil {
+			if err := park(row.Token, "bt_au_closed_account", "closed account", paymentmethods.CardClosed); err != nil {
 				return stats, err
 			}
 		case basistheory.AUOutcomeContactCardholder:
-			if err := park(row.Token, "bt_au_contact_cardholder", "the network will not answer without the cardholder"); err != nil {
+			if err := park(row.Token, "bt_au_contact_cardholder", "the network will not answer without the cardholder", paymentmethods.ContactCustomer); err != nil {
 				return stats, err
 			}
 		case basistheory.AUOutcomeNoChange:

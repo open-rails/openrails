@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 
@@ -44,6 +45,9 @@ type NMIWebhookService struct {
 	DeduplicationService         *DeduplicationService
 	NotificationService          *subscriptions.NotificationService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
+	// NMIResolver arms the account's NMI client for the reads a notice needs
+	// (the vault behind an Account Updater notice, #1115).
+	NMIResolver railresolve.NMIClientResolver
 	// ConvergeEnqueuer (#684): subscription-state events are wake-up signals —
 	// the handler marks the subscription dirty and the coalesced River job
 	// fetches provider truth and converges via the #665 decider.
@@ -358,31 +362,6 @@ func (s *NMIWebhookService) markDirtyFromTransactionEvent(ctx context.Context) e
 		}, nil))
 	}
 	return markSubscriptionDirty(ctx, s.ConvergeEnqueuer, s.Rail, reference, s.Data.EventType, 0)
-}
-
-func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
-	log.WithContext(ctx).
-		WithField("eventType", s.Data.EventType).
-		Info("Processing NMI ACU notification")
-
-	body, err := s.parseACUEventBody()
-	if err != nil {
-		return err
-	}
-
-	railCustomerRef := body.VaultID.Trimmed()
-	fields := log.Fields{"vault_id": railCustomerRef}
-	if body.Subscription != nil && !body.Subscription.SubscriptionID.IsEmpty() {
-		fields["subscription_id"] = body.Subscription.SubscriptionID.Trimmed()
-	}
-	if body.PaymentMethod != nil {
-		fields["card_last4"] = body.PaymentMethod.LastFour.Trimmed()
-		fields["card_type"] = body.PaymentMethod.CardType.Trimmed()
-		fields["expiry"] = body.PaymentMethod.ExpiryDate.Trimmed()
-	}
-
-	log.WithContext(ctx).WithFields(fields).Info("Received NMI ACU event (no automatic vault update configured)")
-	return nil
 }
 
 type nmiChargebackMatch struct {

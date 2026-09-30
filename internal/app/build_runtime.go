@@ -852,6 +852,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		DeduplicationService:         deduplicationService,
 		RailCustomerService:          railCustomerService,
 		RailConfigs:                  railConfigs,
+		NMIResolver:                  collectionResolver,
 		MoneyService:                 moneyService,
 	}
 
