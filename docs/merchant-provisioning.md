@@ -80,7 +80,9 @@ Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
 (`merchant:settings:update`), subject to the rename interval and, on hosted
 deployments, the reserved names and creation pattern. Hosts rename as the
 operator with `ControlPlane.RenameMerchant`. `GET /v1/platform/merchants?q=`
-searches current names.
+searches current names. A signed-in user lists the merchants they hold a role in
+with `GET /v1/merchants` (`{id, slug, display_name, role}`, highest role per
+merchant); hosts use `ControlPlane.ListUserMerchants`.
 
 ### Hosted creation recipe (registration is provisioning)
 

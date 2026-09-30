@@ -7,8 +7,7 @@ import { twoFactorVerificationBody, type TwoFactorChallenge } from "@/lib/auth"
 import { authStateQueryOptions, consumeOIDCFragment } from "@/lib/auth-state"
 import { client, server, type Reply } from "@/test/harness"
 
-const membership = (slug: string, persona = "merchant") =>
-  ({ persona, instance_slug: slug, instance_name: slug })
+const membership = (slug: string) => ({ id: `id-${slug}`, slug, role: "owner" })
 const who = { id: "user-1", email: "alice@example.test" }
 
 let routes: Record<string, Reply>
@@ -16,9 +15,7 @@ beforeEach(async () => {
   routes = {
     "/capabilities": { password: { login: true } },
     "/me": who,
-    "/me/groups": {
-      data: [membership("merchant-b"), membership("merchant-a"), membership("ignored", "customer")],
-    },
+    "/merchants": { object: "list", data: [membership("merchant-b"), membership("merchant-a")] },
   }
   await server(routes)
   vi.stubGlobal("window", { location: { hash: "", pathname: "/admin", search: "" } })
@@ -29,15 +26,15 @@ afterEach(() => vi.unstubAllGlobals())
 const load = () => client().fetchQuery(authStateQueryOptions())
 
 describe("auth state", () => {
-  it("lists only merchant memberships and selects one for every request", async () => {
+  it("lists the user's merchants and selects one for every request", async () => {
     setTokens({ access_token: "token" })
 
     const state = await load()
 
     expect(state.capabilities).toEqual({ password: { login: true } })
     expect(state.identity?.who).toEqual(who)
-    expect(state.identity?.merchants.map((m) => m.instance_slug)).toEqual(["merchant-a", "merchant-b"])
-    expect(state.identity?.activeMerchant?.instance_slug).toBe("merchant-a")
+    expect(state.identity?.merchants.map((m) => m.slug)).toEqual(["merchant-a", "merchant-b"])
+    expect(state.identity?.activeMerchant?.slug).toBe("merchant-a")
     // The selection is written back, so cache keys and headers agree with it.
     expect(getTokens()?.merchant).toBe("merchant-a")
   })
@@ -70,7 +67,7 @@ describe("auth state", () => {
 
   it("never attaches an identity to a session that changed while it loaded", async () => {
     setTokens({ access_token: "first" })
-    routes["/me/groups"] = () => {
+    routes["/merchants"] = () => {
       setTokens({ access_token: "second", merchant: "merchant-b" })
       return { data: [membership("merchant-a")] }
     }

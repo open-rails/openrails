@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/open-rails/authkit"
 
@@ -52,4 +53,51 @@ func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id merchant.I
 		return err
 	}
 	return directory.SetDisplayName(ctx, id, displayName)
+}
+
+// UserMerchant is a live merchant a user holds a role in.
+type UserMerchant struct {
+	ID          merchant.ID `json:"id"`
+	Slug        string      `json:"slug"`
+	DisplayName string      `json:"display_name,omitempty"`
+	Role        string      `json:"role"`
+}
+
+// ListUserMerchants returns the live merchants userID holds a role in, ordered
+// by name, with the user's highest role in each.
+func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]UserMerchant, error) {
+	if c == nil || c.Core() == nil {
+		return nil, ErrNoControlPlane
+	}
+	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(strings.TrimSpace(userID)))
+	if err != nil {
+		return nil, err
+	}
+	roles := map[string]string{}
+	var groups []string
+	for _, m := range memberships {
+		if m.Persona != MerchantType {
+			continue
+		}
+		role, seen := roles[m.GroupID]
+		if !seen {
+			groups = append(groups, m.GroupID)
+		}
+		if !seen || teamRoleRank(string(m.Role)) < teamRoleRank(role) {
+			roles[m.GroupID] = string(m.Role)
+		}
+	}
+	directory, err := c.directory()
+	if err != nil {
+		return nil, err
+	}
+	refs, err := directory.ListByGroups(ctx, groups)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UserMerchant, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: roles[ref.GroupID]})
+	}
+	return out, nil
 }

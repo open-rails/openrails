@@ -766,9 +766,11 @@ export interface Me {
   entitlements?: string[]
 }
 
+// A merchant the signed-in user holds a role in (GET /v1/merchants).
 export interface MerchantMembership {
-  persona: string
-  instance_slug: string
+  id: string
+  slug: string
+  display_name?: string
   role: string
 }
 

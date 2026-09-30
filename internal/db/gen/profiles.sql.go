@@ -57,47 +57,6 @@ func (q *Queries) GetMerchantDirectoryByID(ctx context.Context, id uuid.UUID) (G
 	return i, err
 }
 
-const listMerchantDirectoryRefs = `-- name: ListMerchantDirectoryRefs :many
-SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
-FROM openrails.merchants m
-WHERE m.deleted_at IS NULL
-  AND (m.slug = ANY($1::text[])
-       OR m.id IN (SELECT a.merchant_id FROM openrails.merchant_slug_aliases a
-                    WHERE a.slug = ANY($1::text[])
-                      AND (a.expires_at IS NULL OR a.expires_at > now())))
-ORDER BY m.slug
-`
-
-type ListMerchantDirectoryRefsRow struct {
-	ID          uuid.UUID
-	Slug        string
-	DisplayName string
-}
-
-// The read counterpart of the display-name write path: a host that reaches a
-// merchant through a MEMBERSHIP knows only names, and needs display names to
-// label its own surfaces. Live names and unexpired former names resolve to the
-// live merchant's current name; names that do not resolve do not come back.
-func (q *Queries) ListMerchantDirectoryRefs(ctx context.Context, slugs []string) ([]ListMerchantDirectoryRefsRow, error) {
-	rows, err := q.db.Query(ctx, listMerchantDirectoryRefs, slugs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMerchantDirectoryRefsRow
-	for rows.Next() {
-		var i ListMerchantDirectoryRefsRow
-		if err := rows.Scan(&i.ID, &i.Slug, &i.DisplayName); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const registerUnboundMerchant = `-- name: RegisterUnboundMerchant :one
 INSERT INTO openrails.merchants (slug, status, display_name)
 VALUES ($1, 'active', $2)

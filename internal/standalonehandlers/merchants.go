@@ -13,6 +13,29 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// MerchantLister is the control-plane surface behind GET /v1/merchants.
+type MerchantLister interface {
+	ListUserMerchants(ctx context.Context, userID string) ([]controlplane.UserMerchant, error)
+}
+
+// MerchantListMine handles GET /v1/merchants: the live merchants the signed-in
+// user holds a role in, with its highest role in each (#1106).
+func MerchantListMine(svc MerchantLister) func(*httprequest.Request) {
+	return func(r *httprequest.Request) {
+		uc, ok := r.UserContext()
+		if !ok || strings.TrimSpace(uc.UserID) == "" {
+			r.ErrorJSON(http.StatusUnauthorized, "authentication required")
+			return
+		}
+		list, err := svc.ListUserMerchants(r.Request.Context(), uc.UserID)
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "failed to list merchants")
+			return
+		}
+		r.JSON(http.StatusOK, map[string]any{"object": "list", "data": list})
+	}
+}
+
 // MerchantCreator is the control-plane surface behind POST /v1/merchants.
 type MerchantCreator interface {
 	CreateOwnedMerchant(ctx context.Context, name, userID string) (*merchants.Merchant, bool, error)

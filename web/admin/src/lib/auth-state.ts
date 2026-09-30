@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query"
 
 import {
+  api,
   ApiError,
   authApi,
   clearTokensIfCurrent,
@@ -32,35 +33,32 @@ export interface AuthStateData {
 
 export const authStateQueryKey = ["auth", "state"] as const
 
-function merchantMemberships(groups: MerchantMembershipList) {
-  return [...groups.data]
-    .filter((group) => group.persona === "merchant")
-    .sort((a, b) => a.instance_slug.localeCompare(b.instance_slug))
+function merchantMemberships(list: MerchantMembershipList) {
+  return [...list.data].sort((a, b) => a.slug.localeCompare(b.slug))
 }
 
 export async function loadIdentity(
   expectedSession: NonNullable<ReturnType<typeof getTokens>>
 ): Promise<AuthIdentity> {
   const who = await authApi<Me>("/me")
-  const groups = await authApi<MerchantMembershipList>("/me/groups")
+  const memberships = await api<MerchantMembershipList>("/merchants")
   if (!sameTokenSession(expectedSession, getTokens())) {
     throw new Error("Your session changed while your account was loading")
   }
 
-  const merchants = merchantMemberships(groups)
+  const merchants = merchantMemberships(memberships)
   const storedSession = getTokens()
   if (!storedSession) {
     throw new Error("Your session ended while your account was loading")
   }
   const activeMerchant =
-    merchants.find(
-      (merchant) => merchant.instance_slug === storedSession.merchant
-    ) ?? merchants[0]
+    merchants.find((merchant) => merchant.slug === storedSession.merchant) ??
+    merchants[0]
 
-  if (storedSession.merchant !== activeMerchant?.instance_slug) {
+  if (storedSession.merchant !== activeMerchant?.slug) {
     const updated = {
       ...storedSession,
-      merchant: activeMerchant?.instance_slug,
+      merchant: activeMerchant?.slug,
     }
     if (!setTokensIfCurrent(updated, storedSession)) {
       throw new Error("Your session changed while your account was loading")

@@ -15,7 +15,7 @@ import { CustomerCreditSupportSection } from "./credits"
 
 const state = vi.hoisted(() => ({ merchant: "alpha" }))
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ activeMerchant: { instance_slug: state.merchant } }),
+  useAuth: () => ({ activeMerchant: { slug: state.merchant } }),
 }))
 
 const grantInput = { amount: "1000000", currency: "USD", source: "admin" as const, source_id: "stable-operation" }

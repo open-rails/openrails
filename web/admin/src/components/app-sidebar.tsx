@@ -142,9 +142,10 @@ export function AppSidebar() {
 
 function MerchantSwitcher() {
   const { activeMerchant, merchants, selectMerchant } = useAuth()
-  const label = activeMerchant?.instance_slug ?? "Select merchant"
+  const label =
+    activeMerchant?.display_name || activeMerchant?.slug || "Select merchant"
   const role = activeMerchant?.role ?? "Merchant console"
-  const initials = activeMerchant?.instance_slug.slice(0, 2) ?? "µ"
+  const initials = activeMerchant?.slug.slice(0, 2) ?? "µ"
 
   return (
     <SidebarMenu>
@@ -179,20 +180,19 @@ function MerchantSwitcher() {
                 Merchants
               </DropdownMenuLabel>
               {merchants.map((merchant) => {
-                const active =
-                  merchant.instance_slug === activeMerchant?.instance_slug
+                const active = merchant.slug === activeMerchant?.slug
                 return (
                   <DropdownMenuItem
-                    key={merchant.instance_slug}
-                    onClick={() => selectMerchant(merchant.instance_slug)}
+                    key={merchant.slug}
+                    onClick={() => selectMerchant(merchant.slug)}
                     className="gap-2 py-2"
                   >
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold uppercase">
-                      {merchant.instance_slug.slice(0, 2)}
+                      {merchant.slug.slice(0, 2)}
                     </span>
                     <span className="grid min-w-0 flex-1 leading-tight">
                       <span className="truncate text-sm">
-                        {merchant.instance_slug}
+                        {merchant.display_name || merchant.slug}
                       </span>
                       <span className="truncate text-xs text-muted-foreground capitalize">
                         {merchant.role}

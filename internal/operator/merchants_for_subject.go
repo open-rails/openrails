@@ -9,9 +9,9 @@ import (
 )
 
 // MerchantRef is a merchant's directory identity as a host sees it: the slug it
-// scopes billing to, plus an optional human-facing display name. It answers both
+// scopes billing to, plus an optional human-facing display name. It answers
 // "which merchants does this customer transact with" (ListMerchantsForSubject,
-// openrails-saas #18) and "what are these merchants called" (ListMerchantRefs).
+// openrails-saas #18).
 type MerchantRef struct {
 	ID          merchant.ID `json:"id"`
 	Slug        string      `json:"slug"`
