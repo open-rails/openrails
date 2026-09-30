@@ -34,7 +34,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	viewed := uniqueName("b-viewed")
 	theirs, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: viewed, OwnerUserID: owner})
 	require.NoError(t, err)
-	w := call(t, handler, ownerToken, http.MethodPost, "/v1/merchant/team/invites", viewed, map[string]string{"email": u.Email, "role": "viewer"})
+	w := call(t, handler, ownerToken, http.MethodPost, "/v1/merchant/team/invites", viewed, map[string]string{"email": *u.Email, "role": "viewer"})
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: uniqueName("c-unrelated"), OwnerUserID: owner})
 	require.NoError(t, err)

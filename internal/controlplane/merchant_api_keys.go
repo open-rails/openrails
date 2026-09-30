@@ -39,7 +39,7 @@ type MerchantAPIKey struct {
 // MintMerchantAPIKey mints a key under the merchant's group holding role, as
 // actor: AuthKit requires merchant:credentials:manage and coverage of the
 // role. A non-user principal mints as the system, after the caller enforced
-// its no-escalation rule (the route gate plus MerchantRoleCoveredBy). The
+// its no-escalation rule (the route gate plus RoleCoveredBy). The
 // secret is returned once: it is never stored and never retrievable again.
 func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, name string, role iam.Role, actor iam.Actor) (MerchantAPIKey, string, error) {
 	if !slices.Contains(MerchantAPIKeyRoles(), role) {

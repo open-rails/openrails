@@ -34,10 +34,12 @@ type MerchantAPIKeyManager interface {
 	RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error)
 }
 
-// RequestActor derives the AuthKit actor of a request's user token
-// (verify.ActorFromClaims), bound to its session.
+// RequestActor derives who performs a merchant mutation: the AuthKit actor of
+// a request's user token (verify.ActorFromClaims), bound to its session, or,
+// for a non-user credential, whether its grants cover a role.
 type RequestActor interface {
 	RequestActor(r *http.Request) (iam.Actor, error)
+	RoleCoveredBy(role iam.Role, grants []string) (bool, error)
 }
 
 // mutationActor is who performs a merchant credential or membership mutation.
@@ -48,10 +50,17 @@ type RequestActor interface {
 // neither applies or coverage fails.
 func mutationActor(r *httprequest.Request, svc RequestActor, role *iam.Role, code string) (iam.Actor, bool) {
 	if principal, ok := merchantRoutePrincipal(r); ok && len(principal.Permissions) > 0 {
-		if role != nil && !controlplane.MerchantRoleCoveredBy(*role, principal.Permissions) {
-			r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
-				"cannot grant authority beyond your own credential's"))
-			return iam.Actor{}, false
+		if role != nil {
+			covered, err := svc.RoleCoveredBy(*role, principal.Permissions)
+			if err != nil {
+				r.InternalError("resolve role permissions", err)
+				return iam.Actor{}, false
+			}
+			if !covered {
+				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
+					"cannot grant authority beyond your own credential's"))
+				return iam.Actor{}, false
+			}
 		}
 		return iam.SystemActor(), true
 	}

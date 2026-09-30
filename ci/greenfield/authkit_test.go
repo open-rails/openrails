@@ -283,6 +283,8 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)
-	_, err = cp.Core().ParseBootstrapManifestYAML(raw)
+	manifest, err := authkit.ParseBootstrapManifestYAML(raw)
+	require.NoError(t, err)
+	_, err = cp.Core().ApplyBootstrapManifest(ctx, manifest, iam.BootstrapOptions{DryRun: true})
 	require.NoError(t, err)
 }

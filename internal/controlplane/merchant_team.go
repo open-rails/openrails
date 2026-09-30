@@ -122,7 +122,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 			return MerchantTeamInviteResult{}, lastOwner(err)
 		}
 		return MerchantTeamInviteResult{Added: true, Member: &MerchantTeamMember{
-			UserID: user.ID, Email: user.Email, Username: user.Username, Role: role.Name(),
+			UserID: user.ID, Email: text(user.Email), Username: user.Username, Role: role.Name(),
 		}}, nil
 	case err != nil && !errors.Is(err, iam.ErrUserNotFound):
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: resolve invite email: %w", err)
@@ -253,7 +253,7 @@ func (c *ControlPlane) team(ctx context.Context, group iam.GroupRef) (map[string
 		for _, m := range batch.Items {
 			member := MerchantTeamMember{UserID: m.Subject.ID, Role: m.Role.Name()}
 			if m.User != nil {
-				member.Email, member.Username = m.User.Email, m.User.Username
+				member.Email, member.Username = text(m.User.Email), m.User.Username
 			}
 			out[m.Subject.ID] = member
 		}
@@ -291,4 +291,12 @@ func teamMemberLabel(m MerchantTeamMember) string {
 		return m.Username
 	}
 	return m.UserID
+}
+
+// text is *s, "" when unset.
+func text(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
