@@ -57,7 +57,7 @@ func terminalCheckoutError(intent gen.OpenrailsRailIntent, prefix string) error 
 		if code == "" {
 			code = strings.TrimSpace(evidence.DeclineCode)
 		}
-		return &paymentmethods.PaymentMethodError{Err: errors.New(reason), LocalizationID: code, Message: reason, Rail: intent.Rail, Failure: operationFailure(intent)}
+		return &paymentmethods.PaymentMethodError{Err: errors.New(reason), LocalizationID: code, Message: reason, Rail: intent.Rail, Reason: operationReason(intent)}
 	default:
 		return errors.New(reason)
 	}

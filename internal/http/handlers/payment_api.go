@@ -163,7 +163,7 @@ func paymentFailure(p *models.Payment, status string) *openrails.PaymentFailure 
 	if p.FailureCode != nil {
 		code = *p.FailureCode
 	}
-	failure := decline.Classify(string(p.Rail), code).PaymentFailure()
+	failure := decline.Classify(string(p.Rail), code).Reason.Failure()
 	return &failure
 }
 

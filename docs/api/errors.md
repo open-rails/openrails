@@ -29,7 +29,7 @@ with another instrument in a new checkout session. The code says what happened,
 
 | Code | Type | Status | Meaning | Metadata |
 | --- | --- | --- | --- | --- |
-| `card_declined` | `card_error` | 402 | the provider declined the presented card | `decline_reason` (the decline reason: `insufficient_funds`, `do_not_honor`, `expired_card`, `incorrect_cvc`, `incorrect_zip`, `stop_recurring`, ...), `failure_code` (provider's verbatim code) |
+| `card_declined` | `card_error` | 402 | the provider declined the presented card | `decline_reason` (an `openrails.DeclineReason`: `insufficient_funds`, `do_not_honor`, `expired_card`, `incorrect_cvc`, `incorrect_zip`, `stop_recurring`, ...; Go hosts read it with `DeclineReasonFrom`), `failure` (the buyer-facing `PaymentFailure` with OpenRails' message; `PaymentFailureFrom`), `failure_code` (provider's verbatim code) |
 | `payment_method_stale` | `card_error` | 402 | the saved payment method named by the request can no longer be charged for this customer and processor; collect the card again | — |
 | `payment_method_required` | `invalid_request_error` | 400 | the charge named neither a saved `payment_method_id` nor a new card `payment_token`; OpenRails never charges an implied card such as the default | `param`: `payment_method_id` |
 | `payment_provider_rejected` | `api_error` | 502 | the provider rejected the charge for a gateway or merchant-configuration reason; another card will not help | `decline_reason`, `failure_code` |

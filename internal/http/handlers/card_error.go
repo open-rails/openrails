@@ -13,10 +13,10 @@ import (
 
 // writePaymentMethodError renders a provider refusal as the shared payment
 // refusal contract (openrails.CodeCardDeclined / CodePaymentProviderRejected).
-// Classification uses only the provider's verbatim failure code; processor
-// text stays in server-side logs and the caller receives safe actionable copy.
+// Classification uses the provider's code and AVS/CVV results; processor text
+// stays in server-side logs and the caller receives safe actionable copy.
 func writePaymentMethodError(r *httprequest.Request, pmErr *paymentmethods.PaymentMethodError) {
-	r.APIError(railPaymentRefusalError(pmErr.Rail, strings.TrimSpace(pmErr.LocalizationID), pmErr.Failure))
+	r.APIError(railPaymentRefusalError(pmErr.Rail, strings.TrimSpace(pmErr.LocalizationID), pmErr.Reason))
 }
 
 // writePaymentMethodStale renders openrails.CodePaymentMethodStale: the saved
@@ -41,26 +41,26 @@ func writePaymentMethodRequired(r *httprequest.Request) {
 // card_declined the customer can answer with another card; gateway and
 // merchant-configuration categories are a 502 payment_provider_rejected.
 func paymentRefusalError(failureCode string) *api.APIError {
-	return railPaymentRefusalError("nmi", failureCode, nil)
+	return railPaymentRefusalError("nmi", failureCode, "")
 }
 
-// railPaymentRefusalError classifies failureCode in rail's vocabulary; failure
-// overrides the customer-facing decline when richer evidence produced one.
-func railPaymentRefusalError(rail, failureCode string, customer *openrails.PaymentFailure) *api.APIError {
+// railPaymentRefusalError renders a refusal: reason, when set, was classified
+// with the refusal's full evidence; otherwise failureCode is classified in
+// rail's vocabulary.
+func railPaymentRefusalError(rail, failureCode string, reason openrails.DeclineReason) *api.APIError {
 	if rail == "" {
 		rail = "nmi"
 	}
-	verdict := decline.Classify(rail, failureCode)
-	failure := verdict.PaymentFailure()
-	if customer != nil {
-		failure = *customer
+	if reason == "" {
+		reason = decline.Classify(rail, failureCode).Reason
 	}
-	metadata := map[string]any{"decline_reason": string(verdict.Reason), "failure": failure}
+	failure := reason.Failure()
+	metadata := map[string]any{"decline_reason": string(reason), "failure": failure}
 	if failureCode != "" {
 		metadata["failure_code"] = failureCode
 	}
 	switch {
-	case verdict.ProviderFault():
+	case decline.ProviderFault(reason):
 		return api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, openrails.CodePaymentProviderRejected,
 			"The payment processor could not complete this payment. Please try again later.").WithMetadata(metadata)
 	default:

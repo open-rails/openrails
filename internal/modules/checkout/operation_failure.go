@@ -12,6 +12,13 @@ import (
 // operationFailure renders a refused card operation's retained provider
 // evidence as the customer-facing decline. Raw codes stay in the evidence.
 func operationFailure(in gen.OpenrailsRailIntent) *openrails.PaymentFailure {
+	failure := operationReason(in).Failure()
+	return &failure
+}
+
+// operationReason classifies a refused card operation's retained provider
+// evidence.
+func operationReason(in gen.OpenrailsRailIntent) openrails.DeclineReason {
 	evidence := map[string]json.RawMessage{}
 	_ = json.Unmarshal(in.ResultEvidence, &evidence)
 	if raw, ok := evidence["qualified_initial_refusal"]; ok {
@@ -43,15 +50,13 @@ func operationFailure(in gen.OpenrailsRailIntent) *openrails.PaymentFailure {
 		return ""
 	}
 	if get("declined") != "" || get("localization_id", "decline_code", "stripe_decline_code", "failure_code", "stripe_failure_code", "response_code") != "" {
-		failure := decline.ClassifyEvidence(decline.Evidence{
+		return decline.ClassifyEvidence(decline.Evidence{
 			Rail:         in.Rail,
 			Code:         get("localization_id", "decline_code", "stripe_decline_code", "response_code", "failure_code", "stripe_failure_code"),
 			FallbackCode: get("stripe_failure_code", "failure_code"),
 			AVS:          get("avs_response"),
 			CVV:          get("cvv_response"),
-		}).PaymentFailure()
-		return &failure
+		}).Reason
 	}
-	failure := decline.Failure(decline.CustomerProcessingError)
-	return &failure
+	return openrails.DeclineProcessingError
 }
