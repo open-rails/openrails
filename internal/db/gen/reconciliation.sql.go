@@ -1738,7 +1738,7 @@ type ListSubscriptionDeclineCodesRow struct {
 }
 
 // life.dunning.funnel: recorded subscription decline codes since a cutoff,
-// classified in Go (collection.ClassifyDeclineDetail) to count unmapped ones.
+// classified in Go (decline.Classify) to count unmapped ones.
 func (q *Queries) ListSubscriptionDeclineCodes(ctx context.Context, arg ListSubscriptionDeclineCodesParams) ([]ListSubscriptionDeclineCodesRow, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionDeclineCodes, arg.MerchantID, arg.Since)
 	if err != nil {

@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/billing/declinecode"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
@@ -50,25 +49,25 @@ func TestRecurringAllowlist(t *testing.T) {
 // and ghost plans are terminal.
 func TestClassifyCrankError(t *testing.T) {
 	type want struct {
-		code declinecode.Code
-		cat  declinecode.Category
+		code CrankCode
+		cat  CrankCategory
 		on   int
 	}
-	operational := want{declinecode.CommunicationError, declinecode.Operational, -1}
-	dun := want{declinecode.GenericDecline, declinecode.Recoverable, -1}
+	operational := want{CommunicationError, Operational, -1}
+	dun := want{GenericDecline, Recoverable, -1}
 	for _, tc := range []struct {
 		err  error
 		want want
 	}{
 		{nil, want{"", "", -1}},
-		{errors.New(`{"InstructionError":[0,{"Custom":400}]}`), want{declinecode.DuplicateTransaction, declinecode.AlreadyPaid, 400}},
-		{errors.New("custom program error: 0x190"), want{declinecode.DuplicateTransaction, declinecode.AlreadyPaid, 400}},
-		{errors.New(`{"InstructionError":[0,{"Custom":4}]}`), want{declinecode.DeclinedStopRecurring, declinecode.Terminal, 4}},
-		{errors.New(`{"InstructionError":[0,{"Custom":508}]}`), want{declinecode.DeclinedStopRecurring, declinecode.Terminal, 508}},
-		{errors.New(`{"InstructionError":[0,{"Custom": 519}]}`), want{declinecode.DeclinedStopRecurring, declinecode.Terminal, 519}},
-		{errors.New(`{"InstructionError":[0,{"Custom":1}]}`), want{declinecode.InsufficientFunds, declinecode.Recoverable, 1}},
-		{errors.New("custom program error: 0x1"), want{declinecode.InsufficientFunds, declinecode.Recoverable, 1}},
-		{errors.New(`{"InstructionError":[0,{"Custom":6001}]}`), want{declinecode.GenericDecline, declinecode.Recoverable, 6001}},
+		{errors.New(`{"InstructionError":[0,{"Custom":400}]}`), want{DuplicateTransaction, AlreadyPaid, 400}},
+		{errors.New("custom program error: 0x190"), want{DuplicateTransaction, AlreadyPaid, 400}},
+		{errors.New(`{"InstructionError":[0,{"Custom":4}]}`), want{DeclinedStopRecurring, Terminal, 4}},
+		{errors.New(`{"InstructionError":[0,{"Custom":508}]}`), want{DeclinedStopRecurring, Terminal, 508}},
+		{errors.New(`{"InstructionError":[0,{"Custom": 519}]}`), want{DeclinedStopRecurring, Terminal, 519}},
+		{errors.New(`{"InstructionError":[0,{"Custom":1}]}`), want{InsufficientFunds, Recoverable, 1}},
+		{errors.New("custom program error: 0x1"), want{InsufficientFunds, Recoverable, 1}},
+		{errors.New(`{"InstructionError":[0,{"Custom":6001}]}`), want{GenericDecline, Recoverable, 6001}},
 		{errors.New("Transfer: insufficient funds"), dun},
 		{errors.New("delegation has been revoked"), dun},
 		{errors.New("PlanTermsMismatch"), dun},
@@ -88,6 +87,6 @@ func TestClassifyCrankError(t *testing.T) {
 	} {
 		got := ClassifyCrankError(tc.err)
 		require.Equal(t, tc.want, want{got.Code, got.Category, got.OnChainCode}, "%v", tc.err)
-		require.Equal(t, tc.want.cat == declinecode.Operational, IsOperationalFailure(tc.err), "%v", tc.err)
+		require.Equal(t, tc.want.cat == Operational, IsOperationalFailure(tc.err), "%v", tc.err)
 	}
 }

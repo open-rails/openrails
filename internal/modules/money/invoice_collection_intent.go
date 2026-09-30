@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -565,7 +566,7 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		if err != nil {
 			return err
 		}
-		failureReason := payments.NormalizeFailureReason(rail, failureCode)
+		failureReason := decline.ReasonFor(rail, failureCode)
 		failed, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
 			Rail: optionalRail(rail), RailPaymentID: optionalString(transactionID), FailureCode: &code, FailureReason: &failureReason,
@@ -683,10 +684,10 @@ func invoiceCycleHours(invoice *models.Invoice) int {
 // logInvoiceDeclineDecision names the bucket and its invoice-shaped
 // consequence on every refusal. Nothing here cancels anything.
 func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail string, failureCode *string, action collection.Action) {
-	collection.AlertUnmappedDecline(ctx, action.Decline)
+	decline.AlertUnmapped(ctx, action.Decline)
 	entry := log.WithContext(ctx).WithFields(log.Fields{
 		"invoice_id": invoiceID, "rail": rail, "failure_code": derefStr(failureCode),
-		"decline_outcome": action.Outcome.String(), "decline_coverage": action.Decline.Coverage.String(),
+		"decline_outcome": action.Decline.Action.String(), "decline_coverage": string(action.Decline.Coverage),
 	})
 	switch {
 	case action.AwaitingPaymentMethod():
@@ -706,7 +707,7 @@ func queueInvoiceCollectionOutcome(ctx context.Context, database *db.DB, invoice
 	amountDue := invoice.AmountDue
 	data := openrails.NotificationData{
 		InvoiceID: invoice.ID, Currency: invoice.Currency, AmountDue: &amountDue,
-		FailureCode: failureCode, DeclineOutcome: action.Outcome.String(),
+		FailureCode: failureCode, DeclineOutcome: action.Decline.Action.String(),
 	}
 	eventType := models.NotificationPaymentMethodFailed
 	switch {

@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -392,7 +393,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		// stays NULL — the mirror cannot distinguish initial vs renewal).
 		if !t.Success {
 			if code := strings.TrimSpace(t.DeclineCode); code != "" {
-				reason := payments.NormalizeFailureReason(string(sub.Rail), code)
+				reason := decline.ReasonFor(string(sub.Rail), code)
 				params.FailureCode = &code
 				params.FailureReason = &reason
 			}

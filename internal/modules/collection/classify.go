@@ -2,6 +2,8 @@ package collection
 
 import (
 	"time"
+
+	"github.com/open-rails/openrails/internal/billing/decline"
 )
 
 // Action is what ONE failed collection attempt does to the schedule.
@@ -13,10 +15,9 @@ import (
 // resolved (or#828). Under the or#870 doctrine that case is bucket 2, a
 // DELIBERATE stop with a reason, a notification and a resume path, not a hole.
 type Action struct {
-	// Outcome is the or#870 bucket this decline fell in. Bucket 1 (the zero
-	// value) keeps the schedule; buckets 2 and 3 stop charging, for opposite
-	// reasons.
-	Outcome DeclineOutcome
+	// Decline is the classifier's answer. Its Action retries (keeps the
+	// schedule) or stops charging, for opposite reasons.
+	Decline decline.Result
 	// NextAttemptAt schedules the next attempt (offsets anchored to the FIRST
 	// failure). Set only for bucket 1 while the cycle's schedule has attempts
 	// left.
@@ -25,25 +26,20 @@ type Action struct {
 	// (subscription: cancel at the rail + revoke; invoice: uncollectible). Set
 	// for bucket 3 immediately, and for bucket 1 once the schedule is spent.
 	Terminal bool
-	// Decline is the classifier's full answer, carried so the consumer can tell
-	// "bucket 1 because the rail says retry" from "bucket 1 because nobody ever
-	// mapped this code" — indistinguishable from Outcome alone, and only the
-	// second is a problem.
-	Decline Classification
 }
 
 // AwaitingPaymentMethod is bucket 2: charging STOPS but nothing is terminated.
 // The debt (or subscription) stands, access is untouched, and the customer
 // fixing the instrument is what resumes collection.
 func (a Action) AwaitingPaymentMethod() bool {
-	return a.Outcome == DeclineFixPaymentMethod
+	return a.Decline.Action == decline.FixPaymentMethod
 }
 
 // ScheduleExhausted distinguishes the two roads to Terminal: bucket 1 that ran
 // out of attempts (we gave up) versus bucket 3, terminal on the first look
 // (the issuer withdrew the mandate).
 func (a Action) ScheduleExhausted() bool {
-	return a.Terminal && a.Outcome == DeclineRetry
+	return a.Terminal && !a.Decline.Action.StopsCharging()
 }
 
 // FailureAction is the ONE decision for one failed attempt, shared by both
@@ -63,17 +59,17 @@ func FailureAction(cycleHours int, rail string, failureCode *string, priorFailur
 	if failureCode != nil {
 		code = *failureCode
 	}
-	decline := ClassifyDeclineDetail(rail, code)
-	switch decline.Outcome {
-	case DeclineNonRecoverable:
+	d := decline.Classify(rail, code)
+	switch d.Action {
+	case decline.NonRecoverable:
 		// Bucket 3 — the issuer withdrew the recurring mandate, or the
 		// instrument is permanently dead. Terminal on the FIRST look: there is
 		// no schedule worth running against an instrument that cannot succeed.
-		return Action{Outcome: decline.Outcome, Terminal: true, Decline: decline}, nil
-	case DeclineFixPaymentMethod:
+		return Action{Decline: d, Terminal: true}, nil
+	case decline.FixPaymentMethod:
 		// Bucket 2 — their card, fixable in a minute. Stop charging NOW, and
 		// terminate NOTHING.
-		return Action{Outcome: decline.Outcome, Decline: decline}, nil
+		return Action{Decline: d}, nil
 	}
 
 	// Bucket 1 — ours or transient. Keep the schedule.
@@ -83,12 +79,12 @@ func FailureAction(cycleHours int, rail string, failureCode *string, priorFailur
 	}
 	failures := priorFailures + 1
 	if failures >= len(offsets)+1 {
-		return Action{Outcome: DeclineRetry, Terminal: true, Decline: decline}, nil
+		return Action{Decline: d, Terminal: true}, nil
 	}
 	first := now
 	if firstFailureAt != nil {
 		first = *firstFailureAt
 	}
 	next := first.Add(offsets[failures-1])
-	return Action{Outcome: DeclineRetry, NextAttemptAt: &next, Decline: decline}, nil
+	return Action{Decline: d, NextAttemptAt: &next}, nil
 }

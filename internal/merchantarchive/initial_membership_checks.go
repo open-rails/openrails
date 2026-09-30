@@ -9,6 +9,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -105,7 +106,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 			return err
 		}
 		code := fmt.Sprint(refusal.Outcome().Evidence["response_code"])
-		reason := payments.NormalizeFailureReason(op.Rail, code)
+		reason := decline.ReasonFor(op.Rail, code)
 		if payment.SubscriptionID != nil || payment.ListAmount != p.Terms.RecurringAmount || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptInitial || payment.FailureCode == nil || *payment.FailureCode != code || payment.FailureReason == nil || *payment.FailureReason != reason || !payment.PurchasedAt.Equal(p.Terms.AcceptedAt) || !payment.CreatedAt.Equal(p.Terms.AcceptedAt) {
 			return errors.New("initial decline contradicts the sealed refusal and accepted attempt")
 		}

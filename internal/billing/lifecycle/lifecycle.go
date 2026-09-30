@@ -60,7 +60,7 @@ type Snapshot struct {
 	CancelKind CancelKind
 }
 
-// Bucket is the decline doctrine's answer (or#870, collection.DeclineOutcome).
+// Bucket is the decline doctrine's answer (or#870, decline.Action).
 type Bucket int
 
 const (

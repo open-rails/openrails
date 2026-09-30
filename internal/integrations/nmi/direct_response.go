@@ -2,6 +2,7 @@ package nmi
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -26,11 +27,17 @@ func ParseSaleResponse(raw string) (*SaleResponse, error) {
 	if !isDirectResponseApproved(output) {
 		return nil, newSaleError(raw, output)
 	}
+	return saleResponse(output, raw), nil
+}
+
+func saleResponse(output url.Values, raw string) *SaleResponse {
 	return &SaleResponse{
 		TransactionID: output.Get("transactionid"),
 		Authcode:      output.Get("authcode"),
 		ResponseText:  responseText(output, raw),
-	}, nil
+		AVSResponse:   strings.TrimSpace(output.Get("avsresponse")),
+		CVVResponse:   strings.TrimSpace(output.Get("cvvresponse")),
+	}
 }
 
 // WireAmount renders rail minor units as NMI's major-unit decimal, at the

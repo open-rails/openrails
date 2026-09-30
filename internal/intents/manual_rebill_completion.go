@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
 
 	"github.com/jackc/pgx/v5"
@@ -204,7 +206,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 		return Ambiguous(err.Error())
 	}
 	code := fmt.Sprint(refusal.ResponseCode)
-	failureReason := payments.NormalizeFailureReason(string(models.RailNMI), code)
+	failureReason := decline.ReasonFor(string(models.RailNMI), code)
 	outcome := TerminalWithEvidence("rebill declined", map[string]any{"declined": true, "response_code": refusal.ResponseCode})
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -233,9 +235,9 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 		// A stale refusal is still forensic evidence, but cannot dunn a later
 		// period or overwrite a recovery observed while this attempt ran.
 		if (sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) && failures == p.FailureCount {
-			classification := collection.ClassifyDeclineDetail(string(models.RailNMI), code)
+			action := decline.Classify(string(models.RailNMI), code).Action
 			certainty := ""
-			if classification.Outcome == collection.DeclineNonRecoverable {
+			if action == decline.NonRecoverable {
 				certainty = collection.CertaintyNonRetryableDecline
 			}
 			blocked := ""
@@ -243,7 +245,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 				blocked = verdict.Reason
 			}
 			reason := "rebill declined"
-			err = h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.Rail(p.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: classification.Outcome, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			err = h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.Rail(p.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: action, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
 			if err != nil {
 				return err
 			}

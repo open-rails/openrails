@@ -1014,7 +1014,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status = 'unknown_needs_verify';
 
 -- life.dunning.funnel: recorded subscription decline codes since a cutoff,
--- classified in Go (collection.ClassifyDeclineDetail) to count unmapped ones.
+-- classified in Go (decline.Classify) to count unmapped ones.
 -- name: ListSubscriptionDeclineCodes :many
 SELECT p.rail, p.failure_code::text AS failure_code, count(*)::bigint AS declines
 FROM openrails.payments p

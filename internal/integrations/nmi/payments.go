@@ -40,6 +40,8 @@ type SaleResponse struct {
 	TransactionID string
 	Authcode      string
 	ResponseText  string
+	// AVSResponse and CVVResponse are the gateway's verification letters.
+	AVSResponse, CVVResponse string
 }
 
 type RefundParams struct {
@@ -128,11 +130,7 @@ func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, curre
 	if !isDirectResponseApproved(output) {
 		return nil, newSaleError(response, output)
 	}
-	return &SaleResponse{
-		TransactionID: output.Get("transactionid"),
-		Authcode:      output.Get("authcode"),
-		ResponseText:  responseText(output, response),
-	}, nil
+	return saleResponse(output, response), nil
 }
 
 // Refund reverses a settled transaction via POST /v5/payments/{id}/refund.

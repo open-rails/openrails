@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -666,7 +667,7 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				CreatedAt:     s.now(),
 			}
 			if code := strings.TrimSpace(failureCode); code != "" {
-				reason := payments.NormalizeFailureReason(string(models.RailCCBill), code)
+				reason := decline.ReasonFor(string(models.RailCCBill), code)
 				failed.FailureCode = &code
 				failed.FailureReason = &reason
 			}
@@ -1872,7 +1873,7 @@ func (s *CCBillWebhookService) recordCCBillDecline(ctx context.Context, d *db.DB
 		Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, PurchasedAt: now, CreatedAt: now,
 	}
 	if code := strings.TrimSpace(failureCode); code != "" {
-		reason := payments.NormalizeFailureReason(string(models.RailCCBill), code)
+		reason := decline.ReasonFor(string(models.RailCCBill), code)
 		failed.FailureCode, failed.FailureReason = &code, &reason
 	}
 	if _, err := payments.NewPaymentService(d, s.Clock).CreateIfNotExists(ctx, failed); err != nil {

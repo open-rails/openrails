@@ -9,9 +9,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -54,7 +56,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		if err != nil || !applied || !duns {
 			return applied, err
 		}
-		return applyDunnedDecline(ctx, lc, sub, d)
+		return applyDunnedDecline(ctx, database, lc, sub, d)
 
 	case TransitionRenew:
 		if d.NewPeriodEnd == nil {
@@ -120,17 +122,28 @@ func eventFor(d Decision, cur *models.Subscription, now time.Time) lifecycle.Eve
 // to FailMembership, the dunning writer, which counts and classifies it,
 // schedules the next attempt (never "now") and tells the customer. A decline
 // already counted is ignored.
-func applyDunnedDecline(ctx context.Context, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision) (bool, error) {
+func applyDunnedDecline(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision) (bool, error) {
 	if sub.NextRetryAt != nil || (sub.LastRetryAt != nil && !d.Decline.OccurredAt.After(*sub.LastRetryAt)) {
 		return false, nil
 	}
 	code := normalize.Trim(d.Decline.DeclineCode)
+	action := decline.Classify(string(sub.Rail), code).Action
+	certainty, blocked := "", ""
+	if action == decline.NonRecoverable {
+		// The same certainty leg and kill switch OpenRails' own rebills use.
+		certainty = collection.CertaintyNonRetryableDecline
+		if gate := destructive.New(database).Check(ctx, sub.MerchantID); !gate.Allowed {
+			blocked = gate.Reason
+		}
+	}
 	return true, lc.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:            sub.Rail,
-		SubscriptionID:  &sub.ID,
-		FailureCode:     normalize.OptionalString(code),
-		Decline:         collection.ClassifyDecline(string(sub.Rail), code),
-		AttemptRecorded: true,
+		Rail:              sub.Rail,
+		SubscriptionID:    &sub.ID,
+		FailureCode:       normalize.OptionalString(code),
+		Decline:           action,
+		AttemptRecorded:   true,
+		TerminalCertainty: certainty,
+		TerminalBlocked:   blocked,
 	})
 }
 

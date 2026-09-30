@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
 // operationFailure renders a refused card operation's retained provider
@@ -43,15 +43,15 @@ func operationFailure(in gen.OpenrailsRailIntent) *openrails.PaymentFailure {
 		return ""
 	}
 	if get("declined") != "" || get("localization_id", "decline_code", "stripe_decline_code", "failure_code", "stripe_failure_code", "response_code") != "" {
-		failure := payments.CustomerDecline(payments.DeclineDetail{
+		failure := decline.ClassifyEvidence(decline.Evidence{
 			Rail:         in.Rail,
 			Code:         get("localization_id", "decline_code", "stripe_decline_code", "response_code", "failure_code", "stripe_failure_code"),
 			FallbackCode: get("stripe_failure_code", "failure_code"),
 			AVS:          get("avs_response"),
 			CVV:          get("cvv_response"),
-		})
+		}).PaymentFailure()
 		return &failure
 	}
-	failure := payments.NewPaymentFailure(payments.DeclineProcessingError)
+	failure := decline.Failure(decline.CustomerProcessingError)
 	return &failure
 }

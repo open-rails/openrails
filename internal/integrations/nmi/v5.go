@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -260,8 +261,8 @@ func newV5TransactionError(prefix string, txn *v5Transaction) error {
 	return &CustomerVaultError{
 		Message:        prefix,
 		ResponseCode:   code,
-		LocalizationID: nmiLocalizationID(code),
-		Detail:         nmiResponseDetail(code),
+		LocalizationID: decline.NMILocalizationID(code),
+		Detail:         decline.NMIMessage(code),
 		RawResponse:    string(rawResponse),
 	}
 }

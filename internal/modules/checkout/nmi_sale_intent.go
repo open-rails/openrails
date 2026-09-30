@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -374,7 +375,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 				if code == "" {
 					code, _ = evidence["decline_code"].(string)
 				}
-				reason := payments.NormalizeFailureReason(in.Rail, code)
+				reason := decline.ReasonFor(in.Rail, code)
 				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
 				_, err := purchase.PaymentService.CreateIfNotExists(ctx, &models.Payment{ID: p.PaymentID, CustomerID: customer, PriceID: p.PriceID, Rail: models.Rail(in.Rail), TransactionID: in.Rail + "_sale_declined:" + in.ID.String(), Amount: p.Amount, ListAmount: p.ListAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.AcceptedAt, CreatedAt: now})
 				if err != nil {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -553,7 +554,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				if in.Rail == "stripe" {
 					code = fmt.Sprint(outcome.Evidence["failure_code"])
 				}
-				reason := payments.NormalizeFailureReason(in.Rail, code)
+				reason := decline.ReasonFor(in.Rail, code)
 				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
 				if p.Instrument.CustodianHeld() {
 					token = charge.TokenTypePANViaProxy

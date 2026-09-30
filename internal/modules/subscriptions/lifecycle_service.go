@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -33,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
-	"reflect"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -2004,7 +2005,7 @@ func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Co
 		CreatedAt:      now,
 	}
 	if code := normalize.FromPtr(params.FailureCode); code != "" {
-		reason := payments.NormalizeFailureReason(string(subscription.Rail), code)
+		reason := decline.ReasonFor(string(subscription.Rail), code)
 		failed.FailureCode = &code
 		failed.FailureReason = &reason
 	}
@@ -2133,13 +2134,13 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 		switch params.Decline {
-		case collection.DeclineFixPaymentMethod:
+		case decline.FixPaymentMethod:
 			// or#870 bucket 2 — the customer's card, fixable. Charging stops,
 			// access and the stored card are untouched, and a replaced card
 			// resumes dunning. Not terminal: no certainty leg needed.
 			event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.FixMethod, At: now}
 			needsPaymentMethodUpdate = true
-		case collection.DeclineNonRecoverable:
+		case decline.NonRecoverable:
 			// or#870 bucket 3 — the mandate is gone. Cancel at the rail, unless
 			// the kill switch or a missing certainty leg holds the outcome.
 			if heldTerminal = terminalRefusal(params.TerminalCertainty); heldTerminal != "" {
@@ -2185,7 +2186,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			// A processor try-again answer gets the short transient ladder first;
 			// those quick retries are not dunning failures.
-			if !params.Terminal && collection.ClassifyDeclineDetail(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
+			if !params.Terminal && decline.Classify(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
 				if next, ok := policy.NextTransientAttempt(subscription.TransientRetries, now); ok {
 					subscription.TransientRetries++
 					subscription.LastRetryAt = &now
@@ -2405,7 +2406,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		case subscription.Status == models.StatusCancelled:
 			eventType = models.NotificationPremiumEnded
 			endReason := PremiumEndReasonExpired
-			if params.Decline == collection.DeclineNonRecoverable {
+			if params.Decline == decline.NonRecoverable {
 				endReason = PremiumEndReasonNonRecoverable
 			}
 			data.Reason = string(endReason)

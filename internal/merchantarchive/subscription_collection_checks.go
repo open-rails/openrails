@@ -8,6 +8,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -113,7 +114,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 		if stripeDeclined {
 			response = stripeCode
 		}
-		reason := payments.NormalizeFailureReason(op.Rail, response)
+		reason := decline.ReasonFor(op.Rail, response)
 		if payment.ID != uuid.NewSHA1(op.ID, []byte("decline")) || payment.CustomerID != t.CustomerID || payment.SubscriptionID == nil || *payment.SubscriptionID != t.SubscriptionID || payment.PriceID != t.PriceID || payment.Amount != t.Amount || payment.ListAmount != t.Amount || payment.Currency != t.Currency || payment.Status != payments.PaymentStatusFailedValue || payment.MoneyMovement != models.MoneyMovementNone || payment.FailureCode == nil || *payment.FailureCode != response || payment.FailureReason == nil || *payment.FailureReason != reason || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal {
 			return errors.New("engine decline contradicts its original failed payment")
 		}

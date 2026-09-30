@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -396,7 +397,7 @@ func (h *NMIUpgradeIntentHandler) absentProration(ctx context.Context, in gen.Op
 	case attempts.Transactions == 0:
 		step.refuseUnexecuted(openrails.CodeTierChangeRefused, absentProrationRefusal)
 	case attempts.Declined:
-		step.refuse(&nmi.CustomerVaultError{Message: "sale declined", ResponseCode: attempts.DeclineCode, LocalizationID: nmi.LocalizationIDForResponseCode(attempts.DeclineCode)})
+		step.refuse(&nmi.CustomerVaultError{Message: "sale declined", ResponseCode: attempts.DeclineCode, LocalizationID: decline.NMILocalizationID(attempts.DeclineCode)})
 	default:
 		h.raiseProrationUnresolved(ctx, in, p, fmt.Sprintf("the provider holds %d transaction(s) under this order but none qualifies as the accepted charge", attempts.Transactions))
 		return intents.Ambiguous("tier change proration receipt does not qualify")

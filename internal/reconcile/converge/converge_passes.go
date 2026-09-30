@@ -13,11 +13,11 @@ import (
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -1279,7 +1279,7 @@ func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time
 	}
 	var unmapped []map[string]any
 	for _, c := range codes {
-		if collection.ClassifyDeclineDetail(c.Rail, c.FailureCode).NeedsMapping() {
+		if decline.Classify(c.Rail, c.FailureCode).NeedsMapping() {
 			unmapped = append(unmapped, map[string]any{"rail": c.Rail, "code": c.FailureCode, "declines": c.Declines})
 		}
 	}

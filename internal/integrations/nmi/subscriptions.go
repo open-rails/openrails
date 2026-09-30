@@ -101,6 +101,8 @@ type ManualRebillResponse struct {
 	// (0 when approved or unavailable). Used by dunning to distinguish hard
 	// declines (stop retries) from soft declines (keep retrying).
 	ResponseCode int
+	// AVSResponse and CVVResponse are the gateway's verification letters.
+	AVSResponse, CVVResponse string
 }
 
 // AddRecurringSubscription uses Classic Direct Post. Paid enrollment explicitly
@@ -374,15 +376,18 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 			err := ambiguous(errors.New("approved manual rebill missing transaction id"))
 			return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 		}
-		return &ManualRebillResponse{Success: true, TransactionID: transactionID}, nil
+		return &ManualRebillResponse{Success: true, TransactionID: transactionID, AVSResponse: strings.TrimSpace(output.Get("avsresponse")), CVVResponse: strings.TrimSpace(output.Get("cvvresponse"))}, nil
 	}
 
 	rejection := newSaleError(response, output)
 	result := &ManualRebillResponse{
-		Success:      false,
-		Declined:     !RequiresVerification(rejection),
-		ErrorMessage: rejection.Error(),
-		ResponseCode: parseMobiusResponseCode(output),
+		Success:       false,
+		Declined:      !RequiresVerification(rejection),
+		TransactionID: strings.TrimSpace(output.Get("transactionid")),
+		ErrorMessage:  rejection.Error(),
+		ResponseCode:  parseMobiusResponseCode(output),
+		AVSResponse:   strings.TrimSpace(output.Get("avsresponse")),
+		CVVResponse:   strings.TrimSpace(output.Get("cvvresponse")),
 	}
 	if RequiresVerification(rejection) {
 		return result, rejection

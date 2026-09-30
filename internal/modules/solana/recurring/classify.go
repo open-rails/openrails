@@ -3,8 +3,6 @@ package recurring
 import (
 	"regexp"
 	"strconv"
-
-	"github.com/open-rails/openrails/internal/billing/declinecode"
 )
 
 // On-chain error codes observed live on devnet (#263) for a failed
@@ -56,8 +54,8 @@ var (
 // rail-agnostic decline code (shared with the card rails) plus the
 // action category the cranker acts on, and the raw on-chain code for forensics.
 type CrankFailure struct {
-	Code        declinecode.Code
-	Category    declinecode.Category
+	Code        CrankCode
+	Category    CrankCategory
 	OnChainCode int // parsed program Custom code, or -1 if none
 	Raw         string
 }
@@ -72,25 +70,25 @@ func ClassifyCrankError(err error) CrankFailure {
 	}
 	raw := err.Error()
 	if IsOperationalFailure(err) {
-		return CrankFailure{Code: declinecode.CommunicationError, Category: declinecode.Operational, OnChainCode: -1, Raw: raw}
+		return CrankFailure{Code: CommunicationError, Category: Operational, OnChainCode: -1, Raw: raw}
 	}
 	code := parseOnChainCode(raw)
 	switch code {
 	case onchainCapReached:
-		return CrankFailure{Code: declinecode.DuplicateTransaction, Category: declinecode.AlreadyPaid, OnChainCode: code, Raw: raw}
+		return CrankFailure{Code: DuplicateTransaction, Category: AlreadyPaid, OnChainCode: code, Raw: raw}
 	case onchainTokenOwnerMismatch:
-		return CrankFailure{Code: declinecode.DeclinedStopRecurring, Category: declinecode.Terminal, OnChainCode: code, Raw: raw}
+		return CrankFailure{Code: DeclinedStopRecurring, Category: Terminal, OnChainCode: code, Raw: raw}
 	case onchainSubscriptionCancelled, onchainPlanTermsMismatch:
 		// Cancelled-at-period-end pull (508) or ghost/changed plan (519): the
 		// subscription will never pull successfully again -> stop and mark the
 		// membership cancelled. Never dun.
-		return CrankFailure{Code: declinecode.DeclinedStopRecurring, Category: declinecode.Terminal, OnChainCode: code, Raw: raw}
+		return CrankFailure{Code: DeclinedStopRecurring, Category: Terminal, OnChainCode: code, Raw: raw}
 	case onchainTokenInsufficientFunds:
-		return CrankFailure{Code: declinecode.InsufficientFunds, Category: declinecode.Recoverable, OnChainCode: code, Raw: raw}
+		return CrankFailure{Code: InsufficientFunds, Category: Recoverable, OnChainCode: code, Raw: raw}
 	}
 	// Unknown failure: conservative default -> dunning (grace-protected,
 	// recoverable on the next successful pull) rather than silently dropping it.
-	return CrankFailure{Code: declinecode.GenericDecline, Category: declinecode.Recoverable, OnChainCode: code, Raw: raw}
+	return CrankFailure{Code: GenericDecline, Category: Recoverable, OnChainCode: code, Raw: raw}
 }
 
 func parseOnChainCode(s string) int {

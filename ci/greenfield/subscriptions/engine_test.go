@@ -238,10 +238,11 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 }
 
 // Scenario 2: the documented decline policy (docs/operations.md, Dunning):
-// a soft decline on a monthly cycle retries at +2d, +5d, +9d and +13d from the
-// first failure and terminates (cancelled, access revoked) on the fifth
-// failure; a card-fixable decline stops retrying and waits for a new method;
-// a non-recoverable decline terminates at once. Engine access is bounded by
+// a soft decline (do-not-honor included, #1109) on a monthly cycle retries at
+// +2d, +5d, +9d and +13d from the first failure and terminates (cancelled,
+// access revoked) on the fifth failure; a card-fixable decline (a lost card
+// included) stops retrying and waits for a new method; a non-recoverable
+// decline terminates at once. Engine access is bounded by
 // the paid period, so a declined renewal has no grace window.
 func TestEngineDeclinePolicy(t *testing.T) {
 	t.Parallel()
@@ -253,7 +254,9 @@ func TestEngineDeclinePolicy(t *testing.T) {
 	}{
 		{"soft/armed", "insufficient_funds", "202", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "cancelled"},
 		{"soft/default_switch_off", "insufficient_funds", "202", false, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "past_due"},
+		{"do_not_honor_retries", "do_not_honor", "201", true, []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}, "cancelled"},
 		{"fix_payment_method", "expired_card", "223", true, nil, "awaiting_method"},
+		{"lost_card_waits_for_a_new_card", "lost_card", "251", true, nil, "awaiting_method"},
 		{"non_recoverable/armed", "stolen_card", "252", true, nil, "cancelled"},
 		{"non_recoverable/default_switch_off", "stolen_card", "252", false, nil, "past_due"},
 	}

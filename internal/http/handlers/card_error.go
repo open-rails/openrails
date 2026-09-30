@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -50,17 +50,17 @@ func railPaymentRefusalError(rail, failureCode string, customer *openrails.Payme
 	if rail == "" {
 		rail = "nmi"
 	}
-	reason := payments.NormalizeFailureReason(rail, failureCode)
-	failure := payments.CustomerDecline(payments.DeclineDetail{Rail: rail, Code: failureCode})
+	verdict := decline.Classify(rail, failureCode)
+	failure := verdict.PaymentFailure()
 	if customer != nil {
 		failure = *customer
 	}
-	metadata := map[string]any{"decline_reason": reason, "failure": failure}
+	metadata := map[string]any{"decline_reason": string(verdict.Reason), "failure": failure}
 	if failureCode != "" {
 		metadata["failure_code"] = failureCode
 	}
-	switch reason {
-	case payments.FailureProcessorError, payments.FailureConfigError:
+	switch {
+	case verdict.ProviderFault():
 		return api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, openrails.CodePaymentProviderRejected,
 			"The payment processor could not complete this payment. Please try again later.").WithMetadata(metadata)
 	default:

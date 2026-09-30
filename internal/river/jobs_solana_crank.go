@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/billing/declinecode"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -299,13 +298,13 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			"onchain_code":     cf.OnChainCode,
 		})
 		switch cf.Category {
-		case declinecode.Operational:
+		case recurring.Operational:
 			// RPC/network or the cranker wallet out of SOL gas: retry next run, NEVER
 			// dun — a shared outage would wrongly past-due a merchant's whole book.
 			// Leave next_pull_at unchanged so it stays due.
 			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankOutcome{}, crankErr
-		case declinecode.AlreadyPaid:
+		case recurring.AlreadyPaid:
 			// The period was already pulled on-chain but our DB did not record it
 			// (the partial-failure window). Advance past this period so we neither
 			// re-attempt nor dun; the reconcile worker (#258) repairs the ledger.
@@ -326,7 +325,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				reason:   "period already paid on-chain; advanced without local renewal (reconcile repairs)",
 				evidence: map[string]any{"decline_code": string(cf.Code)},
 			}, nil
-		case declinecode.Terminal:
+		case recurring.Terminal:
 			// The subscriber revoked the SPL token delegate on-chain — transfer_subscription
 			// can no longer move funds. Mirror it: cancel + stop, never dun. NOTE: a
 			// plain cancel_subscription does NOT reach here (it stops FUTURE-period

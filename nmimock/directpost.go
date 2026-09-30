@@ -68,7 +68,7 @@ func (m *Mock) sale(form url.Values) string {
 		d := &Sale{TransactionID: m.next("tx"), OrderID: order, Vault: v.ID, BillingID: v.BillingID, Amount: form.Get("amount"),
 			Currency: strings.ToUpper(form.Get("currency")), Card: *charged, Declined: code, At: m.now()}
 		m.sales = append(m.sales, d)
-		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", d.TransactionID, "avsresponse", "", "cvvresponse", "",
+		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", d.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
 			"orderid", order, "type", "sale", "response_code", code, "customer_vault_id", v.ID)
 	}
 	if m.duplicate > 0 {
@@ -99,7 +99,7 @@ func (m *Mock) sale(form url.Values) string {
 	}
 	m.sales = append(m.sales, s)
 	m.remember(*charged, form.Get("amount"))
-	fields := []string{"response", "1", "responsetext", "SUCCESS", "authcode", "123456", "transactionid", s.TransactionID, "avsresponse", "", "cvvresponse", "",
+	fields := []string{"response", "1", "responsetext", "SUCCESS", "authcode", "123456", "transactionid", s.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
 		"orderid", order, "type", "sale", "response_code", "100", "customer_vault_id", v.ID}
 	if form.Get("recurring") == "add_subscription" {
 		id, bad := m.addSubscription(form)
@@ -189,9 +189,9 @@ func (m *Mock) validate(form url.Values) string {
 	}
 	m.validations = append(m.validations, &Validation{TransactionID: id, Vault: v.ID, BillingID: form.Get("billing_id"), Card: *c, Approved: approved, Form: form, At: m.now()})
 	if !approved {
-		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", id, "orderid", form.Get("orderid"), "type", "validate", "response_code", code)
+		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", id, "avsresponse", c.AVS, "cvvresponse", c.CVV, "orderid", form.Get("orderid"), "type", "validate", "response_code", code)
 	}
-	return answer("response", "1", "responsetext", "VALIDATED", "authcode", "", "transactionid", id, "orderid", form.Get("orderid"), "type", "validate", "response_code", "100")
+	return answer("response", "1", "responsetext", "VALIDATED", "authcode", "", "transactionid", id, "avsresponse", c.AVS, "cvvresponse", c.CVV, "orderid", form.Get("orderid"), "type", "validate", "response_code", "100")
 }
 
 func (m *Mock) directRefund(form url.Values) string {
