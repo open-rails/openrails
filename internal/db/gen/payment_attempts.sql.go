@@ -385,7 +385,7 @@ WHERE a.merchant_id = $1::uuid
   AND ($13::timestamptz IS NULL OR a.attempted_at >= $13::timestamptz)
   AND ($14::timestamptz IS NULL OR a.attempted_at < $14::timestamptz)
 ORDER BY a.attempted_at DESC, a.id DESC
-LIMIT $16::int OFFSET $15::int
+LIMIT $16::bigint OFFSET $15::bigint
 `
 
 type ListPaymentAttemptsParams struct {
@@ -403,8 +403,8 @@ type ListPaymentAttemptsParams struct {
 	CycleID        *uuid.UUID
 	Since          *time.Time
 	Until          *time.Time
-	PageOffset     int32
-	PageLimit      int32
+	PageOffset     int64
+	PageLimit      int64
 }
 
 type ListPaymentAttemptsRow struct {

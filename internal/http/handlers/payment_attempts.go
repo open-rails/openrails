@@ -266,8 +266,8 @@ func (q *queryReader) time(key string) *time.Time {
 	return &t
 }
 
-func (q *queryReader) page() (int32, int32) {
-	return int32(min(max(parseIntDefault(q.r.Query("limit"), 50), 1), 200)), int32(max(parseIntDefault(q.r.Query("offset"), 0), 0))
+func (q *queryReader) page() (int64, int64) {
+	return int64(min(max(parseIntDefault(q.r.Query("limit"), 50), 1), 200)), int64(max(parseIntDefault(q.r.Query("offset"), 0), 0))
 }
 
 func (q *queryReader) fail(err error) {

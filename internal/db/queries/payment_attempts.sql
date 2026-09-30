@@ -93,7 +93,7 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(since)::timestamptz IS NULL OR a.attempted_at >= sqlc.narg(since)::timestamptz)
   AND (sqlc.narg(until)::timestamptz IS NULL OR a.attempted_at < sqlc.narg(until)::timestamptz)
 ORDER BY a.attempted_at DESC, a.id DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: GetPaymentAttempt :one
 SELECT * FROM openrails.payment_attempts

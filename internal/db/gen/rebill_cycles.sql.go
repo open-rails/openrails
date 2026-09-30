@@ -228,7 +228,7 @@ WHERE cf.merchant_id = $1::uuid
         WHEN 'open' THEN cf.won_at IS NULL AND cf.closed_at > $10::timestamptz
         ELSE true END
 ORDER BY cf.due_at DESC, cf.id DESC
-LIMIT $12::int OFFSET $11::int
+LIMIT $12::bigint OFFSET $11::bigint
 `
 
 type ListRebillCyclesParams struct {
@@ -242,8 +242,8 @@ type ListRebillCyclesParams struct {
 	DueUntil       *time.Time
 	Outcome        *string
 	Now            time.Time
-	PageOffset     int32
-	PageLimit      int32
+	PageOffset     int64
+	PageLimit      int64
 }
 
 type ListRebillCyclesRow struct {

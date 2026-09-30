@@ -62,7 +62,7 @@ WHERE cf.merchant_id = sqlc.arg(merchant_id)::uuid
         WHEN 'open' THEN cf.won_at IS NULL AND cf.closed_at > sqlc.arg(now)::timestamptz
         ELSE true END
 ORDER BY cf.due_at DESC, cf.id DESC
-LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: GetRebillCycle :one
 SELECT * FROM openrails.rebill_cycle_facts

@@ -5716,7 +5716,7 @@
     "internal/http/handlers/merchant_payment_providers.go": "f29061bd756d3686833b503f74a05b7130c9765b4c8418d9e9efbf938a060b85",
     "internal/http/handlers/notifications.go": "c0a31605497bf64b1c3bfbeee00dccdfd2bc43bf7bd87bf90f0e2a8ee125d460",
     "internal/http/handlers/payment_api.go": "1e66a86715f69d09f71c23ea08340241852409b486de9d15c4b922a814148076",
-    "internal/http/handlers/payment_attempts.go": "5222839cd873a9e772e9b4538e972b09d00ce4f7859035f51daa00423a83ef3b",
+    "internal/http/handlers/payment_attempts.go": "674a806dcb86f6eb0d2c5e1f1e61ad0fc9dc5ee1ecfb5e5d79a54e3e8dacf4d9",
     "internal/http/handlers/payment_methods.go": "750052bb5990737cfe1ee83ac1b7b797b744e2dd10864264825972ac73018b3c",
     "internal/http/handlers/platform_merchants.go": "9ba896f9cd3d18f28cd41ca1129c0ea87beb1c4d47b62fe429f4053e5c198cd9",
     "internal/http/handlers/portal.go": "a838cd7e700ee512de98ee9820ff980615383131292ed34b470ba4e674fd7bbb",
