@@ -17,7 +17,7 @@ caller-controlled context, or choose an explicit deadline. The CLI defaults to
 caller cancellation and also accepts `--timeout`.
 
 Local export/import and `prepare-target --unbound-merchants` load only the `db`
-configuration and enforce the application role's RLS posture. They do not start
+configuration. They do not start
 providers, workers, FX refresh, a secret store, or AuthKit. Hosted
 `prepare-target` still needs normal destination AuthKit configuration to verify
 live group ownership. Remote export/import require only `--url` and
@@ -80,8 +80,7 @@ still requires the operator to prevent concurrent writes throughout final cutove
 ## Prepare the destination identity
 
 Run against the **destination** database configuration with the normal
-non-superuser, `NOBYPASSRLS` application role. The command uses the same CLI RLS
-posture gate as other merchant operations and does not run migrations or workers.
+application role. The command does not run migrations or workers.
 
 For an OpenRails control plane:
 

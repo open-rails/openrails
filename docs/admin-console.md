@@ -106,7 +106,7 @@ What the engine enforces (verified):
   secrets, no data).
 - All **data and actions** go through `/v1/merchant/*` with a Bearer token
   (AuthKit user session or merchant API key) and are enforced server-side by
-  the merchant permission catalog (#567) plus RLS merchant scoping. The console
+  the merchant permission catalog (#567) plus per-query merchant scoping. The console
   has no client-side privilege of its own; a 403 renders as a
   "role lacks permission" toast.
 - Core OpenRails imposes **no environment restriction** — `enabled: true`

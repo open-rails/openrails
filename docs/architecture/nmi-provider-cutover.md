@@ -181,8 +181,8 @@ and local completion remain available after revocation. Target compensation
 checks only the target's qualification because it never writes the source.
 
 Lease heartbeats use an independent merchant-scoped lazy connection on the same
-database. They never join the provider-lock transaction or lose their RLS
-identity. With a one-connection pool, an active request can occupy the only slot;
+database. They never join the provider-lock transaction or lose their merchant
+scope. With a one-connection pool, an active request can occupy the only slot;
 a heartbeat then waits for capacity and Runner shutdown cancels that wait. This
 does not promise renewal during unavailable pool capacity. Receipt custody and
 synchronous result writes continue using the original request pin.
