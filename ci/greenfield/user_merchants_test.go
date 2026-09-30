@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/embed/controlplane"
@@ -22,7 +23,8 @@ func TestUserMerchantsListing(t *testing.T) {
 	require.NoError(t, err)
 	member, memberToken := newUser(t, cp)
 	owner, ownerToken := newUser(t, cp)
-	u, err := cp.Core().AdminGetUser(ctx, member)
+	verifyEmail(t, cp, member)
+	u, err := cp.Core().User(ctx, iam.UserByID(member))
 	require.NoError(t, err)
 
 	own := uniqueName("a-own")
@@ -32,7 +34,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	viewed := uniqueName("b-viewed")
 	theirs, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: viewed, OwnerUserID: owner})
 	require.NoError(t, err)
-	w := call(t, handler, ownerToken, http.MethodPost, "/v1/merchant/team/invites", viewed, map[string]string{"email": *u.Email, "role": "viewer"})
+	w := call(t, handler, ownerToken, http.MethodPost, "/v1/merchant/team/invites", viewed, map[string]string{"email": u.Email, "role": "viewer"})
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: uniqueName("c-unrelated"), OwnerUserID: owner})
 	require.NoError(t, err)

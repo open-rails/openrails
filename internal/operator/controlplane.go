@@ -6,104 +6,45 @@ package operator
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"reflect"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
-	"github.com/open-rails/authkit/ratelimit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/config"
 	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// AttachOptions configures the embedded AuthKit control-plane seam.
+// AttachOptions configures the embedded AuthKit control plane: the only seam
+// a host has onto the AuthKit configuration OpenRails wires (authkit.Config and
+// Deps). What it does not forward is deliberate:
 //
-// # Field-by-field forwarding audit (#743)
+//   - Token: the issuer is Auth.Issuer and the audience the product constant
+//     billingauth.TokenAudience (#750); durations take AuthKit's defaults.
+//   - Keys: resolved by OpenRails from Auth (inline PEM, else keys_path, else
+//     a development key when allowed); a host injects no key source.
+//   - Roles: OpenRails' permission model (#567) is the product's schema.
+//   - APIKeys: the "openrails" key prefix is a product decision.
+//   - Identity providers, 2FA policy, passkeys, delegation, languages,
+//     entitlements and hooks: feature areas the control plane does not use.
+//   - Limiter and ClientIP: full replacements of the rate limiter and the
+//     client-IP posture; tune AuthRateLimitOverrides and the proxy fields.
 //
-// AttachOptions is the ONLY seam an embedding host has onto the AuthKit dials
-// OpenRails' control plane wires (authcore.Config, authcore.Deps and
-// authhttp.Config). Below is every dial on both surfaces and whether
-// AttachOptions forwards it, so the next missing forward is a deliberate
-// decision recorded here, not a silent gap rediscovered by a 404 in
-// production (#743's Frontend-links finding was exactly that).
-//
-// authcore.Config (the AuthKit engine):
-//   - Token (Issuer/Audiences/durations/SessionMaxPerUser): NOT forwarded.
-//     Issuer comes from AttachOptions.Auth.Issuer (already host-configurable at the
-//     config layer); the audience is the OpenRails product constant
-//     billingauth.TokenAudience, not a per-host dial (#750). Token
-//     durations/session caps have no AttachOptions knob yet — an open gap,
-//     not yet requested by a host.
-//   - Frontend: FORWARDED (this issue) via AttachOptions.Frontend.
-//   - Registration: PARTIALLY forwarded. OpenRails computes native registration
-//     from HostedPosture (open+required vs closed+none), while the independent
-//     passwordless login and auto-registration policies are explicit opt-ins.
-//   - Keys: NOT forwarded. Signing-key resolution is OpenRails' own
-//     responsibility (resolveControlPlaneKeySource: AttachOptions.Auth inline
-//     material, else vault keys.json, else dev-ephemeral) — a host has no
-//     business injecting a KeySource or flipping VerifyOnly.
-//   - Identity (OAuth/OIDC providers): NOT forwarded. No AttachOptions
-//     provider list exists; hosted external-login is a future issue, not a
-//     silently-defaulted feature.
-//   - APIKeys.Prefix: NOT forwarded — the "openrails" API-key brand prefix
-//     (APIKeyPrefix) is an OpenRails product decision, not host-configurable.
-//   - APIKeys.MaxTTL: NOT forwarded — no cap today; open gap, not a decision.
-//   - TwoFactor / Passkeys: NOT forwarded — neither feature area is wired
-//     into the control plane's mounted routes for embedded hosts yet.
-//   - RBAC: NOT forwarded — OpenRails' own Groups() permission-group catalog
-//     IS the product's authorization schema (#567); a host cannot override
-//     its own persona/permission model.
-//   - Schema / SolanaNetwork: NOT AttachOptions concerns — Schema follows
-//     cfg.DB.SchemaName() at the DB-wiring layer; SolanaNetwork is never
-//     overridden today.
-//   - The dev-rig flags (Applications.AllowPrivateNetworkJWKS,
-//     Registration.AllowMissingSenders; ak#314): selected explicitly through
-//     AttachOptions.Auth; billing configuration cannot enable them.
-//
-// authcore.Deps (engine dependencies):
-//   - Email / SMS: FORWARDED via AttachOptions.EmailSender / SMSSender (#738).
-//   - Redis: FORWARDED (#753) — AttachWithOptions wires the app graph's OWN
-//     Redis client (app.App.RedisClient) into authhttp.Config.Redis for
-//     shared rate limits; AuthKit keeps no other state in Redis. Without it
-//     the control plane requires auth.allow_memory (per-process limits).
-//   - NameAdmission: FORWARDED via AttachOptions.NameAdmission (usernames and
-//     customer groups; merchant names are OpenRails', #1106).
-//   - InstanceAdmission: NOT forwarded. OpenRails creates merchant groups
-//     itself; MerchantCreation.Admission gates merchant creation.
-//   - Entitlements / DelegatedAuthorization / ApplicationAdmission /
-//     SolanaSNSResolver / OutboundHTTP / Clock: NOT forwarded — unrelated
-//     feature areas OpenRails' control plane does not use.
-//
-// authhttp.Config (HTTP-layer construction, authhttp.New):
-//   - TrustedProxies / CloudflareProxies / DirectPeerIP: FORWARDED via the
-//     AttachOptions fields of the same names (client-IP posture, ak#299/#298).
-//   - ClientIP: NOT forwarded — superseded by the posture fields; exposing a raw
-//     ClientIPFunc would let a host inject arbitrary, unaudited client-IP logic.
-//   - Limiter / DisableRateLimiting: NOT forwarded — full-policy-replacement
-//     footguns; forwarding them would let a host disable rate limiting entirely
-//     instead of tuning one bucket. Use AuthRateLimitOverrides instead.
-//   - RateLimits: FORWARDED (#743 task 3) via AttachOptions.AuthRateLimitOverrides.
-//   - Redis: NOT separately forwarded — the HTTP layer reuses whatever Redis
-//     client the engine was wired with above (#210).
-//   - Languages / Documents: NOT forwarded — no host has asked for them yet.
+// Redis is the app graph's own client (#753), shared for rate limits.
 type AttachOptions struct {
 	// Auth is the explicit standalone identity configuration, separate from billing.
 	Auth *hostconfig.AuthConfig
 
-	// DPoPRequestURL returns the externally visible request URL when the host
-	// rewrites mounted billing paths. It must use trusted routing configuration.
-	DPoPRequestURL func(*http.Request) string
-
 	// Naming overrides Auth.Naming, the site naming policy for usernames and
 	// merchant names. Nil uses config.
-	Naming *authkit.NamingConfig
-	// NameAdmission is a side-effect-free host claim check; creation charges use MerchantCreation.Admission.
-	NameAdmission func(context.Context, authkit.NameAdmissionRequest) error
+	Naming *merchant.NamingConfig
+	// NameAdmission is a side-effect-free username policy; merchant creation
+	// charges use MerchantCreation.Admission.
+	NameAdmission func(context.Context, iam.NameAdmissionRequest) error
 	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
 	// Leave false for private standalone-compatible embedded hosts.
 	HostedPosture bool
@@ -112,34 +53,21 @@ type AttachOptions struct {
 	// confirm routes. PasswordlessAutoRegistration additionally lets a verified
 	// unknown contact create a no-password user during confirmation. Both are off
 	// by default. Auto-registration requires login and HostedPosture; login
-	// requires at least one non-nil email or SMS sender.
+	// requires an email or SMS sender.
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
 
-	// EmailSender / SMSSender are host-owned verification senders threaded into
-	// the AuthKit engine (#738). The types (and the VerificationMessage payload a
-	// sender receives) are the github.com/open-rails/authkit/embedded aliases, so
-	// an external host implements them without reaching into authkit internals.
-	//
-	// Hosted posture keeps registration verification Required, and authkit fails
-	// construction loudly when that policy has no sender — so HostedPosture
-	// requires at least one of these. Self-hosted posture ignores them for
-	// registration (closed, nothing to verify); a supplied sender still powers
-	// the mounted self-service verify/reset routes.
-	EmailSender authcore.EmailSender
-	SMSSender   authcore.SMSSender
+	// EmailSender and SMSSender deliver AuthKit's messages (#738). Hosted
+	// posture requires verified registration, so it needs at least one.
+	// Self-hosted posture registers nobody; a sender still powers the mounted
+	// verify and reset routes.
+	EmailSender func(context.Context, iam.EmailMessage) error
+	SMSSender   func(context.Context, iam.SMSMessage) error
 
-	// Frontend overrides AuthKit's Frontend config — the host-owned frontend
-	// routes used to build absolute emailed links (verification, password
-	// reset, ...). #743: left zero, BaseURL pins at the control-plane's own
-	// issuer, which for a hosted product is an API host that serves no pages
-	// — emailed verify/reset links 404 (the reported bug). Hosted products
-	// MUST set at least Frontend.BaseURL to their product frontend's origin;
-	// VerifyPath/PasswordResetPath/etc default per authcore's own rules
-	// (VerifyPath->"/verify", PasswordResetPath->"/reset", ...) when left
-	// blank. The type is authkit/embedded's own exported FrontendConfig — no
-	// OpenRails-owned wrapper needed, matching EmailSender/SMSSender above.
-	Frontend authcore.FrontendConfig
+	// Frontend is where emailed links point (#743). Left zero, they point at
+	// the control plane's issuer, which for a hosted product is an API host
+	// serving no pages: hosted products MUST set Frontend.BaseURL.
+	Frontend authkit.FrontendConfig
 
 	// TrustedProxies overrides cfg.TrustedProxies for AuthKit's HTTP client-IP
 	// resolver. Production requires proxies or an explicit direct-peer posture.
@@ -152,14 +80,9 @@ type AttachOptions struct {
 	// It cannot be combined with configured or host-supplied trusted proxies.
 	DirectPeerIP bool
 
-	// AuthRateLimitOverrides overlays bucket-specific limits onto AuthKit's
-	// built-in rate-limit defaults (#743 task 3, authhttp.Config.RateLimits).
-	// Keys are AuthKit's exported
-	// bucket names (authhttp.RLPasswordLogin, authhttp.RLAuthRegister, ...);
-	// a host tunes only the buckets it names, every other bucket keeps
-	// AuthKit's default. The type is authkit/ratelimit's own exported Limit —
-	// no OpenRails wrapper needed, matching Frontend/EmailSender above.
-	AuthRateLimitOverrides map[string]ratelimit.Limit
+	// AuthRateLimitOverrides overlays bucket limits onto AuthKit's defaults
+	// (authkit.DefaultRateLimits, #743); every other bucket keeps its default.
+	AuthRateLimitOverrides map[string]authkit.RateLimit
 
 	// MerchantCreation declares the hosted policy for merchant names claimed by
 	// users (or#914): reserved names (merchant.ReservedHostedSlugs +
@@ -245,17 +168,14 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if opts.PasswordlessLogin {
 		cpOpts = append(cpOpts, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))
 	}
-	if !isNil(opts.EmailSender) {
+	if opts.EmailSender != nil {
 		cpOpts = append(cpOpts, controlplane.WithEmailSender(opts.EmailSender))
 	}
-	if !isNil(opts.SMSSender) {
+	if opts.SMSSender != nil {
 		cpOpts = append(cpOpts, controlplane.WithSMSSender(opts.SMSSender))
 	}
-	if opts.Frontend != (authcore.FrontendConfig{}) {
+	if opts.Frontend != (authkit.FrontendConfig{}) {
 		cpOpts = append(cpOpts, controlplane.WithFrontend(opts.Frontend))
-	}
-	if opts.DPoPRequestURL != nil {
-		cpOpts = append(cpOpts, controlplane.WithDPoPRequestURL(opts.DPoPRequestURL))
 	}
 	if opts.DirectPeerIP {
 		cpOpts = append(cpOpts, controlplane.WithDirectPeerIP())
@@ -322,23 +242,10 @@ func validateAttachOptions(opts AttachOptions) error {
 	if opts.PasswordlessAutoRegistration && !opts.HostedPosture {
 		return fmt.Errorf("control plane: passwordless auto-registration requires hosted posture")
 	}
-	if opts.PasswordlessLogin && isNil(opts.EmailSender) && isNil(opts.SMSSender) {
+	if opts.PasswordlessLogin && opts.EmailSender == nil && opts.SMSSender == nil {
 		return fmt.Errorf("control plane: passwordless login requires an email or SMS sender")
 	}
 	return nil
-}
-
-func isNil(value any) bool {
-	if value == nil {
-		return true
-	}
-	reflected := reflect.ValueOf(value)
-	switch reflected.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
-		return reflected.IsNil()
-	default:
-		return false
-	}
 }
 
 // BootstrapOptions is the nameable, externally-constructible alias for

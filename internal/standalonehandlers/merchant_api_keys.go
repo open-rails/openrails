@@ -8,12 +8,14 @@ package standalonehandlers
 import (
 	"context"
 	"errors"
-	"github.com/open-rails/openrails/internal/http/handlers"
 	"net/http"
+	"slices"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/http/handlers"
+
 	"github.com/google/uuid"
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -26,9 +28,63 @@ import (
 // API-key routes. Implemented by *controlplane.ControlPlane; nil (an embedded
 // host without a control plane) omits these routes at registration.
 type MerchantAPIKeyManager interface {
-	MintMerchantAPIKey(ctx context.Context, mid merchant.ID, name, role, actorUserID string) (controlplane.MerchantAPIKey, string, error)
+	RequestActor
+	MintMerchantAPIKey(ctx context.Context, mid merchant.ID, name string, role iam.Role, actor iam.Actor) (controlplane.MerchantAPIKey, string, error)
 	ListMerchantAPIKeys(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantAPIKey, error)
-	RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID, id string) (bool, error)
+	RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error)
+}
+
+// RequestActor derives the AuthKit actor of a request's user token
+// (verify.ActorFromClaims), bound to its session.
+type RequestActor interface {
+	RequestActor(r *http.Request) (iam.Actor, error)
+}
+
+// mutationActor is who performs a merchant credential or membership mutation.
+// A user session acts as itself: AuthKit checks its authority and session
+// live. A non-user credential (API key, service JWT, in-process host,
+// delegated token) carries its resolved grants, which must cover role here
+// (when set); it then acts as the system. It writes a 403 with code when
+// neither applies or coverage fails.
+func mutationActor(r *httprequest.Request, svc RequestActor, role *iam.Role, code string) (iam.Actor, bool) {
+	if principal, ok := merchantRoutePrincipal(r); ok && len(principal.Permissions) > 0 {
+		if role != nil && !controlplane.MerchantRoleCoveredBy(*role, principal.Permissions) {
+			r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
+				"cannot grant authority beyond your own credential's"))
+			return iam.Actor{}, false
+		}
+		return iam.SystemActor(), true
+	}
+	actor, err := svc.RequestActor(r.Request)
+	if err != nil {
+		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, code,
+			"caller identity does not support this operation"))
+		return iam.Actor{}, false
+	}
+	return actor, true
+}
+
+// merchantRole reads a merchant role name from a request, writing a 400 when
+// it is unknown.
+func merchantRole(r *httprequest.Request, name string, allowed []iam.Role) (iam.Role, bool) {
+	role, ok := controlplane.MerchantRole(name)
+	if !ok || !slices.Contains(allowed, role) {
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",
+			"role must be one of: "+strings.Join(controlplane.RoleNames(allowed), ", ")))
+		return iam.Role{}, false
+	}
+	return role, true
+}
+
+// sessionRevoked answers a mutation AuthKit refused because the caller's
+// session was revoked since its token was minted.
+func sessionRevoked(r *httprequest.Request, err error) bool {
+	if !errors.Is(err, iam.ErrSessionRevoked) {
+		return false
+	}
+	r.APIError(api.NewAPIError(http.StatusUnauthorized, api.ErrorTypeAuthentication, "credential_revoked",
+		"the session was revoked"))
+	return true
 }
 
 // merchantRoutePrincipal returns the gate-resolved principal the merchant
@@ -70,54 +126,27 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 			return
 		}
 		req.Name = strings.TrimSpace(req.Name)
-		req.Role = strings.ToLower(strings.TrimSpace(req.Role))
 		if req.Name == "" || len(req.Name) > 120 {
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_name",
 				"name is required (max 120 chars)"))
 			return
 		}
-		if _, known := controlplane.MerchantRolePermissions(req.Role); !known {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",
-				"role must be one of: "+strings.Join(controlplane.MerchantAPIKeyRoles(), ", ")))
+		role, ok := merchantRole(r, req.Role, controlplane.MerchantAPIKeyRoles())
+		if !ok {
 			return
 		}
-
-		// Two actor shapes (mirroring the gate): a USER SESSION carries an AuthKit
-		// user id and no resolved grant set — pass it as the mint actor so AuthKit
-		// core enforces capability + no-escalation against live group state. Every
-		// NON-USER credential (API key, service JWT, in-process host, delegated
-		// token) carries its resolved grants on the principal instead — the same
-		// no-escalation rule is enforced HERE (the requested role's permissions
-		// must be covered by the caller's own) before a genesis-actor mint.
-		principal, hasPrincipal := merchantRoutePrincipal(r)
-		var actor string
-		if hasPrincipal && len(principal.Permissions) > 0 {
-			if !controlplane.MerchantRoleCoveredBy(req.Role, principal.Permissions) {
-				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
-					"cannot mint a key with authority beyond your own credential's"))
-				return
-			}
-		} else {
-			uc, _ := r.UserContext()
-			actor = strings.TrimSpace(uc.UserID)
-			if actor == "" {
-				// Fail closed: no user actor and no resolved grant set.
-				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "credentials_manage_required",
-					"caller identity does not support minting API keys"))
-				return
-			}
+		actor, ok := mutationActor(r, svc, &role, "credentials_manage_required")
+		if !ok {
+			return
 		}
-
-		key, secret, err := svc.MintMerchantAPIKey(r.Request.Context(), mid, req.Name, req.Role, actor)
+		key, secret, err := svc.MintMerchantAPIKey(r.Request.Context(), mid, req.Name, role, actor)
 		if err != nil {
 			switch {
-			case errors.Is(err, controlplane.ErrUnknownMerchantRole):
-				r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",
-					"role must be one of: "+strings.Join(controlplane.MerchantAPIKeyRoles(), ", ")))
-			case errors.Is(err, authkit.ErrInsufficientRoleAuthority):
+			case sessionRevoked(r, err):
+			case errors.Is(err, iam.ErrInsufficientAuthority):
 				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "credentials_manage_required",
 					"your account lacks credential-management authority on this merchant"))
-			case errors.Is(err, authkit.ErrRoleAssignmentEscalation):
+			case errors.Is(err, iam.ErrRoleAssignmentEscalation):
 				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
 					"cannot mint a key with authority beyond your own"))
 			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
@@ -172,8 +201,15 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				"no live API key with that id in this merchant"))
 			return
 		}
-		revoked, err := svc.RevokeMerchantAPIKey(r.Request.Context(), mid, id)
+		actor, ok := mutationActor(r, svc, nil, "credentials_manage_required")
+		if !ok {
+			return
+		}
+		revoked, err := svc.RevokeMerchantAPIKey(r.Request.Context(), mid, id, actor)
 		if err != nil {
+			if sessionRevoked(r, err) {
+				return
+			}
 			if errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) {
 				r.ErrorJSON(http.StatusForbidden, "merchant_unresolved")
 				return
@@ -183,7 +219,7 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 		}
 		if !revoked {
 			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found",
-				"no live API key with that id in this merchant"))
+				"no API key with that id in this merchant"))
 			return
 		}
 		r.JSON(http.StatusOK, map[string]any{"revoked": true, "id": id})

@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -25,13 +25,14 @@ import (
 // Implemented by *controlplane.ControlPlane; nil (an embedded host without a
 // control plane) omits these routes at registration.
 type MerchantTeamManager interface {
+	RequestActor
 	ListMerchantTeam(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantTeamMember, error)
-	InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email, role, actorUserID string) (controlplane.MerchantTeamInviteResult, error)
+	InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email string, role iam.Role, actor iam.Actor) (controlplane.MerchantTeamInviteResult, error)
 	ListMerchantTeamInvites(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantTeamInvite, error)
 	InvitesEnabled() bool
-	RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, linkID string) (bool, error)
-	ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID, newRole, actorUserID string) error
-	RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID, actorUserID string) error
+	RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error)
+	ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID string, newRole iam.Role, actor iam.Actor) error
+	RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID string, actor iam.Actor) error
 }
 
 func teamMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
@@ -43,8 +44,8 @@ func teamMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
 	return mid, true
 }
 
-// MerchantListTeam handles GET /v1/merchant/team: the merchant's human team
-// (user, role) — owner first — WITHOUT the synthetic bootstrap actor.
+// MerchantListTeam handles GET /v1/merchant/team: the merchant's team (user,
+// role), owners first.
 func MerchantListTeam(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		mid, ok := teamMerchantScope(r)
@@ -61,9 +62,10 @@ func MerchantListTeam(svc MerchantTeamManager) func(*httprequest.Request) {
 }
 
 // MerchantInviteTeamMember handles POST /v1/merchant/team/invites {email, role}.
-// An existing user is added immediately (201 {added:true, member}); an
-// unregistered email yields a single-use register+join link (201 {invite, url})
-// when the deployment permits self-registration, else 409.
+// A live account that verified the email is added immediately (201
+// {added:true, member}); any other email yields a single-use register+join
+// link (201 {invite, url}) when the deployment permits self-registration,
+// else 409.
 func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		mid, ok := teamMerchantScope(r)
@@ -78,29 +80,26 @@ func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 			return
 		}
 		req.Email = strings.TrimSpace(req.Email)
-		req.Role = strings.ToLower(strings.TrimSpace(req.Role))
 		if req.Email == "" {
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_email",
 				"email is required"))
 			return
 		}
-		if _, known := controlplane.MerchantRolePermissions(req.Role); !known {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",
-				"role must be one of: "+strings.Join(controlplane.MerchantRoles(), ", ")))
-			return
-		}
-
-		actor, ok := teamMutationActor(r, req.Role)
+		role, ok := merchantRole(r, req.Role, controlplane.MerchantRoles())
 		if !ok {
 			return
 		}
-		result, err := svc.InviteMerchantTeamMember(r.Request.Context(), mid, req.Email, req.Role, actor)
+		actor, ok := mutationActor(r, svc, &role, "members_manage_required")
+		if !ok {
+			return
+		}
+		result, err := svc.InviteMerchantTeamMember(r.Request.Context(), mid, req.Email, role, actor)
 		if err != nil {
 			switch {
 			case errors.Is(err, controlplane.ErrTeamInvitesDisabled):
 				r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "invites_disabled",
-					"that email has no account yet, and self-registration invites are disabled on this deployment — the operator must provision the account first, then add it here by email"))
-			case errors.Is(err, authkit.ErrExternalInvitesDisabled):
+					"no account has verified that email, and self-registration invites are disabled on this deployment — the operator must provision the account and verify its email first, then add it here by email"))
+			case errors.Is(err, iam.ErrExternalInvitesDisabled):
 				r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "invites_disabled",
 					"self-registration invites are disabled on this deployment"))
 			default:
@@ -139,9 +138,13 @@ func MerchantRevokeTeamInvite(svc MerchantTeamManager) func(*httprequest.Request
 			return
 		}
 		id := strings.TrimSpace(r.Param("id"))
-		revoked, err := svc.RevokeMerchantTeamInvite(r.Request.Context(), mid, id)
+		actor, ok := mutationActor(r, svc, nil, "members_manage_required")
+		if !ok {
+			return
+		}
+		revoked, err := svc.RevokeMerchantTeamInvite(r.Request.Context(), mid, id, actor)
 		if err != nil {
-			teamServiceError(r, err, "failed to revoke invite")
+			teamMutationError(r, err, "failed to revoke invite")
 			return
 		}
 		if !revoked {
@@ -173,21 +176,19 @@ func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) 
 		if !r.BindJSON(&req) {
 			return
 		}
-		req.Role = strings.ToLower(strings.TrimSpace(req.Role))
-		if _, known := controlplane.MerchantRolePermissions(req.Role); !known {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",
-				"role must be one of: "+strings.Join(controlplane.MerchantRoles(), ", ")))
-			return
-		}
-		actor, ok := teamMutationActor(r, req.Role)
+		role, ok := merchantRole(r, req.Role, controlplane.MerchantRoles())
 		if !ok {
 			return
 		}
-		if err := svc.ChangeMerchantTeamRole(r.Request.Context(), mid, userID, req.Role, actor); err != nil {
+		actor, ok := mutationActor(r, svc, &role, "members_manage_required")
+		if !ok {
+			return
+		}
+		if err := svc.ChangeMerchantTeamRole(r.Request.Context(), mid, userID, role, actor); err != nil {
 			teamMutationError(r, err, "failed to change role")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"user_id": userID, "role": req.Role})
+		r.JSON(http.StatusOK, map[string]any{"user_id": userID, "role": role.Name()})
 	}
 }
 
@@ -205,50 +206,18 @@ func MerchantRemoveTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 				"user id is required"))
 			return
 		}
-		// Removal grants no role, so there is no target role to no-escalation-check
-		// against a non-user principal; the members:manage route gate suffices.
-		actor := teamActorNoEscalation(r)
+		// Removal grants no role: the members:manage route gate suffices for a
+		// non-user principal.
+		actor, ok := mutationActor(r, svc, nil, "members_manage_required")
+		if !ok {
+			return
+		}
 		if err := svc.RemoveMerchantTeamMember(r.Request.Context(), mid, userID, actor); err != nil {
 			teamMutationError(r, err, "failed to remove team member")
 			return
 		}
 		r.JSON(http.StatusOK, map[string]any{"removed": true, "user_id": userID})
 	}
-}
-
-// teamMutationActor resolves the acting user for a role-granting mutation and
-// enforces no-escalation for non-user principals (same shape as #757): a USER
-// SESSION passes its user id to AuthKit core (which enforces authority against
-// live state); a NON-USER credential carries its resolved grants and must cover
-// the target role's permissions here before a genesis-actor mutation. Returns
-// (actor, false) and writes a 403 when coverage fails.
-func teamMutationActor(r *httprequest.Request, role string) (string, bool) {
-	principal, hasPrincipal := merchantRoutePrincipal(r)
-	if hasPrincipal && len(principal.Permissions) > 0 {
-		if !controlplane.MerchantRoleCoveredBy(role, principal.Permissions) {
-			r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
-				"cannot grant a role with authority beyond your own credential's"))
-			return "", false
-		}
-		return "", true // non-user principal → genesis actor in the control plane
-	}
-	uc, _ := r.UserContext()
-	actor := strings.TrimSpace(uc.UserID)
-	if actor == "" {
-		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "members_manage_required",
-			"caller identity does not support managing team members"))
-		return "", false
-	}
-	return actor, true
-}
-
-// teamActorNoEscalation resolves the acting user for a non-granting mutation
-// (removal): the caller's user id when it is a user session, else empty (the
-// control plane falls back to the genesis actor). Authority is already enforced
-// by the members:manage route gate.
-func teamActorNoEscalation(r *httprequest.Request) string {
-	uc, _ := r.UserContext()
-	return strings.TrimSpace(uc.UserID)
 }
 
 func teamServiceError(r *httprequest.Request, err error, fallback string) {
@@ -261,6 +230,7 @@ func teamServiceError(r *httprequest.Request, err error, fallback string) {
 
 func teamMutationError(r *httprequest.Request, err error, fallback string) {
 	switch {
+	case sessionRevoked(r, err):
 	case errors.Is(err, controlplane.ErrCannotRemoveLastOwner):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "last_owner",
 			"a merchant must keep at least one owner — assign another owner before demoting or removing this one"))
@@ -269,11 +239,11 @@ func teamMutationError(r *httprequest.Request, err error, fallback string) {
 			"that user is not a member of this merchant"))
 	case errors.Is(err, controlplane.ErrUnknownMerchantRole):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "unknown_role",
-			"role must be one of: "+strings.Join(controlplane.MerchantRoles(), ", ")))
-	case errors.Is(err, authkit.ErrInsufficientRoleAuthority):
+			"role must be one of: "+strings.Join(controlplane.RoleNames(controlplane.MerchantRoles()), ", ")))
+	case errors.Is(err, iam.ErrInsufficientAuthority):
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "members_manage_required",
 			"your account lacks team-management authority on this merchant"))
-	case errors.Is(err, authkit.ErrRoleAssignmentEscalation):
+	case errors.Is(err, iam.ErrRoleAssignmentEscalation):
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
 			"cannot grant a role with authority beyond your own"))
 	default:

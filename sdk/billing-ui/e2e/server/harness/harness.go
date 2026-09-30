@@ -11,9 +11,8 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	authkithttp "github.com/open-rails/authkit/adapters/http"
-	"github.com/open-rails/authkit/authhttp"
-	"github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	openrailsconfig "github.com/open-rails/openrails/config"
@@ -44,7 +43,7 @@ const (
 )
 
 type Runtime struct {
-	Auth    *embedded.Runtime
+	Auth    *authkit.Client
 	Billing *openrailsembed.Runtime
 	Client  *openrails.Client
 	Catalog Catalog
@@ -64,7 +63,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := embedded.ApplyMigrations(ctx, pool, AuthSchema); err != nil {
+	if err := authkit.Migrate(ctx, pool, authConfig(""), authkit.MigrateOptions{}); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("authkit migrations: %w", err)
 	}
@@ -87,22 +86,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 		}
 	}()
 	signer := solanago.NewWallet().PrivateKey
-	auth, err := embedded.New(embedded.Config{
-		Schema: AuthSchema,
-		HTTP:   authhttp.Config{DirectPeerIP: true, PerProcessRateLimits: true, Mount: authhttp.MountOptions{APIPrefix: "/auth/v1"}},
-		Token: embedded.TokenConfig{
-			Issuer:            baseURL,
-			IssuedAudiences:   []string{Audience},
-			ExpectedAudiences: []string{Audience},
-		},
-		Registration: embedded.RegistrationConfig{
-			NativeUserMode: embedded.RegistrationModeOpen,
-			Verification:   embedded.RegistrationVerificationNone,
-		},
-		Keys: embedded.KeysConfig{AllowEphemeralDevKeys: true},
-
-		TwoFactor: embedded.TwoFactorConfig{Mode: embedded.TwoFactorDisabled},
-	}, embedded.Deps{Postgres: pool})
+	auth, err := authkit.New(ctx, authConfig(baseURL), authkit.Deps{Postgres: pool})
 	if err != nil {
 		return nil, fmt.Errorf("authkit: %w", err)
 	}
@@ -111,7 +95,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			auth.Close()
 		}
 	}()
-	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: auth.Verifier(), Customer: billingauth.SubjectCustomerID})
+	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: auth, Customer: billingauth.SubjectCustomerID})
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +156,20 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
 }
 
+// authConfig is AuthKit's configuration: its JSON API at /auth/v1 beside
+// OpenRails at /billing, open registration and no second factor.
+func authConfig(issuer string) authkit.Config {
+	return authkit.Config{
+		Schema:       AuthSchema,
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth/v1"},
+		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{Audience}},
+		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
+		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
+		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		River:        authkit.RiverConfig{Schema: AuthSchema},
+	}
+}
+
 // checkoutRouting sells the card product through the card PSP and everything
 // else through Solana; the declared-only NMI account never sells.
 var checkoutRouting = []openrailsembed.CheckoutRoutingRuleConfig{
@@ -186,11 +184,7 @@ func (r *Runtime) BillingRoutes() ([]openrailsembed.HTTPRoute, error) {
 
 // Mount registers AuthKit at /auth/v1 and OpenRails at /billing on mux.
 func (r *Runtime) Mount(mux *http.ServeMux) error {
-	authRoutes, err := authkithttp.Routes(r.Auth)
-	if err != nil {
-		return err
-	}
-	if err := authRoutes.Mount(mux); err != nil {
+	if err := r.Auth.Mount(mux); err != nil {
 		return err
 	}
 	billing, err := openrailshttp.Routes(r.Billing)

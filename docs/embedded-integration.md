@@ -204,7 +204,9 @@ attach the control plane or construct your AuthKit client before binding.
 
 `cp` carries the operator mechanisms (`ProvisionMerchant`, directory reads,
 provider configuration, fleet aggregates, retirement, `UserAuthenticator`,
-`JWKSHandler`). Hosts that bring their own AuthKit never import it.
+`RequestActor`); `cp.Core()` is its `*authkit.Client`. Its HTTP surface serves
+JWKS at the issuer plus `/.well-known/jwks.json`. Hosts that bring their own
+AuthKit never import it.
 
 **Host-owned River**: declare ownership during migrations and construction, then
 attach every component before requesting `RiverJobs()`. The neutral `helpers/river`

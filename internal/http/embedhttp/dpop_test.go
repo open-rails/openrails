@@ -5,11 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -18,8 +18,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	coreauth "github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/jwtkit"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
 	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/internal/app"
@@ -33,37 +32,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Static authority records isolate the crypto/proof boundary.
+// proofAuthority is a real DB-less verifier with a static permission check:
+// the test is about the sender proof, not AuthKit's authority.
 type proofAuthority struct {
-	coreauth.Client
-	application coreauth.RemoteApplication
-	group       coreauth.GroupInstance
+	*verify.Verifier
+	group string
 }
 
-func (s *proofAuthority) ListEnabledRemoteApplications(context.Context) ([]coreauth.RemoteApplication, error) {
-	return []coreauth.RemoteApplication{s.application}, nil
+func (a proofAuthority) Can(_ context.Context, _ iam.Actor, ref iam.GroupRef, perm iam.Perm) (bool, error) {
+	return ref.ID() == a.group && perm.String() == permissions.MerchantCatalogRead, nil
 }
-func (s *proofAuthority) GetRemoteApplication(context.Context, string) (*coreauth.RemoteApplication, error) {
-	return &s.application, nil
-}
-func (s *proofAuthority) ResolveRemoteApplicationAuthority(context.Context, string) (coreauth.RemoteApplicationAuthority, error) {
-	return coreauth.RemoteApplicationAuthority{Permissions: []string{permissions.MerchantCatalogRead}, PermissionGroupID: s.group.ID, AuthorityIssuer: "https://authority.test", Persona: "merchant", InstanceSlug: "store"}, nil
-}
-func (s *proofAuthority) ResolveAPIKeyDetailed(context.Context, string, string) (coreauth.ResolvedAPIKey, error) {
-	return coreauth.ResolvedAPIKey{}, errors.New("no API key")
-}
+func (proofAuthority) KnownPermission(iam.Perm) bool { return true }
 
-// GroupInstanceByID reports the bound group live (AuthKit re-checks scoped
-// machine permissions against it).
-func (s *proofAuthority) GroupInstanceByID(_ context.Context, id string) (coreauth.GroupInstance, error) {
-	if id != s.group.ID {
-		return coreauth.GroupInstance{}, coreauth.ErrGroupNotFound
-	}
-	return s.group, nil
-}
+type proofVerifier struct{ proofAuthority }
 
-func (s *proofAuthority) GroupInstanceForSlug(context.Context, coreauth.GroupRef) (coreauth.GroupInstance, error) {
-	return s.group, nil
+func (v proofVerifier) AuthenticateRequest(ctx context.Context, r *http.Request) (auth.Principal, error) {
+	return verify.AuthenticateRequest(ctx, v.proofAuthority, r)
 }
 
 type proofDirectory struct{ row merchants.Merchant }
@@ -80,12 +64,11 @@ func (d proofDirectory) GetBySlug(context.Context, string) (*merchants.Merchant,
 func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	const issuer = "https://delegating-app.test"
 	const origin = "https://billing.test"
-	signer, err := jwtkit.NewRSASigner(2048, "proof-issuer")
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	der, err := x509.MarshalPKIXPublicKey(signer.PublicKey())
+	der, err := x509.MarshalPKIXPublicKey(&rsaKey.PublicKey)
 	require.NoError(t, err)
 	groupID := uuid.NewString()
-	authority := &proofAuthority{application: coreauth.RemoteApplication{ID: uuid.NewString(), Slug: "delegator", Issuer: issuer, Enabled: true, Mode: coreauth.RemoteAppModeStatic, PublicKeys: []coreauth.RemoteAppKey{{KID: signer.KID(), PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}}, group: coreauth.GroupInstance{ID: groupID, Persona: "merchant", InstanceSlug: "store"}}
 	var mu sync.Mutex
 	used := map[string]bool{}
 	proofClaims := 0
@@ -98,11 +81,10 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		}
 		used[key] = true
 		return true, nil
-	}, func(r *http.Request) string { return origin + r.URL.EscapedPath() })).WithService(authority).
-		WithPermissionChecker(authority, "https://authority.test")
-	require.NoError(t, verifier.LoadRemoteApplications(t.Context(), authority, []string{"billing"}))
-	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: verifier, Authority: func(context.Context, billingauth.Requirement) (billingauth.Authority, error) {
-		return billingauth.Authority{Scope: auth.Scope{Authority: "https://authority.test", ID: groupID}, Permission: permissions.MerchantCatalogRead}, nil
+	}), verify.WithRequestOrigin(origin))
+	require.NoError(t, verifier.AddIssuer(issuer, []string{"billing"}, verify.IssuerOptions{Keys: []iam.RemoteApplicationKey{{KID: "proof-issuer", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}}))
+	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: proofVerifier{proofAuthority{verifier, groupID}}, Authority: func(context.Context, billingauth.Requirement) (billingauth.Authority, error) {
+		return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: groupID}, Permission: permissions.MerchantCatalogRead}, nil
 	}})
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -111,7 +93,9 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	require.NoError(t, err)
 	x, y := base64.RawURLEncoding.EncodeToString(public[1:33]), base64.RawURLEncoding.EncodeToString(public[33:])
 	thumb := sha256.Sum256([]byte(`{"crv":"P-256","kty":"EC","x":"` + x + `","y":"` + y + `"}`))
-	access, err := signer.SignWithHeaders(t.Context(), map[string]any{"iss": issuer, "aud": "billing", "delegated_sub": "delegated-actor", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "permissions": []string{permissions.MerchantCatalogRead}, "cnf": map[string]any{"jkt": base64.RawURLEncoding.EncodeToString(thumb[:])}}, map[string]any{"typ": verify.DelegatedAccessTokenType})
+	delegated := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "aud": "billing", "delegated_sub": "delegated-actor", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "permissions": []string{permissions.MerchantCatalogRead}, "cnf": map[string]any{"jkt": base64.RawURLEncoding.EncodeToString(thumb[:])}})
+	delegated.Header["typ"], delegated.Header["kid"] = "delegated-access+jwt", "proof-issuer"
+	access, err := delegated.SignedString(rsaKey)
 	require.NoError(t, err)
 	proof := func(method, path string) string {
 		hash := sha256.Sum256([]byte(access))

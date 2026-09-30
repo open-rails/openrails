@@ -2,66 +2,97 @@ package controlplane
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
-	authhttp "github.com/open-rails/authkit/authhttp"
+	"github.com/open-rails/authkit/iam"
+	riverhelpers "github.com/open-rails/helpers/river"
 )
 
-// excludedAuthRoutes are AuthKit routes OpenRails shadows or withholds. JWKS
-// is not served on this surface. The merchant group's settings routes read and
-// rename AuthKit's group name, which is not the merchant's name (#1106).
-var excludedAuthRoutes = []authhttp.RouteRef{
-	{Method: http.MethodGet, Path: authhttp.JWKSPath},
-	{Method: http.MethodGet, Path: "/" + string(MerchantType) + "/{instance_slug}"},
-	{Method: http.MethodPatch, Path: "/" + string(MerchantType) + "/{instance_slug}"},
-}
-
-// IntentionalRouteGroups is the set of AuthKit route groups OpenRails
-// intentionally exposes in locked-down / self-hosted mode (issue #224 task 4).
+// IntentionalRouteGroups are the AuthKit route groups OpenRails exposes in
+// locked-down / self-hosted mode (issue #224 task 4), deliberately not AuthKit's
+// full surface:
 //
-// It deliberately EXCLUDES the full DefaultAPI surface. We mount only the
-// login/session/user/JWKS-adjacent capabilities and declared group-management
-// routes OpenRails needs:
-//
-//   - RouteAuth: public AuthKit discovery plus login, refresh, logout, password reset.
+//   - RouteAuth: discovery, login, refresh, logout, password reset, JWKS.
 //   - RouteAccount: self-service account routes (me, sessions, password change).
-//   - RoutePermissionGroups: merchant membership/credentials and explicitly
-//     created customer portal membership; AuthKit applies the declared group
-//     authorizer. Customer groups expose no machine credentials.
+//   - RoutePermissionGroups: merchant membership and credentials, and explicit
+//     customer portal membership, authorized by AuthKit.
 //
-// NOT mounted by default in locked-down mode:
-//   - RouteRegister (public user self-registration — disabled in self-hosted).
-//   - RouteAdmin (AuthKit's own admin surface — OpenRails owns admin routes).
-//   - RouteBrowserOIDC (browser redirects mount separately when enabled).
-var IntentionalRouteGroups = []authhttp.RouteGroup{
-	authhttp.RouteAuth,
-	authhttp.RouteAccount,
-	authhttp.RoutePermissionGroups,
+// Registration, AuthKit's admin surface and browser OIDC are not mounted.
+var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups}
+
+// hostedRouteGroups is AuthKit's whole JSON API. Browser OIDC stays unmounted.
+var hostedRouteGroups = []iam.RouteGroup{
+	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount, iam.RouteAdmin,
+	iam.RoutePermissionGroups, iam.RouteDeviceKeys, iam.RouteDelegated,
 }
 
-// MountedRouteGroups returns the AuthKit route groups this control plane
-// mounts, always as an EXPLICIT allow-list (a nil MountOptions.Groups would
-// mount AuthKit's default surface plus browser OIDC). Locked-down mode returns
-// the intentional subset; hosted-SaaS posture returns the groups present in
-// AuthKit's DefaultAPI surface — still never browser OIDC or JWKS.
-func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
-	if c == nil {
-		return nil
-	}
+// MountedRouteGroups is the explicit list of AuthKit route groups this control
+// plane mounts (a nil list would mount AuthKit's default surface plus browser
+// OIDC).
+func (c *ControlPlane) MountedRouteGroups() []iam.RouteGroup {
 	if c.SelfHostedPosture() {
-		out := make([]authhttp.RouteGroup, len(IntentionalRouteGroups))
-		copy(out, IntentionalRouteGroups)
-		return out
+		return append([]iam.RouteGroup(nil), IntentionalRouteGroups...)
 	}
-	if c.authSvc == nil {
+	return append([]iam.RouteGroup(nil), hostedRouteGroups...)
+}
+
+// AuthKit's JSON API lives at the issuer's path, AuthKit's base path, or at
+// /auth when the issuer is an origin. JWKS is served at the issuer plus
+// /.well-known/jwks.json.
+func authAPIBase(issuer string) string {
+	if path := issuerPath(issuer); path != "" {
+		return path
+	}
+	return "/auth"
+}
+
+// authAPIPath is authAPIBase beneath AuthKit's base path.
+func authAPIPath(issuer string) string {
+	if issuerPath(issuer) != "" {
+		return "/"
+	}
+	return "/auth"
+}
+
+func issuerPath(issuer string) string {
+	u, err := url.Parse(strings.TrimSpace(issuer))
+	if err != nil || strings.Trim(u.Path, "/") == "" {
+		return ""
+	}
+	return "/" + strings.Trim(u.Path, "/")
+}
+
+// AuthAPIBase is the path AuthKit's JSON API is served at.
+func (c *ControlPlane) AuthAPIBase() string {
+	if c == nil || c.authBase == "" {
+		return "/auth"
+	}
+	return c.authBase
+}
+
+// AuthRoutes is the mounted AuthKit route catalog, each served by AuthHandler.
+// A GET route's pattern also serves HEAD.
+func (c *ControlPlane) AuthRoutes() []iam.Route {
+	if c == nil || c.client == nil {
 		return nil
 	}
-	var out []authhttp.RouteGroup
-	seen := map[authhttp.RouteGroup]bool{}
-	for _, spec := range c.authSvc.APIRoutes() {
-		if !seen[spec.Group] {
-			seen[spec.Group] = true
-			out = append(out, spec.Group)
+	var out []iam.Route
+	for _, route := range c.client.Routes() {
+		if route.Method != http.MethodHead {
+			out = append(out, route)
 		}
 	}
 	return out
 }
+
+// AuthHandler serves AuthKit's mounted HTTP surface.
+func (c *ControlPlane) AuthHandler() http.Handler {
+	if c == nil || c.client == nil {
+		return nil
+	}
+	return c.client.Handler()
+}
+
+// RiverJobs contributes AuthKit's jobs to OpenRails' River fleet.
+func (c *ControlPlane) RiverJobs() riverhelpers.Contribution { return c.client.RiverJobs() }

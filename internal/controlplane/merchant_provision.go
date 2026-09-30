@@ -7,46 +7,38 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
-	log "github.com/sirupsen/logrus"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ensureMerchantGroup returns merchant mid's AuthKit group, creating it owned by
-// ownerUserID when absent. Its AuthKit name is the merchant id: AuthKit names
-// are not merchant names (#1106), and a fixed one makes this idempotent under
-// concurrent callers.
-func (c *ControlPlane) ensureMerchantGroup(ctx context.Context, mid merchant.ID, ownerUserID string) (string, bool, error) {
-	core := c.Core()
-	if core == nil {
-		return "", false, ErrNoControlPlane
+// createMerchantGroup creates merchant mid's AuthKit group, keyed by mid and
+// owned by ownerUserID when set, inside tx. It is idempotent: the group of a
+// merchant that already has one is returned unchanged.
+func (c *ControlPlane) createMerchantGroup(ctx context.Context, tx pgx.Tx, mid merchant.ID, ownerUserID string) (iam.GroupRef, error) {
+	g := iam.NewGroup{ID: mid.String(), Persona: MerchantType}
+	if owner := strings.TrimSpace(ownerUserID); owner != "" {
+		s := iam.UserSubject(owner)
+		g.Owner = &s
 	}
-	ref := authkit.GroupRef{Persona: MerchantType, Instance: mid.String()}
-	groupID, err := core.ResolveGroupIDForSlug(ctx, ref)
-	if err == nil || !errors.Is(err, authkit.ErrGroupNotFound) {
-		return groupID, false, err
-	}
-	groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
-		Persona: MerchantType, InstanceSlug: ref.Instance, ParentPersona: authkit.RootPersona,
-		OwnerSubjectID: strings.TrimSpace(ownerUserID),
-	})
+	group, err := c.client.CreateGroup(ctx, g, authkit.InTx(tx))
 	if err != nil {
-		// A concurrent caller created it first.
-		if existing, rerr := core.ResolveGroupIDForSlug(ctx, ref); rerr == nil {
-			return existing, false, nil
-		}
-		return "", false, fmt.Errorf("controlplane: create merchant group for %s: %w", mid, err)
+		return iam.GroupRef{}, fmt.Errorf("controlplane: create merchant group for %s: %w", mid, err)
 	}
-	return groupID, true, nil
+	return iam.GroupByID(group.ID), nil
 }
 
 // CreateMerchant claims name for a new merchant bound to a new AuthKit group,
-// owned by ownerUserID when set. prepare runs against the group before the
-// name is claimed. When the name cannot be claimed (ErrMerchantNameTaken) the
-// group is deleted again.
-func (c *ControlPlane) CreateMerchant(ctx context.Context, name, ownerUserID string, prepare func(context.Context, string) error) (*merchants.Merchant, error) {
+// owned by ownerUserID when set. The group, prepare's AuthKit writes (done
+// with authkit.InTx(tx)) and the merchant row commit together: a name that
+// cannot be claimed (ErrMerchantNameTaken) leaves nothing behind.
+func (c *ControlPlane) CreateMerchant(ctx context.Context, name, ownerUserID string, prepare func(context.Context, pgx.Tx, iam.GroupRef) error) (*merchants.Merchant, error) {
+	if c.Core() == nil {
+		return nil, ErrNoControlPlane
+	}
 	directory, err := c.directory()
 	if err != nil {
 		return nil, err
@@ -56,24 +48,13 @@ func (c *ControlPlane) CreateMerchant(ctx context.Context, name, ownerUserID str
 		return nil, err
 	}
 	mid := merchant.ID(id)
-	groupID, _, err := c.ensureMerchantGroup(ctx, mid, ownerUserID)
-	if err != nil {
-		return nil, err
-	}
-	if prepare != nil {
-		err = prepare(ctx, groupID)
-	}
-	var m *merchants.Merchant
-	if err == nil {
-		m, _, err = directory.Provision(ctx, merchants.ProvisionRequest{ID: mid, Slug: name, PermissionGroupID: groupID})
-	}
-	if err != nil {
-		if derr := c.Core().DeleteGroupInstanceByID(context.WithoutCancel(ctx), groupID, authkit.DeletePermissionGroupOptions{}); derr != nil {
-			log.WithError(derr).WithField("group_id", groupID).Warn("controlplane: delete unclaimed merchant group failed")
+	return directory.Provision(ctx, merchants.ProvisionRequest{ID: mid, Slug: name, PermissionGroupID: mid.String()}, func(ctx context.Context, tx pgx.Tx) error {
+		group, err := c.createMerchantGroup(ctx, tx, mid, ownerUserID)
+		if err != nil || prepare == nil {
+			return err
 		}
-		return nil, err
-	}
-	return m, nil
+		return prepare(ctx, tx, group)
+	})
 }
 
 // ProvisionMerchant returns the live merchant a current or former name
@@ -107,7 +88,7 @@ func (c *ControlPlane) CreateOwnedMerchant(ctx context.Context, name, userID str
 		return nil, false, ErrNoControlPlane
 	}
 	if userID == "" {
-		return nil, false, authkit.ErrInsufficientRoleAuthority
+		return nil, false, iam.ErrInsufficientAuthority
 	}
 	name = merchant.NormalizeSlug(name)
 	if err := merchant.ValidateSlug(name); err != nil {
@@ -121,8 +102,8 @@ func (c *ControlPlane) CreateOwnedMerchant(ctx context.Context, name, userID str
 		return m, created, err
 	}
 	if m.PermissionGroupID != "" {
-		owns, err := c.Core().CanOnGroup(ctx, authkit.UserSubject(userID), m.PermissionGroupID, MerchantType.OwnerGrant())
-		if err != nil || owns {
+		roles, err := c.client.GroupRoles(ctx, iam.GroupByID(m.PermissionGroupID), []iam.Subject{iam.UserSubject(userID)})
+		if err != nil || roles[iam.UserSubject(userID)] == MerchantOwner {
 			return m, false, err
 		}
 	}

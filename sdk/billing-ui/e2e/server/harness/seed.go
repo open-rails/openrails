@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/authkit/iam"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -172,17 +173,16 @@ type User struct {
 // CreateUser registers a native AuthKit user and mints its access token.
 func (r *Runtime) CreateUser(ctx context.Context) (User, error) {
 	id := uuid.NewString()[:12]
-	client := r.Auth.Client()
 	email := "e2e-" + id + "@example.test"
-	u, err := client.CreateUser(ctx, email, "u"+id)
+	u, err := r.Auth.CreateUser(ctx, iam.NewUser{Email: email, Username: "u" + id})
 	if err != nil {
 		return User{}, err
 	}
-	token, _, err := client.MintAccessToken(ctx, u.ID, nil)
+	token, err := r.Auth.MintAccessToken(ctx, u.ID, iam.AccessTokenOptions{})
 	if err != nil {
 		return User{}, err
 	}
-	return User{ID: u.ID, Email: email, AccessToken: token}, nil
+	return User{ID: u.ID, Email: email, AccessToken: token.Value}, nil
 }
 
 type Seeded struct {

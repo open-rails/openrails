@@ -1,28 +1,17 @@
 package controlplane
 
 // Merchant team management (#760): the control-plane surface behind
-// /v1/merchant/team. Roster, invites, role changes, and removal all go through
-// AuthKit CORE group-membership calls (ListGroupMembers / AssignGroupRoleAs /
-// UnassignGroupRoleAs / RemoveGroupSubjectAs / CreateGroupInviteLink) — never
-// raw AuthKit SQL (bootstrap.go doctrine). Members hold one of the FIXED merchant
-// catalog roles (#567): owner / support / viewer.
+// /v1/merchant/team. Roster, invites, role changes and removal go through
+// AuthKit group membership (ListGroupMembers, SetGroupRole, RemoveGroupMember,
+// CreateInvitation) — never raw AuthKit SQL. A member holds one of the fixed
+// merchant roles (#567).
 //
-// Two facts shape this surface, both grounded in what AuthKit v0.82 exposes to a
-// consumer:
-//
-//   - The known-user "consent invite" flow (#147/#193 group_membership_invites)
-//     is NOT reachable via the embedded client. The only invite primitive a
-//     merchant owner can create+list+revoke is the group invite link. So an
-//     invite to an ALREADY-REGISTERED email is a direct role assignment (the
-//     invitee is added immediately); an invite to an UNREGISTERED email mints a
-//     single-use register+join link the owner shares (fail-soft copy-link).
-//
-//   - Invite-link minting requires AuthKit's registration to be open/invite-only
-//     (ExternalInvitesEnabled). Locked-down standalone runs registration CLOSED,
-//     so the unregistered-email path returns ErrTeamInvitesDisabled there: new
-//     teammates must be provisioned by the operator first, then added by email.
-//     Hosted/embedded-open postures mint the link. This is the documented
-//     "register-then-accept hosted / operator-provisioned embedded" split.
+// Adding a teammate by email assigns the role at once only to a live account
+// that has VERIFIED the address: anyone can register an address they do not
+// own (#1107). Any other address gets a single-use register+join link the
+// owner shares — when AuthKit registration is open. Locked-down standalone
+// runs registration closed, so there the operator provisions the account and
+// verifies its email first (ErrTeamInvitesDisabled).
 
 import (
 	"context"
@@ -32,33 +21,30 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 var (
-	// ErrCannotRemoveLastOwner guards the #760 invariant: a merchant must always
-	// retain at least one (human) owner. Demoting or removing the last owner is
-	// refused with a corrective error, never silently allowed.
+	// ErrCannotRemoveLastOwner guards the #760 invariant: a merchant always
+	// keeps at least one owner. Demoting or removing the last owner is refused
+	// with a corrective error, never silently allowed.
 	ErrCannotRemoveLastOwner = errors.New("controlplane: cannot remove or demote the last merchant owner")
 
 	// ErrNotATeamMember is returned by role-change/remove for a user who holds no
 	// role in the merchant group (so there is nothing to change or remove).
 	ErrNotATeamMember = errors.New("controlplane: user is not a member of this merchant")
 
-	// ErrTeamInvitesDisabled is returned when inviting an UNREGISTERED email but
-	// the deployment runs AuthKit registration closed (locked-down standalone):
-	// no self-registration link can be minted. The operator must provision the
-	// account first; then it can be added by email as an existing user.
+	// ErrTeamInvitesDisabled is returned when inviting an email no live account
+	// has verified but the deployment runs AuthKit registration closed
+	// (locked-down standalone): no self-registration link can be minted. The
+	// operator must provision the account and verify its email first.
 	ErrTeamInvitesDisabled = errors.New("controlplane: link invites for new users are disabled on this deployment")
 )
 
-// MerchantTeamMember is a human member of a merchant's team: an AuthKit user
-// holding a fixed catalog role in the merchant permission-group. Display fields
-// are hydrated best-effort; a member with no stored email/username still lists
-// (identified by user id).
+// MerchantTeamMember is a user holding a merchant role. Display fields are
+// best-effort; a member with no stored email/username still lists.
 type MerchantTeamMember struct {
 	UserID   string `json:"user_id"`
 	Email    string `json:"email,omitempty"`
@@ -66,9 +52,8 @@ type MerchantTeamMember struct {
 	Role     string `json:"role"`
 }
 
-// MerchantTeamInvite is a pending register+join invite link for the merchant.
-// The single-use code/URL is returned ONLY at creation (in InviteResult) — it
-// is never listed, exactly like an API-key secret.
+// MerchantTeamInvite is a register+join invite link for the merchant. Its
+// single-use URL is returned ONLY at creation (InviteResult), never listed.
 type MerchantTeamInvite struct {
 	ID         string     `json:"id"`
 	Role       string     `json:"role"`
@@ -79,34 +64,28 @@ type MerchantTeamInvite struct {
 }
 
 // MerchantTeamInviteResult is the outcome of inviting an email. Exactly one of
-// Member (the email was an existing user, added to the team immediately) or
-// Invite+URL (a single-use link the owner shares with a new user) is set.
+// Member (a live account verified the email and was added immediately) or
+// Invite+URL (a single-use link the owner shares with the address) is set.
 type MerchantTeamInviteResult struct {
-	// Added is true when the email resolved to an existing user who was added to
+	// Added is true when a live account that verified the email was added to
 	// the team directly (no link needed).
 	Added bool `json:"added"`
 	// Member is set when Added: the member now on the team.
 	Member *MerchantTeamMember `json:"member,omitempty"`
-	// Invite is set when a link was minted for an unregistered email.
+	// Invite is set when a link was minted for the address.
 	Invite *MerchantTeamInvite `json:"invite,omitempty"`
 	// URL is the single-use register+join link — shown once, here, only when a
 	// link was minted. The owner shares it with the invitee.
 	URL string `json:"url,omitempty"`
 }
 
-// ListMerchantTeam returns the merchant's human team: every user-kind member of
-// the merchant permission-group with their catalog role, display fields hydrated
-// best-effort. The synthetic bootstrap api-key actor (a non-login system owner
-// seeded in admin-less deployments) is excluded — it is not a teammate.
+// ListMerchantTeam returns the merchant's team, owners first.
 func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([]MerchantTeamMember, error) {
-	if c == nil || c.Core() == nil {
-		return nil, ErrNoControlPlane
-	}
-	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
+	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
-	members, err := c.humanTeam(ctx, group)
+	members, err := c.team(ctx, group)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +95,6 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Role != out[j].Role {
-			// Show merchant administrators before the bounded creator role.
 			return teamRoleRank(out[i].Role) < teamRoleRank(out[j].Role)
 		}
 		return teamMemberLabel(out[i]) < teamMemberLabel(out[j])
@@ -124,326 +102,193 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 	return out, nil
 }
 
-// InviteMerchantTeamMember adds a teammate by email. If the email belongs to an
-// existing user, that user is assigned role immediately (Added). Otherwise a
-// single-use register+join link is minted and returned (URL) — unless the
-// deployment runs registration closed, in which case ErrTeamInvitesDisabled is
-// returned. role must be a fixed catalog role. actorUserID is the acting AuthKit
-// user (empty for non-user principals → genesis owner actor; the CALLER must
-// have enforced owner authority via the route gate + no-escalation).
-func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email, role, actorUserID string) (MerchantTeamInviteResult, error) {
-	if c == nil || c.Core() == nil {
-		return MerchantTeamInviteResult{}, ErrNoControlPlane
-	}
-	role = strings.ToLower(strings.TrimSpace(role))
-	if _, ok := MerchantRolePermissions(role); !ok {
-		return MerchantTeamInviteResult{}, ErrUnknownMerchantRole
-	}
+// InviteMerchantTeamMember adds a teammate by email as actor. If a live
+// account has verified the email, it is assigned role immediately (Added).
+// Otherwise a single-use register+join link is minted and returned (URL) —
+// unless the deployment runs registration closed (ErrTeamInvitesDisabled).
+func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email string, role iam.Role, actor iam.Actor) (MerchantTeamInviteResult, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: invite email is required")
 	}
-	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
+	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return MerchantTeamInviteResult{}, err
 	}
-	actor, err := c.resolveTeamActor(ctx, group, actorUserID)
-	if err != nil {
-		return MerchantTeamInviteResult{}, err
-	}
-
-	// Existing user? Add them directly — no registration needed.
-	user, err := c.Core().GetUserByEmail(ctx, email)
+	user, err := c.client.User(ctx, iam.UserByEmail(email))
 	switch {
-	case err == nil && user != nil:
-		if aerr := c.Core().AssignGroupRoleAs(ctx, actor, group, authkit.UserSubject(user.ID), authkit.Role(role)); aerr != nil {
-			return MerchantTeamInviteResult{}, aerr
+	case err == nil && user.EmailVerified:
+		if _, err := c.client.SetGroupRole(ctx, actor, group, iam.UserSubject(user.ID), role); err != nil {
+			return MerchantTeamInviteResult{}, lastOwner(err)
 		}
 		return MerchantTeamInviteResult{Added: true, Member: &MerchantTeamMember{
-			UserID:   user.ID,
-			Email:    derefString(user.Email),
-			Username: derefString(user.Username),
-			Role:     role,
+			UserID: user.ID, Email: user.Email, Username: user.Username, Role: role.Name(),
 		}}, nil
-	case err != nil && !isUserNotFound(err):
+	case err != nil && !errors.Is(err, iam.ErrUserNotFound):
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: resolve invite email: %w", err)
 	}
-
-	// Unregistered email: mint a single-use register+join link (if the posture
-	// permits self-registration). AuthKit gates minting on the same members:manage
-	// no-escalation the route gate + caller already enforced.
 	if c.SelfHostedPosture() {
 		return MerchantTeamInviteResult{}, ErrTeamInvitesDisabled
 	}
-	link, err := c.Core().CreateGroupInviteLink(ctx, authkit.CreateGroupInviteLinkRequest{
-		Persona:      group.Persona,
-		InstanceSlug: group.Instance,
-		Role:         authkit.Role(role),
-		InvitedBy:    actor,
-	})
+	link, err := c.client.CreateInvitation(ctx, actor, group, iam.NewInvitation{Role: role})
+	if errors.Is(err, iam.ErrExternalInvitesDisabled) {
+		return MerchantTeamInviteResult{}, ErrTeamInvitesDisabled
+	}
 	if err != nil {
-		if errors.Is(err, authkit.ErrExternalInvitesDisabled) {
-			return MerchantTeamInviteResult{}, ErrTeamInvitesDisabled
-		}
 		return MerchantTeamInviteResult{}, err
 	}
-	return MerchantTeamInviteResult{
-		Invite: &MerchantTeamInvite{ID: link.ID, Role: role},
-		URL:    link.URL,
-	}, nil
+	invite := teamInvite(link.Invitation)
+	return MerchantTeamInviteResult{Invite: &invite, URL: link.URL}, nil
 }
 
-// ListMerchantTeamInvites returns the merchant's invite links (pending, redeemed,
-// and revoked — status is the audit view), NEVER the code/URL.
+// ListMerchantTeamInvites returns the merchant's invite links (pending,
+// redeemed and revoked — status is the audit view), never their codes.
 func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant.ID) ([]MerchantTeamInvite, error) {
-	if c == nil || c.Core() == nil {
-		return nil, ErrNoControlPlane
-	}
-	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
+	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
-	links, err := c.Core().ListGroupInviteLinks(ctx, group)
-	if err != nil {
-		return nil, err
+	var out []MerchantTeamInvite
+	page := iam.PageRequest{Limit: iam.MaxPageLimit}
+	for {
+		batch, err := c.client.ListInvitations(ctx, group, page)
+		if err != nil {
+			return nil, err
+		}
+		for _, inv := range batch.Items {
+			out = append(out, teamInvite(inv))
+		}
+		if batch.Next == "" {
+			return out, nil
+		}
+		page.Cursor = batch.Next
 	}
-	out := make([]MerchantTeamInvite, 0, len(links))
-	for _, l := range links {
-		out = append(out, MerchantTeamInvite{
-			ID:         l.ID,
-			Role:       string(l.Role),
-			CreatedAt:  l.CreatedAt,
-			ExpiresAt:  l.ExpiresAt,
-			RedeemedAt: l.RedeemedAt,
-			RevokedAt:  l.RevokedAt,
-		})
-	}
-	return out, nil
 }
 
-// InvitesEnabled reports whether the deployment can mint register+join links for
-// unregistered emails (the console tailors its invite affordance on this).
+func teamInvite(inv iam.Invitation) MerchantTeamInvite {
+	return MerchantTeamInvite{ID: inv.ID, Role: inv.Role.Name(), CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, RedeemedAt: inv.RedeemedAt, RevokedAt: inv.RevokedAt}
+}
+
+// InvitesEnabled reports whether the deployment can mint register+join links
+// (the console tailors its invite affordance on this).
 func (c *ControlPlane) InvitesEnabled() bool {
 	return c != nil && c.Core() != nil && !c.SelfHostedPosture()
 }
 
-// RevokeMerchantTeamInvite revokes a pending invite link by id, scoped to the
-// merchant's group. Returns false when no such live link exists in this merchant.
-func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, linkID string) (bool, error) {
-	if c == nil || c.Core() == nil {
-		return false, ErrNoControlPlane
-	}
-	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
+// RevokeMerchantTeamInvite revokes an invite link of the merchant as actor.
+// It returns false when the merchant has no invite with that id.
+func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, id string, actor iam.Actor) (bool, error) {
+	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return false, err
 	}
-	err = c.Core().RevokeGroupInviteLink(ctx, group, strings.TrimSpace(linkID))
-	if err != nil {
-		if errors.Is(err, authkit.ErrInviteLinkNotFound) {
-			return false, nil
-		}
-		return false, err
+	err = c.client.RevokeInvitation(ctx, actor, group, strings.TrimSpace(id))
+	if errors.Is(err, iam.ErrInvitationNotFound) {
+		return false, nil
 	}
-	return true, nil
+	return err == nil, err
 }
 
-// ChangeMerchantTeamRole sets targetUserID's role to exactly newRole (fixed
-// catalog). The last-owner invariant is enforced up front: demoting the sole
-// (human) owner is refused with ErrCannotRemoveLastOwner. Self-demotion is
-// therefore allowed only when another owner exists. actorUserID as in Invite.
-func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID, newRole, actorUserID string) error {
-	if c == nil || c.Core() == nil {
-		return ErrNoControlPlane
-	}
-	newRole = strings.ToLower(strings.TrimSpace(newRole))
-	if _, ok := MerchantRolePermissions(newRole); !ok {
-		return ErrUnknownMerchantRole
-	}
-	targetUserID = strings.TrimSpace(targetUserID)
-	if targetUserID == "" {
-		return ErrNotATeamMember
-	}
-	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
-	if err != nil {
+// ChangeMerchantTeamRole makes targetUserID hold newRole, as actor. Demoting
+// the last human owner is ErrCannotRemoveLastOwner.
+func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID string, newRole iam.Role, actor iam.Actor) error {
+	group, current, owners, err := c.teamMember(ctx, mid, targetUserID)
+	if err != nil || current == newRole.Name() {
 		return err
 	}
-	actor, err := c.resolveTeamActor(ctx, group, actorUserID)
-	if err != nil {
-		return err
-	}
-
-	members, err := c.humanTeam(ctx, group)
-	if err != nil {
-		return err
-	}
-	current, ok := members[targetUserID]
-	if !ok {
-		return ErrNotATeamMember
-	}
-	if current.Role == newRole {
-		return nil // no-op
-	}
-	if current.Role == MerchantRoleOwner && newRole != MerchantRoleOwner && ownerCount(members) <= 1 {
+	if current == MerchantOwner.Name() && owners <= 1 {
 		return ErrCannotRemoveLastOwner
 	}
-
-	// Assign the new role first, then strip the old — order keeps a promotion
-	// from ever transiently dropping a role. The pre-check above already guards
-	// the last-owner case; AuthKit's own refuseIfLastOwner is a backstop.
-	if err := c.Core().AssignGroupRoleAs(ctx, actor, group, authkit.UserSubject(targetUserID), authkit.Role(newRole)); err != nil {
-		return err
-	}
-	if err := c.Core().UnassignGroupRoleAs(ctx, actor, group, authkit.UserSubject(targetUserID), authkit.Role(current.Role)); err != nil {
-		if errors.Is(err, authkit.ErrCannotRemoveLastAdminRole) {
-			return ErrCannotRemoveLastOwner
-		}
-		return err
-	}
-	return nil
+	_, err = c.client.SetGroupRole(ctx, actor, group, iam.UserSubject(strings.TrimSpace(targetUserID)), newRole)
+	return lastOwner(err)
 }
 
-// RemoveMerchantTeamMember removes targetUserID from the merchant team entirely.
-// Refuses to remove the sole (human) owner (ErrCannotRemoveLastOwner). Removing a
-// non-member is ErrNotATeamMember.
-func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID, actorUserID string) error {
-	if c == nil || c.Core() == nil {
-		return ErrNoControlPlane
-	}
-	targetUserID = strings.TrimSpace(targetUserID)
-	if targetUserID == "" {
-		return ErrNotATeamMember
-	}
-	ctx, group, err := c.merchantGroupScopeForID(ctx, mid)
+// RemoveMerchantTeamMember removes targetUserID from the merchant team, as
+// actor. Removing the last human owner is ErrCannotRemoveLastOwner.
+func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID string, actor iam.Actor) error {
+	group, current, owners, err := c.teamMember(ctx, mid, targetUserID)
 	if err != nil {
 		return err
 	}
-	actor, err := c.resolveTeamActor(ctx, group, actorUserID)
-	if err != nil {
-		return err
-	}
-	members, err := c.humanTeam(ctx, group)
-	if err != nil {
-		return err
-	}
-	current, ok := members[targetUserID]
-	if !ok {
-		return ErrNotATeamMember
-	}
-	if current.Role == MerchantRoleOwner && ownerCount(members) <= 1 {
+	if current == MerchantOwner.Name() && owners <= 1 {
 		return ErrCannotRemoveLastOwner
 	}
-	if err := c.Core().RemoveGroupSubjectAs(ctx, actor, group, authkit.UserSubject(targetUserID)); err != nil {
-		if errors.Is(err, authkit.ErrCannotRemoveLastAdminRole) {
-			return ErrCannotRemoveLastOwner
-		}
-		return err
-	}
-	return nil
+	return lastOwner(c.client.RemoveGroupMember(ctx, actor, group, iam.UserSubject(strings.TrimSpace(targetUserID))))
 }
 
-// humanTeam returns the merchant's user-kind members keyed by user id, with
-// display fields hydrated and the synthetic bootstrap api-key actor excluded.
-// Each member's Role is their highest-privilege catalog role (a subject may hold
-// several role rows; the console models one role per member).
-func (c *ControlPlane) humanTeam(ctx context.Context, group authkit.GroupRef) (map[string]MerchantTeamMember, error) {
-	raw, err := c.Core().ListGroupMembers(ctx, group)
+// teamMember is targetUserID's role in the merchant's group and the number of
+// users owning it: the merchant keeps a human owner (#760), whatever
+// applications also hold the role.
+func (c *ControlPlane) teamMember(ctx context.Context, mid merchant.ID, targetUserID string) (iam.GroupRef, string, int, error) {
+	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
-		return nil, err
+		return iam.GroupRef{}, "", 0, err
 	}
-	roles := make(map[string]string, len(raw))
-	ids := make([]string, 0, len(raw))
-	for _, m := range raw {
-		if m.SubjectKind != authkit.SubjectKindUser {
-			continue
-		}
-		if existing, seen := roles[m.SubjectID]; !seen || teamRoleRank(string(m.Role)) < teamRoleRank(existing) {
-			if !seen {
-				ids = append(ids, m.SubjectID)
-			}
-			roles[m.SubjectID] = string(m.Role)
-		}
-	}
-	refs, err := c.Core().UsersByIDs(ctx, ids)
+	members, err := c.team(ctx, group)
 	if err != nil {
-		return nil, err
+		return iam.GroupRef{}, "", 0, err
 	}
-	out := make(map[string]MerchantTeamMember, len(ids))
-	for _, id := range ids {
-		ref := refs[id]
-		if isBootstrapActor(ref.Username, ref.Email) {
-			continue
-		}
-		out[id] = MerchantTeamMember{
-			UserID:   id,
-			Email:    ref.Email,
-			Username: ref.Username,
-			Role:     roles[id],
-		}
+	target, ok := members[strings.TrimSpace(targetUserID)]
+	if !ok {
+		return iam.GroupRef{}, "", 0, ErrNotATeamMember
 	}
-	return out, nil
-}
-
-// resolveTeamActor returns the acting AuthKit user for a group mutation: the
-// caller's user id when present, else the merchant's genesis owner actor (the
-// operator-CLI idiom shared with #757 api-key minting). The genesis actor holds
-// merchant:*, so AuthKit's no-escalation check passes; owner authority itself is
-// enforced by the route gate + the handler's no-escalation coverage check.
-func (c *ControlPlane) resolveTeamActor(ctx context.Context, group authkit.GroupRef, actorUserID string) (string, error) {
-	if actorUserID = strings.TrimSpace(actorUserID); actorUserID != "" {
-		return actorUserID, nil
-	}
-	return c.ensureMerchantAPIKeyActor(ctx, group)
-}
-
-func ownerCount(members map[string]MerchantTeamMember) int {
-	n := 0
+	owners := 0
 	for _, m := range members {
-		if m.Role == MerchantRoleOwner {
-			n++
+		if m.Role == MerchantOwner.Name() {
+			owners++
 		}
 	}
-	return n
+	return group, target.Role, owners, nil
 }
 
-// isBootstrapActor reports whether a member is the synthetic bootstrap api-key
-// actor (a non-login system owner seeded in admin-less deployments), which must
-// never appear in the team roster nor count toward the human owner total.
-func isBootstrapActor(username, email string) bool {
-	return username == bootstrapAPIKeyActorUsername || strings.EqualFold(email, bootstrapAPIKeyActorEmail)
-}
-
-func teamRoleRank(role string) int {
-	switch role {
-	case MerchantRoleOwner:
-		return 0
-	case MerchantRoleSupport:
-		return 1
-	case MerchantRoleViewer:
-		return 2
-	case MerchantRoleCreator:
-		return 3
-	default:
-		return 4
+// team is the merchant group's users keyed by id, display fields hydrated.
+func (c *ControlPlane) team(ctx context.Context, group iam.GroupRef) (map[string]MerchantTeamMember, error) {
+	out := map[string]MerchantTeamMember{}
+	q := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, WithUsers: true, Page: iam.PageRequest{Limit: iam.MaxPageLimit}}
+	for {
+		batch, err := c.client.ListGroupMembers(ctx, group, q)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range batch.Items {
+			member := MerchantTeamMember{UserID: m.Subject.ID, Role: m.Role.Name()}
+			if m.User != nil {
+				member.Email, member.Username = m.User.Email, m.User.Username
+			}
+			out[m.Subject.ID] = member
+		}
+		if batch.Next == "" {
+			return out, nil
+		}
+		q.Page.Cursor = batch.Next
 	}
+}
+
+// lastOwner maps AuthKit's last-owner refusal onto the team's corrective error.
+func lastOwner(err error) error {
+	if errors.Is(err, iam.ErrLastOwner) {
+		return errors.Join(ErrCannotRemoveLastOwner, err)
+	}
+	return err
+}
+
+// teamRoleRank orders roles most privileged first.
+func teamRoleRank(role string) int {
+	roles := MerchantRoles()
+	for i, r := range roles {
+		if r.Name() == role {
+			return len(roles) - i
+		}
+	}
+	return len(roles) + 1
 }
 
 func teamMemberLabel(m MerchantTeamMember) string {
-	if m.Email != "" {
+	switch {
+	case m.Email != "":
 		return m.Email
-	}
-	if m.Username != "" {
+	case m.Username != "":
 		return m.Username
 	}
 	return m.UserID
-}
-
-func isUserNotFound(err error) bool {
-	return errors.Is(err, authkit.ErrUserNotFound) || errors.Is(err, pgx.ErrNoRows)
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
 	"github.com/stretchr/testify/require"
 
@@ -31,10 +32,10 @@ func bearer(authorization string) *http.Request {
 }
 
 func TestUserAuthenticator(t *testing.T) {
-	claims := verify.Claims{UserID: userID, Email: "e@x", Username: "u", DiscordUsername: "d", SessionID: "sid", Roles: []string{"admin"}, Entitlements: []string{"premium"}}
+	claims := verify.Claims{Kind: iam.ActorUser, UserID: userID, Email: "e@x", Username: "u", SessionID: "sid", RootRole: "root:admin", Entitlements: []string{"premium"}}
 	uc, err := NewAuthenticator(&countingVerifier{claims: claims}).Authenticate(t.Context(), bearer("Bearer x"))
 	require.NoError(t, err)
-	require.Equal(t, billingauth.UserContext{UserID: userID, Email: "e@x", Username: "u", DiscordUsername: "d", SessionID: "sid", Entitlements: []string{"premium"}}, uc, "token role snapshots are never carried")
+	require.Equal(t, billingauth.UserContext{UserID: userID, Email: "e@x", Username: "u", SessionID: "sid", Entitlements: []string{"premium"}}, uc, "token role snapshots are never carried")
 
 	// DPoP proofs are single-use and belong to the delegated verifier.
 	v := &countingVerifier{claims: claims}
@@ -42,12 +43,21 @@ func TestUserAuthenticator(t *testing.T) {
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
 	require.Zero(t, v.calls)
 
-	// One verification per authenticator per request.
+	// One verification per authenticator per request, shared by the actor.
 	user := NewAuthenticator(v)
 	r := requestauth.Begin(bearer("Bearer x"))
 	for range 3 {
 		_, err = user.Authenticate(r.Context(), r)
 		require.NoError(t, err)
 	}
+	actor, err := user.Actor(r)
+	require.NoError(t, err)
 	require.Equal(t, 1, v.calls)
+	require.Equal(t, userID, actor.ID())
+	session, bound := actor.Session()
+	require.True(t, bound, "the actor carries the token's session, so a revoked sign-in is refused")
+	require.Equal(t, "sid", session.SessionID)
+
+	_, err = NewAuthenticator(&countingVerifier{claims: verify.Claims{Kind: iam.ActorAPIKey, APIKeyID: "k"}}).Actor(bearer("Bearer x"))
+	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "only a user token has a user actor")
 }

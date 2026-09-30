@@ -2,10 +2,11 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -38,22 +39,27 @@ func ProvisionMerchantForRestore(ctx context.Context, a *app.App, req ProvisionM
 	}
 	groupID, owner := strings.TrimSpace(req.ExistingGroupID), strings.TrimSpace(req.OwnerUserID)
 	if groupID == "" || owner == "" {
-		return nil, authkit.ErrInsufficientRoleAuthority
+		return nil, iam.ErrInsufficientAuthority
 	}
 	core := cp.Core()
-	group, err := core.GroupInstanceByID(ctx, groupID)
+	group, err := core.Group(ctx, iam.GroupByID(groupID))
 	if err != nil {
 		return nil, err
 	}
-	if group.Persona != controlplane.MerchantType {
-		return nil, authkit.ErrInsufficientRoleAuthority
+	if group.Persona != controlplane.MerchantType || group.DeletedAt != nil {
+		return nil, iam.ErrInsufficientAuthority
 	}
-	allowed, err := core.CanOnGroup(ctx, authkit.UserSubject(owner), groupID, controlplane.MerchantType.OwnerGrant())
+	roles, err := core.GroupRoles(ctx, iam.GroupByID(group.ID), []iam.Subject{iam.UserSubject(owner)})
 	if err != nil {
 		return nil, err
 	}
-	if !allowed {
-		return nil, authkit.ErrInsufficientRoleAuthority
+	if roles[iam.UserSubject(owner)] != controlplane.MerchantOwner {
+		return nil, iam.ErrInsufficientAuthority
+	}
+	if u, err := core.User(ctx, iam.UserByID(owner)); errors.Is(err, iam.ErrUserNotFound) || err == nil && u.Ban != nil {
+		return nil, iam.ErrInsufficientAuthority
+	} else if err != nil {
+		return nil, err
 	}
 	directory, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {

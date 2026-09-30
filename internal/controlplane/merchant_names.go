@@ -2,29 +2,13 @@ package controlplane
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-// merchantNamingPolicy applies the site naming policy (auth.naming, the policy
-// AuthKit applies to usernames) to OpenRails merchant names (#1106).
-func merchantNamingPolicy(cfg authkit.NamingConfig) (merchants.NamingPolicy, error) {
-	p, err := cfg.Normalize()
-	if err != nil {
-		return merchants.NamingPolicy{}, fmt.Errorf("controlplane: merchant naming policy: %w", err)
-	}
-	return merchants.NamingPolicy{
-		Enabled:             p.Enabled,
-		RenameInterval:      p.RenameInterval,
-		FormerNames:         merchants.FormerNames(p.FormerNameRetentionMode),
-		FormerNameRetention: p.FormerNameRetention,
-	}, nil
-}
 
 // RenameMerchant renames an active merchant; its former name forwards to it
 // under the naming policy. A merchant rename (operator=false) is subject to the
@@ -64,28 +48,23 @@ type UserMerchant struct {
 }
 
 // ListUserMerchants returns the live merchants userID holds a role in, ordered
-// by name, with the user's highest role in each.
+// by name, with the user's role in each.
 func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]UserMerchant, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(strings.TrimSpace(userID)))
+	memberships, err := c.memberships(ctx, iam.UserSubject(strings.TrimSpace(userID)))
 	if err != nil {
 		return nil, err
 	}
 	roles := map[string]string{}
 	var groups []string
 	for _, m := range memberships {
-		if m.Persona != MerchantType {
+		if m.Group.Persona != MerchantType {
 			continue
 		}
-		role, seen := roles[m.GroupID]
-		if !seen {
-			groups = append(groups, m.GroupID)
-		}
-		if !seen || teamRoleRank(string(m.Role)) < teamRoleRank(role) {
-			roles[m.GroupID] = string(m.Role)
-		}
+		groups = append(groups, m.Group.ID)
+		roles[m.Group.ID] = m.Role.Name()
 	}
 	directory, err := c.directory()
 	if err != nil {

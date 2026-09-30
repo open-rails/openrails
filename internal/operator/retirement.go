@@ -9,7 +9,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -81,9 +81,14 @@ func retirementDirectory(a *app.App) (*controlplane.ControlPlane, *merchants.Ser
 	return cp, dir, nil
 }
 
+// groupReleaser deletes a retired merchant's group; one already gone is
+// released.
 func groupReleaser(cp *controlplane.ControlPlane) merchants.GroupReleaser {
 	core := cp.Core()
 	return func(ctx context.Context, groupID string) error {
-		return core.DeleteGroupInstanceByID(ctx, groupID, authkit.DeletePermissionGroupOptions{ReleaseSlug: true})
+		if err := core.DeleteGroup(ctx, iam.GroupByID(groupID)); err != nil && !errors.Is(err, iam.ErrGroupNotFound) {
+			return err
+		}
+		return nil
 	}
 }

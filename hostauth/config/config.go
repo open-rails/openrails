@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/open-rails/authkit"
 	billing "github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Config composes host identity with neutral billing configuration.
@@ -37,8 +37,8 @@ type AuthConfig struct {
 	// Configure trusted_proxies instead when a reverse proxy is in front.
 	DirectPeerIP bool `koanf:"direct_peer_ip,omitempty"`
 
-	// Naming is normalized and validated by AuthKit once at construction.
-	Naming authkit.NamingConfig `koanf:"naming,omitempty"`
+	// Naming is the site naming policy for merchant names and usernames.
+	Naming merchant.NamingConfig `koanf:"naming,omitempty"`
 	// HARDCUT (#312/#537): there is no `auth.operator_tenant_slug` /
 	// `auth.operator_tenant_admin_roles`. Admin authority is live merchant-local
 	// AuthKit merchant permission-group state (or a deployment-minted admin API
@@ -56,8 +56,8 @@ type AuthConfig struct {
 	// AuthKit binary names since ak#266/v0.89.0 — special-cased in
 	// envKeyToConfigKey so they land here instead of a mechanical auth.* split).
 	// Read ONCE here at the config-load boundary and handed to authkit as an
-	// explicit jwtkit.KeySource (internal/controlplane); authkit's own library
-	// no longer reads any env itself. Optional: the control plane falls back to
+	// explicit key source (internal/controlplane); AuthKit reads no
+	// environment itself. Optional: the control plane falls back to
 	// KeysPath/keys.json (or, in dev, an ephemeral key) when unset.
 	ActiveKeyID         string `koanf:"active_key_id,omitempty"`
 	ActivePrivateKeyPEM string `koanf:"active_private_key_pem,omitempty"`
@@ -65,8 +65,8 @@ type AuthConfig struct {
 	// keys (verify-only, e.g. a previous active key mid-rotation).
 	PublicKeysJSON string `koanf:"public_keys,omitempty"`
 	// KeysPath is the directory holding keys.json when no inline key material
-	// is set (env AUTHKIT_KEYS_PATH; special-cased below). Empty uses
-	// jwtkit.DefaultAuthKeysPath ("/vault/auth").
+	// is set (env AUTHKIT_KEYS_PATH; special-cased below). Empty uses AuthKit's
+	// default, /vault/auth.
 	KeysPath string `koanf:"keys_path,omitempty"`
 	// MintDisabled DECLARES the control plane verify-only (#748): token
 	// minting is intentionally off, so internal/controlplane.New never even

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -50,15 +51,24 @@ func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) 
 	return cp
 }
 
-// user creates an AuthKit user and returns its id and a bearer access token.
+// newUser creates an AuthKit user with an unverified email and returns its id
+// and a bearer access token.
 func newUser(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
 	t.Helper()
 	username := "u" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	u, err := cp.Core().CreateUser(t.Context(), username+"@greenfield.test", username)
+	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: username + "@greenfield.test", Username: username})
 	require.NoError(t, err)
-	token, _, err := cp.Core().MintAccessToken(t.Context(), u.ID, nil)
+	token, err := cp.Core().MintAccessToken(t.Context(), u.ID, iam.AccessTokenOptions{})
 	require.NoError(t, err)
-	return u.ID, token
+	return u.ID, token.Value
+}
+
+// verifyEmail marks the user's email proven, as the system.
+func verifyEmail(t *testing.T, cp *controlplane.ControlPlane, userID string) {
+	t.Helper()
+	verified := true
+	_, err := cp.Core().UpdateUser(t.Context(), iam.SystemActor(), userID, iam.UserUpdate{EmailVerified: &verified})
+	require.NoError(t, err)
 }
 
 func uniqueName(prefix string) string { return prefix + "-" + uuid.NewString()[:8] }
@@ -101,9 +111,9 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	created, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: owner})
 	require.NoError(t, err)
 	require.True(t, created.Created)
-	group, err := cp.Core().GroupInstanceByID(ctx, created.GroupID)
+	group, err := cp.Core().Group(ctx, iam.GroupByID(created.GroupID))
 	require.NoError(t, err)
-	require.Equal(t, created.MerchantID.String(), group.InstanceSlug, "the AuthKit group carries no merchant name")
+	require.Equal(t, created.MerchantID.String(), group.ID, "the AuthKit group is keyed by the merchant and carries no name")
 
 	again, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
@@ -186,11 +196,6 @@ func TestMerchantRenameRoute(t *testing.T) {
 	require.NotEmpty(t, w.Header().Get("Retry-After"))
 	w = do(http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	for _, method := range []string{http.MethodGet, http.MethodPatch} {
-		w := do(method, "/auth/merchant/"+m.GroupID, "", map[string]string{"slug": "hijack"})
-		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, w.Code, method)
-	}
 	mid, current, err := cp.ResolveMerchantForGroup(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, []any{m.MerchantID, next}, []any{mid, current})

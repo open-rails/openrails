@@ -3,6 +3,8 @@ package policy
 import (
 	"context"
 	"errors"
+	"net/http"
+
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -11,10 +13,12 @@ import (
 // without making gin-free route registration import the control-plane package.
 const PermMerchantCatalogUpdate = "merchant:catalog:update"
 
-// AdminPermissionChecker is the live AuthKit effective-permission check the
-// control plane provides for merchant-local `merchant:` permissions.
+// AdminPermissionChecker is the live AuthKit permission check the control
+// plane provides for merchant-local `merchant:` permissions. It checks the
+// user r authenticates as, the token's session included: a revoked session
+// is an error joined with helpers/auth ErrRevoked.
 type AdminPermissionChecker interface {
-	ResolveAuthorizedMerchant(ctx context.Context, merchantRef, userID, perm string) (merchant.ID, string, error)
+	ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, merchantRef, perm string) (merchant.ID, string, error)
 }
 
 var ErrPermissionRequired = errors.New("merchant permission required")

@@ -4,10 +4,9 @@ users:
     email_verified: true
     password:
       plaintext: "change-me"
-    root_role: owner
+    root_role: root:owner
 
 remote_applications:
-  - slug: openrails-runtime
-    issuer: https://openrails.example
+  - issuer: https://openrails.example
     jwks_uri: https://openrails.example/.well-known/jwks.json
     enabled: true

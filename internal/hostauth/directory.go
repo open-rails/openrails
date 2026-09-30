@@ -7,19 +7,18 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/google/uuid"
-	authkit "github.com/open-rails/authkit"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
+
 	"github.com/open-rails/openrails"
 )
 
-// IdentityClient is the public AuthKit directory surface this adapter needs.
-// authkit.Client satisfies it; no database access is
-// borrowed from the billing engine.
+// IdentityClient is the AuthKit directory surface this adapter needs;
+// *authkit.Client satisfies it.
 type IdentityClient interface {
-	AdminGetUser(context.Context, string) (*authkit.AdminUser, error)
-	GetUserByUsername(context.Context, string) (*authkit.User, error)
+	User(context.Context, iam.UserRef, ...authkit.Option) (iam.User, error)
+	ResolveUsername(context.Context, string) (iam.NameResolution, error)
 }
 
 // Directory adapts an explicitly supplied AuthKit client for billing email and
@@ -41,8 +40,8 @@ func (d *Directory) Exists(ctx context.Context, userID string) (bool, error) {
 	return ok, err
 }
 
-// EmailIdentity preserves billing's existing usable-email policy.
-// Deleted or missing users and empty emails are skipped.
+// EmailIdentity preserves billing's usable-email policy: deleted or missing
+// users and empty emails are skipped.
 func (d *Directory) EmailIdentity(ctx context.Context, userID string) (username, email string, ok bool, err error) {
 	if d == nil || d.client == nil {
 		return "", "", false, nil
@@ -51,34 +50,28 @@ func (d *Directory) EmailIdentity(ctx context.Context, userID string) (username,
 	if err != nil {
 		return "", "", false, nil
 	}
-	user, err := d.client.AdminGetUser(ctx, id.String())
-	if errors.Is(err, authkit.ErrUserNotFound) || errors.Is(err, pgx.ErrNoRows) {
+	user, err := d.client.User(ctx, iam.UserByID(id.String()))
+	if errors.Is(err, iam.ErrUserNotFound) {
 		return "", "", false, nil
 	}
 	if err != nil {
 		return "", "", false, err
 	}
-	if user == nil || user.DeletedAt != nil || user.Email == nil || *user.Email == "" {
+	if user.Email == "" {
 		return "", "", false, nil
 	}
-	if user.Username != nil {
-		username = *user.Username
-	}
-	return username, *user.Email, true, nil
+	return user.Username, user.Email, true, nil
 }
 
-// GetUserIDByUsername follows AuthKit's canonical username-resolution policy,
-// including retained former names. Billing never reads identity tables.
+// GetUserIDByUsername follows AuthKit's username resolution, including
+// retained former names. Billing never reads identity tables.
 func (d *Directory) GetUserIDByUsername(ctx context.Context, username string) (string, error) {
 	if d == nil || d.client == nil {
 		return "", fmt.Errorf("authkit directory: client is required")
 	}
-	user, err := d.client.GetUserByUsername(ctx, username)
+	name, err := d.client.ResolveUsername(ctx, username)
 	if err != nil {
 		return "", err
 	}
-	if user == nil || user.DeletedAt != nil || user.ID == "" {
-		return "", authkit.ErrUserNotFound
-	}
-	return user.ID, nil
+	return name.ID, nil
 }

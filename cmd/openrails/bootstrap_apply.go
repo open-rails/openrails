@@ -8,8 +8,7 @@ import (
 	"os"
 	"strings"
 
-	authkit "github.com/open-rails/authkit"
-	akembedded "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit/iam"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -113,11 +112,6 @@ func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) err
 		path = bootstrap.DefaultBootstrapManifestPath
 	}
 
-	manifest, err := akembedded.LoadBootstrapManifestFile(path)
-	if err != nil {
-		return err
-	}
-
 	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-auth-bootstrap requires --config")
@@ -134,7 +128,7 @@ func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) err
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
-	return applyAuthKitAuthorityManifest(ctx, application, manifest, out, authkit.BootstrapReconcileOptions{
+	return applyAuthKitAuthorityManifest(ctx, application, path, out, iam.BootstrapOptions{
 		DryRun:      opts.dryRun,
 		StartupOnly: opts.startupOnly,
 		Name:        opts.name,
@@ -251,15 +245,8 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 		return fmt.Errorf("startup bootstrap: control plane not attached (#469: it is mandatory in standalone mode)")
 	}
 
-	manifest, err := akembedded.LoadBootstrapManifestFile(path)
-	if err != nil {
-		return err
-	}
 	log.WithField("file", path).Info("startup bootstrap: first run — applying AuthKit authority manifest")
-	if err := applyAuthKitAuthorityManifest(ctx, a, manifest, log.StandardLogger().Out, authkit.BootstrapReconcileOptions{StartupOnly: true, Name: "openrails"}); err != nil {
-		return err
-	}
-	return nil
+	return applyAuthKitAuthorityManifest(ctx, a, path, log.StandardLogger().Out, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
 }
 
 // resolveBootstrapManifestPath returns the conventional bootstrap manifest
@@ -271,10 +258,11 @@ func resolveBootstrapManifestPath(_ *config.Config) string {
 	return ""
 }
 
-// applyAuthKitAuthorityManifest reconciles AuthKit-owned standalone authority.
+// applyAuthKitAuthorityManifest reconciles AuthKit-owned standalone authority
+// from the manifest file at path, validated against the control plane's roles.
 // It intentionally does not touch OpenRails merchant config, secrets, catalog,
 // provider state, or remote rails.
-func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest authkit.BootstrapManifest, out io.Writer, opts authkit.BootstrapReconcileOptions) error {
+func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, path string, out io.Writer, opts iam.BootstrapOptions) error {
 	cp := embcp.Get(a)
 	if cp == nil {
 		return fmt.Errorf("AuthKit authority bootstrap: control plane not attached")
@@ -282,7 +270,15 @@ func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest aut
 	if cp.Core() == nil {
 		return fmt.Errorf("AuthKit authority bootstrap: core service unavailable")
 	}
-	res, err := cp.Core().OperatorApplyBootstrapManifest(ctx, manifest, opts)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read AuthKit authority manifest: %w", err)
+	}
+	manifest, err := cp.Core().ParseBootstrapManifestYAML(raw)
+	if err != nil {
+		return fmt.Errorf("parse AuthKit authority manifest %s: %w", path, err)
+	}
+	res, err := cp.Core().ApplyBootstrapManifest(ctx, manifest, opts)
 	if err != nil {
 		return fmt.Errorf("apply AuthKit authority bootstrap: %w", err)
 	}

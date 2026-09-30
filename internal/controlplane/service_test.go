@@ -4,16 +4,17 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	authhttp "github.com/open-rails/authkit/authhttp"
-	authcore "github.com/open-rails/authkit/embedded"
-	jwtkit "github.com/open-rails/authkit/jwtkit"
-	"github.com/redis/go-redis/v9"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 	log "github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
@@ -23,17 +24,29 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// Every refusal precedes AuthKit's construction, so none needs a database.
 func TestNewRefusesIncompleteConfiguration(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://127.0.0.1:1/unreachable")
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	issuer := "https://openrails.example.com"
 	for want, tc := range map[string]struct {
 		cfg  *config.Config
 		auth *hostconfig.AuthConfig
+		pool *pgxpool.Pool
+		opts []Option
 	}{
-		"auth.issuer is required": {&config.Config{}, nil},
-		"auth issuer":             {&config.Config{}, &hostconfig.AuthConfig{Issuer: "http://openrails.example.com"}},
-		"request_origin":          {&config.Config{}, &hostconfig.AuthConfig{Issuer: "https://a.example", RequestOrigin: "https://a.example/billing"}},
-		"pgx pool is required":    {&config.Config{}, &hostconfig.AuthConfig{Issuer: "https://openrails.example.com"}},
+		"auth.issuer is required":        {&config.Config{}, nil, pool, nil},
+		"auth issuer":                    {&config.Config{}, &hostconfig.AuthConfig{Issuer: "http://openrails.example.com"}, pool, nil},
+		"request_origin":                 {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, RequestOrigin: "https://a.example/billing"}, pool, nil},
+		"pgx pool is required":           {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer}, nil, nil},
+		"merchant creation slug pattern": {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer}, pool, []Option{WithMerchantCreation(MerchantCreationConfig{SlugPattern: "("})}},
+		"naming policy":                  {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, Naming: merchant.NamingConfig{FormerNames: merchant.FormerNamesConfig{Mode: "sometimes"}}}, pool, nil},
+		"explicit client-IP posture":     {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, MintDisabled: true}, pool, nil},
+		"rate limits need Redis":         {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, DirectPeerIP: true, MintDisabled: true}, pool, nil},
+		"AUTHKIT_ACTIVE_KEY_ID":          {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"}, pool, nil},
 	} {
-		_, err := New(context.Background(), tc.cfg, tc.auth, nil)
+		_, err := New(context.Background(), tc.cfg, tc.auth, tc.pool, tc.opts...)
 		require.ErrorContains(t, err, want)
 	}
 }
@@ -46,23 +59,44 @@ func TestPostureIsCodeOnlyOptIn(t *testing.T) {
 	require.Equal(t, IntentionalRouteGroups, groups)
 	groups[0] = "mutated"
 	require.NotEqual(t, "mutated", string(IntentionalRouteGroups[0]), "callers get a copy")
-	require.Equal(t, authcore.RegistrationModeClosed, registrationMode(true))
-	require.Equal(t, authcore.RegistrationVerificationNone, registrationVerification(true))
-	require.Nil(t, (&ControlPlane{hosted: true}).MountedRouteGroups(), "hosted without an auth service mounts nothing")
-	require.Equal(t, authcore.RegistrationModeOpen, registrationMode(false))
-	require.Equal(t, authcore.RegistrationVerificationRequired, registrationVerification(false))
+	hosted := (&ControlPlane{hosted: true}).MountedRouteGroups()
+	require.NotContains(t, hosted, iam.RouteBrowserOIDC, "hosted posture still mounts no browser OIDC")
+	require.Contains(t, hosted, iam.RouteRegistration)
+
+	auth := &hostconfig.AuthConfig{}
+	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeClosed, Verification: iam.RegistrationVerificationNone}, registration(options{}, auth))
+	open := registration(newOptions([]Option{WithHostedPosture(), WithPasswordless(true)}), auth)
+	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired, PasswordlessLogin: true, PasswordlessAutoRegistration: true}, open)
 
 	defaults := newOptions([]Option{nil})
 	require.False(t, defaults.hosted || defaults.passwordlessLogin || defaults.passwordlessAutoRegistration || defaults.merchantCreation != nil)
-	require.True(t, newOptions([]Option{WithHostedPosture()}).hosted)
 	login := newOptions([]Option{WithPasswordless(false)})
 	require.True(t, login.passwordlessLogin && !login.passwordlessAutoRegistration)
-	auto := newOptions([]Option{WithPasswordless(true)})
-	require.True(t, auto.passwordlessLogin && auto.passwordlessAutoRegistration)
+}
 
-	require.Equal(t, authcore.FrontendConfig{BaseURL: "https://issuer.example"}, resolveFrontendConfig("https://issuer.example", authcore.FrontendConfig{}))
-	override := authcore.FrontendConfig{BaseURL: "https://app.example"}
-	require.Equal(t, override, resolveFrontendConfig("https://issuer.example", override))
+// The JSON API sits at /auth beneath an origin issuer, else at the issuer's
+// path, which is AuthKit's base path.
+func TestAuthAPIPath(t *testing.T) {
+	for issuer, want := range map[string][2]string{
+		"https://openrails.example":       {"/auth", "/auth"},
+		"https://openrails.example/":      {"/auth", "/auth"},
+		"https://api.example/auth":        {"/", "/auth"},
+		"https://api.example/identity/v2": {"/", "/identity/v2"},
+	} {
+		require.Equal(t, want, [2]string{authAPIPath(issuer), authAPIBase(issuer)}, issuer)
+	}
+}
+
+// The site naming policy governs usernames too: OpenRails' zero interval is
+// "no wait", AuthKit's is its default.
+func TestUsernamePolicyFollowsNaming(t *testing.T) {
+	week, zero := 7*24*time.Hour, time.Duration(0)
+	p, err := merchant.NamingConfig{RenameInterval: &zero, FormerNames: merchant.FormerNamesConfig{Duration: &week}}.Normalize()
+	require.NoError(t, err)
+	require.Equal(t, authkit.UsernameConfig{Renames: true, RenameInterval: -1, FormerNames: authkit.FormerNamesConfig{Mode: authkit.FormerNamesFinite, Duration: week}}, usernames(p))
+	p, err = merchant.NamingConfig{FormerNames: merchant.FormerNamesConfig{Mode: merchant.FormerNamesForever}}.Normalize()
+	require.NoError(t, err)
+	require.Equal(t, authkit.UsernameConfig{Renames: true, RenameInterval: 72 * time.Hour, FormerNames: authkit.FormerNamesConfig{Mode: authkit.FormerNamesForever}}, usernames(p))
 }
 
 // ak#299: an undeclared client-IP posture refuses boot rather than sharing one
@@ -97,9 +131,9 @@ func TestClientIPPostureMustBeDeclared(t *testing.T) {
 	}
 }
 
-// #752: inline keys cannot rotate, so they warn; a missing key fails closed
-// unless ephemeral keys are explicitly allowed.
-func TestControlPlaneKeySource(t *testing.T) {
+// #752: inline keys cannot rotate, so they warn; without them keys_path
+// resolves in AuthKit.
+func TestInlineKeySource(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	der, err := x509.MarshalPKCS8PrivateKey(priv)
@@ -115,68 +149,54 @@ func TestControlPlaneKeySource(t *testing.T) {
 		}
 		return false
 	}
-	cfg := &config.Config{}
 
-	_, err = resolveControlPlaneKeySource(cfg, &hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM})
+	ks, err := inlineKeySource(&hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM})
 	require.NoError(t, err)
+	require.Equal(t, "k", ks.ActiveSigner().KID())
 	require.True(t, warned())
-	_, err = resolveControlPlaneKeySource(cfg, &hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM, PublicKeysJSON: "{"})
+	_, err = inlineKeySource(&hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM, PublicKeysJSON: "{"})
 	require.ErrorContains(t, err, "AUTHKIT_PUBLIC_KEYS")
-	_, err = resolveControlPlaneKeySource(cfg, &hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"})
+	_, err = inlineKeySource(&hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"})
 	require.Error(t, err)
 
 	hook.Reset()
-	auth := &hostconfig.AuthConfig{KeysPath: t.TempDir()}
-	_, err = resolveControlPlaneKeySource(cfg, auth)
-	require.Error(t, err, "missing key fails closed")
-	auth.AllowEphemeralSigningKey = true
-	_, err = resolveControlPlaneKeySource(cfg, auth)
+	ks, err = inlineKeySource(&hostconfig.AuthConfig{KeysPath: t.TempDir()})
 	require.NoError(t, err)
+	require.Nil(t, ks, "keys_path is resolved by AuthKit")
 	require.False(t, warned(), "keys_path is the hot-rotating path")
-	require.Equal(t, jwtkit.DefaultAuthKeysPath, authKeysPath(&hostconfig.AuthConfig{KeysPath: "  "}))
-}
-
-// DPoP htu comes from trusted configuration, never Host/X-Forwarded-Host.
-func TestDelegatedRequestURLUsesTrustedOrigin(t *testing.T) {
-	for _, path := range []string{"/billing/v1/orders", "/billing/v1/a%2Fb", "/billing/v1/a//b"} {
-		r := httptest.NewRequest(http.MethodGet, "http://untrusted.test"+path+"?q=x", nil)
-		r.Header.Set("X-Forwarded-Host", "attacker.test")
-		require.Equal(t, "https://billing.example"+path, delegatedRequestURL("https://billing.example/", nil)(r))
-	}
-	r := httptest.NewRequest(http.MethodGet, "http://untrusted.test/billing/v1/a", nil)
-	for _, bad := range []string{"", "billing.example", "ftp://billing.example", "https://billing.example/billing", "https://user:secret@billing.example", "https://billing.example?override=yes", "https://billing.example#x"} {
-		require.Empty(t, delegatedRequestURL(bad, nil)(r), bad)
-	}
-	override := func(*http.Request) string { return "https://host.example/original%2Fpath" }
-	require.Equal(t, "https://host.example/original%2Fpath", delegatedRequestURL("", override)(r))
 }
 
 // A missing or partial control plane fails closed with a typed error, never a panic.
 func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	mid := merchant.ID{1}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	for _, cp := range []*ControlPlane{nil, {}} {
 		require.Equal(t, APIKeyPrefix, cp.TokenPrefix())
 		require.True(t, cp.LooksLikeAPIKey(" "+APIKeyPrefix+"_st_key_secret "))
 		require.False(t, cp.LooksLikeAPIKey("eyJ.a.b"))
 		require.Nil(t, cp.UserAuthenticator())
+		require.Nil(t, cp.AuthHandler())
+		require.Empty(t, cp.AuthRoutes())
 		_, err := cp.ResolveAPIKey(ctx, APIKeyPrefix+"_st_key_secret")
 		require.ErrorIs(t, err, ErrNoControlPlane)
 		_, err = cp.ResolveServiceJWT(ctx, "a.b.c")
 		require.ErrorIs(t, err, ErrNoControlPlane)
-		_, err = cp.ResolveDelegated(httptest.NewRequest(http.MethodGet, "/", nil))
+		_, err = cp.ResolveDelegated(r)
 		require.ErrorIs(t, err, ErrDelegatedNotConfigured)
 		_, err = cp.ResolveRemoteApplication(ctx, "a.b.c")
 		require.ErrorIs(t, err, ErrRemoteApplicationNotConfigured)
-		_, _, err = cp.MintMerchantAPIKey(ctx, mid, "k", MerchantRoleViewer, "")
+		_, _, err = cp.MintMerchantAPIKey(ctx, mid, "k", MerchantViewer, iam.SystemActor())
 		require.ErrorIs(t, err, ErrNoControlPlane)
-		_, _, err = cp.ResolveAuthorizedMerchant(ctx, "acme", "user", PermMerchantCatalogRead)
+		_, _, err = cp.ResolveAuthorizedMerchant(ctx, r, "acme", "merchant:catalog:read")
+		require.ErrorIs(t, err, ErrNoControlPlane)
+		_, err = cp.HasRootPermission(ctx, r, "root:merchants:read")
+		require.ErrorIs(t, err, ErrNoControlPlane)
+		_, err = cp.RequestActor(r)
 		require.ErrorIs(t, err, ErrNoControlPlane)
 		_, _, err = cp.MerchantScope(ctx, "acme")
 		require.ErrorIs(t, err, ErrServiceCredentialMerchantUnresolved)
 		require.Error(t, cp.AuthorizeMerchant(ctx, "group", mid))
-		_, _, _, _, _, err = cp.merchantForIssuer(ctx, "  ")
-		require.ErrorIs(t, err, ErrDelegatedIssuerUnknown)
 		cp.Close()
 	}
 	for _, bad := range []struct {
@@ -188,23 +208,18 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 	}
 }
 
-// AuthKit's rate limits are an explicit choice: shared through Redis, or per
-// process only when the operator says the deployment is single-process; the
-// result always passes AuthKit's own exactly-one-limiter validation.
-func TestRateLimitBackendMustBeChosen(t *testing.T) {
-	var cfg authhttp.Config
-	require.ErrorContains(t, chooseRateLimits(&cfg, nil, false), "rate limits need Redis")
-
-	cfg = authhttp.Config{DirectPeerIP: true}
-	require.NoError(t, chooseRateLimits(&cfg, nil, true))
-	require.True(t, cfg.PerProcessRateLimits)
-	require.NoError(t, cfg.Validate())
-
-	rd := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
-	defer rd.Close()
-	cfg = authhttp.Config{DirectPeerIP: true}
-	require.NoError(t, chooseRateLimits(&cfg, rd, true))
-	require.NotNil(t, cfg.Redis)
-	require.False(t, cfg.PerProcessRateLimits)
-	require.NoError(t, cfg.Validate())
+// Only a remote application's own access token takes the application path;
+// every other JWT falls through to the service-JWT and delegated resolvers.
+func TestRemoteApplicationTokenType(t *testing.T) {
+	header := func(typ string) string {
+		return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"`+typ+`"}`)) + ".e30.sig"
+	}
+	require.Equal(t, remoteApplicationTokenType, joseType(header(remoteApplicationTokenType)))
+	require.Equal(t, "delegated-access+jwt", joseType(header("delegated-access+jwt")))
+	require.Empty(t, joseType("not a jwt"))
+	cp := &ControlPlane{delegatedVerifier: &authkit.Verifier{}}
+	_, err := cp.ResolveRemoteApplication(context.Background(), header("delegated-access+jwt"))
+	require.ErrorIs(t, err, ErrNotRemoteApplicationToken)
+	_, err = cp.ResolveRemoteApplication(context.Background(), "  ")
+	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }

@@ -525,9 +525,11 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 
 	}
-	membershipMID, canonical, err := g.AdminPermissionChecker.ResolveAuthorizedMerchant(ctx, uc.Merchant, uc.UserID, perm)
+	membershipMID, canonical, err := g.AdminPermissionChecker.ResolveAuthorizedMerchant(ctx, req, uc.Merchant, perm)
 	if err != nil {
 		switch {
+		case errors.Is(err, auth.ErrRevoked), errors.Is(err, billingauth.ErrUnauthenticated):
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: credentialFailure(err)}
 		case errors.Is(err, authpolicy.ErrPermissionRequired):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
@@ -614,6 +616,14 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 		}
 	}
 	return nil, nil, false
+}
+
+// credentialFailure is the 401 message for a credential a live check refused.
+func credentialFailure(err error) string {
+	if errors.Is(err, auth.ErrRevoked) {
+		return "credential_revoked"
+	}
+	return billingauth.UnauthenticatedMessage(err)
 }
 
 func bearerToken(header string) string {
