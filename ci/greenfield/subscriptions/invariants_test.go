@@ -17,7 +17,9 @@ import (
 //	recorded:  every approved, unrefunded provider charge is a completed local
 //	           payment, unless its operation is still unresolved;
 //	evidenced: every completed local rail payment is a provider charge;
-//	once:      no subscription period holds two completed charges.
+//	once:      no subscription period holds two completed charges;
+//	moved:     payments holds only money that moved: a declined charge is a
+//	           payment attempt, never a failed payments row (#1111).
 //
 // A test whose scenario deliberately breaks one opts out with its reason.
 type moneyInvariants struct{ waived map[string]string }
@@ -108,9 +110,24 @@ func (w *world) checkMoneyInvariants() {
 	}
 	rows.Close()
 
+	var failed []string
+	rows, err = w.pool.Query(ctx, `SELECT id::text FROM `+schema+`.payments WHERE status = 'failed' AND refunded_payment_id IS NULL`)
+	if err != nil {
+		t.Errorf("invariants: read failed payments: %v", err)
+		return
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			failed = append(failed, id)
+		}
+	}
+	rows.Close()
+
 	w.reportInvariant("evidenced", "local payments with no provider charge", phantom)
 	w.reportInvariant("recorded", "provider charges with no local payment", unrecorded)
 	w.reportInvariant("once", "subscription periods charged twice", twice)
+	w.reportInvariant("moved", "failed charges in payments", failed)
 }
 
 func (w *world) reportInvariant(name, what string, violations []string) {

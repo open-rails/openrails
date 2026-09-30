@@ -1714,16 +1714,15 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 }
 
 const listSubscriptionDeclineCodes = `-- name: ListSubscriptionDeclineCodes :many
-SELECT p.rail, p.failure_code::text AS failure_code, count(*)::bigint AS declines
-FROM openrails.payments p
-WHERE p.merchant_id = $1::uuid
-  AND p.subscription_id IS NOT NULL
-  AND p.deleted_at IS NULL
-  AND p.status = 'failed'
-  AND p.failure_code IS NOT NULL
-  AND p.created_at >= $2::timestamptz
-GROUP BY p.rail, p.failure_code
-ORDER BY p.rail, p.failure_code
+SELECT a.rail, a.response_code::text AS failure_code, count(*)::bigint AS declines
+FROM openrails.payment_attempts a
+WHERE a.merchant_id = $1::uuid
+  AND a.subscription_id IS NOT NULL
+  AND a.category <> 'approved'
+  AND a.response_code IS NOT NULL
+  AND a.attempted_at >= $2::timestamptz
+GROUP BY a.rail, a.response_code
+ORDER BY a.rail, a.response_code
 `
 
 type ListSubscriptionDeclineCodesParams struct {

@@ -1016,16 +1016,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- life.dunning.funnel: recorded subscription decline codes since a cutoff,
 -- classified in Go (decline.Classify) to count unmapped ones.
 -- name: ListSubscriptionDeclineCodes :many
-SELECT p.rail, p.failure_code::text AS failure_code, count(*)::bigint AS declines
-FROM openrails.payments p
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND p.subscription_id IS NOT NULL
-  AND p.deleted_at IS NULL
-  AND p.status = 'failed'
-  AND p.failure_code IS NOT NULL
-  AND p.created_at >= sqlc.arg(since)::timestamptz
-GROUP BY p.rail, p.failure_code
-ORDER BY p.rail, p.failure_code;
+SELECT a.rail, a.response_code::text AS failure_code, count(*)::bigint AS declines
+FROM openrails.payment_attempts a
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.subscription_id IS NOT NULL
+  AND a.category <> 'approved'
+  AND a.response_code IS NOT NULL
+  AND a.attempted_at >= sqlc.arg(since)::timestamptz
+GROUP BY a.rail, a.response_code
+ORDER BY a.rail, a.response_code;
 
 -- A LIFE repair's premise, re-checked under the row lock: a completed payment
 -- for the subscription (at or after since, when given).

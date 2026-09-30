@@ -10,14 +10,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -555,20 +553,6 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 		} else {
 			if answer, transaction, declined := refusal.Declined(); declined && p.Terms.Amount > 0 {
 				if err := recordInitialAttempt(ctx, d, in, p, attempts.Attempt{Answer: answer, TransactionID: transaction}, h.Checkout.now()); err != nil {
-					return err
-				}
-			}
-			if outcome.Evidence["declined"] == true && p.Terms.Amount > 0 {
-				code := fmt.Sprint(outcome.Evidence["response_code"])
-				if in.Rail == "stripe" {
-					code = fmt.Sprint(outcome.Evidence["failure_code"])
-				}
-				reason := decline.ReasonFor(in.Rail, code)
-				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
-				if p.Instrument.CustodianHeld() {
-					token = charge.TokenTypePANViaProxy
-				}
-				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: in.PspID, Rail: models.Rail(in.Rail), TransactionID: in.Rail + "_sub_declined:" + in.ID.String(), Amount: p.Terms.Amount, ListAmount: p.Terms.RecurringAmount, Currency: p.Terms.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
 					return err
 				}
 			}

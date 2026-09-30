@@ -278,6 +278,12 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			sub := w.subscription(tp, l.sub)
 			require.Equal(t, "past_due", sub.Status, "the provider's failed renewal is mirrored")
 			require.True(t, l.c.entitled(l.ent), "provider-owned dunning keeps standing access")
+			owner := map[string]string{"stripe": "provider", "nmi": "nmi_schedule"}[rail]
+			recorded := w.attempts(l.c.id)
+			require.NotEmpty(t, recorded)
+			rebill := recorded[len(recorded)-1]
+			require.Equal(t, []string{"rebill", owner}, []string{rebill.Kind, rebill.Owner}, "the provider's decline is the cycle's rebill attempt")
+			require.NotEqual(t, "approved", rebill.Category)
 			charges := l.engineCharges()
 			w.runRenewals()
 			require.Equal(t, charges, l.engineCharges(), "OpenRails leaves the provider's dunning alone")

@@ -386,7 +386,7 @@ for those routes.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
+| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments (money that moved; declines are payment attempts) with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
 | GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; payments and refunds embed the `product` summary; `Client.GetPayment` |
 | POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail. `Idempotency-Key` required; body `{amount}` or `{full:true}`, optional `reason`, `revoke_access` (explicit; on an NMI-billed subscription it also cancels the membership and deletes its NMI schedule, and is refused `409 provider_cancel_held` while destructive actions are disarmed). 201 settled, 202 pending; `refund_rail_unavailable`/`refund_unsupported` refusals. `Client.RefundPayment` |
 | GET | `/v1/merchant/payment-attempts` | `merchant:payments:read` | Every authorization a PSP answered (verifications, sales, rebills, retries), newest first. Filters `kind`, `owner`, `category`, `reason`, `response_code`, `card_entry`, `psp_id`, `customer_id`, `checkout_id`, `subscription_id`, `cycle_id`, `since`/`until` (RFC3339). `Client.ListPaymentAttempts` |

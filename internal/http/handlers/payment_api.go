@@ -78,7 +78,7 @@ func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.Pa
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (openrails.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, CreatedAt: p.CreatedAt}
+	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (openrails.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, CreatedAt: p.CreatedAt}
 	if p.RefundedPaymentID != nil {
 		original := openrails.PaymentID(*p.RefundedPaymentID)
 		payment.RefundedPaymentID = &original

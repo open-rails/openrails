@@ -125,9 +125,6 @@ export function PaymentDetailPage() {
         </Fact>
         <Fact label="Created">{formatDate(payment.created_at)}</Fact>
         <Fact label="Type">{payment.object}</Fact>
-        {payment.failure_message && (
-          <Fact label="Failure">{payment.failure_message}</Fact>
-        )}
       </div>
 
       <Card>

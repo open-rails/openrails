@@ -26,9 +26,10 @@ type FleetCurrencyRevenue struct {
 	SettledAmount int64  `json:"settled_amount,string"`
 }
 
-// FleetRailHealth is one rail's completed/failed/chargeback split across the
-// fleet window. Chargebacks counts #733 reversal mirror rows recorded in the
-// window — the dispute signal VAMP-style monitoring watches.
+// FleetRailHealth is one rail's approved/declined charge attempts and
+// chargebacks across the fleet window. Chargebacks counts #733 reversal
+// mirror rows recorded in the window: the dispute signal VAMP-style
+// monitoring watches.
 type FleetRailHealth struct {
 	Rail        string `json:"rail"`
 	Succeeded   int64  `json:"succeeded"`

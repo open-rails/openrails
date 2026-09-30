@@ -209,16 +209,18 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		failed := ccbillNumericID()
 		w.deliverCCBill("RenewalFailure", map[string]string{
 			"subscriptionId": m.railSub, "transactionId": failed,
-			"failureReason": "Insufficient funds", "failureCode": "BE-140",
+			"failureReason": "Insufficient funds", "failureCode": "BE-113",
 			"renewalDate": ccbillDate(m.paidThrough), "nextRetryDate": ccbillDate(m.paidThrough.Add(2 * day)),
 			"cardType": "VISA", "paymentType": "CREDIT",
 		})
 		sub := w.subscription(embedded, m.sub)
 		require.Equal(t, "past_due", sub.Status)
 		require.NotNil(t, sub.NextRetryAt)
-		decline := m.payment(failed)
-		require.NotNil(t, decline, "the declined rebill is recorded")
-		require.Equal(t, "failed", decline.Status)
+		require.Nil(t, m.payment(failed), "a decline is an attempt, never a payment")
+		rebill := w.attempts(m.c.id)
+		require.Len(t, rebill, 1)
+		require.Equal(t, []string{"rebill", "provider", "issuer_soft", "insufficient_funds", failed},
+			[]string{rebill[0].Kind, rebill[0].Owner, rebill[0].Category, str(rebill[0].Reason), str(rebill[0].TransactionID)})
 		require.True(t, m.c.entitled(m.ent), "access survives CCBill's dunning")
 
 		w.advance(2 * day)
@@ -229,6 +231,9 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		require.Equal(t, "active", sub.Status)
 		require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
 		require.Equal(t, "succeeded", m.payment(recovered).Status)
+		retry := w.attempts(m.c.id)
+		require.Len(t, retry, 2)
+		require.Equal(t, []string{"dunning_retry", "approved"}, []string{retry[1].Kind, retry[1].Category}, "CCBill's own retry")
 		require.Zero(t, w.engineCharges())
 	})
 

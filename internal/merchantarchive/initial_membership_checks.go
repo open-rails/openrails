@@ -4,16 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -88,32 +85,16 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		if p.Terms.PaymentID == uuid.Nil {
 			return nil
 		}
-		payment, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PaymentID})
-		if !evidence.Declined {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			return errors.New("unsent initial enrollment has a payment")
+		// A refused or unsent enrollment moved no money: it has no payment
+		// (a decline is a payment attempt, #1111).
+		_, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PaymentID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
 		}
 		if err != nil {
 			return err
 		}
-		refusal, _, err := intents.LoadInitialMembershipRefusal(op)
-		if err != nil {
-			return err
-		}
-		code := fmt.Sprint(refusal.Outcome().Evidence["response_code"])
-		reason := decline.ReasonFor(op.Rail, code)
-		if payment.SubscriptionID != nil || payment.ListAmount != p.Terms.RecurringAmount || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptInitial || payment.FailureCode == nil || *payment.FailureCode != code || payment.FailureReason == nil || *payment.FailureReason != reason || !payment.PurchasedAt.Equal(p.Terms.AcceptedAt) || !payment.CreatedAt.Equal(p.Terms.AcceptedAt) {
-			return errors.New("initial decline contradicts the sealed refusal and accepted attempt")
-		}
-		if payment.CustomerID != p.Terms.CustomerID || payment.PspID == nil || *payment.PspID != p.Terms.PSPID || payment.PriceID != p.Terms.PriceID || payment.Rail != op.Rail || payment.Amount != p.Terms.Amount || payment.Currency != p.Terms.Currency || payment.Status != "failed" || payment.MoneyMovement != "none" || payment.TransactionID != "nmi_sub_declined:"+op.ID.String() {
-			return errors.New("initial decline points to another failed attempt")
-		}
-		return nil
+		return errors.New("refused initial enrollment has a payment")
 	}
 	if subErr != nil {
 		return subErr

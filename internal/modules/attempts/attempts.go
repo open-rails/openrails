@@ -208,6 +208,17 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 			return err
 		}
 		row.CycleID, row.SubscriptionID = &cycle, &a.Cycle.SubscriptionID
+		// A provider that retries its own declines (Stripe, CCBill): its first
+		// charge of the cycle is the rebill, the rest are its retries.
+		if a.ProviderSchedule && a.Kind == Rebill && a.Owner == OwnerProvider {
+			tried, err := q.CycleHasAttempt(ctx, gen.CycleHasAttemptParams{MerchantID: a.MerchantID, SubscriptionID: a.Cycle.SubscriptionID, DueAt: a.Cycle.DueAt.UTC()})
+			if err != nil {
+				return err
+			}
+			if tried {
+				row.Kind = string(DunningRetry)
+			}
+		}
 	}
 	if a.Target != "" {
 		checkout, err := checkoutFor(ctx, q, a)

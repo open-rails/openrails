@@ -2005,52 +2005,6 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 	return nil
 }
 
-// recordFailedRenewalAttempt writes the declined renewal charge as a durable
-// status='failed' payments row (#733) inside the caller's tx. Best-effort:
-// a missing price is logged, never fails the dunning flow. Idempotent on the
-// synthetic per-attempt transaction id.
-func (s *SubscriptionLifecycleService) recordFailedRenewalAttempt(ctx context.Context, txDB *db.DB, priceService *catalog.PriceService, subscription *models.Subscription, params *FailMembershipParams, now time.Time, attemptNum int) {
-	price := subscription.Price
-	if price == nil && subscription.PriceID != uuid.Nil {
-		if p, err := priceService.GetByID(ctx, subscription.PriceID); err == nil {
-			price = p
-		}
-	}
-	if price == nil {
-		log.WithContext(ctx).WithField("subscription_id", subscription.ID).Warn("declined renewal not recorded as payment row: no price")
-		return
-	}
-	kind := payments.AttemptRenewal
-	failed := &models.Payment{
-		ID:             uuidutil.NewV7(),
-		CustomerID:     subscription.CustomerID,
-		PriceID:        price.ID,
-		SubscriptionID: &subscription.ID,
-		Rail:           subscription.Rail,
-		PspID:          pspIDOf(subscription),
-		TransactionID:  fmt.Sprintf("renewal_declined:%s:attempt%d", subscription.ID, attemptNum),
-		Amount:         price.Amount,
-		ListAmount:     price.Amount,
-		Currency:       price.Currency,
-		Status:         payments.PaymentStatusFailedValue,
-		AttemptKind:    &kind,
-		MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
-		PurchasedAt:    now,
-		CreatedAt:      now,
-	}
-	if code := normalize.FromPtr(params.FailureCode); code != "" {
-		reason := decline.ReasonFor(string(subscription.Rail), code)
-		failed.FailureCode = &code
-		failed.FailureReason = &reason
-	}
-	if tt := payments.DefaultTokenType(string(subscription.Rail), models.CustodianPSP); tt != "" {
-		failed.TokenType = &tt
-	}
-	if _, err := payments.NewPaymentService(txDB, s.Clock()).CreateIfNotExists(ctx, failed); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("failed to record declined renewal payment row")
-	}
-}
-
 // FailMembership marks a subscription as failed due to payment issues.
 // FindingTerminalHeld is a terminal decline whose cancellation was refused.
 const FindingTerminalHeld = "life.terminal_outcome.held"
@@ -2111,18 +2065,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			declined = params.DeclinedAt.UTC()
 		}
 
-		// Captured BEFORE either branch mutates subscription.RetryAttempts: the
-		// terminal branch below (either path) calls ClearRetrySchedule(), which
-		// zeroes RetryAttempts. recordFailedRenewalAttempt's idempotency key is
-		// keyed on the attempt ordinal, so reading it AFTER the clear would
-		// collapse every terminal attempt's key onto attempt 1 — silently
-		// dropping the terminal (most forensically important) decline's payment
-		// row as a false CreateIfNotExists replay of attempt 1's row.
-		failureAttemptNum := 1
-		if subscription.RetryAttempts != nil {
-			failureAttemptNum = *subscription.RetryAttempts + 1
-		}
-
 		// #821/#839/#840/#836: ONE gate for every terminal outcome in this flow.
 		// A terminal cancel revokes entitlements AND queues the IRREVERSIBLE
 		// cancellation of the recurring SCHEDULE at the rail (or#870: never the
@@ -2150,7 +2092,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			if params.TerminalCertainty != "" {
 				return params.TerminalCertainty
 			}
-			if params.RecordFailedAttempt || params.AttemptRecorded {
+			if params.AttemptRecorded {
 				return collection.CertaintyDunningExhausted
 			}
 			return ""
@@ -2304,13 +2246,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// (#691: no grace windows are appended while dunning runs past the paid
 		// term — the auto-renew sub's STANDING window keeps access intact until a
 		// terminal outcome closes it.)
-
-		// #733: durably record the declined attempt as a failed payments row in
-		// this same tx. Terminal-without-charge callers pass
-		// RecordFailedAttempt=false (no attempt happened).
-		if params.RecordFailedAttempt {
-			s.recordFailedRenewalAttempt(ctx, db, priceService, subscription, params, now, failureAttemptNum)
-		}
 
 		// #344 follow-up: a terminal payment-failure cancellation of an
 		// NMI-backed subscription must also stop the rail-side recurring

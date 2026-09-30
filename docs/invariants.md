@@ -200,7 +200,7 @@ defaults are fine; invented **data** defaults are not.
 
 | # | Invariant | Enforced at |
 |---|---|---|
-| FAB-1 | Rail decline codes are stored verbatim; the normalized category is derived; an unmapped code reads `"unknown"`. | `payments.failure_code` / `failure_reason` (`0001_schema.up.sql`); `payments/failure_reason.go:10` |
+| FAB-1 | Rail decline codes are stored verbatim; the category and reason are derived by the one classifier; an unmapped code reads `"unknown"`. A decline is a payment attempt, never a `payments` row. | `payment_attempts.response_code` / `category` / `reason` (`0028_payment_attempts.up.sql`); `billing/decline`; `modules/attempts` |
 | FAB-2 | A product declaring no entitlements grants **none**. (A previous version fabricated `"premium"`.) | `subscriptions/lifecycle_service.go:411-418,1094-1099` |
 | FAB-3 | Absent provider dates and tokens return `ok=false`, never a fabricated instant. | `ccbill/subscription_management.go:140,362`; `reconcile/unknown_probe.go:100,201` |
 | FAB-4 | A Solana subscribe/cancel is not classified as a sale — that would fabricate payment. | `reconcile/solana.go:27` |

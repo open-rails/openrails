@@ -12,9 +12,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -89,6 +91,10 @@ type resolvedPlan struct {
 	// together they feed the cadence-relative dunning schedule (#359).
 	cycleHours    int
 	retryAttempts int
+	// The subscription a failed pull is an attempt of (#1111).
+	customerID, pspID uuid.UUID
+	policy            models.CollectionPolicy
+	periodEnd         *time.Time
 }
 
 // SolanaCrankWorker queries due Solana subscriptions and cranks each: pull the
@@ -335,6 +341,9 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			// confirm. Solana never uses a scheduled-cancel (the card "cancel at period
 			// end" deferral) — Solana cancels are immediate and on-chain.
 			llog.Warn("Solana cranker: terminal pull failure (delegate revoked); cancelling subscription (no dunning)")
+			if err := w.recordPullAttempt(ctx, row, plan, string(cf.Code), crankErr.Error()); err != nil {
+				return crankOutcome{}, err
+			}
 			if err := repo.SetStatus(ctx, row.ID, models.SolanaSubscriptionCancelled); err != nil {
 				return crankOutcome{}, fmt.Errorf("solana crank: set cancelled status: %w", err)
 			}
@@ -364,12 +373,15 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			reason := crankErr.Error()
 			code := string(cf.Code)
 			subID := row.SubscriptionID
+			if err := w.recordPullAttempt(ctx, row, plan, code, reason); err != nil {
+				return crankOutcome{}, err
+			}
 			if err := w.Lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-				Rail:                models.RailSolana,
-				SubscriptionID:      &subID,
-				FailureReason:       &reason,
-				FailureCode:         &code,
-				RecordFailedAttempt: true,
+				Rail:            models.RailSolana,
+				SubscriptionID:  &subID,
+				FailureReason:   &reason,
+				FailureCode:     &code,
+				AttemptRecorded: true,
 			}); err != nil {
 				return crankOutcome{}, fmt.Errorf("solana crank: fail membership: %w", err)
 			}
@@ -445,6 +457,20 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 
 // resolvePlan loads the on-chain pull amount + period + fingerprint and the fiat
 // amount/currency for the subscription's price.
+// recordPullAttempt records a refused on-chain pull as its cycle's attempt
+// (#1111): the cycle's rebill, or a dunning retry after an earlier failure.
+func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan, code, text string) error {
+	if plan.periodEnd == nil {
+		return nil // no paid period: nothing came due
+	}
+	return attempts.Record(ctx, w.DB.Gen(ctx), attempts.Attempt{
+		MerchantID: row.MerchantID, CustomerID: plan.customerID, PSPID: plan.pspID, Rail: string(models.RailSolana),
+		Kind: attempts.RebillKind(false, plan.retryAttempts), Owner: attempts.OwnerOf(plan.policy),
+		Answer: decline.Evidence{Code: code, Text: text}, Amount: plan.fiatAmount, Currency: plan.currency, At: w.now(),
+		SubscriptionID: &row.SubscriptionID, Cycle: &attempts.Cycle{SubscriptionID: row.SubscriptionID, DueAt: *plan.periodEnd},
+	})
+}
+
 func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaSubscription) (resolvedPlan, error) {
 	subRepo := subscriptions.NewSubscriptionRepo(w.DB)
 	sub, err := subRepo.GetByID(ctx, row.SubscriptionID)
@@ -500,5 +526,9 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 		currency:        price.Currency,
 		cycleHours:      collection.BillingCycleHoursOf(price),
 		retryAttempts:   retryAttempts,
+		customerID:      sub.CustomerID,
+		pspID:           sub.PspID,
+		policy:          sub.CollectionPolicy,
+		periodEnd:       sub.CurrentPeriodEndsAt,
 	}, nil
 }
