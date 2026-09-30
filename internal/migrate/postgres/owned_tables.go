@@ -82,7 +82,7 @@ var OwnedTables = []string{
 
 // OwnedViews are the OpenRails views which may accompany its tables in an
 // exclusive schema. They are not table data and are never archived as rows.
-var OwnedViews = []string{"catalog_drift_events", "freeloader_episodes", "orphaned_episodes"}
+var OwnedViews = []string{"catalog_drift_events", "freeloader_episodes", "orphaned_episodes", "rebill_cycle_facts"}
 
 // OwnedFunctions identifies exact routine signatures; host overloads are not owned.
 var OwnedFunctions = []string{

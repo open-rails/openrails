@@ -380,7 +380,7 @@ var families = map[Family]familySpec{
 	},
 	FamRebillCycles: {
 		Kind:     "flow",
-		From:     rebillCyclesFrom,
+		From:     `openrails.rebill_cycle_facts cy`,
 		TimeExpr: `cy.due_at`,
 		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = cy.psp_id`},
 		DimExprs: map[string]string{
@@ -388,14 +388,14 @@ var families = map[Family]familySpec{
 			"rail":                   `cy.rail`,
 			"rail_account":           `COALESCE(rma.account_id, 'unknown')`,
 			"owner":                  `cy.owner`,
-			"first_outcome":          cycleFirstOutcome,
+			"first_outcome":          `cy.first_outcome`,
 			"first_failure_category": `CASE WHEN cy.first_category <> 'approved' THEN cy.first_category ELSE '' END`,
 			"first_failure_reason":   `COALESCE(cy.first_reason, '')`,
 			"miss_reason":            `COALESCE(cy.miss_reason, '')`,
-			"recovered_by":           cycleRecoveredBy,
-			"recovery_attempt": `CASE WHEN NOT ` + cycleFirstFailed + ` OR cy.won_ordinal IS NULL THEN ''
+			"recovered_by":           `cy.recovered_by`,
+			"recovery_attempt": `CASE WHEN NOT cy.first_failed OR cy.won_ordinal IS NULL THEN ''
 				WHEN cy.won_ordinal >= 5 THEN '5+' ELSE cy.won_ordinal::text END`,
-			"days_to_recover": `CASE WHEN NOT ` + cycleFirstFailed + ` OR cy.won_at IS NULL THEN ''
+			"days_to_recover": `CASE WHEN NOT cy.first_failed OR cy.won_at IS NULL THEN ''
 				ELSE floor(EXTRACT(EPOCH FROM cy.won_at - COALESCE(cy.missed_at, cy.first_at)) / 86400)::bigint::text END`,
 		},
 	},
@@ -420,36 +420,11 @@ const checkoutsFrom = `(SELECT a.merchant_id, a.checkout_id,
 // checkoutSettled: approved, or quiet for an hour before the query's end.
 const checkoutSettled = `(ck.approved OR ck.last_at < @to - interval '1 hour')`
 
-// #1116: a rebill cycle with its first attempt and the attempt that collected
-// it (the first approval), and the subscription it belongs to.
-const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
-		f.category AS first_category, f.reason AS first_reason, f.attempted_at AS first_at,
-		w.kind AS won_kind, w.source AS won_source, w.attempted_at AS won_at, w.payment_method_id AS won_method, w.ordinal AS won_ordinal,
-		s.status AS sub_status, s.current_period_ends_at AS sub_paid_through
-	FROM openrails.rebill_cycles c
-	LEFT JOIN LATERAL (SELECT a.category, a.reason, a.attempted_at FROM openrails.payment_attempts a
-		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
-	LEFT JOIN LATERAL (SELECT a.kind, a.source, a.attempted_at, a.payment_method_id,
-			(SELECT COUNT(*) FROM openrails.payment_attempts b WHERE b.merchant_id = c.merchant_id AND b.cycle_id = c.id
-				AND (b.attempted_at, b.id) <= (a.attempted_at, a.id)) AS ordinal
-		FROM openrails.payment_attempts a
-		WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved' ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
-	LEFT JOIN openrails.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id) cy`
-
+// #1116: rebill cycles as migration 0033's view derives them. Closed states
+// are as of the query's range end.
 const (
-	// cycleFirstFailed: the cycle's rebill was missed, or its first attempt failed.
-	cycleFirstFailed = `(cy.missed_at IS NOT NULL OR COALESCE(cy.first_category <> 'approved', false))`
-	// cycleClosed: collected, the subscription ended, a later period is paid,
-	// or the dunning window (at most 14 days) has passed by the query's end.
-	cycleClosed       = `(cy.won_at IS NOT NULL OR cy.sub_status = 'cancelled' OR cy.sub_paid_through > cy.due_at OR @to >= cy.due_at + interval '15 days')`
-	cycleFirstOutcome = `CASE WHEN cy.missed_at IS NOT NULL THEN 'missed' WHEN cy.first_category IS NULL THEN 'pending'
-		WHEN cy.first_category = 'approved' THEN 'approved' WHEN cy.first_category = 'system_error' THEN 'error' ELSE 'declined' END`
-	cycleRecoveredBy = `CASE WHEN NOT ` + cycleFirstFailed + ` OR cy.won_at IS NULL THEN ''
-		WHEN cy.won_source = 'provider_schedule' THEN 'late_provider_charge'
-		WHEN EXISTS (SELECT 1 FROM openrails.payment_method_updates u WHERE u.merchant_id = cy.merchant_id AND u.payment_method_id = cy.won_method
-			AND u.kind = 'updated' AND u.at >= COALESCE(cy.missed_at, cy.first_at) AND u.at <= cy.won_at) THEN 'updated_card'
-		WHEN cy.won_kind = 'customer_retry' THEN 'customer_retry'
-		ELSE 'dunning_retry' END`
+	cycleClosed = `(cy.closed_at <= @to)`
+	cycleLost   = `(cy.won_at IS NULL AND cy.closed_at <= @to)`
 )
 
 // #1116 dimension sets.
@@ -629,7 +604,7 @@ var Measures = []Measure{
 	{Name: "rebill_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
 		Description: "cycles whose rebill failed: the first attempt declined or errored, or no attempt happened (missed)",
 		Formula:     "COUNT(cycles with first_outcome in (declined, error, missed))",
-		Expr:        `COUNT(*) FILTER (WHERE ` + cycleFirstFailed + `)`,
+		Expr:        `COUNT(*) FILTER (WHERE cy.first_failed)`,
 		Dims:        cycleDims},
 	{Name: "rebill_first_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "rebill_first_failures", Den: "rebills_attempted",
 		Description: "failed first rebills / cycles with a first outcome",
@@ -651,15 +626,15 @@ var Measures = []Measure{
 		Expr: `COUNT(*) FILTER (WHERE cy.won_at IS NOT NULL)`,
 		Dims: cycleDims},
 	{Name: "rebills_lost", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE cy.won_at IS NULL AND ` + cycleClosed + `)`,
+		Expr: `COUNT(*) FILTER (WHERE ` + cycleLost + `)`,
 		Dims: cycleDims},
 	{Name: "closed_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count", Internal: true,
-		Expr: `COUNT(*) FILTER (WHERE ` + cycleFirstFailed + ` AND ` + cycleClosed + `)`,
+		Expr: `COUNT(*) FILTER (WHERE cy.first_failed AND ` + cycleClosed + `)`,
 		Dims: cycleDims},
 	{Name: "dunning_recovered", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
 		Description: "cycles whose first rebill failed and that were collected; group by recovery_attempt or days_to_recover for the recovery curve",
 		Formula:     "COUNT(cycles with a failed first outcome that were collected)",
-		Expr:        `COUNT(*) FILTER (WHERE ` + cycleFirstFailed + ` AND cy.won_at IS NOT NULL)`,
+		Expr:        `COUNT(*) FILTER (WHERE cy.first_failed AND cy.won_at IS NOT NULL)`,
 		Dims:        cycleDims},
 	{Name: "dunning_recovery_rate", Class: ClassRatio, Unit: "ratio", Num: "dunning_recovered", Den: "closed_first_failures",
 		Description: "collected / closed cycles whose first rebill failed",
