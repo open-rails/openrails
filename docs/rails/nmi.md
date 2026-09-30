@@ -98,7 +98,11 @@ Enable these event types (what the handler consumes):
 - `transaction.void.success` / `.failure`
 - `chargeback.batch.complete` — auto-reconciled: refund recorded, subscription
   cancelled
-- `acu.summary.*` (Automatic Card Updater) — received and logged
+- `acu.summary.automaticallyupdated` / `.closedaccount` / `.contactcustomer`
+  (Automatic Card Updater). An updated card is re-read from the vault, and
+  memberships waiting on it retry at the next due pass. A closed account parks
+  the card. Both closed and contact-customer ask the member for a new card.
+  Each notice is recorded once in `payment_method_updates`.
 
 Subscription-state events are treated as wake-up signals only: OpenRails marks
 the subscription dirty and converges from freshly *fetched* gateway truth, so a

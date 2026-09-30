@@ -163,11 +163,19 @@ type NMITransactionDetail struct {
 	Action          *NMIAction          `json:"action"`
 }
 
+// NMIACUEventBody is an Account Updater notice. It is a wake-up: only the
+// vault it names is read; the card comes from NMI's vault (#1115).
 type NMIACUEventBody struct {
-	VaultID       Stringish           `json:"vault_id"`
-	CustomerID    Stringish           `json:"customer_id"`
-	Subscription  *NMISubscriptionRef `json:"subscription"`
-	PaymentMethod *NMIPaymentInfo     `json:"payment_method"`
+	VaultID         Stringish `json:"vault_id"`
+	CustomerVaultID Stringish `json:"customer_vault_id"`
+}
+
+// Vault is the vault the notice is about.
+func (b NMIACUEventBody) Vault() string {
+	if v := b.VaultID.Trimmed(); v != "" {
+		return v
+	}
+	return b.CustomerVaultID.Trimmed()
 }
 
 // NMIChargebackBatchEventBody represents NMI's chargeback.batch.complete webhook payload
@@ -210,12 +218,6 @@ type NMISubscriptionRef struct {
 
 type NMIAction struct {
 	Amount Stringish `json:"amount"`
-}
-
-type NMIPaymentInfo struct {
-	LastFour   Stringish `json:"last_four"`
-	CardType   Stringish `json:"card_type"`
-	ExpiryDate Stringish `json:"expiry_date"`
 }
 
 type NMIMerchant struct {

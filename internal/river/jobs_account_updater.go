@@ -357,7 +357,7 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 		// The ONE fold: rotate through RotateCustodianMethodRef (which clears
 		// the park, or#872), park closed/contact-cardholder, record every code
 		// verbatim. The webhook path lands in the same function.
-		stats, err := webhooks.FoldAccountUpdaterResults(ctx, q, rows)
+		stats, err := webhooks.FoldAccountUpdaterResults(ctx, q, jobRef, rows)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("fold account updater results for job %s: %w", jobRef, err))
 			continue

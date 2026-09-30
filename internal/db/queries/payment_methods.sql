@@ -251,7 +251,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND network_token_id <> ''
   AND network_token_status <> sqlc.arg(network_token_status);
 
--- name: ParkPaymentMethodByMethodRef :execrows
+-- name: ParkPaymentMethodByMethodRef :many
 -- #795 cancellation-last-resort: a custody-side instrument problem (token
 -- deleted/expired, closed account) PARKS the instrument — charges fail loudly,
 -- the operator is notified, and nothing is terminally cancelled. Idempotent:
@@ -265,7 +265,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(rail_method_ref)
-  AND park_reason = '';
+  AND park_reason = ''
+RETURNING id, customer_id, psp_id;
 
 -- name: ParkStripePaymentMethodByRef :execrows
 -- A Stripe detach is irreversible provider truth. Preserve the local evidence,
@@ -279,7 +280,7 @@ WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stri
   AND rail_method_ref = sqlc.arg(rail_method_ref)
   AND park_reason = '';
 
--- name: RotateCustodianMethodRef :execrows
+-- name: RotateCustodianMethodRef :many
 -- #795 Account Updater UPD_* fold: the custodian minted a NEW token id —
 -- re-point rail_method_ref and refresh card metadata. The old->new mapping is
 -- the same machinery a future custodian swap remap uses.
@@ -302,7 +303,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(old_method_ref)
-  AND park_reason NOT LIKE 'delete:%';
+  AND park_reason NOT LIKE 'delete:%'
+RETURNING id, customer_id, psp_id;
 
 -- name: RefreshCustodianCardMetadata :execrows
 -- #795 token.updated fold: refresh masked metadata from the custodian's read.
@@ -327,9 +329,12 @@ UPDATE openrails.payment_methods SET
     expiry_date = sqlc.narg(expiry_date),
     metadata = sqlc.narg(metadata),
     stored_credential_recurring_ref = sqlc.arg(recurring_ref)::text,
+    park_reason = '',
+    parked_at = NULL,
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND rail_method_ref = sqlc.arg(old_rail_method_ref)::text;
+  AND rail_method_ref = sqlc.arg(old_rail_method_ref)::text
+  AND park_reason NOT LIKE 'delete:%';
 
 -- name: GetDefaultPaymentMethodID :one
 -- #1084: the customer's default payment method (none when it has no usable one).
@@ -347,3 +352,38 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 -- name: MarkDefaultPaymentMethod :execrows
 UPDATE openrails.payment_methods SET is_default = true
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason = '';
+
+-- name: ListVaultPaymentMethods :many
+-- #1115: the stored cards on one NMI vault of one PSP.
+SELECT * FROM openrails.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail = 'nmi'
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND park_reason NOT LIKE 'delete:%'
+ORDER BY created_at, id;
+
+-- name: RefreshPaymentMethodCard :execrows
+-- #1115: an account updater reissued the card in place. Its details change,
+-- and a park an earlier notice set is cleared.
+UPDATE openrails.payment_methods SET
+    last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
+    card_type = COALESCE(NULLIF(sqlc.arg(card_type)::text, ''), card_type),
+    expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
+    park_reason = '',
+    parked_at = NULL,
+    updated_at = sqlc.arg(updated_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason NOT LIKE 'delete:%';
+
+-- name: ParkPaymentMethod :execrows
+-- #1115: an account updater reported the card's account closed. The first
+-- park stands.
+UPDATE openrails.payment_methods SET
+    park_reason = sqlc.arg(park_reason)::text,
+    parked_at = sqlc.arg(parked_at)::timestamptz,
+    updated_at = sqlc.arg(parked_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason = '';
+
+-- name: InsertPaymentMethodUpdate :exec
+-- #1115: idempotent on (source, event_ref, method); at defaults to now.
+INSERT INTO openrails.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(payment_method_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
+    sqlc.arg(source)::text, sqlc.arg(kind)::text, sqlc.arg(event_ref)::text, COALESCE(sqlc.narg(at)::timestamptz, now()))
+ON CONFLICT DO NOTHING;

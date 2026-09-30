@@ -1032,6 +1032,20 @@ type OpenrailsPaymentMethod struct {
 	IsDefault bool
 }
 
+// #1115 changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op.
+type OpenrailsPaymentMethodUpdate struct {
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+	CustomerID      uuid.UUID
+	PspID           uuid.UUID
+	Source          string
+	Kind            string
+	EventRef        string
+	At              time.Time
+	CreatedAt       time.Time
+}
+
 // Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {
 	ID        uuid.UUID

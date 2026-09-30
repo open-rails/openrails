@@ -75,7 +75,9 @@ type WebhookDispatcher struct {
 	// RailConfigs resolves per-merchant armed rail credentials at dispatch
 	// time (Layer C, #788): the ONLY rail-credential source in this package.
 	// The merchant comes from ctx; an unarmed rail fails closed.
-	RailConfigs            railresolve.Source
+	RailConfigs railresolve.Source
+	// NMIResolver arms an NMI account's client for the reads a notice needs.
+	NMIResolver            railresolve.NMIClientResolver
 	PurchaseRegistrar      stripePurchaseRegistrar
 	CheckoutSessionService webhookCheckoutSessionStore
 	MoneyService           *money.MoneyService
@@ -181,6 +183,7 @@ func (h NMIWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, even
 		NotificationService:          d.NotificationService,
 		SubscriptionLifecycleService: d.SubscriptionLifecycleService,
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
+		NMIResolver:                  d.NMIResolver,
 		Clock:                        d.Clock,
 	}
 	return service.HandleNMIWebhook(ctx)

@@ -57,6 +57,12 @@ SELECT count(*) FROM openrails.rebill_cycles WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsRebillCycles :exec
 DELETE FROM openrails.rebill_cycles WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsPaymentMethodUpdates :one
+SELECT count(*) FROM openrails.payment_method_updates WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsPaymentMethodUpdates :exec
+DELETE FROM openrails.payment_method_updates WHERE merchant_id = $1;
+
 
 
 -- name: CountMerchantRowsNotificationQueue :one

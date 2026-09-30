@@ -49,6 +49,7 @@ var OwnedTables = []string{
 	"notifications",
 	"operation_authorizations",
 	"payment_attempts",
+	"payment_method_updates",
 	"payment_methods",
 	"payments",
 	"price_key_movements",
