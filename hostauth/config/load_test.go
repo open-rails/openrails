@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-rails/authkit"
 	billing "github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -194,13 +194,13 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 		values   map[string]any
 		enabled  bool
 		interval time.Duration
-		mode     authkit.FormerNameRetentionMode
+		mode     merchant.FormerNames
 		duration time.Duration
 	}{
-		"defaults":              {nil, true, 72 * time.Hour, authkit.FormerNamesFinite, 90 * 24 * time.Hour},
-		"disabled zero forever": {map[string]any{"auth.naming.enabled": false, "auth.naming.rename_interval": "0s", "auth.naming.former_names.mode": "forever"}, false, 0, authkit.FormerNamesForever, 0},
-		"finite duration":       {map[string]any{"auth.naming.former_names.duration": "240h"}, true, 72 * time.Hour, authkit.FormerNamesFinite, 240 * time.Hour},
-		"immediate":             {map[string]any{"auth.naming.former_names.mode": "immediate"}, true, 72 * time.Hour, authkit.FormerNamesImmediate, 0},
+		"defaults":              {nil, true, 72 * time.Hour, merchant.FormerNamesFinite, 90 * 24 * time.Hour},
+		"disabled zero forever": {map[string]any{"auth.naming.enabled": false, "auth.naming.rename_interval": "0s", "auth.naming.former_names.mode": "forever"}, false, 0, merchant.FormerNamesForever, 0},
+		"finite duration":       {map[string]any{"auth.naming.former_names.duration": "240h"}, true, 72 * time.Hour, merchant.FormerNamesFinite, 240 * time.Hour},
+		"immediate":             {map[string]any{"auth.naming.former_names.mode": "immediate"}, true, 72 * time.Hour, merchant.FormerNamesImmediate, 0},
 	} {
 		var opts []LoadOption
 		for key, value := range row.values {
@@ -212,7 +212,7 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 		require.NoError(t, err, name)
 		require.Equal(t, row.enabled, policy.Enabled, name)
 		require.Equal(t, row.interval, policy.RenameInterval, name)
-		require.Equal(t, row.mode, policy.FormerNameRetentionMode, name)
+		require.Equal(t, row.mode, policy.FormerNames, name)
 		require.Equal(t, row.duration, policy.FormerNameRetention, name)
 	}
 	_, err := Load("", WithOverride("auth.naming.rename_interval", "999999999999999999999h"))
@@ -231,7 +231,7 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 	require.Zero(t, *cfg.Auth.Naming.RenameInterval)
 	policy, err := cfg.Auth.Naming.Normalize()
 	require.NoError(t, err)
-	require.Equal(t, authkit.FormerNamesImmediate, policy.FormerNameRetentionMode)
+	require.Equal(t, merchant.FormerNamesImmediate, policy.FormerNames)
 }
 
 // Sandbox posture never relaxes auth transport; only the explicit loopback

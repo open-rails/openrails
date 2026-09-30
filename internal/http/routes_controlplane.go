@@ -6,33 +6,24 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ControlPlaneAuthPrefix is where OpenRails mounts the selected AuthKit route
-// groups (#224). It is a deliberate, narrow surface — NOT AuthKit DefaultAPI.
-const ControlPlaneAuthPrefix = "/auth"
+// authAPIBase is where the control plane's AuthKit JSON API lives (#224):
+// /auth beneath an origin issuer, else the issuer's path.
+func (s *Server) authAPIBase() string { return s.controlPlane.AuthAPIBase() }
 
 // registerControlPlaneAuthRoutes mounts the AuthKit route groups OpenRails
-// intentionally exposes (#224 task 4) as ONE neutral authhttp.MountHandler
-// (authkit #250) under /auth. Groups is the posture's explicit allow-list
-// (ControlPlane.MountedRouteGroups — never nil, which would mount AuthKit's
-// default surface plus browser OIDC); JWKS is excluded (OpenRails does not
-// expose AuthKit's JWKS on this surface) and browser OIDC is in no mounted
-// group list. Hosted merchant creation's directory attachment rides
-// MountOptions.Wrap; other requests never create portal groups.
+// intentionally exposes (#224 task 4): the posture's explicit group list
+// (ControlPlane.MountedRouteGroups, never AuthKit's default surface or browser
+// OIDC), plus JWKS at the issuer.
 func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 	cp := s.controlPlane
-	if cp == nil || cp.AuthService() == nil {
+	if cp == nil || cp.AuthHandler() == nil {
 		return nil
 	}
-	routes, err := cp.AuthRoutes()
-	if err != nil {
-		return err
-	}
+	routes := cp.AuthRoutes()
 	for _, route := range routes {
-		s.handle(mux, route.Method+" "+route.Path, route.Handler)
+		s.handle(mux, route.Pattern(), cp.AuthHandler())
 	}
-
 	log.WithFields(log.Fields{
-		"prefix":      ControlPlaneAuthPrefix,
 		"routes":      len(routes),
 		"self_hosted": cp.SelfHostedPosture(),
 	}).Info("control plane: mounted selective AuthKit route groups")

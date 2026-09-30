@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -161,41 +160,45 @@ func NewSecretManagementService(secrets MerchantSecretStore) (*Service, error) {
 // Secrets exposes the per-merchant secret store (may be nil).
 func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 
-// Provision claims req.Slug for a new merchant bound to the AuthKit group.
-// Repeating it for a bound group returns that merchant, whatever its name now;
-// a name held by another merchant is ErrMerchantNameTaken.
-func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchant, bool, error) {
+// Provision claims req.Slug for a new merchant bound to req.PermissionGroupID.
+// bind runs first, in the same transaction, and creates that group, so a claim
+// that fails leaves no group behind. A name held by another merchant is
+// ErrMerchantNameTaken.
+func (s *Service) Provision(ctx context.Context, req ProvisionRequest, bind func(context.Context, pgx.Tx) error) (*Merchant, error) {
 	slug := normalizeSlug(req.Slug)
 	if err := merchant.ValidateSlug(slug); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	groupID := strings.TrimSpace(req.PermissionGroupID)
 	if groupID == "" {
-		return nil, false, ErrPermissionGroupRequired
-	}
-	m, err := s.merchantByGroupID(ctx, groupID)
-	if !errors.Is(err, ErrMerchantNotFound) {
-		return m, false, err
+		return nil, ErrPermissionGroupRequired
 	}
 	id := req.ID.UUID()
 	if req.ID.IsZero() {
+		var err error
 		if id, err = uuid.NewV7(); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
-		VALUES ($1, $2, 'active', $3)`, id, slug, groupID)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_merchants_permission_group_id" {
-		m, err := s.merchantByGroupID(ctx, groupID)
-		return m, false, err
-	}
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, false, fmt.Errorf("merchants: provision %q: %w", slug, nameClaimError(err))
+		return nil, err
 	}
-	m, err = s.merchantByGroupID(ctx, groupID)
-	return m, err == nil, err
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if bind != nil {
+		if err := bind(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
+		VALUES ($1, $2, 'active', $3)`, id, slug, groupID); err != nil {
+		return nil, fmt.Errorf("merchants: provision %q: %w", slug, nameClaimError(err))
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.merchantByGroupID(ctx, groupID)
 }
 
 // merchantByGroupID includes retired rows so the same group cannot silently

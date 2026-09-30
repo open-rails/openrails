@@ -36,27 +36,9 @@ func (e *RenameTooSoonError) Error() string {
 	return fmt.Sprintf("merchants: the next rename is allowed at %s", e.NextRenameAt.UTC().Format(time.RFC3339))
 }
 
-// FormerNames selects how long a former name keeps forwarding to its merchant.
-type FormerNames string
-
-const (
-	FormerNamesFinite    FormerNames = "finite"
-	FormerNamesForever   FormerNames = "forever"
-	FormerNamesImmediate FormerNames = "immediate"
-)
-
-// NamingPolicy governs merchant renames.
-type NamingPolicy struct {
-	Enabled        bool
-	RenameInterval time.Duration
-	FormerNames    FormerNames
-	// FormerNameRetention is the alias lifetime under FormerNamesFinite.
-	FormerNameRetention time.Duration
-}
-
 // Rename gives a live merchant a new name. The former name becomes an alias
 // under policy, and a name the merchant itself held before is reclaimed.
-func (s *Service) Rename(ctx context.Context, id merchant.ID, name string, policy NamingPolicy) (*Merchant, error) {
+func (s *Service) Rename(ctx context.Context, id merchant.ID, name string, policy merchant.NamingPolicy) (*Merchant, error) {
 	name = normalizeSlug(name)
 	if err := merchant.ValidateSlug(name); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidName, err)
@@ -87,13 +69,13 @@ func (s *Service) Rename(ctx context.Context, id merchant.ID, name string, polic
 			 WHERE id = $1`, id.UUID(), name); err != nil {
 			return err
 		}
-		if policy.FormerNames == FormerNamesImmediate {
+		if policy.FormerNames == merchant.FormerNamesImmediate {
 			return nil
 		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO openrails.merchant_slug_aliases (slug, merchant_id, expires_at)
 			VALUES ($1, $2, CASE WHEN $3 THEN NULL ELSE now() + make_interval(secs => $4) END)`,
-			current, id.UUID(), policy.FormerNames == FormerNamesForever, policy.FormerNameRetention.Seconds())
+			current, id.UUID(), policy.FormerNames == merchant.FormerNamesForever, policy.FormerNameRetention.Seconds())
 		return err
 	})
 	if err != nil {

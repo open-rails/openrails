@@ -7,14 +7,15 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit"
 )
 
-// ApplyAuthKit initializes standalone identity and optional direct runtime access.
-// The owner is privileged; the host supplies the runtime login and credentials.
+// ApplyAuthKit migrates the control plane's AuthKit schema (the default,
+// profiles) through the privileged owner pool and grants the runtime login
+// access. OpenRails owns the River fleet, so River's tables are not AuthKit's.
 func ApplyAuthKit(ctx context.Context, owner, runtime *pgxpool.Pool) error {
-	opts := authcore.MigrationOptions{River: authcore.RiverFromHost(), RuntimePool: runtime}
-	if err := authcore.ApplyMigrations(ctx, owner, "profiles", opts); err != nil {
+	cfg := authkit.Config{River: authkit.RiverConfig{HostOwned: true}}
+	if err := authkit.Migrate(ctx, owner, cfg, authkit.MigrateOptions{RuntimePool: runtime}); err != nil {
 		return fmt.Errorf("standalone AuthKit migrations: %w", err)
 	}
 	return nil

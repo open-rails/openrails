@@ -2,11 +2,13 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/open-rails/openrails/permissions"
 
 	"github.com/google/uuid"
+	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/app"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
@@ -15,11 +17,11 @@ import (
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
-// RootPermissionChecker authorizes a user against the singleton ROOT
-// permission-group (#721) — the platform-operator tier. Implemented by
-// *credential.ControlPlane.HasRootPermission.
+// RootPermissionChecker authorizes the user r authenticates as against the
+// singleton ROOT permission group (#721), the platform-operator tier, with the
+// token's session. Implemented by the control plane.
 type RootPermissionChecker interface {
-	HasRootPermission(ctx context.Context, userID, perm string) (bool, error)
+	HasRootPermission(ctx context.Context, r *http.Request, perm string) (bool, error)
 }
 
 // PlatformOptions wires the /v1/platform/* tier. Deliberately narrower than
@@ -105,7 +107,11 @@ func (opts PlatformOptions) platformPermissionMW(perm string) router.Middleware 
 				r.AbortJSON(http.StatusUnauthorized, verr.Error())
 				return
 			}
-			allowed, err := opts.Root.HasRootPermission(r.Request.Context(), uc.UserID, perm)
+			allowed, err := opts.Root.HasRootPermission(r.Request.Context(), r.Request, perm)
+			if errors.Is(err, auth.ErrRevoked) || errors.Is(err, billingauth.ErrUnauthenticated) {
+				r.AbortJSON(http.StatusUnauthorized, credentialFailure(err))
+				return
+			}
 			if err != nil {
 				r.AbortJSON(http.StatusInternalServerError, "failed to check permission")
 				return

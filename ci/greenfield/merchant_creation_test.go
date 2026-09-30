@@ -42,8 +42,8 @@ func TestMerchantCreationRoute(t *testing.T) {
 
 	shop := uniqueName("shop")
 	require.Equal(t, http.StatusForbidden, code(ownerToken, map[string]string{"name": shop}), "an unverified account claims no name")
-	require.NoError(t, cp.Core().MarkEmailVerified(t.Context(), owner))
-	require.NoError(t, cp.Core().MarkEmailVerified(t.Context(), other))
+	verifyEmail(t, cp, owner)
+	verifyEmail(t, cp, other)
 
 	body, status := create(ownerToken, map[string]string{"name": shop, "display_name": "Shop One"})
 	require.Equal(t, http.StatusCreated, status)

@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -63,26 +63,17 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 		if cp == nil || cp.Core() == nil {
 			return errors.New("control plane unavailable")
 		}
-		core := cp.Core()
 		ownerUserID = strings.TrimSpace(ownerUserID)
-
-		u, err := core.AdminGetUser(ctx, ownerUserID)
+		u, err := cp.Core().User(ctx, iam.UserByID(ownerUserID))
 		if err != nil {
 			return fmt.Errorf("resolve creating user: %w", err)
 		}
 		if !u.EmailVerified {
 			return ErrEmailUnverified
 		}
-
-		memberships, err := core.ListSubjectGroups(ctx, authkit.UserSubject(ownerUserID))
+		ownedGroups, err := cp.OwnedMerchantGroups(ctx, ownerUserID)
 		if err != nil {
 			return fmt.Errorf("list user's merchant memberships: %w", err)
-		}
-		var ownedGroups []string
-		for _, m := range memberships {
-			if m.Persona == controlplane.MerchantType && strings.EqualFold(string(m.Role), controlplane.MerchantRoleOwner) {
-				ownedGroups = append(ownedGroups, m.GroupID)
-			}
 		}
 		directory, err := merchants.NewDirectoryService(cp.Pool())
 		if err != nil {

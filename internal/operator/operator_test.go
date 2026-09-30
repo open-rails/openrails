@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit/iam"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -17,23 +17,20 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type emailSender struct{ authcore.EmailSender }
-type smsSender struct{ authcore.SMSSender }
-
 func TestAttachOptionsPasswordlessPolicy(t *testing.T) {
-	var typedNil *emailSender
+	emailSender := func(context.Context, iam.EmailMessage) error { return nil }
+	smsSender := func(context.Context, iam.SMSMessage) error { return nil }
 	for name, tc := range map[string]struct {
 		opts    AttachOptions
 		wantErr bool
 	}{
 		"disabled":                        {AttachOptions{}, false},
-		"login with email":                {AttachOptions{PasswordlessLogin: true, EmailSender: emailSender{}}, false},
-		"login with sms only":             {AttachOptions{PasswordlessLogin: true, EmailSender: typedNil, SMSSender: smsSender{}}, false},
-		"hosted auto-registration":        {AttachOptions{HostedPosture: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender{}}, false},
-		"auto-registration without login": {AttachOptions{HostedPosture: true, PasswordlessAutoRegistration: true, EmailSender: emailSender{}}, true},
-		"auto-registration not hosted":    {AttachOptions{PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender{}}, true},
+		"login with email":                {AttachOptions{PasswordlessLogin: true, EmailSender: emailSender}, false},
+		"login with sms only":             {AttachOptions{PasswordlessLogin: true, SMSSender: smsSender}, false},
+		"hosted auto-registration":        {AttachOptions{HostedPosture: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
+		"auto-registration without login": {AttachOptions{HostedPosture: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration not hosted":    {AttachOptions{PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
 		"login without sender":            {AttachOptions{PasswordlessLogin: true}, true},
-		"login with typed-nil sender":     {AttachOptions{PasswordlessLogin: true, EmailSender: typedNil}, true},
 	} {
 		err := validateAttachOptions(tc.opts)
 		require.Equal(t, tc.wantErr, err != nil, "%s: %v", name, err)

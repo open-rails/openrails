@@ -358,7 +358,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		// browser refuses cross-origin script access to those by default.
 		middleware.PermissiveCORSHTTP(browser),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		billingCredentialsHTTP,
+		s.billingCredentialsHTTP,
 		// Resolve the merchant / billing namespace before authorization and before any
 		// merchant-owned DB access (issue #223). Resolved PER REQUEST off the Runtime
 		// (#744), never a value snapshotted here at construction time; zero when none
@@ -399,10 +399,11 @@ func (s *Server) Handler() http.Handler { return s.publicHandler }
 
 // AuthKit owns its refresh/CSRF cookie protocol. Apply the billing credential
 // policy only to the billing surface, never to the mounted AuthKit transport.
-func billingCredentialsHTTP(next http.Handler) http.Handler {
+func (s *Server) billingCredentialsHTTP(next http.Handler) http.Handler {
 	billing := billingauth.ExplicitCredentials(next)
+	base := s.authAPIBase()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == ControlPlaneAuthPrefix || strings.HasPrefix(r.URL.Path, ControlPlaneAuthPrefix+"/") {
+		if r.URL.Path == base || strings.HasPrefix(r.URL.Path, base+"/") {
 			next.ServeHTTP(w, r)
 			return
 		}

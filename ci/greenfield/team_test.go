@@ -13,8 +13,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -27,7 +26,7 @@ import (
 
 // unsentEmail satisfies the hosted posture's sender requirement; nothing here
 // sends email.
-type unsentEmail struct{ authcore.EmailSender }
+func unsentEmail(context.Context, iam.EmailMessage) error { return nil }
 
 // SEC: adding a teammate by email never grants a merchant role to an account
 // that has not proved the address: anyone can register an address they do not
@@ -61,19 +60,16 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
 			if hosted {
-				opts.HostedPosture, opts.EmailSender = true, unsentEmail{}
+				opts.HostedPosture, opts.EmailSender = true, unsentEmail
 			}
 			cp, err := controlplane.Attach(ctx, rt, opts)
 			require.NoError(t, err)
 			require.NoError(t, app.HostGraph(rt).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 			core := cp.Core()
-			account := func(verified bool) *authkit.User {
+			account := func(verified bool) iam.User {
 				id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-				u, err := core.CreateUser(ctx, "team-"+id+"@greenfield.test", "team_"+id)
+				u, err := core.CreateUser(ctx, iam.NewUser{Email: "team-" + id + "@greenfield.test", Username: "team_" + id, EmailVerified: verified})
 				require.NoError(t, err)
-				if verified {
-					require.NoError(t, core.MarkEmailVerified(ctx, u.ID))
-				}
 				return u
 			}
 			owner := account(true)
@@ -83,8 +79,9 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			require.NoError(t, err)
 			server := httptest.NewServer(handler)
 			t.Cleanup(server.Close)
-			token, _, err := core.MintAccessToken(ctx, owner.ID, nil)
+			access, err := core.MintAccessToken(ctx, owner.ID, iam.AccessTokenOptions{})
 			require.NoError(t, err)
+			token := access.Value
 
 			call := func(method, path string, body any) (int, map[string]any) {
 				var data io.Reader
@@ -116,7 +113,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				}
 				return out
 			}
-			onTeam := func(u *authkit.User) bool {
+			onTeam := func(u iam.User) bool {
 				status, body := call(http.MethodGet, "", nil)
 				require.Equal(t, http.StatusOK, status, "%v", body)
 				for _, m := range body["data"].([]any) {
@@ -128,18 +125,18 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			}
 
 			unknown := shape(invite("team-" + uuid.NewString()[:12] + "@greenfield.test"))
-			for what, u := range map[string]*authkit.User{"unverified": account(false), "deleted": account(true)} {
+			for what, u := range map[string]iam.User{"unverified": account(false), "deleted": account(true)} {
 				if what == "deleted" {
-					results, err := core.SoftDeleteUsers(ctx, []string{u.ID})
+					results, err := core.DeleteUsers(ctx, iam.SystemActor(), []string{u.ID})
 					require.NoError(t, err)
 					require.NoError(t, results[0].Err)
 				}
-				require.Equal(t, unknown, shape(invite(*u.Email)), "%s: answered like an unregistered address", what)
+				require.Equal(t, unknown, shape(invite(u.Email)), "%s: answered like an unregistered address", what)
 				require.False(t, onTeam(u), "%s: an account that has not proved the address holds no merchant role", what)
 			}
 
 			verified := account(true)
-			status, body := invite(strings.ToUpper(*verified.Email))
+			status, body := invite(strings.ToUpper(verified.Email))
 			require.Equal(t, http.StatusCreated, status, "%v", body)
 			require.Equal(t, true, body["added"])
 			require.True(t, onTeam(verified), "control: the account that proved the address joins")

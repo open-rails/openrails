@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -348,10 +349,13 @@ func TestPlatformRoutes(t *testing.T) {
 	type unlock struct{ user, actor string }
 	var unlocked *unlock
 	var asked []string
-	root := rootFunc(func(_ context.Context, userID, perm string) (bool, error) {
-		asked = append(asked, perm)
-		return userID == userA, nil
-	})
+	checker := func(granted bool) rootFunc {
+		return func(_ context.Context, _ *http.Request, perm string) (bool, error) {
+			asked = append(asked, perm)
+			return granted, nil
+		}
+	}
+	root, notRoot := checker(true), checker(false)
 	unlocker := unlockFunc(func(_ context.Context, user, actor string) error {
 		unlocked = &unlock{user, actor}
 		return nil
@@ -376,10 +380,11 @@ func TestPlatformRoutes(t *testing.T) {
 		opts   PlatformOptions
 		status int
 	}{
-		{"no root grant", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userB}, nil), Root: root, AdminLimiter: unlocker}, 403},
+		{"no root grant", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userB}, nil), Root: notRoot, AdminLimiter: unlocker}, 403},
+		{"revoked session", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: rootFunc(func(context.Context, *http.Request, string) (bool, error) { return false, auth.ErrRevoked }), AdminLimiter: unlocker}, 401},
 		{"unauthenticated", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated), Root: root, AdminLimiter: unlocker}, 401},
 		{"opaque subject", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: "root"}, nil), Root: root, AdminLimiter: unlocker}, 401},
-		{"root checker failure", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: rootFunc(func(context.Context, string, string) (bool, error) { return false, errors.New("db") }), AdminLimiter: unlocker}, 500},
+		{"root checker failure", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: rootFunc(func(context.Context, *http.Request, string) (bool, error) { return false, errors.New("db") }), AdminLimiter: unlocker}, 500},
 		{"not wired", PlatformOptions{AdminLimiter: unlocker}, 500},
 		{"no unlocker", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: root}, 503},
 	} {
@@ -397,16 +402,16 @@ func TestPlatformRoutes(t *testing.T) {
 	} {
 		asked = nil
 		method, p, _ := strings.Cut(path, " ")
-		denied := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userB}, nil), Root: root})
+		denied := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userB}, nil), Root: notRoot})
 		require.Equal(t, http.StatusForbidden, do(denied, method, p, nil).Code, path)
 		require.Equal(t, []string{perm}, asked, path)
 	}
 }
 
-type rootFunc func(context.Context, string, string) (bool, error)
+type rootFunc func(context.Context, *http.Request, string) (bool, error)
 
-func (f rootFunc) HasRootPermission(ctx context.Context, userID, perm string) (bool, error) {
-	return f(ctx, userID, perm)
+func (f rootFunc) HasRootPermission(ctx context.Context, r *http.Request, perm string) (bool, error) {
+	return f(ctx, r, perm)
 }
 
 type unlockFunc func(context.Context, string, string) error

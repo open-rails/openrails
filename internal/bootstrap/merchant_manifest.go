@@ -13,11 +13,13 @@ import (
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 
 	"github.com/goccy/go-yaml"
+	"github.com/jackc/pgx/v5"
 	koanfyaml "github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
-	jwtkit "github.com/open-rails/authkit/jwtkit"
+	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/keys"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -178,9 +180,7 @@ type RemoteApplicationConfig struct {
 	// JWKS is a static JWKS document. Mutually exclusive with JWKSURI/PublicKeys.
 	JWKS StaticJWKSConfig `yaml:"jwks,omitempty" koanf:"jwks"`
 	// PublicKeys are static verification keys (PEM). Mutually exclusive with JWKSURI/JWKS.
-	PublicKeys []authkit.RemoteAppKey `yaml:"public_keys,omitempty" koanf:"public_keys"`
-	// Slug overrides the remote_application slug (defaults to "<merchant>-app").
-	Slug string `yaml:"slug,omitempty" koanf:"slug"`
+	PublicKeys []iam.RemoteApplicationKey `yaml:"public_keys,omitempty" koanf:"public_keys"`
 }
 
 type StaticJWKSConfig struct {
@@ -199,8 +199,8 @@ type StaticJWKConfig struct {
 	Y   string `yaml:"y,omitempty" koanf:"y"`
 }
 
-func (j StaticJWKConfig) authkitJWK() jwtkit.JWK {
-	return jwtkit.JWK{
+func (j StaticJWKConfig) authkitJWK() keys.JWK {
+	return keys.JWK{
 		Kty: j.Kty, Use: j.Use, Kid: j.Kid, Alg: j.Alg,
 		N: j.N, E: j.E, Crv: j.Crv, X: j.X, Y: j.Y,
 	}
@@ -393,7 +393,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 			return nil, err
 		}
 	} else if req.ControlPlane != nil && mt.RemoteApplication != nil && req.Options.Overwrite {
-		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, tn.PermissionGroupID, tn.Slug, mt.RemoteApplication); err != nil {
+		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, iam.GroupByID(tn.PermissionGroupID), mt.RemoteApplication); err != nil {
 			return nil, fmt.Errorf("merchant bootstrap: update merchant group/remote_application for %q: %w", slug, err)
 		}
 	}
@@ -456,8 +456,8 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	if err := merchant.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
-	tn, err := cp.CreateMerchant(ctx, slug, "", func(ctx context.Context, groupID string) error {
-		return configureMerchantRemoteApplication(ctx, cp, groupID, slug, mt.RemoteApplication)
+	tn, err := cp.CreateMerchant(ctx, slug, "", func(ctx context.Context, tx pgx.Tx, group iam.GroupRef) error {
+		return configureMerchantRemoteApplication(ctx, cp, group, mt.RemoteApplication, authkit.InTx(tx))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: provision %q: %w", slug, err)
@@ -489,80 +489,77 @@ func sortedMerchantKeys(in map[string]MerchantConfig) []string {
 	return keys
 }
 
-func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) ([]authkit.RemoteAppKey, error) {
+func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) ([]iam.RemoteApplicationKey, error) {
 	if app == nil || len(app.JWKS.Keys) == 0 {
 		return nil, nil
 	}
-	keys := make([]authkit.RemoteAppKey, 0, len(app.JWKS.Keys))
+	out := make([]iam.RemoteApplicationKey, 0, len(app.JWKS.Keys))
 	for _, raw := range app.JWKS.Keys {
 		jwk := raw.authkitJWK()
-		pub, err := jwtkit.JWKToPublicKey(jwk)
+		kid := strings.TrimSpace(jwk.Kid)
+		pubs, err := keys.PublicKeys(keys.JWKS{Keys: []keys.JWK{jwk}})
 		if err != nil {
-			return nil, fmt.Errorf("key %q: %w", strings.TrimSpace(jwk.Kid), err)
+			return nil, fmt.Errorf("key %q: %w", kid, err)
 		}
-		der, err := x509.MarshalPKIXPublicKey(pub)
-		if err != nil {
-			return nil, fmt.Errorf("key %q: marshal public key: %w", strings.TrimSpace(jwk.Kid), err)
+		for _, pub := range pubs {
+			der, err := x509.MarshalPKIXPublicKey(pub)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: marshal public key: %w", kid, err)
+			}
+			out = append(out, iam.RemoteApplicationKey{
+				KID:          kid,
+				PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})),
+			})
 		}
-		keys = append(keys, authkit.RemoteAppKey{
-			KID:          strings.TrimSpace(jwk.Kid),
-			PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})),
-		})
 	}
-	return keys, nil
+	return out, nil
 }
 
-// configureMerchantRemoteApplication registers the merchant's manifest
-// remote_application under its group, granted the merchant `owner` role (full
-// `merchant:*` authority, scoped to this merchant alone since federated
-// authority claims are stripped). Idempotent.
-func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, groupID, merchantSlug string, app *RemoteApplicationConfig) error {
+// configureMerchantRemoteApplication registers or updates the merchant's
+// manifest remote_application under its group, holding the merchant owner role:
+// full `merchant:*` authority over this merchant alone. The system registers
+// it (trust root manual). opts places it in the merchant's creation
+// transaction.
+func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, group iam.GroupRef, app *RemoteApplicationConfig, opts ...authkit.Option) error {
 	if app == nil {
 		return nil
 	}
+	ra, err := manifestRemoteApplication(app)
+	if err != nil {
+		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", group.ID(), err)
+	}
 	core := cp.Core()
-	ctx, group := controlplane.MerchantGroupRef(ctx, groupID)
-	ra, err := manifestRemoteApplicationToAuthKit(merchantSlug, groupID, app)
+	stored, err := core.UpsertRemoteApplication(ctx, iam.SystemActor(), group, ra, opts...)
 	if err != nil {
-		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", groupID, err)
+		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", group.ID(), err)
 	}
-	stored, err := core.UpsertRemoteApplication(ctx, ra)
-	if err != nil {
-		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
-	}
-	if err := core.OperatorAssignGroupRole(ctx, group, authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
-		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
+	if _, err := core.SetGroupRole(ctx, iam.SystemActor(), group, iam.RemoteApplicationSubject(stored.ID), controlplane.MerchantOwner, opts...); err != nil {
+		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", group.ID(), err)
 	}
 	return nil
 }
 
-// manifestRemoteApplicationToAuthKit maps a merchant's manifest remote_application
-// onto an AuthKit remote_application registration nested under the merchant group.
-func manifestRemoteApplicationToAuthKit(merchantSlug, groupID string, app *RemoteApplicationConfig) (authkit.RemoteApplication, error) {
-	appSlug := strings.TrimSpace(app.Slug)
-	if appSlug == "" {
-		appSlug = merchantSlug + "-app"
-	}
-	mode := authkit.RemoteAppModeJWKS
+// manifestRemoteApplication maps a merchant's manifest remote_application onto
+// an AuthKit registration.
+func manifestRemoteApplication(app *RemoteApplicationConfig) (iam.RemoteApplication, error) {
+	mode := iam.RemoteApplicationModeJWKS
 	publicKeys := app.PublicKeys
 	if len(app.JWKS.Keys) > 0 {
 		keys, err := remoteApplicationStaticPublicKeys(app)
 		if err != nil {
-			return authkit.RemoteApplication{}, err
+			return iam.RemoteApplication{}, err
 		}
 		publicKeys = keys
 	}
 	if len(publicKeys) > 0 {
-		mode = authkit.RemoteAppModeStatic
+		mode = iam.RemoteApplicationModeStatic
 	}
-	return authkit.RemoteApplication{
-		Slug:              appSlug,
-		PermissionGroupID: groupID,
-		Issuer:            strings.TrimSpace(app.Issuer),
-		JWKSURI:           strings.TrimSpace(app.JWKSURI),
-		Mode:              mode,
-		PublicKeys:        publicKeys,
-		Enabled:           true,
+	return iam.RemoteApplication{
+		Issuer:     strings.TrimSpace(app.Issuer),
+		JWKSURI:    strings.TrimSpace(app.JWKSURI),
+		Mode:       mode,
+		PublicKeys: publicKeys,
+		Enabled:    true,
 	}, nil
 }
 

@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
@@ -62,10 +63,13 @@ type (
 	ProviderAccountCutoverReport        = operator.ProviderAccountCutoverReport
 )
 
-const (
+// MerchantType and CustomerType are OpenRails' permission-group personas.
+var (
 	MerchantType = operator.MerchantType
 	CustomerType = operator.CustomerType
+)
 
+const (
 	MerchantRetirementRefusedNotLive       = operator.MerchantRetirementRefusedNotLive
 	MerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch
 	MerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved
@@ -107,10 +111,10 @@ var (
 	ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified
 )
 
-// CustomerGroup names a customer's AuthKit persona group. Merchant groups are
-// addressed by id only; OpenRails owns merchant names.
-func CustomerGroup(customerID string) authkit.GroupRef { return operator.CustomerGroup(customerID) }
-func CustomerGroupSlug(userID string) string           { return operator.CustomerGroupSlug(userID) }
+// CustomerGroup addresses a customer's own AuthKit group, keyed by the
+// customer's user id. Merchant groups are addressed by their stored id;
+// OpenRails owns merchant names.
+func CustomerGroup(customerID string) iam.GroupRef { return operator.CustomerGroup(customerID) }
 
 // ControlPlane is the attached OpenRails control plane for one runtime.
 type ControlPlane struct {
@@ -182,14 +186,15 @@ func (c *ControlPlane) Handler() (http.Handler, error) {
 	return srv.Handler(), nil
 }
 
-// Core returns the control plane's portable AuthKit operation Client.
-func (c *ControlPlane) Core() authkit.Client { return c.cp.Core() }
+// Core is the control plane's AuthKit Client.
+func (c *ControlPlane) Core() *authkit.Client { return c.cp.Core() }
 
 // UserAuthenticator verifies control-plane session tokens in process.
 func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator { return c.cp.UserAuthenticator() }
 
-// JWKSHandler serves the control plane's signing keys for external verifiers.
-func (c *ControlPlane) JWKSHandler() http.Handler { return c.cp.AuthService().JWKSHandler() }
+// RequestActor is the AuthKit actor of r's control-plane user token
+// (verify.ActorFromClaims), bound to its session.
+func (c *ControlPlane) RequestActor(r *http.Request) (iam.Actor, error) { return c.cp.RequestActor(r) }
 
 // RunBootstrap idempotently installs the operator authority and permission
 // catalog; it mints an initial API key only when opts asks for one.
@@ -232,10 +237,11 @@ func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset 
 	return operator.ListActiveMerchantIDs(ctx, c.app, limit, offset)
 }
 
-// ResolveAuthorizedMerchant captures the merchant behind ref, then checks that
-// userID holds permission on it. The returned slug is display metadata.
-func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, ref, userID, permission string) (merchant.ID, string, error) {
-	return c.cp.ResolveAuthorizedMerchant(ctx, ref, userID, permission)
+// ResolveAuthorizedMerchant captures the merchant behind ref (or the user's
+// sole merchant when empty), then checks that the user r authenticates as
+// holds permission on it, its session included. The slug is display metadata.
+func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, ref, permission string) (merchant.ID, string, error) {
+	return c.cp.ResolveAuthorizedMerchant(ctx, r, ref, permission)
 }
 
 // ResolveMerchantForGroup captures the merchant UUID and canonical slug behind
@@ -244,9 +250,10 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, ref string) 
 	return c.cp.ResolveMerchantForGroup(ctx, ref)
 }
 
-// HasRootPermission reads live root-group membership for perm.
-func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm string) (bool, error) {
-	return c.cp.HasRootPermission(ctx, userID, perm)
+// HasRootPermission checks perm live in the root group for the user r
+// authenticates as, its session included.
+func (c *ControlPlane) HasRootPermission(ctx context.Context, r *http.Request, perm string) (bool, error) {
+	return c.cp.HasRootPermission(ctx, r, perm)
 }
 
 // EnsureCustomerPermissionGroup idempotently materializes the customer's

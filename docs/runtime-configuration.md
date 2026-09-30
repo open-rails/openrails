@@ -48,10 +48,9 @@ permission never allows plaintext stored secrets.
   `https://shop.example/billing/v1/...`. Configure it only for features needing
   external callbacks or billing links.
 - `auth.request_origin` names the public request origin for DPoP checks, for
-  example `https://shop.example`. It cannot include `/billing`. The original
-  escaped request path supplies that prefix, preserving encoded slashes and
-  repeated slashes. Hosts that rewrite paths can supply the existing
-  `WithDPoPRequestURL` resolver with the original external target.
+  example `https://shop.example`. It cannot include `/billing`: a proof names
+  the origin plus the request's path as the server receives it, so a host
+  mounts billing without rewriting its path.
 - `auth.issuer` independently defines token trust.
 - `dashboard_base_url` independently names the administrative console destination.
 - A remote Client's server URL selects its transport destination; it does not

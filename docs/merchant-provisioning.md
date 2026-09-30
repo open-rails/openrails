@@ -54,8 +54,8 @@ expires; the merchant itself can take it back. Deleting or retiring a merchant
 releases its name and aliases. Resolution follows live names and unexpired
 aliases; API writes keep their method, body, authorization and idempotency key.
 
-The site naming policy (`auth.naming`, shared with AuthKit usernames) governs
-renames. Defaults allow a rename every **72 hours** and keep each former name
+The site naming policy (`auth.naming`, OpenRails' own, which also governs
+AuthKit usernames) governs renames. Defaults allow a rename every **72 hours** and keep each former name
 for **90 days**; later policy changes do not alter recorded expiries.
 
 ```yaml
@@ -81,8 +81,8 @@ Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
 deployments, the reserved names and creation pattern. Hosts rename as the
 operator with `ControlPlane.RenameMerchant`. `GET /v1/platform/merchants?q=`
 searches current names. A signed-in user lists the merchants they hold a role in
-with `GET /v1/merchants` (`{id, slug, display_name, role}`, highest role per
-merchant); hosts use `ControlPlane.ListUserMerchants`.
+with `GET /v1/merchants` (`{id, slug, display_name, role}`, the user's role in
+each); hosts use `ControlPlane.ListUserMerchants`.
 
 ### Hosted creation recipe (registration is provisioning)
 

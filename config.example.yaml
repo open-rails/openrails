@@ -55,7 +55,7 @@ auth:
   # Declare only when AuthKit receives direct client connections.
   # Behind proxies, configure top-level trusted_proxies instead.
   direct_peer_ip: true
-  # Shared AuthKit policy for usernames and group names (shown defaults).
+  # Site naming policy for merchant names and usernames (shown defaults).
   naming:
     enabled: true
     rename_interval: 72h

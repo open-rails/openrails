@@ -32,7 +32,7 @@ func (s *Server) registerAdminConsoleRoutes(mux router.Registrar) error {
 		CatalogDraftingEnabled: s.cfg.LLM.CatalogDraftingConfigured(),
 	}
 	if cfg.AuthBaseURL == "" {
-		cfg.AuthBaseURL = ControlPlaneAuthPrefix
+		cfg.AuthBaseURL = s.authAPIBase()
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = StandaloneV1Prefix

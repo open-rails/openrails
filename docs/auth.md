@@ -40,9 +40,9 @@ clients instead use a certificate-bound delegated Bearer token and its actual
 TLS client certificate. Unbound wire delegation is unsupported.
 
 See [frontend integration](frontend-integration.md#authentication) for the
-mint/request contract. Receiver proof targets use the configured `auth.request_origin`;
-`AttachOptions.DPoPRequestURL` supplies trusted external URL mapping for hosts
-that rewrite paths. Arbitrary Host/Forwarded headers never define that target.
+mint/request contract. Receiver proof targets are the configured
+`auth.request_origin` plus the request path. Arbitrary Host/Forwarded headers
+never define that target.
 Redis-backed AuthKit proof claims are shared across receiver replicas and must
 retain accepted claims for the full proof window. Storage errors fail closed
 with 503; a rejected proof receives the DPoP authentication challenge.
@@ -64,10 +64,11 @@ the billing cookie adapter.
 
 Privileged local users pass AuthKit request verification and live account
 admission. Enrollment-only tokens remain restricted after enrollment completes;
-clients obtain a new normal token. Ban/deletion blocks an unexpired token even
-when the user's role remains. Session revocation is separate: an already
-issued access JWT can remain usable until its configured expiry. Account
-liveness does not imply a per-session access-token deny-list.
+clients obtain a new normal token. Every permission check acts as the token's
+own sign-in (`verify.ActorFromClaims`): once that session is revoked (logout,
+revoke-all, password change, ban, deletion) the check answers 401
+`credential_revoked`, whatever time the token has left. Routes that only
+authenticate, with no permission check, accept the token until it expires.
 
 Delegated verification consults the registered signing application's enabled
 state/grant and active merchant binding. Issuer disablement, grant removal or
@@ -89,10 +90,10 @@ trust does not confer that authority. Embedded `AttachOptions` forward the
 same settings. Direct-peer and proxy declarations are mutually exclusive.
 
 Development signing keys persist under `auth.keys_path`; production supplies
-its managed keys. After in-process application registration, call
-`ControlPlane.ReloadRemoteApplications` for immediate discovery. Out-of-process
-registration/key rotation converges through the bounded registry refresh.
-Unverified token issuers never trigger arbitrary database or JWKS discovery.
+its managed keys. AuthKit reads a signing application's registration on every
+verification, so registration, key changes and disablement apply to the next
+request, wherever they were made. Unverified token issuers never trigger
+arbitrary database or JWKS discovery.
 
 Cookie origins use canonical browser spelling: lowercase host, no wildcard,
 userinfo, path, query, fragment, or explicit default port. HTTPS is required;
@@ -103,8 +104,8 @@ HTTP is allowed for explicit localhost/loopback development origins.
 Billing customer records and spend-delegation policies are merchant-scoped and
 do not create AuthKit customer groups as a side effect. Hosts such as
 OpenRails-SaaS explicitly call `EnsureCustomerPermissionGroup` when a user
-creates a portal account. `CustomerType`, `CustomerGroup`, and
-`CustomerGroupSlug` remain available for that membership and discovery flow.
+creates a portal account. The group's id is the customer's user id:
+`CustomerGroup(customerID)` addresses it and `CustomerType` is its persona.
 
 Customer groups do not issue API keys or register signing applications: those
 credentials have no supported customer-treasury authentication path. Their

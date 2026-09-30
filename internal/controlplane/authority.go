@@ -3,12 +3,14 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"github.com/open-rails/openrails/internal/credential"
+	"net/http"
 	"strings"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -18,28 +20,43 @@ import (
 // explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
+// ErrMerchantAmbiguous requires an explicit selector when several distinct
+// merchant groups are present in the user's live memberships.
+var ErrMerchantAmbiguous = credential.ErrMerchantAmbiguous
+
+// RequestActor is the actor r's control-plane user token acts as
+// (verify.ActorFromClaims): bound to its session, so every permission check
+// refuses it once that sign-in is revoked. billingauth.ErrUnauthenticated
+// when r carries no user token.
+func (c *ControlPlane) RequestActor(r *http.Request) (iam.Actor, error) {
+	if c == nil || c.users == nil {
+		return iam.Actor{}, ErrNoControlPlane
+	}
+	return c.users.Actor(r)
+}
+
 // ResolveAuthorizedMerchant resolves merchantRef (a current or former name)
-// or, when empty, the user's sole merchant membership to one bound merchant,
-// then checks perm live on that merchant's group.
-func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRef, userID, perm string) (merchant.ID, string, error) {
+// or, when empty, the requesting user's sole merchant to one bound merchant,
+// then checks perm live on that merchant's group for the request's actor. A
+// revoked session is an error joined with helpers/auth ErrRevoked.
+func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, merchantRef, perm string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
 		return merchant.ID{}, "", ErrNoControlPlane
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return merchant.ID{}, "", policy.ErrPermissionRequired
+	actor, err := c.RequestActor(r)
+	if err != nil {
+		return merchant.ID{}, "", err
 	}
 	var groupID string
-	var err error
 	if ref := strings.TrimSpace(merchantRef); ref == "" {
-		groupID, err = c.merchantGroupForUser(ctx, userID)
+		groupID, err = c.merchantGroupForUser(ctx, actor.ID())
 	} else {
 		groupID, err = c.merchantGroupByName(ctx, ref)
 	}
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
-	allowed, err := c.Core().CanOnGroup(ctx, authkit.UserSubject(userID), groupID, authkit.Perm(strings.TrimSpace(perm)))
+	allowed, err := c.can(ctx, actor, iam.GroupByID(groupID), perm)
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
@@ -51,6 +68,34 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRe
 		return merchant.ID{}, "", policy.ErrMerchantUnresolved
 	}
 	return mid, slug, err
+}
+
+// HasRootPermission reports whether the request's user holds perm in the root
+// group (#721), checked live with its session. The root owner holds root:*;
+// the bounded operator roles hold root:merchants:*. It gates /v1/platform/*.
+func (c *ControlPlane) HasRootPermission(ctx context.Context, r *http.Request, perm string) (bool, error) {
+	if c == nil || c.Core() == nil {
+		return false, ErrNoControlPlane
+	}
+	actor, err := c.RequestActor(r)
+	if err != nil {
+		return false, err
+	}
+	return c.can(ctx, actor, iam.RootGroup(), perm)
+}
+
+// can checks perm live for actor in ref. A revoked session is joined with
+// helpers/auth ErrRevoked, a credential failure rather than an outage.
+func (c *ControlPlane) can(ctx context.Context, actor iam.Actor, ref iam.GroupRef, perm string) (bool, error) {
+	p, err := c.client.Permission(strings.TrimSpace(perm))
+	if err != nil {
+		return false, err
+	}
+	allowed, err := c.client.Can(ctx, actor, ref, p)
+	if errors.Is(err, iam.ErrSessionRevoked) {
+		return false, errors.Join(err, helpersauth.ErrRevoked)
+	}
+	return allowed, err
 }
 
 // merchantGroupByName resolves a current or former merchant name to the group
@@ -73,40 +118,21 @@ func (c *ControlPlane) merchantGroupByName(ctx context.Context, name string) (st
 	return m.PermissionGroupID, nil
 }
 
-// HasRootPermission reports whether the user holds perm in the singleton ROOT
-// permission-group (#721): live AuthKit state, no merchant context. The root
-// `owner` auto-holds root:*; bounded operator roles (merchant-directory-*)
-// carry concrete root:merchants:* grants. Gates the /v1/platform/* tier.
-func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm string) (bool, error) {
-	if c == nil || c.Core() == nil {
-		return false, ErrNoControlPlane
-	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false, nil
-	}
-	// The root group is the singleton parentless group: persona=root, no slug.
-	return c.Core().Can(ctx, authkit.UserSubject(userID), authkit.RootGroup(), authkit.Perm(strings.TrimSpace(perm)))
-}
-
-// ErrMerchantAmbiguous requires an explicit selector when several distinct
-// merchant groups are present in the user's live memberships.
-var ErrMerchantAmbiguous = credential.ErrMerchantAmbiguous
-
+// merchantGroupForUser is the one merchant group userID holds a role in.
 func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) (string, error) {
-	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(userID))
+	memberships, err := c.memberships(ctx, iam.UserSubject(userID))
 	if err != nil {
 		return "", err
 	}
 	var groupID string
-	for _, membership := range memberships {
-		if membership.Persona != MerchantType {
+	for _, m := range memberships {
+		if m.Group.Persona != MerchantType {
 			continue
 		}
-		if groupID != "" && groupID != membership.GroupID {
+		if groupID != "" && groupID != m.Group.ID {
 			return "", ErrMerchantAmbiguous
 		}
-		groupID = membership.GroupID
+		groupID = m.Group.ID
 	}
 	if groupID == "" {
 		return "", policy.ErrMerchantUnresolved
@@ -114,10 +140,40 @@ func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) 
 	return groupID, nil
 }
 
+// OwnedMerchantGroups are the merchant groups userID holds the owner role in.
+func (c *ControlPlane) OwnedMerchantGroups(ctx context.Context, userID string) ([]string, error) {
+	memberships, err := c.memberships(ctx, iam.UserSubject(strings.TrimSpace(userID)))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, m := range memberships {
+		if m.Group.Persona == MerchantType && m.Role == MerchantOwner {
+			out = append(out, m.Group.ID)
+		}
+	}
+	return out, nil
+}
+
+// memberships is every live group s holds a role in.
+func (c *ControlPlane) memberships(ctx context.Context, s iam.Subject) ([]iam.Membership, error) {
+	var out []iam.Membership
+	page := iam.PageRequest{Limit: iam.MaxPageLimit}
+	for {
+		batch, err := c.client.ListMemberships(ctx, s, page)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, batch.Items...)
+		if batch.Next == "" {
+			return out, nil
+		}
+		page.Cursor = batch.Next
+	}
+}
+
 // ResolveMerchantForGroup resolves a bound merchant by a current or former
-// name. Route auth uses it after a live merchant
-// permission check so user-session merchant routes pin the same merchant context
-// as API-key and delegated JWT principals.
+// name, with no authority check.
 func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
 		return merchant.ID{}, "", ErrNoControlPlane
@@ -134,24 +190,4 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 		return merchant.ID{}, "", err
 	}
 	return mid, mslug, nil
-}
-
-// IsAdmin reports whether the user holds any merchant-staff grant in the named
-// merchant via live AuthKit state (a proxy: it tests the broadest merchant read
-// perm the owner/viewer/support all hold).
-func (c *ControlPlane) IsAdmin(ctx context.Context, merchantRef, userID string) (bool, error) {
-	if c == nil || c.Core() == nil {
-		return false, ErrNoControlPlane
-	}
-	if strings.TrimSpace(merchantRef) == "" {
-		return false, nil
-	}
-	groupID, err := c.merchantGroupByName(ctx, merchantRef)
-	if errors.Is(err, policy.ErrMerchantUnresolved) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return c.Core().CanOnGroup(ctx, authkit.UserSubject(strings.TrimSpace(userID)), groupID, PermMerchantSettingsRead)
 }

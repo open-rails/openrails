@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit"
+
 	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/credential"
 
@@ -24,11 +24,9 @@ const (
 // It carries everything route authorization needs: the resolved OpenRails
 // merchant and the granted permission strings.
 //
-// #567/#569: a merchant IS a top-level permission-group (`type=merchant`,
-// `resourceRef=merchant-slug`). A programmatic credential is minted/nested under
-// that merchant group; its merchant identity is THE GROUP it belongs to — never a
-// resource scope — and its authority over the merchant is its assigned group role
-// (resolved to `merchant:*` perms).
+// #567/#569: a merchant IS a merchant permission group. A programmatic
+// credential belongs to that group; its merchant identity is THE GROUP, never a
+// resource scope, and its authority is its role there.
 type ResolvedServiceCredential = credential.ResolvedServiceCredential
 
 // MerchantScope resolves a current or former merchant name to its bound
@@ -53,56 +51,43 @@ func (c *ControlPlane) TokenPrefix() string {
 	return APIKeyPrefix
 }
 
-// LooksLikeAPIKey reports whether token carries this deployment's
-// shared-secret API-key marker. Used by the service credential middleware to
-// route a Bearer credential to API-key validation rather than JWT verification.
+// LooksLikeAPIKey reports whether token carries this deployment's API-key
+// marker, "<prefix>_st_". The middleware routes such a Bearer credential to
+// API-key validation rather than JWT verification.
 func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
-	return authkit.HasAPIKeyPrefix(c.TokenPrefix(), strings.TrimSpace(token))
+	return strings.HasPrefix(strings.TrimSpace(token), c.TokenPrefix()+"_st_")
 }
 
-// ResolveAPIKey validates a presented shared-secret API key end-to-end:
-//
-//   - parses the <prefix>_st_<key_id>_<secret> shape,
-//   - resolves key id + secret hash via AuthKit core (controlling permission
-//     group, role-resolved permissions, expiry, revocation) — returns
-//     authkit.ErrAccessTokenExpired / ErrAccessTokenRevoked /
-//     ErrInvalidAccessToken on those conditions,
-//   - resolves the merchant the credential administers from the permission GROUP
-//     the key was minted under (#567/#569: a merchant IS its group). A key whose
-//     group backs no active merchant yields ErrServiceCredentialMerchantUnresolved.
-//   - rejects a resolved merchant that differs from the request Host merchant.
+// ResolveAPIKey validates a presented API key: AuthKit resolves it live (its
+// group, its role's permissions, expiry and revocation: iam.ErrAPIKeyInvalid,
+// ErrAPIKeyExpired, ErrAPIKeyRevoked), and the merchant is the one bound to
+// that group (#567/#569), never a resource scope. A key whose group backs no
+// active merchant is ErrServiceCredentialMerchantUnresolved, and one presented
+// against another merchant's Host is ErrServiceCredentialHostMismatch.
 func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	keyID, secret, ok := authkit.ParseAPIKey(c.TokenPrefix(), strings.TrimSpace(token))
-	if !ok {
-		return nil, authkit.ErrInvalidAccessToken
-	}
-
-	groupID, permissions, err := c.Core().ResolveAPIKey(ctx, keyID, secret)
+	key, err := c.client.ResolveAPIKey(ctx, strings.TrimSpace(token))
 	if err != nil {
 		return nil, err
 	}
-
-	// #569 (hard cut): the merchant identity is the permission group the key was
-	// minted under — resolved with the same group-based resolver the service-JWT
-	// path uses — never a resource scope. Fails closed when the group backs no
-	// active merchant (stale/deleted), so cross-merchant or orphaned keys are denied.
-	mid, mslug, err := c.merchantForGroupID(ctx, groupID)
+	mid, slug, err := c.merchantForGroupID(ctx, key.Group.ID)
 	if err != nil {
 		return nil, err
 	}
-
 	if hostMID, ok := merchant.HostMerchant(ctx); ok && hostMID != mid {
 		return nil, ErrServiceCredentialHostMismatch
 	}
-
+	permissions := make([]string, len(key.Permissions))
+	for i, perm := range key.Permissions {
+		permissions[i] = perm.String()
+	}
 	return &ResolvedServiceCredential{
-		OwnerGroupID:  groupID,
-		OwnerGroupRef: mslug,
+		OwnerGroupID:  key.Group.ID,
+		OwnerGroupRef: slug,
 		MerchantID:    mid,
-		MerchantSlug:  mslug,
+		MerchantSlug:  slug,
 		Permissions:   permissions,
 	}, nil
 }
@@ -121,12 +106,9 @@ var ErrServiceCredentialMerchantUnresolved = credential.ErrServiceCredentialMerc
 // lacks the required OpenRails merchant authority.
 var ErrServiceCredentialScopeDenied = credential.ErrServiceCredentialScopeDenied
 
-// merchantForGroupID resolves the OpenRails merchant a caller administers from
-// its authenticated authkit permission-group id: the merchant whose
-// permission_group_id equals it (#567 — a merchant IS its own group; was the
-// the old owner-link lookup). With merchant.slug == group slug (#548), the group
-// is effectively the merchant's authkit identity. Suspended/deleted merchants
-// are rejected.
+// merchantForGroupID resolves the OpenRails merchant bound to an AuthKit group
+// (#567: a merchant IS its own group). Suspended and deleted merchants are
+// rejected.
 func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (merchant.ID, string, error) {
 	groupID = strings.TrimSpace(groupID)
 	if c.pool == nil {

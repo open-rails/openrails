@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -78,17 +78,15 @@ func (c *ControlPlane) authorizeNameClaim(ctx context.Context, name, userID stri
 	return fmt.Errorf("%w: %q", ErrMerchantSlugReserved, name)
 }
 
+// holdsRootRole reports whether userID holds the root role named role, bare
+// ("admin") or qualified ("root:admin").
 func (c *ControlPlane) holdsRootRole(ctx context.Context, userID, role string) (bool, error) {
-	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(userID))
+	roles, err := c.client.GroupRoles(ctx, iam.RootGroup(), []iam.Subject{iam.UserSubject(userID)})
 	if err != nil {
 		return false, err
 	}
-	for _, m := range memberships {
-		if m.Persona == authkit.RootPersona && strings.EqualFold(string(m.Role), role) {
-			return true, nil
-		}
-	}
-	return false, nil
+	held, ok := roles[iam.UserSubject(userID)]
+	return ok && (strings.EqualFold(held.Name(), role) || strings.EqualFold(held.String(), role)), nil
 }
 
 // EnforceMerchantCreationPolicy applies the declared creation policy to a new

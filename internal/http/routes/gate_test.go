@@ -47,7 +47,7 @@ type membership struct {
 	refs     []string
 }
 
-func (m *membership) ResolveAuthorizedMerchant(_ context.Context, ref, _, _ string) (merchant.ID, string, error) {
+func (m *membership) ResolveAuthorizedMerchant(_ context.Context, _ *http.Request, ref, _ string) (merchant.ID, string, error) {
 	m.refs = append(m.refs, ref)
 	if m.err != nil {
 		return merchant.ID{}, "", m.err
@@ -160,6 +160,7 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "user with opaque subject", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: "user-1"}, nil), AdminPermissionChecker: &membership{}}, want: want{status: 401}},
 		{name: "user without membership checker", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil)}, want: want{status: 500, message: "authorization unavailable"}},
 		{name: "membership lookup failure", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: errors.New("db")}}, want: want{status: 500, message: "failed to check permission"}},
+		{name: "revoked session", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: errors.Join(errors.New("session_revoked"), auth.ErrRevoked)}}, want: want{status: 401, message: "credential_revoked"}},
 		{name: "ambiguous membership", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: credential.ErrMerchantAmbiguous}}, want: want{status: 403, message: "merchant_unresolved"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

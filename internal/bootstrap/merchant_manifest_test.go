@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
-	akembedded "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -18,9 +17,6 @@ import (
 )
 
 func TestExampleManifestsParse(t *testing.T) {
-	_, err := akembedded.LoadBootstrapManifestFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
-	require.NoError(t, err)
-
 	manifest, err := LoadMerchantConfigManifest(filepath.Join("..", "..", "config", "merchants_config.example.yaml"))
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 2)
