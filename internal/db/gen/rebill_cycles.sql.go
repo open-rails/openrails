@@ -51,6 +51,49 @@ func (q *Queries) CycleHasAttempt(ctx context.Context, arg CycleHasAttemptParams
 	return attempted, err
 }
 
+const getRebillCycle = `-- name: GetRebillCycle :one
+SELECT merchant_id, id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, missed_at, miss_reason, created_at, first_category, first_reason, first_at, won_attempt_id, won_kind, won_source, won_at, won_ordinal, first_failed, first_outcome, closed_at, recovered_by FROM openrails.rebill_cycle_facts
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+`
+
+type GetRebillCycleParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetRebillCycle(ctx context.Context, arg GetRebillCycleParams) (OpenrailsRebillCycleFact, error) {
+	row := q.db.QueryRow(ctx, getRebillCycle, arg.MerchantID, arg.ID)
+	var i OpenrailsRebillCycleFact
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.SubscriptionID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.Rail,
+		&i.Owner,
+		&i.DueAt,
+		&i.Amount,
+		&i.Currency,
+		&i.MissedAt,
+		&i.MissReason,
+		&i.CreatedAt,
+		&i.FirstCategory,
+		&i.FirstReason,
+		&i.FirstAt,
+		&i.WonAttemptID,
+		&i.WonKind,
+		&i.WonSource,
+		&i.WonAt,
+		&i.WonOrdinal,
+		&i.FirstFailed,
+		&i.FirstOutcome,
+		&i.ClosedAt,
+		&i.RecoveredBy,
+	)
+	return i, err
+}
+
 const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
 SELECT merchant_id FROM openrails.overdue_rebill_merchant_ids(
     $1::timestamptz, $2::timestamptz, $3::int)
@@ -157,6 +200,109 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 			&i.LifecycleRev,
 			&i.RowVersion,
 			&i.DunningPolicy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRebillCycles = `-- name: ListRebillCycles :many
+SELECT cf.merchant_id, cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.created_at, cf.first_category, cf.first_reason, cf.first_at, cf.won_attempt_id, cf.won_kind, cf.won_source, cf.won_at, cf.won_ordinal, cf.first_failed, cf.first_outcome, cf.closed_at, cf.recovered_by, count(*) OVER () AS total
+FROM openrails.rebill_cycle_facts cf
+WHERE cf.merchant_id = $1::uuid
+  AND ($2::text IS NULL OR cf.owner = $2::text)
+  AND ($3::text IS NULL OR cf.first_outcome = $3::text)
+  AND ($4::text IS NULL OR cf.miss_reason = $4::text)
+  AND ($5::uuid IS NULL OR cf.psp_id = $5::uuid)
+  AND ($6::uuid IS NULL OR cf.subscription_id = $6::uuid)
+  AND ($7::timestamptz IS NULL OR cf.due_at >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR cf.due_at < $8::timestamptz)
+  AND CASE $9::text
+        WHEN 'collected' THEN cf.won_at IS NOT NULL
+        WHEN 'lost' THEN cf.won_at IS NULL AND cf.closed_at <= $10::timestamptz
+        WHEN 'open' THEN cf.won_at IS NULL AND cf.closed_at > $10::timestamptz
+        ELSE true END
+ORDER BY cf.due_at DESC, cf.id DESC
+LIMIT $12::bigint OFFSET $11::bigint
+`
+
+type ListRebillCyclesParams struct {
+	MerchantID     uuid.UUID
+	Owner          *string
+	FirstOutcome   *string
+	MissReason     *string
+	PspID          *uuid.UUID
+	SubscriptionID *uuid.UUID
+	DueSince       *time.Time
+	DueUntil       *time.Time
+	Outcome        *string
+	Now            time.Time
+	PageOffset     int64
+	PageLimit      int64
+}
+
+type ListRebillCyclesRow struct {
+	OpenrailsRebillCycleFact OpenrailsRebillCycleFact
+	Total                    int64
+}
+
+// #1116: the merchant's rebill cycles as rebill_cycle_facts derives them,
+// latest due first. outcome filters on collected, lost (closed by now
+// without a collection) or open.
+func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesParams) ([]ListRebillCyclesRow, error) {
+	rows, err := q.db.Query(ctx, listRebillCycles,
+		arg.MerchantID,
+		arg.Owner,
+		arg.FirstOutcome,
+		arg.MissReason,
+		arg.PspID,
+		arg.SubscriptionID,
+		arg.DueSince,
+		arg.DueUntil,
+		arg.Outcome,
+		arg.Now,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRebillCyclesRow
+	for rows.Next() {
+		var i ListRebillCyclesRow
+		if err := rows.Scan(
+			&i.OpenrailsRebillCycleFact.MerchantID,
+			&i.OpenrailsRebillCycleFact.ID,
+			&i.OpenrailsRebillCycleFact.SubscriptionID,
+			&i.OpenrailsRebillCycleFact.CustomerID,
+			&i.OpenrailsRebillCycleFact.PspID,
+			&i.OpenrailsRebillCycleFact.Rail,
+			&i.OpenrailsRebillCycleFact.Owner,
+			&i.OpenrailsRebillCycleFact.DueAt,
+			&i.OpenrailsRebillCycleFact.Amount,
+			&i.OpenrailsRebillCycleFact.Currency,
+			&i.OpenrailsRebillCycleFact.MissedAt,
+			&i.OpenrailsRebillCycleFact.MissReason,
+			&i.OpenrailsRebillCycleFact.CreatedAt,
+			&i.OpenrailsRebillCycleFact.FirstCategory,
+			&i.OpenrailsRebillCycleFact.FirstReason,
+			&i.OpenrailsRebillCycleFact.FirstAt,
+			&i.OpenrailsRebillCycleFact.WonAttemptID,
+			&i.OpenrailsRebillCycleFact.WonKind,
+			&i.OpenrailsRebillCycleFact.WonSource,
+			&i.OpenrailsRebillCycleFact.WonAt,
+			&i.OpenrailsRebillCycleFact.WonOrdinal,
+			&i.OpenrailsRebillCycleFact.FirstFailed,
+			&i.OpenrailsRebillCycleFact.FirstOutcome,
+			&i.OpenrailsRebillCycleFact.ClosedAt,
+			&i.OpenrailsRebillCycleFact.RecoveredBy,
+			&i.Total,
 		); err != nil {
 			return nil, err
 		}
