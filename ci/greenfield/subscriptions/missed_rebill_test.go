@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -42,8 +43,9 @@ func (w *world) missReason(sub openrails.SubscriptionID, due time.Time) string {
 }
 
 // NMI passes a schedule's date without charging: after the deadline the
-// Query API proves no attempt, and the cycle is a missed rebill.
-func TestNMIScheduleSkippedRebillIsMissed(t *testing.T) {
+// Query API proves no attempt, the cycle is a missed rebill, and OpenRails
+// charges it once. NMI's next charge bills only the next period (#1113).
+func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
@@ -57,9 +59,29 @@ func TestNMIScheduleSkippedRebillIsMissed(t *testing.T) {
 	w.watchRebills()
 	require.Equal(t, "provider_skipped", w.missReason(l.sub, due))
 	require.Len(t, w.openFindings("life.rebill.missed"), 1)
-	require.Zero(t, len(w.nmi.Attempts()), "a missed NMI rebill is not charged here")
 	w.watchRebills()
 	require.Len(t, w.openFindings("life.rebill.missed"), 1, "one finding per cycle")
+	require.Equal(t, "past_due", w.subscription(embedded, l.sub).Status, "the period is OpenRails' to collect")
+
+	w.runRenewals()
+	sub := w.subscription(embedded, l.sub)
+	require.Equal(t, "active", sub.Status)
+	next := *sub.CurrentPeriodEndsAt
+	require.True(t, next.After(due))
+	require.Len(t, w.nmi.Attempts(), 1, "OpenRails charges the skipped period once")
+	rows := w.cycleAttempts(l.sub)
+	require.Len(t, rows, 1)
+	require.Equal(t, []string{"rebill", "nmi_schedule", "openrails", "approved"}, []string{rows[0].Kind, rows[0].Owner, rows[0].Source, rows[0].Category})
+	require.True(t, due.Equal(rows[0].DueAt))
+
+	w.advance(next.Sub(w.clock.Now()) + time.Hour)
+	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(true)))
+	w.settle()
+	w.runRenewals()
+	require.True(t, w.subscription(embedded, l.sub).CurrentPeriodEndsAt.After(next))
+	require.Len(t, w.nmi.Attempts(), 1)
+	require.Len(t, w.nmi.ledger(""), 3, "one charge per period: the initial, OpenRails' collection, NMI's next")
+	require.Len(t, completed(w.payments(embedded, l.c.id)), 3)
 }
 
 // NMI charged and its webhook never came: the watch finds the charge through

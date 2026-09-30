@@ -530,7 +530,9 @@ This schedule governs every subscription OpenRails collects itself: engine
 memberships on Stripe and NMI, and every NMI schedule (`nmi_schedule`). NMI
 never retries a declined scheduled charge, so on `nmi_schedule` the provider's
 decline is the schedule's first failure (first retry at the first offset, never
-at once). A past_due `nmi_schedule` row left with no retry scheduled resumes at
+at once). Retries count from when the decline happened, not when OpenRails saw
+it: a decline found late by a provider read keeps the same retry days, and a
+retry already past runs at the next due pass. A past_due `nmi_schedule` row left with no retry scheduled resumes at
 its next step after the last attempt, clamped to grace. Below 96h cycles no
 retry is scheduled: NMI's next scheduled charge is the retry. Provider-owned Stripe subscriptions use Stripe's own dunning. Ours is sparser
 than Stripe's 8-retry default because each NMI decline costs a per-transaction
@@ -540,6 +542,14 @@ fee.
 their paid-period boundary and runs retries whose `next_retry_at` has passed.
 A subscription it cannot process raises a standing `life.due_pass.refused`
 finding (resolved automatically once it processes) and never fails the pass.
+
+**Missed rebills.** Every 15 minutes the rebill watch looks for renewals with
+no attempt past their deadline (engine: 1h; `nmi_schedule`: 24h, after reading
+NMI's Query API and schedule) and raises one `life.rebill.missed` finding per
+cycle. When NMI's records show no charge and its schedule has moved to the next
+period (`provider_skipped`), OpenRails charges the period itself, then duns a
+decline on the same schedule. A stalled or deleted NMI schedule only raises the
+finding: NMI may still bill it.
 
 **Engine outcomes.** A renewal allowance of min(24h, max(5m, period/10))
 follows each paid engine period (1h → 6m, 1d → 2h24m, 7d → 16h48m, 30d and

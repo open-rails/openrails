@@ -334,7 +334,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 			require.Equal(t, "past_due", sub.Status)
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a future schedule date cannot grant an unpaid period")
 			require.NotNil(t, sub.NextRetryAt, "OpenRails schedules recovery after the provider decline")
-			require.WithinDuration(t, w.clock.Now().Add(48*time.Hour), *sub.NextRetryAt, time.Second, "NMI never retries; OpenRails' first retry is the schedule's +2d, not now")
+			require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "NMI never retries; OpenRails' first retry is the schedule's +2d from NMI's decline")
 			require.Zero(t, len(w.nmi.Attempts()), "read-only posture holds automatic recovery")
 			w.cfg = nil
 			w.restart()
@@ -435,9 +435,10 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 	require.Equal(t, charges, stripeOwned.engineCharges())
 }
 
-// A lapsed NMI schedule with no decline seen is never charged by
-// OpenRails: NMI may have billed it unobserved. When NMI's renewal arrives
-// late, the period is paid exactly once.
+// A lapsed NMI schedule whose date has not moved on is never charged by
+// OpenRails, even once the rebill watch records the cycle missed: NMI may
+// still bill it. When NMI's renewal arrives late, the period is paid exactly
+// once.
 func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -450,12 +451,14 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	for _, step := range []time.Duration{end.Sub(w.clock.Now()) + time.Hour, 49 * time.Hour} {
 		w.advance(step)
 		w.converge()
+		w.watchRebills()
 		w.runRenewals()
 		sub := w.subscription(embedded, l.sub)
 		require.NotEqual(t, "past_due", sub.Status, "a lapse is not a decline")
 		require.Nil(t, sub.NextRetryAt)
 		require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charges without a seen decline")
 	}
+	require.Equal(t, "provider_stalled", w.missReason(l.sub, end))
 
 	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(true)))
 	w.runRenewals()

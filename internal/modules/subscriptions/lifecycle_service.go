@@ -1820,6 +1820,40 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 	})
 }
 
+// CollectSkippedRenewal hands OpenRails a period NMI's schedule skipped
+// (#1113): the row enters dunning with its first attempt due now, so the due
+// pass charges the cycle's rebill and a decline follows the merchant's
+// schedule. The caller has proven the skip from NMI's records. Reports
+// whether the row was handed over.
+func (s *SubscriptionLifecycleService) CollectSkippedRenewal(ctx context.Context, dbb *db.DB, sub *models.Subscription) (bool, error) {
+	belief := sub.CurrentPeriodEndsAt
+	if belief == nil {
+		return false, nil
+	}
+	collected := false
+	err := withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+		if !samePeriodEnd(belief, sub.CurrentPeriodEndsAt) {
+			return nil
+		}
+		now := s.now()
+		effects, err := Transition(sub, lifecycle.RenewalSkipped{PeriodStart: belief.UTC()}, now)
+		if err != nil || len(effects) == 0 {
+			return err
+		}
+		if err := openCase(ctx, dbb, sub); err != nil {
+			return err
+		}
+		sub.ClearRetrySchedule()
+		sub.NextRetryAt = &now
+		if _, err := s.ApplyEffects(ctx, dbb, sub, effects, now, EffectOptions{}); err != nil {
+			return err
+		}
+		collected = true
+		return NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now)
+	})
+	return collected, err
+}
+
 // samePeriodEnd reports whether the locked row is still on the period a caller
 // decided on. A caller with no period belief (nil) accepts any.
 func samePeriodEnd(belief, current *time.Time) bool {
@@ -2072,6 +2106,10 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		needsPaymentMethodUpdate = false
 
 		now := s.now()
+		declined := now
+		if !params.DeclinedAt.IsZero() && params.DeclinedAt.Before(now) {
+			declined = params.DeclinedAt.UTC()
+		}
 
 		// Captured BEFORE either branch mutates subscription.RetryAttempts: the
 		// terminal branch below (either path) calls ClearRetrySchedule(), which
@@ -2187,9 +2225,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// A processor try-again answer gets the short transient ladder first;
 			// those quick retries are not dunning failures.
 			if !params.Terminal && decline.Classify(string(subscription.Rail), normalize.FromPtr(params.FailureCode)).Transient {
-				if next, ok := policy.NextTransientAttempt(subscription.TransientRetries, now); ok {
+				if next, ok := policy.NextTransientAttempt(subscription.TransientRetries, declined); ok {
 					subscription.TransientRetries++
-					subscription.LastRetryAt = &now
+					subscription.LastRetryAt = &declined
 					if _, err := Transition(subscription, lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}, now); err != nil {
 						return fmt.Errorf("fail membership %s: %w", subscription.ID, err)
 					}
@@ -2200,7 +2238,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			terminal := params.Terminal
 			if !terminal {
-				subscription.LastRetryAt = &now
+				subscription.LastRetryAt = &declined
 				if subscription.RetryAttempts == nil {
 					attempts := 1
 					subscription.RetryAttempts = &attempts
@@ -2225,7 +2263,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 				event = lifecycle.DunningExhausted{At: now}
 			default:
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.Retry, At: now}
-				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, now)
+				nextRetry, ok, err := policy.NextAttemptAt(cycleHours, *subscription.RetryAttempts, declined)
 				if err != nil {
 					return err
 				}

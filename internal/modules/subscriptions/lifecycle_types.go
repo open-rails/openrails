@@ -134,6 +134,10 @@ type FailMembershipParams struct {
 	SubscriptionID *uuid.UUID
 	FailureReason  *string
 	FailureCode    *string
+	// DeclinedAt is when the decline happened; zero means now. The retry
+	// schedule runs from it, so a decline seen late (a lost webhook found by
+	// a pull) keeps the same retry days (#1113).
+	DeclinedAt time.Time
 	// Terminal requests immediate cancellation (entitlements revoked, no further
 	// retries) regardless of the retry count, without incrementing it. It is a
 	// REQUEST, not a command: TerminalCertainty must name the evidence, or the
