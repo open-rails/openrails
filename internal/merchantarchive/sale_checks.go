@@ -59,13 +59,16 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 	}
 	observed, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: paymentID})
 	if op.Status == intents.StatusFailedTerminal {
-		// A refused or unexecuted sale moved no money: it has no payment
-		// (a decline is a payment attempt, #1111).
+		// A refused or unexecuted sale moved no money (a decline is a payment
+		// attempt, #1111); only a pre-#1111 decline record may carry its id.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if evidence.Declined && declineRecord(observed) {
+			return nil
 		}
 		return errors.New("refused sale has a payment")
 	}
@@ -115,4 +118,10 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 		return errors.New("terminal sale has incomplete original benefits")
 	}
 	return nil
+}
+
+// declineRecord is a decline recorded in payments before declines became
+// payment attempts (#1111): it moved no money.
+func declineRecord(p gen.OpenrailsPayment) bool {
+	return p.Status == gen.OpenrailsPaymentStatusFailed && p.MoneyMovement == "none" && p.RefundedPaymentID == nil
 }

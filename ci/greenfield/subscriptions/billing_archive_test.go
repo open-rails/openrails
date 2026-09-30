@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails"
 )
 
 // The portable billing archive's schema check classifies every subscription
@@ -70,4 +72,49 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 	require.NoError(t, err)
 	table, _ = archiveRefusal()
 	require.NotEqual(t, "idempotency_keys", table, "a lapsed claim does not block the export")
+}
+
+// A membership refused before declines became payment attempts (#1111) left a
+// failed payments row under its payment id. The archive keeps accepting that
+// record; any other payment under a refused enrollment is refused.
+func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	price := w.membership("content:members", 9_990_000)
+	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
+	_, err := h.pay("pay-nsf", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
+	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
+	w.settle()
+	refusedTable := func() string {
+		status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")
+		if status == http.StatusOK {
+			return ""
+		}
+		var refusal struct {
+			Error struct {
+				Metadata struct {
+					Table string `json:"table"`
+				} `json:"metadata"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &refusal), body)
+		return refusal.Error.Metadata.Table
+	}
+	require.NotEqual(t, "rail_intents", refusedTable())
+
+	// The decline record the checkout wrote before #1111.
+	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO openrails.payments (merchant_id, id, customer_id, price_id, psp_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
+		SELECT merchant_id, (payload->'terms'->>'payment_id')::uuid, (payload->'terms'->>'customer_id')::uuid, (payload->'terms'->>'price_id')::uuid,
+		       psp_id, rail, rail || '_sub_declined:' || id, (payload->'terms'->>'amount')::bigint, (payload->'terms'->>'recurring_amount')::bigint,
+		       payload->'terms'->>'currency', 'failed', 'none'
+		FROM openrails.rail_intents WHERE intent_type = 'initial_membership' AND status = 'failed_terminal'`))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, record.RowsAffected())
+	require.NotEqual(t, "rail_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
+
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE openrails.payments SET status = 'completed' WHERE transaction_id LIKE '%_sub_declined:%'`))
+	require.NoError(t, err)
+	require.Equal(t, "rail_intents", refusedTable(), "a completed payment under a refused enrollment")
+	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM openrails.payments WHERE transaction_id LIKE '%_sub_declined:%'`))
+	require.NoError(t, err)
 }
