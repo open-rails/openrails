@@ -95,6 +95,43 @@ type Attempt struct {
 	// Step keys an operation's attempts that carry no transaction id.
 	Step                            string
 	CardBrand, CardLast4, TokenType string
+	// Cycle is the rebill a rebill, dunning or customer retry belongs to.
+	Cycle *Cycle
+}
+
+// Cycle is one expected rebill: the subscription's paid period that came due
+// at DueAt (#1111).
+type Cycle struct {
+	SubscriptionID uuid.UUID
+	DueAt          time.Time
+}
+
+// RebillKind is a cycle charge's kind: the customer paying now, the cycle's
+// first try, or a later scheduled retry.
+func RebillKind(customer bool, failures int) Kind {
+	switch {
+	case customer:
+		return CustomerRetry
+	case failures == 0:
+		return Rebill
+	}
+	return DunningRetry
+}
+
+type observedKey struct{}
+
+// ObservedVia marks work under ctx as triggered by a webhook or a pull, for
+// the provider answers it records.
+func ObservedVia(ctx context.Context, via string) context.Context {
+	return context.WithValue(ctx, observedKey{}, via)
+}
+
+// ObservedFrom is ctx's mark, else fallback.
+func ObservedFrom(ctx context.Context, fallback string) string {
+	if via, ok := ctx.Value(observedKey{}).(string); ok && via != "" {
+		return via
+	}
+	return fallback
 }
 
 var last4Shape = regexp.MustCompile(`^[0-9]{4}$`)
@@ -143,6 +180,19 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		reason, action := string(verdict.Reason), verdict.Action.String()
 		row.Category, row.Reason, row.Action = string(verdict.Category), &reason, &action
 		row.ResponseCode = optional(verdict.Code)
+	}
+	if a.Cycle != nil {
+		if row.Currency == nil || row.Owner == string(OwnerNone) {
+			return errors.New("attempt: a rebill needs its currency and owner")
+		}
+		cycle, err := q.UpsertRebillCycle(ctx, gen.UpsertRebillCycleParams{
+			ID: uuidutil.NewV7(), MerchantID: a.MerchantID, SubscriptionID: a.Cycle.SubscriptionID, CustomerID: a.CustomerID, PspID: a.PSPID,
+			Rail: rail, Owner: row.Owner, DueAt: a.Cycle.DueAt.UTC(), Amount: a.Amount, Currency: *row.Currency,
+		})
+		if err != nil {
+			return err
+		}
+		row.CycleID, row.SubscriptionID = &cycle, &a.Cycle.SubscriptionID
 	}
 	if a.Target != "" {
 		checkout, err := checkoutFor(ctx, q, a)

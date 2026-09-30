@@ -4,7 +4,7 @@ INSERT INTO openrails.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
-    subscription_id, payment_method_id, payment_id, rail_intent_id, step
+    subscription_id, payment_method_id, payment_id, rail_intent_id, step, cycle_id
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
     sqlc.arg(rail)::text, sqlc.arg(kind)::text, sqlc.arg(owner)::text, sqlc.arg(card_entry)::text,
@@ -15,7 +15,7 @@ INSERT INTO openrails.payment_attempts (
     sqlc.arg(amount)::bigint, sqlc.narg(currency)::text, sqlc.arg(attempted_at)::timestamptz,
     sqlc.narg(checkout_id)::uuid, sqlc.narg(checkout_target)::text, sqlc.narg(subscription_id)::uuid,
     sqlc.narg(payment_method_id)::uuid, sqlc.narg(payment_id)::uuid, sqlc.narg(rail_intent_id)::uuid,
-    sqlc.arg(step)::text
+    sqlc.arg(step)::text, sqlc.narg(cycle_id)::uuid
 )
 ON CONFLICT DO NOTHING;
 

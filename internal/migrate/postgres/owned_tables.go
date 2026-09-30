@@ -56,6 +56,7 @@ var OwnedTables = []string{
 	"product_archive_operations",
 	"prices",
 	"products",
+	"rebill_cycles",
 	"provider_billing_observations",
 	"provider_billing_qualifications",
 	"psps",

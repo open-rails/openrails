@@ -51,7 +51,7 @@ INSERT INTO openrails.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
-    subscription_id, payment_method_id, payment_id, rail_intent_id, step
+    subscription_id, payment_method_id, payment_id, rail_intent_id, step, cycle_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::text, $8::text,
@@ -62,7 +62,7 @@ INSERT INTO openrails.payment_attempts (
     $22::bigint, $23::text, $24::timestamptz,
     $25::uuid, $26::text, $27::uuid,
     $28::uuid, $29::uuid, $30::uuid,
-    $31::text
+    $31::text, $32::uuid
 )
 ON CONFLICT DO NOTHING
 `
@@ -99,6 +99,7 @@ type InsertPaymentAttemptParams struct {
 	PaymentID       *uuid.UUID
 	RailIntentID    *uuid.UUID
 	Step            string
+	CycleID         *uuid.UUID
 }
 
 // #1110: idempotent on the gateway transaction id, else on the operation step.
@@ -135,6 +136,7 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 		arg.PaymentID,
 		arg.RailIntentID,
 		arg.Step,
+		arg.CycleID,
 	)
 	if err != nil {
 		return 0, err

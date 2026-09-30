@@ -88,6 +88,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.subscription_verifications 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.nmi_bulk_checkpoints TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payments TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE ON TABLE openrails.payment_attempts TO :"runtime_user";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.rebill_cycles TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.checkout_sessions TO :"runtime_user";
 GRANT SELECT,INSERT ON TABLE openrails.grants TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO :"runtime_user";
