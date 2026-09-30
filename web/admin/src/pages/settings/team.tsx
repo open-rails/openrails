@@ -374,10 +374,11 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
             <DialogHeader>
               <DialogTitle>Invite a teammate</DialogTitle>
               <DialogDescription>
-                Someone who already has an account joins the team straight away.
+                Someone whose account has verified this email joins the team
+                straight away.
                 {invitesEnabled
                   ? " Anyone else gets a single-use link you can send them."
-                  : " Anyone else has to create an account first, because this deployment does not send invites."}
+                  : " Anyone else needs an account with this email verified first, because this deployment does not send invites."}
               </DialogDescription>
             </DialogHeader>
             <form
