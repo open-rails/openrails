@@ -52,10 +52,12 @@ func TestNMIDeclineReport(t *testing.T) {
 	l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor) // its signup sale is a one-off sale
 	w.converge()
 	w.newCustomer().saveCard("nmi", card{Brand: "mastercard", Last4: "4444"})
-	w.nmi.RenewSchedule(l.railSub, true)
+	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+	require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(true))) // money NMI moved is recorded
+	w.settle()
 	w.nmi.SetDecline(visa.Last4, "202")
-	w.nmi.RenewSchedule(l.railSub, false)
-	w.advance(70 * day) // past both schedule dates
+	w.nmi.RenewSchedule(l.railSub, false) // refused next period, seen by nobody
+	w.advance(31 * day)
 	attempts, payments := w.rows("payment_attempts"), w.rows("payments")
 
 	var report struct {
