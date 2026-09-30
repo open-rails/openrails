@@ -142,9 +142,9 @@ type PaymentMethodError struct {
 	Message        string
 	// Rail is the provider vocabulary LocalizationID belongs to ("" = nmi).
 	Rail string
-	// Failure is the customer-facing decline, when the refusal's full
-	// provider evidence (AVS/CVV, decline codes) was available.
-	Failure *openrails.PaymentFailure
+	// Reason is the decline reason classified with the refusal's full
+	// evidence (AVS/CVV); empty means classify LocalizationID.
+	Reason openrails.DeclineReason
 }
 
 func (e *PaymentMethodError) Error() string {
@@ -286,8 +286,8 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 			if code == "" && nmiErr.ResponseCode != 0 {
 				code = fmt.Sprintf("nmi_response_%d", nmiErr.ResponseCode)
 			}
-			failure := decline.ClassifyEvidence(decline.Evidence{Rail: "nmi", Code: code, AVS: nmiErr.AVSResponse, CVV: nmiErr.CVVResponse, Text: nmiErr.ResponseText}).PaymentFailure()
-			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error()), Rail: "nmi", Failure: &failure}
+			reason := decline.ClassifyEvidence(decline.Evidence{Rail: "nmi", Code: code, AVS: nmiErr.AVSResponse, CVV: nmiErr.CVVResponse, Text: nmiErr.ResponseText}).Reason
+			return nil, &PaymentMethodError{Err: err, LocalizationID: code, Message: fmt.Sprintf("card verification failed: %s", err.Error()), Rail: "nmi", Reason: reason}
 		}
 		return nil, fmt.Errorf("card verification did not complete; add the card again: %w", err)
 	}

@@ -268,7 +268,9 @@ func (CustodianCaptureAction) GoString() string { return "[private custodian cap
 // insufficient_funds, over_limit, card_not_supported, currency_not_supported,
 // processing_error, try_again_later, authentication_required, do_not_honor,
 // generic_decline); fraud-related declines always read generic_decline.
-// Field names the card field to correct: cvc, postal_code, number, expiry or "".
+// Message is OpenRails' copy for the buyer. Field names the card field to
+// correct: cvc, postal_code, number, expiry or "". DeclineReason.Failure
+// renders one.
 type PaymentFailure struct {
 	Reason  string `json:"reason"`
 	Message string `json:"message"`

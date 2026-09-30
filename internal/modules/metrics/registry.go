@@ -2,9 +2,9 @@ package metrics
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/billing/decline"
 )
 
 // The registry is the single source of truth for the metrics vocabulary:
@@ -139,7 +139,7 @@ var Dimensions = []Dimension{
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
 	{Name: "token_type", Description: "credential form presented at charge time (#796): network_token | pan_via_proxy (custodian-held FPAN via proxy) | psp_token (the PSP's own stored credential) | unknown (legacy/non-card); approval_rate by token_type = the network-token uplift", Values: []string{"network_token", "pan_via_proxy", "psp_token", "unknown"}},
 	{Name: "attempt_kind", Description: "payment attempt kind stamped at write time: initial | renewal | unknown (pre-instrumentation or imported rows)", Values: []string{"initial", "renewal", "unknown"}},
-	{Name: "failure_reason", Description: "decline reason on failed payments, from internal/billing/decline (raw code kept verbatim in failure_code)", Values: decline.Reasons()},
+	{Name: "failure_reason", Description: "decline reason on failed payments, from internal/billing/decline (raw code kept verbatim in failure_code)", Values: declineReasonValues()},
 	{Name: "subscriber_type", Description: "first_time | returning (customer had an earlier ended subscription with this merchant)", Values: []string{"first_time", "returning"}},
 	{Name: "entitlement", Description: "entitlement key string (e.g. premium)"},
 	{Name: "discount_code", Description: "discount code on the payment (empty = none)"},
@@ -626,5 +626,15 @@ func (m *Measure) components() []*Measure {
 	var out []*Measure
 	out = append(out, num.components()...)
 	out = append(out, den.components()...)
+	return out
+}
+
+// declineReasonValues are the failure_reason dimension's values.
+func declineReasonValues() []string {
+	var out []string
+	for _, r := range openrails.DeclineReasons() {
+		out = append(out, string(r))
+	}
+	slices.Sort(out)
 	return out
 }

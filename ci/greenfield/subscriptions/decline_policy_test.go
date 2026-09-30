@@ -29,6 +29,10 @@ func TestHostedNewCardSecurityCodeMismatch(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "incorrect_cvc", failure.Reason)
 	require.Equal(t, "cvc", failure.Field)
+	reason, ok := openrails.DeclineReasonFrom(err)
+	require.True(t, ok)
+	require.Equal(t, openrails.DeclineIncorrectCVC, reason, "decline_reason carries the AVS/CVV evidence too")
+	require.Equal(t, reason.Failure(), *failure)
 	require.Empty(t, h.subscriptions())
 	require.Empty(t, h.methods())
 }

@@ -1,15 +1,19 @@
 package decline
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails"
 )
 
 // Every table row names a reason with a policy, and every reason is used.
 func TestTablesAreComplete(t *testing.T) {
-	used := map[Reason]bool{UnknownReason: true}
+	used := map[openrails.DeclineReason]bool{openrails.DeclineUnknown: true}
 	for rail, table := range rails {
 		for code, reason := range table.codes {
 			_, ok := reasons[reason]
@@ -17,10 +21,9 @@ func TestTablesAreComplete(t *testing.T) {
 			used[reason] = true
 		}
 	}
-	for reason, spec := range reasons {
+	require.ElementsMatch(t, openrails.DeclineReasons(), slices.Collect(maps.Keys(reasons)), "every public reason has a policy")
+	for reason := range reasons {
 		require.True(t, used[reason], "reason %q is in no rail table", reason)
-		_, ok := customerCopy[spec.customer]
-		require.True(t, ok, "reason %q: buyer reason %q has no copy", reason, spec.customer)
 	}
 	for code, c := range nmiCodes {
 		require.NotEmpty(t, c.localization, "nmi %d", code)
@@ -51,28 +54,28 @@ func TestNMIActions(t *testing.T) {
 func TestClassifyEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		e      Evidence
-		reason Reason
+		reason openrails.DeclineReason
 		cov    Coverage
 	}{
-		{Evidence{Rail: "nmi", Code: "200", CVV: "N"}, IncorrectCVC, Mapped},
-		{Evidence{Rail: "nmi", Code: "nmi_do_not_honor", AVS: "N"}, IncorrectZip, Mapped},
-		{Evidence{Rail: "nmi", Code: "200", AVS: "W"}, IncorrectAddress, Mapped},
-		{Evidence{Rail: "nmi", Code: "202", AVS: "N"}, InsufficientFunds, Mapped},
-		{Evidence{Rail: "nmi", Code: "252", CVV: "N"}, StolenCard, Mapped},
-		{Evidence{Rail: "nmi", Code: "300", Text: "Duplicate transaction REFID:1"}, DuplicateTransaction, Mapped},
-		{Evidence{Rail: "stripe", Code: "", FallbackCode: "expired_card"}, ExpiredCard, Mapped},
-		{Evidence{Rail: "stripe", Code: "generic_decline", CVV: "fail"}, IncorrectCVC, Mapped},
-		{Evidence{Rail: "ccbill", Code: "BE-950"}, ProcessingError, Mapped},
-		{Evidence{Rail: "nmi", Code: "999"}, UnknownReason, Unmapped},
-		{Evidence{Rail: "nmi", Code: ""}, UnknownReason, NoCode},
-		{Evidence{Rail: "vaulted_card", Code: "202"}, UnknownReason, NoCode},
+		{Evidence{Rail: "nmi", Code: "200", CVV: "N"}, openrails.DeclineIncorrectCVC, Mapped},
+		{Evidence{Rail: "nmi", Code: "nmi_do_not_honor", AVS: "N"}, openrails.DeclineIncorrectZip, Mapped},
+		{Evidence{Rail: "nmi", Code: "200", AVS: "W"}, openrails.DeclineIncorrectAddress, Mapped},
+		{Evidence{Rail: "nmi", Code: "202", AVS: "N"}, openrails.DeclineInsufficientFunds, Mapped},
+		{Evidence{Rail: "nmi", Code: "252", CVV: "N"}, openrails.DeclineStolenCard, Mapped},
+		{Evidence{Rail: "nmi", Code: "300", Text: "Duplicate transaction REFID:1"}, openrails.DeclineDuplicateTransaction, Mapped},
+		{Evidence{Rail: "stripe", Code: "", FallbackCode: "expired_card"}, openrails.DeclineExpiredCard, Mapped},
+		{Evidence{Rail: "stripe", Code: "generic_decline", CVV: "fail"}, openrails.DeclineIncorrectCVC, Mapped},
+		{Evidence{Rail: "ccbill", Code: "BE-950"}, openrails.DeclineProcessingError, Mapped},
+		{Evidence{Rail: "nmi", Code: "999"}, openrails.DeclineUnknown, Unmapped},
+		{Evidence{Rail: "nmi", Code: ""}, openrails.DeclineUnknown, NoCode},
+		{Evidence{Rail: "vaulted_card", Code: "202"}, openrails.DeclineUnknown, NoCode},
 	} {
 		r := ClassifyEvidence(tc.e)
 		require.Equal(t, tc.reason, r.Reason, "%+v", tc.e)
 		require.Equal(t, tc.cov, r.Coverage, "%+v", tc.e)
 	}
-	require.Equal(t, CustomerGeneric, Classify("nmi", "251").PaymentFailure().Reason, "fraud signals stay hidden")
-	require.Equal(t, "cvc", ClassifyEvidence(Evidence{Rail: "nmi", Code: "200", CVV: "N"}).PaymentFailure().Field)
+	require.Equal(t, "generic_decline", Classify("nmi", "251").Reason.Failure().Reason, "fraud signals stay hidden")
+	require.Equal(t, "cvc", ClassifyEvidence(Evidence{Rail: "nmi", Code: "200", CVV: "N"}).Reason.Failure().Field)
 }
 
 // Buyers see a fixed taxonomy; fraud signals never reveal themselves.
@@ -81,30 +84,30 @@ func TestPaymentFailure(t *testing.T) {
 		e             Evidence
 		reason, field string
 	}{
-		{Evidence{Rail: "stripe", Code: "incorrect_cvc", FallbackCode: "card_declined"}, CustomerIncorrectCVC, "cvc"},
-		{Evidence{Rail: "stripe", Code: "expired_card"}, CustomerExpiredCard, "expiry"},
-		{Evidence{Rail: "stripe", Code: "incorrect_zip"}, CustomerIncorrectZip, "postal_code"},
-		{Evidence{Rail: "stripe", FallbackCode: "processing_error"}, CustomerProcessingError, ""},
-		{Evidence{Rail: "stripe", Code: "generic_decline", AVS: "fail"}, CustomerIncorrectZip, "postal_code"},
-		{Evidence{Rail: "stripe", Code: "insufficient_funds", AVS: "fail"}, CustomerInsufficientFunds, ""},
-		{Evidence{Rail: "stripe", Code: "payment_intent_authentication_failure"}, CustomerAuthenticationRequired, ""},
-		{Evidence{Rail: "stripe", Code: "something_new"}, CustomerGeneric, ""},
-		{Evidence{Rail: "stripe", Code: "fraudulent", CVV: "fail"}, CustomerGeneric, ""},
-		{Evidence{Rail: "nmi", Code: "203"}, CustomerOverLimit, ""},
-		{Evidence{Rail: "nmi", Code: "expired_card"}, CustomerExpiredCard, "expiry"},
-		{Evidence{Rail: "nmi", Code: "invalid_card_security_code"}, CustomerIncorrectCVC, "cvc"},
-		{Evidence{Rail: "nmi", Code: "nmi_response_201"}, CustomerDoNotHonor, ""},
-		{Evidence{Rail: "nmi", Code: "transaction_was_declined_by_processor", AVS: "A"}, CustomerIncorrectZip, "postal_code"},
-		{Evidence{Rail: "nmi", Code: "201", AVS: "Z"}, CustomerIncorrectAddress, ""},
-		{Evidence{Rail: "nmi", Code: "421"}, CustomerTryAgainLater, ""},
-		{Evidence{Rail: "nmi", Code: "pick_up_card", CVV: "N"}, CustomerGeneric, ""},
-		{Evidence{Rail: "nmi", Code: "nmi_response_253"}, CustomerGeneric, ""},
-		{Evidence{Rail: "nmi"}, CustomerGeneric, ""},
+		{Evidence{Rail: "stripe", Code: "incorrect_cvc", FallbackCode: "card_declined"}, "incorrect_cvc", "cvc"},
+		{Evidence{Rail: "stripe", Code: "expired_card"}, "expired_card", "expiry"},
+		{Evidence{Rail: "stripe", Code: "incorrect_zip"}, "incorrect_zip", "postal_code"},
+		{Evidence{Rail: "stripe", FallbackCode: "processing_error"}, "processing_error", ""},
+		{Evidence{Rail: "stripe", Code: "generic_decline", AVS: "fail"}, "incorrect_zip", "postal_code"},
+		{Evidence{Rail: "stripe", Code: "insufficient_funds", AVS: "fail"}, "insufficient_funds", ""},
+		{Evidence{Rail: "stripe", Code: "payment_intent_authentication_failure"}, "authentication_required", ""},
+		{Evidence{Rail: "stripe", Code: "something_new"}, "generic_decline", ""},
+		{Evidence{Rail: "stripe", Code: "fraudulent", CVV: "fail"}, "generic_decline", ""},
+		{Evidence{Rail: "nmi", Code: "203"}, "over_limit", ""},
+		{Evidence{Rail: "nmi", Code: "expired_card"}, "expired_card", "expiry"},
+		{Evidence{Rail: "nmi", Code: "invalid_card_security_code"}, "incorrect_cvc", "cvc"},
+		{Evidence{Rail: "nmi", Code: "nmi_response_201"}, "do_not_honor", ""},
+		{Evidence{Rail: "nmi", Code: "transaction_was_declined_by_processor", AVS: "A"}, "incorrect_zip", "postal_code"},
+		{Evidence{Rail: "nmi", Code: "201", AVS: "Z"}, "incorrect_address", ""},
+		{Evidence{Rail: "nmi", Code: "421"}, "try_again_later", ""},
+		{Evidence{Rail: "nmi", Code: "pick_up_card", CVV: "N"}, "generic_decline", ""},
+		{Evidence{Rail: "nmi", Code: "nmi_response_253"}, "generic_decline", ""},
+		{Evidence{Rail: "nmi"}, "generic_decline", ""},
 	} {
-		got := ClassifyEvidence(tc.e).PaymentFailure()
+		got := ClassifyEvidence(tc.e).Reason.Failure()
 		require.Equal(t, tc.reason, got.Reason, "%+v", tc.e)
 		require.Equal(t, tc.field, got.Field, "%+v", tc.e)
 		require.NotEmpty(t, got.Message)
 	}
-	require.Equal(t, Failure(CustomerGeneric), Failure("not_a_reason"))
+	require.Equal(t, openrails.DeclineGeneric.Failure(), openrails.DeclineReason("not_a_reason").Failure())
 }

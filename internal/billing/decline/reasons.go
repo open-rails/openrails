@@ -1,64 +1,15 @@
 package decline
 
-import "slices"
-
-// Reason is the rail-agnostic cause of a refusal, recorded as failure_reason.
-type Reason string
-
-const (
-	GenericDecline    Reason = "generic_decline"
-	DoNotHonor        Reason = "do_not_honor"
-	InsufficientFunds Reason = "insufficient_funds"
-	OverLimit         Reason = "over_limit"
-	CallIssuer        Reason = "call_issuer"
-	RetryLater        Reason = "retry_later"
-	TryAgainLater     Reason = "try_again_later"
-	SecurityViolation Reason = "security_violation"
-	RestrictedCard    Reason = "restricted_card"
-
-	IncorrectNumber      Reason = "incorrect_number"
-	NoSuchIssuer         Reason = "no_such_issuer"
-	InvalidAccount       Reason = "invalid_account"
-	ExpiredCard          Reason = "expired_card"
-	InvalidExpiry        Reason = "invalid_expiry"
-	IncorrectCVC         Reason = "incorrect_cvc"
-	IncorrectZip         Reason = "incorrect_zip"
-	IncorrectAddress     Reason = "incorrect_address"
-	InvalidPIN           Reason = "invalid_pin"
-	UpdateCardholderData Reason = "update_cardholder_data"
-
-	TransactionNotAllowed  Reason = "transaction_not_allowed"
-	CardNotSupported       Reason = "card_not_supported"
-	CurrencyNotSupported   Reason = "currency_not_supported"
-	AuthenticationRequired Reason = "authentication_required"
-	PickupCard             Reason = "pickup_card"
-	LostCard               Reason = "lost_card"
-	StolenCard             Reason = "stolen_card"
-	Fraudulent             Reason = "fraudulent"
-	StopRecurring          Reason = "stop_recurring"
-
-	GatewayRejected Reason = "gateway_rejected"
-	BlockedByPSP    Reason = "blocked_by_psp"
-
-	ProcessingError      Reason = "processing_error"
-	CommunicationError   Reason = "communication_error"
-	IssuerUnavailable    Reason = "issuer_unavailable"
-	InvalidRequest       Reason = "invalid_request"
-	MerchantConfig       Reason = "merchant_config"
-	DuplicateTransaction Reason = "duplicate_transaction"
-
-	UnknownReason Reason = "unknown"
-)
+import "github.com/open-rails/openrails"
 
 type reasonSpec struct {
 	category  Category
 	action    Action
-	customer  string
 	transient bool // the processor asked to try again shortly
-	hidden    bool // fraud signals are never shown to the buyer
 }
 
-// reasons is the policy. Actions follow #1108 decision 2:
+// reasons is the policy for each public reason; the buyer's copy lives with
+// the reason (openrails.DeclineReason.Failure). Actions follow #1108 decision 2:
 //   - retry: issuer soft/generic declines (Visa category 2/4: retries allowed)
 //     and our or the gateway's errors;
 //   - fix_payment_method: bad card data, and codes that forbid re-attempts on
@@ -68,63 +19,53 @@ type reasonSpec struct {
 //
 // 250/251 wait for a new card by owner decision (or#870): losing a wallet must
 // not cost a subscription.
-var reasons = map[Reason]reasonSpec{
-	GenericDecline:    {category: IssuerSoft, action: Retry, customer: CustomerGeneric},
-	DoNotHonor:        {category: IssuerSoft, action: Retry, customer: CustomerDoNotHonor},
-	InsufficientFunds: {category: IssuerSoft, action: Retry, customer: CustomerInsufficientFunds},
-	OverLimit:         {category: IssuerSoft, action: Retry, customer: CustomerOverLimit},
-	CallIssuer:        {category: IssuerSoft, action: Retry, customer: CustomerDoNotHonor},
-	RetryLater:        {category: IssuerSoft, action: Retry, customer: CustomerTryAgainLater},
-	TryAgainLater:     {category: IssuerSoft, action: Retry, customer: CustomerTryAgainLater, transient: true},
-	SecurityViolation: {category: IssuerHard, action: Retry, customer: CustomerGeneric, hidden: true},
-	RestrictedCard:    {category: IssuerHard, action: Retry, customer: CustomerGeneric, hidden: true},
+var reasons = map[openrails.DeclineReason]reasonSpec{
+	openrails.DeclineGeneric:           {category: IssuerSoft, action: Retry},
+	openrails.DeclineDoNotHonor:        {category: IssuerSoft, action: Retry},
+	openrails.DeclineInsufficientFunds: {category: IssuerSoft, action: Retry},
+	openrails.DeclineOverLimit:         {category: IssuerSoft, action: Retry},
+	openrails.DeclineCallIssuer:        {category: IssuerSoft, action: Retry},
+	openrails.DeclineRetryLater:        {category: IssuerSoft, action: Retry},
+	openrails.DeclineTryAgainLater:     {category: IssuerSoft, action: Retry, transient: true},
+	openrails.DeclineSecurityViolation: {category: IssuerHard, action: Retry},
+	openrails.DeclineRestrictedCard:    {category: IssuerHard, action: Retry},
 
-	IncorrectNumber:      {category: CardData, action: FixPaymentMethod, customer: CustomerIncorrectNumber},
-	NoSuchIssuer:         {category: CardData, action: FixPaymentMethod, customer: CustomerIncorrectNumber},
-	InvalidAccount:       {category: CardData, action: FixPaymentMethod, customer: CustomerIncorrectNumber},
-	ExpiredCard:          {category: CardData, action: FixPaymentMethod, customer: CustomerExpiredCard},
-	InvalidExpiry:        {category: CardData, action: FixPaymentMethod, customer: CustomerInvalidExpiry},
-	IncorrectCVC:         {category: CardData, action: FixPaymentMethod, customer: CustomerIncorrectCVC},
-	IncorrectZip:         {category: CardData, action: FixPaymentMethod, customer: CustomerIncorrectZip},
-	IncorrectAddress:     {category: CardData, action: FixPaymentMethod, customer: CustomerIncorrectAddress},
-	InvalidPIN:           {category: CardData, action: FixPaymentMethod, customer: CustomerGeneric},
-	UpdateCardholderData: {category: CardData, action: FixPaymentMethod, customer: CustomerDoNotHonor},
+	openrails.DeclineIncorrectNumber:      {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineNoSuchIssuer:         {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineInvalidAccount:       {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineExpiredCard:          {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineInvalidExpiry:        {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineIncorrectCVC:         {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineIncorrectZip:         {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineIncorrectAddress:     {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineInvalidPIN:           {category: CardData, action: FixPaymentMethod},
+	openrails.DeclineUpdateCardholderData: {category: CardData, action: FixPaymentMethod},
 
-	TransactionNotAllowed:  {category: IssuerHard, action: FixPaymentMethod, customer: CustomerCardNotSupported},
-	CardNotSupported:       {category: IssuerHard, action: FixPaymentMethod, customer: CustomerCardNotSupported},
-	CurrencyNotSupported:   {category: IssuerHard, action: FixPaymentMethod, customer: CustomerCurrencyNotSupported},
-	AuthenticationRequired: {category: IssuerHard, action: FixPaymentMethod, customer: CustomerAuthenticationRequired},
-	PickupCard:             {category: IssuerHard, action: FixPaymentMethod, customer: CustomerGeneric, hidden: true},
-	LostCard:               {category: IssuerHard, action: FixPaymentMethod, customer: CustomerGeneric, hidden: true},
-	StolenCard:             {category: IssuerHard, action: NonRecoverable, customer: CustomerGeneric, hidden: true},
-	Fraudulent:             {category: IssuerHard, action: NonRecoverable, customer: CustomerGeneric, hidden: true},
-	StopRecurring:          {category: IssuerHard, action: NonRecoverable, customer: CustomerDoNotHonor},
+	openrails.DeclineTransactionNotAllowed:  {category: IssuerHard, action: FixPaymentMethod},
+	openrails.DeclineCardNotSupported:       {category: IssuerHard, action: FixPaymentMethod},
+	openrails.DeclineCurrencyNotSupported:   {category: IssuerHard, action: FixPaymentMethod},
+	openrails.DeclineAuthenticationRequired: {category: IssuerHard, action: FixPaymentMethod},
+	openrails.DeclinePickupCard:             {category: IssuerHard, action: FixPaymentMethod},
+	openrails.DeclineLostCard:               {category: IssuerHard, action: FixPaymentMethod},
+	openrails.DeclineStolenCard:             {category: IssuerHard, action: NonRecoverable},
+	openrails.DeclineFraudulent:             {category: IssuerHard, action: NonRecoverable},
+	openrails.DeclineStopRecurring:          {category: IssuerHard, action: NonRecoverable},
 
-	GatewayRejected: {category: GatewayRule, action: Retry, customer: CustomerProcessingError},
-	BlockedByPSP:    {category: GatewayRule, action: FixPaymentMethod, customer: CustomerGeneric, hidden: true},
+	openrails.DeclineGatewayRejected: {category: GatewayRule, action: Retry},
+	openrails.DeclineBlockedByPSP:    {category: GatewayRule, action: FixPaymentMethod},
 
-	ProcessingError:      {category: SystemError, action: Retry, customer: CustomerProcessingError, transient: true},
-	CommunicationError:   {category: SystemError, action: Retry, customer: CustomerTryAgainLater, transient: true},
-	IssuerUnavailable:    {category: SystemError, action: Retry, customer: CustomerTryAgainLater, transient: true},
-	InvalidRequest:       {category: SystemError, action: Retry, customer: CustomerProcessingError},
-	MerchantConfig:       {category: SystemError, action: Retry, customer: CustomerProcessingError},
-	DuplicateTransaction: {category: SystemError, action: Retry, customer: CustomerProcessingError},
+	openrails.DeclineProcessingError:      {category: SystemError, action: Retry, transient: true},
+	openrails.DeclineCommunicationError:   {category: SystemError, action: Retry, transient: true},
+	openrails.DeclineIssuerUnavailable:    {category: SystemError, action: Retry, transient: true},
+	openrails.DeclineInvalidRequest:       {category: SystemError, action: Retry},
+	openrails.DeclineMerchantConfig:       {category: SystemError, action: Retry},
+	openrails.DeclineDuplicateTransaction: {category: SystemError, action: Retry},
 
-	UnknownReason: {category: Unknown, action: Retry, customer: CustomerGeneric},
-}
-
-// Reasons lists every reason, for metric dimensions.
-func Reasons() []string {
-	out := make([]string, 0, len(reasons))
-	for r := range reasons {
-		out = append(out, string(r))
-	}
-	slices.Sort(out)
-	return out
+	openrails.DeclineUnknown: {category: Unknown, action: Retry},
 }
 
 // ProviderFault reports a refusal another card cannot fix: the gateway, the
 // processor or our configuration refused it.
-func (r Result) ProviderFault() bool {
-	return (r.Category == SystemError && r.Reason != DuplicateTransaction) || r.Reason == GatewayRejected
+func ProviderFault(reason openrails.DeclineReason) bool {
+	return (reasons[reason].category == SystemError && reason != openrails.DeclineDuplicateTransaction) || reason == openrails.DeclineGatewayRejected
 }
