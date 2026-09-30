@@ -103,15 +103,6 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 	if params.DisplayName != nil && strings.TrimSpace(*params.DisplayName) == "" {
 		return nil, apperr.Invalidf("display_name must not be empty")
 	}
-	if params.APIHost != nil && strings.TrimSpace(*params.APIHost) != "" {
-		host := merchants.NormalizeAPIHost(*params.APIHost)
-		if err := merchants.ValidateAPIHost(host); err != nil {
-			return nil, apperr.Invalidf("invalid api_host")
-		}
-		if merchants.ClaimableAPIHost(host, s.rt.ReservedAPIHosts) != nil {
-			return nil, apperr.New(400, "api_host_reserved", "that api_host serves this deployment; use a host of your own")
-		}
-	}
 	digest, err := merchantApplicationDigest(params)
 	if err != nil {
 		return nil, err
@@ -165,14 +156,17 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 			directory.DisplayName = strings.TrimSpace(*params.DisplayName)
 		}
 		if params.APIHost != nil {
+			// A new host must be claimed and proven (#1107); the document may
+			// only keep or clear the proven one.
+			host := merchants.NormalizeAPIHost(*params.APIHost)
+			if host != "" && host != current.APIHost {
+				return apperr.New(409, "api_host_requires_proof", "claim a new api_host at PUT /v1/merchant/api-host and prove it; the configuration document only keeps or clears the proven host")
+			}
 			directory.SetApiHost = true
-			directory.ApiHost = merchants.NormalizeAPIHost(*params.APIHost)
+			directory.ApiHost = host
 		}
 		if directory.SetDisplayName || directory.SetApiHost {
 			if err := q.ApplyMerchantConfigurationDirectory(ctx, directory); err != nil {
-				if db.IsUniqueViolation(err) {
-					return apperr.New(409, "api_host_taken", "that api_host is already assigned to another merchant")
-				}
 				return err
 			}
 		}

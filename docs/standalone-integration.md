@@ -259,9 +259,10 @@ subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
 **Per-merchant API hosts (#734).** A multi-merchant deployment can give each
-merchant a canonical hostname (`PUT /v1/merchant/api-host`, or
-`cp.SetMerchantAPIHost` on an attached control plane; resolved live on the next
-request, no restart). Host resolution then routes `/v1/webhooks/{rail}`
+merchant a canonical hostname (the owner claims it with `PUT /v1/merchant/api-host`
+and proves control of the domain with a TXT record, then
+`POST /v1/merchant/api-host/verify`; operators bind directly with
+`cp.SetMerchantAPIHost`). It resolves live on the next request, no restart. Host resolution then routes `/v1/webhooks/{rail}`
 without the path slug, and enforces Host-merchant == issuer-merchant on every
 merchant-scoped route: a token minted for merchant A is rejected on merchant
 B's host even though it verifies.

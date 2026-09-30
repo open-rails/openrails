@@ -28,6 +28,7 @@ GRANT ALL ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.destructive_action_switch TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_slug_aliases TO :"runtime_user";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_api_host_claims TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.metered_rating_watermarks TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO :"runtime_user";
 GRANT SELECT,INSERT ON TABLE openrails.maintenance_runs TO :"runtime_user";

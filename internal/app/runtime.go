@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -108,6 +109,9 @@ type Runtime struct {
 	// public billing URL, console and AuthKit issuer. No merchant may claim one
 	// as its api_host. Written before serving (ReserveAPIHosts).
 	ReservedAPIHosts []string
+	// DNSResolver answers api_host proof lookups (#1107); nil is the system
+	// resolver.
+	DNSResolver *net.Resolver
 
 	// RouteCapabilities is the advisory, boot-probed view of what OpenRails can
 	// actually do (#661), used to gate the provider route surface. Nil means
