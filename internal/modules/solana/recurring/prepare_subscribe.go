@@ -123,11 +123,10 @@ type PrepareSubscribeInput struct {
 	PeriodHours      uint64
 	PlanCreatedAt    int64
 
-	// Reference, when set, attaches a Solana Pay REFERENCE (read-only, non-signer
-	// account meta) to the returned step's instruction so the reference poller can
-	// find the landed tx via getSignaturesForAddress(reference). Used by the Solana
-	// Pay transaction-request subscribe path (a QR scan); empty for the
-	// wallet-connected subscribe (the browser confirms by signature directly).
+	// Reference is the checkout's Solana Pay REFERENCE (read-only, non-signer
+	// account meta). The merchant co-signs the bundle carrying it, which binds
+	// the first payment to that checkout (ConfirmEnrollment requires it), and the
+	// reference poller finds the landed tx via getSignaturesForAddress.
 	Reference string
 }
 
@@ -274,8 +273,9 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// subscribe — exactly like the upgrade bundle (prepare_tier_change.go). The
 	// transfer requires the merchant/cranker as the caller-signer, so the cranker
 	// pre-signs that slot via BuildPartiallySignedTx and the wallet completes the
-	// subscribe/fee-payer slot. Both land or both revert -> no
-	// "subscribed-but-not-charged" window; confirm just verifies the bundle landed.
+	// subscribe/fee-payer slot. Both land or both revert. The wallet can still
+	// send subscribe on its own, so confirm requires this pull in the landed
+	// transaction (ConfirmEnrollment), never just the subscription account.
 	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive receiver ata: %w", err)
@@ -298,9 +298,9 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	if s.signer == nil {
 		return nil, fmt.Errorf("recurring: atomic subscribe requires a cranker signer")
 	}
-	// Solana Pay subscribe: carry the reference (its own instruction — see
-	// referenceTagInstruction) so the poller can detect the landed bundle and
-	// route it to ConfirmEnrollment.
+	// Carry the checkout's reference (its own instruction — see
+	// referenceTagInstruction): it binds the bundle to the checkout and lets the
+	// poller detect it.
 	ixs, err = withReference(ixs, subscriber, in.Reference)
 	if err != nil {
 		return nil, err

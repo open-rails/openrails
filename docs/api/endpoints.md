@@ -84,7 +84,6 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
 | POST | `/v1/checkout/{id}/confirm` | bearer | Confirm a Solana session: `{ payment: { rail: "solana", signature, wallet? } }` |
 | GET | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transfer/transaction request for the session (buyer signs; mounted when a Solana rail is configured) |
 | POST | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transaction-request callback |
-| POST | `/v1/solana/recurring/enroll` | bearer (handler-enforced) | Confirm a Solana recurring enrollment after the wallet signs subscribe; OpenRails then charges the first cycle. Mounted only when OpenRails has a Solana signer |
 
 `POST /v1/checkout` body:
 

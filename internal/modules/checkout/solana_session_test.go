@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -98,10 +99,6 @@ func TestSolanaSessionFlows(t *testing.T) {
 	require.False(t, isSolanaTransferRequestFlow(mk(models.RailSolana, "", "transaction_request")))
 	require.False(t, isSolanaTransferRequestFlow(nil))
 
-	notLanded := fmt.Errorf("recurring: subscription %s not found on-chain — did the wallet run the atomic subscribe?", "PdA")
-	require.True(t, isSolanaSubscribeNotLandedErr(fmt.Errorf("wrap: %w", notLanded)))
-	require.False(t, isSolanaSubscribeNotLandedErr(errors.New("create membership: db down")))
-	require.False(t, isSolanaSubscribeNotLandedErr(nil))
 }
 
 // A poller-verified (settled) payment outlives the quote window; without that
@@ -134,6 +131,9 @@ func (noopSolanaTransactions) BuildPaymentTransactionFromQuote(context.Context, 
 }
 func (noopSolanaTransactions) VerifyTransactionWithContent(context.Context, string, uint64, string, string, string, *string, uuid.UUID, solanaint.PurchaseMemoPolicy) error {
 	return errors.New("unexpected verify")
+}
+func (noopSolanaTransactions) TransactionBlockTime(context.Context, string) (*time.Time, error) {
+	return nil, errors.New("unexpected block time read")
 }
 
 // Build and confirm use only the persisted quote; a session missing any part
@@ -187,6 +187,42 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 		delete(s.RailState, key)
 		_, err := solanaBuildRequestFromSession(s, "payer_wallet", "USDC")
 		require.ErrorIs(t, err, ErrCheckoutSessionValidation, key)
+	}
+}
+
+type landedSolanaTransactions struct {
+	noopSolanaTransactions
+	landedAt time.Time
+}
+
+func (landedSolanaTransactions) VerifyTransactionWithContent(context.Context, string, uint64, string, string, string, *string, uuid.UUID, solanaint.PurchaseMemoPolicy) error {
+	return nil
+}
+func (l landedSolanaTransactions) TransactionBlockTime(context.Context, string) (*time.Time, error) {
+	return &l.landedAt, nil
+}
+
+// A verified transfer landing past its quote's late window settles at a stale
+// price: confirm refuses it before anything is claimed or granted, exactly as
+// the poller does.
+func TestSolanaConfirmRefusesStaleQuote(t *testing.T) {
+	expires := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		landed time.Time
+		stale  bool
+	}{
+		{expires.Add(solanaint.LateSettlementWindow + time.Second), true},
+		{expires.Add(solanaint.LateSettlementWindow), false},
+	} {
+		ref := solanaReference
+		session := &models.CheckoutSession{
+			ID: uuid.New(), CustomerID: uuid.New(), PriceID: new(uuid.New()), Amount: new(int64(10_000)), Currency: new("USD"), Reference: &ref, ExpiresAt: &expires,
+			RailState: map[string]any{"token_symbol": "USDC", "token_mint": devnetUSDCMint, "token_amount": "100000000", "recipient": recipientWallet, "flow": "transaction_request"},
+		}
+		svc := &CheckoutSessionService{rails: solanaRails(), solanaTransactionService: landedSolanaTransactions{landedAt: tc.landed}, checkoutService: &capturingExecutor{}}
+		_, err := svc.confirmSolanaSession(context.Background(), session, &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: "sig"}}, &UserIdentity{ID: session.CustomerID.String()})
+		require.Error(t, err)
+		require.Equal(t, tc.stale, errors.Is(err, ErrCheckoutSessionExpired), "%v", err)
 	}
 }
 

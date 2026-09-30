@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/pkg/merchant"
 	redis "github.com/redis/go-redis/v9"
@@ -52,11 +53,11 @@ type checkoutSessionMarker interface {
 	// tier-change for a lifecycle Solana Pay session and marks it succeeded. It is
 	// idempotent. Implemented by *checkout.CheckoutSessionService.
 	ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error
-	// ConfirmSolanaSubscribeSession advances a RECURRING subscribe Solana Pay
-	// session on a confirmed reference: if only init landed it stays pending; once
-	// the subscription PDA is funded (the atomic [subscribe+transfer] landed) it
-	// enrolls the membership and marks the session succeeded. Idempotent.
-	// Implemented by *checkout.CheckoutSessionService.
+	// ConfirmSolanaSubscribeSession settles a RECURRING subscribe Solana Pay
+	// session from a confirmed signature carrying its reference: once that
+	// transaction is verified as the session's first payment it enrolls the
+	// membership and marks the session succeeded; a transaction not yet readable
+	// stays pending. Idempotent. Implemented by *checkout.CheckoutSessionService.
 	ConfirmSolanaSubscribeSession(ctx context.Context, sessionID uuid.UUID, signature string) error
 }
 
@@ -456,7 +457,7 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		// RECURRING subscribe over Solana Pay (flow=transaction_request, no token
 		// quote on state — the on-chain amount lives in the subscribe instruction).
 		// The confirmed reference is routed to ConfirmSolanaSubscribeSession, which
-		// advances init→subscribe and enrolls once the subscription PDA is funded.
+		// enrolls once the landed transaction is verified as the first payment.
 		pending := &PendingSolanaPayment{
 			UserID:    session.CustomerID.String(),
 			PriceID:   session.PriceID.String(),
@@ -598,12 +599,10 @@ func (p *SolanaPayPoller) deferRetryFor(reference string, backoff time.Duration)
 // txSvc is the merchant-armed transaction service for this pass (#728).
 func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransactionService, reference string, signature string, pending *PendingSolanaPayment) bool {
 	if pending != nil && (pending.Lifecycle || pending.Subscribe) {
-		// Lifecycle (cancel / tier-change) and recurring-subscribe sessions have no
-		// transfer to verify here; the random reference appearing on this signature
-		// already proves it is a tx built for THIS session. The on-chain SUCCESS check
-		// happens in the mirror invoked by processConfirmedPayment (ConfirmCancel /
-		// ConfirmTierChange for lifecycle; ConfirmEnrollment — gated on the funded
-		// subscription PDA — for subscribe).
+		// A reference is public, so its appearance proves nothing. Lifecycle and
+		// recurring-subscribe transactions are verified where they are mirrored
+		// (processConfirmedPayment): ConfirmTierChange and ConfirmEnrollment read
+		// the landed transaction and require the checkout's own co-signed bundle.
 		return true
 	}
 	if txSvc == nil {
@@ -682,12 +681,11 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 		return nil
 	}
 
-	// Recurring subscribe over Solana Pay: advance the init→subscribe step and, once
-	// the subscription PDA is funded (the atomic [subscribe+transfer] landed), enroll
-	// the membership + mark the session succeeded. ConfirmSolanaSubscribeSession is
-	// idempotent and returns ErrSolanaSubscribePending while only init has landed —
-	// the caller keeps the reference alive (does NOT consume it) and re-polls for the
-	// subscribe tx, which carries the SAME reference.
+	// Recurring subscribe over Solana Pay: enroll the membership + mark the
+	// session succeeded once the signature is verified as its first payment.
+	// ConfirmSolanaSubscribeSession is idempotent and returns
+	// ErrSolanaSubscribePending while the transaction is not yet readable — the
+	// caller keeps the reference alive (does NOT consume it) and re-polls.
 	if pending.Subscribe {
 		if p.checkoutSessionService == nil {
 			return fmt.Errorf("checkout session service is not configured")
@@ -773,35 +771,12 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 	// landing later settles at a stale token price, so it grants nothing: the
 	// money is surfaced to the operator (refund or manual grant) and the
 	// reference is consumed.
-	if solanaSettlementTooLate(purchasedAt, pending.ExpiresAt) {
-		if err := webhooks.RecordLedgerRepairAlert(ctx, nil, p.db, *purchasedAt, webhooks.LedgerRepairAlert{
-			Provider:       string(models.RailSolana),
-			Operation:      "late_quote_settlement",
-			TransactionID:  signature,
-			UserID:         pending.UserID,
-			IdempotencyKey: "solana-late:" + signature,
-			Err:            fmt.Errorf("transfer landed %s after its quote expired", purchasedAt.Sub(pending.ExpiresAt).Round(time.Second)),
-			Metadata: map[string]any{
-				"reference":           reference,
-				"checkout_session_id": strings.TrimSpace(pending.SessionID),
-				"price_id":            pending.PriceID,
-				"quote_expired_at":    pending.ExpiresAt.UTC().Format(time.RFC3339),
-				"landed_at":           purchasedAt.UTC().Format(time.RFC3339),
-				"token":               pending.Token,
-				"token_amount":        fmt.Sprint(pending.TokenAmount),
-				"fiat_amount":         strconv.FormatInt(pending.Amount, 10),
-				"currency":            pending.Currency,
-			},
-		}); err != nil {
-			return fmt.Errorf("record late Solana settlement alert: %w", err)
-		}
-		log.WithFields(log.Fields{"reference": reference, "signature": signature}).
-			Warn("Solana payment landed past its quote's late window; not granted, operator alerted")
-		return nil
+	if solanarpc.SettlementTooLate(purchasedAt, pending.ExpiresAt) {
+		return RecordLateSettlement(ctx, p.db, *purchasedAt, reference, signature, pending)
 	}
 	// xs-007 row 35: a landing shortly after the quote expired is honoured —
 	// the buyer signed the quoted token amount and it settled within
-	// solanaLateSettlementWindow; the lateness is the merchant's rate exposure.
+	// solanarpc.LateSettlementWindow; the lateness is the merchant's rate exposure.
 	if purchasedAt != nil && !pending.ExpiresAt.IsZero() && purchasedAt.After(pending.ExpiresAt) {
 		log.WithFields(log.Fields{
 			"reference":        reference,
@@ -812,6 +787,19 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 			"token":            pending.Token,
 			"token_amount":     pending.TokenAmount,
 		}).Warn("Solana payment landed after its quote expired; honouring the settled transfer at the quoted token amount")
+	}
+
+	// One landed transfer settles exactly one checkout, across merchants and
+	// PSPs: a transfer carrying two checkouts' references is refused for the
+	// second, and the poller moves on to the reference's other signatures.
+	if p.db != nil {
+		sessionID, err := uuid.Parse(strings.TrimSpace(pending.SessionID))
+		if err != nil {
+			return fmt.Errorf("confirmed Solana payment requires checkout session identity: %w", err)
+		}
+		if err := settlement.ClaimCheckout(ctx, p.db, sessionID, signature); err != nil {
+			return err
+		}
 	}
 
 	// Use the unified RegisterPurchase to record payment and grant entitlements
@@ -872,11 +860,33 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 	return nil
 }
 
-// solanaLateSettlementWindow bounds how long past its expiry a token quote is honoured.
-const solanaLateSettlementWindow = 30 * time.Minute
-
-func solanaSettlementTooLate(landedAt *time.Time, expiresAt time.Time) bool {
-	return landedAt != nil && !expiresAt.IsZero() && landedAt.After(expiresAt.Add(solanaLateSettlementWindow))
+// RecordLateSettlement surfaces a transfer that landed past its quote's late
+// window: it grants nothing, and the operator refunds or grants by hand.
+func RecordLateSettlement(ctx context.Context, database *db.DB, landedAt time.Time, reference, signature string, pending *PendingSolanaPayment) error {
+	if err := webhooks.RecordLedgerRepairAlert(ctx, nil, database, landedAt, webhooks.LedgerRepairAlert{
+		Provider:       string(models.RailSolana),
+		Operation:      "late_quote_settlement",
+		TransactionID:  signature,
+		UserID:         pending.UserID,
+		IdempotencyKey: "solana-late:" + signature,
+		Err:            fmt.Errorf("transfer landed %s after its quote expired", landedAt.Sub(pending.ExpiresAt).Round(time.Second)),
+		Metadata: map[string]any{
+			"reference":           reference,
+			"checkout_session_id": strings.TrimSpace(pending.SessionID),
+			"price_id":            pending.PriceID,
+			"quote_expired_at":    pending.ExpiresAt.UTC().Format(time.RFC3339),
+			"landed_at":           landedAt.UTC().Format(time.RFC3339),
+			"token":               pending.Token,
+			"token_amount":        fmt.Sprint(pending.TokenAmount),
+			"fiat_amount":         strconv.FormatInt(pending.Amount, 10),
+			"currency":            pending.Currency,
+		},
+	}); err != nil {
+		return fmt.Errorf("record late Solana settlement alert: %w", err)
+	}
+	log.WithFields(log.Fields{"reference": reference, "signature": signature}).
+		Warn("Solana payment landed past its quote's late window; not granted, operator alerted")
+	return nil
 }
 
 func solanaPaymentMatchesPending(payment *models.Payment, reference string, pending *PendingSolanaPayment) bool {

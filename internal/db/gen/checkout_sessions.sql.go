@@ -183,6 +183,32 @@ func (q *Queries) ClaimHostedPurchaseDispatch(ctx context.Context, arg ClaimHost
 	return result.RowsAffected(), nil
 }
 
+const claimSolanaCheckoutSignature = `-- name: ClaimSolanaCheckoutSignature :execrows
+UPDATE openrails.checkout_sessions SET transaction_id = $1::text
+WHERE checkout_sessions.merchant_id = $2::uuid AND id = $3::uuid
+  AND rail = 'solana'
+  AND deleted_at IS NULL
+  AND (transaction_id IS NULL OR transaction_id = $1::text)
+`
+
+type ClaimSolanaCheckoutSignatureParams struct {
+	Signature  string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Binds a verified landed Solana transaction to the one checkout it settles.
+// Zero rows: the checkout is already settled by another transaction. A unique
+// violation (uq_checkout_sessions_solana_signature): the transaction already
+// settles another checkout.
+func (q *Queries) ClaimSolanaCheckoutSignature(ctx context.Context, arg ClaimSolanaCheckoutSignatureParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimSolanaCheckoutSignature, arg.Signature, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const closeHostedCheckoutFromProvider = `-- name: CloseHostedCheckoutFromProvider :execrows
 UPDATE openrails.checkout_sessions
 SET status=CASE WHEN status='succeeded' THEN status ELSE $1::text END,

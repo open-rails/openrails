@@ -7,23 +7,15 @@ import (
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 )
-
-// tierChangeConfirmRPC confirms the wallet's tier-change transaction LANDED and
-// SUCCEEDED on-chain (satisfied by *solanaint.RPCClient). Solana is the source of
-// truth: we only mirror into the DB after observing the confirmed switch.
-type tierChangeConfirmRPC interface {
-	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error)
-}
 
 // tierChangeLifecycle is the membership surface the mirror drives (satisfied by
 // *subscriptions.SubscriptionLifecycleService): cancel the OLD membership and
@@ -55,6 +47,13 @@ type tierChangeStore interface {
 // price's plan config (never client-supplied).
 type ConfirmTierChangeInput struct {
 	Signature string // the wallet's atomic tier-change tx signature
+
+	// CheckoutSessionID and Reference bind a checkout-driven change: the
+	// transaction must carry the checkout's reference and is claimed for it.
+	// Both empty for the subscription route, which binds by the subscription
+	// accounts alone.
+	CheckoutSessionID uuid.UUID
+	Reference         string
 
 	// OldSubscriptionID is the lifecycle subscription being changed FROM (the
 	// caller has already authorized ownership).
@@ -91,9 +90,10 @@ type ConfirmTierChangeInput struct {
 	//                they already paid for until then).
 	IsUpgrade bool
 
-	// FirstChargeBaseUnits is the prorated first pull recorded on the new
-	// membership for an upgrade (informational; the on-chain transfer already
-	// pulled it atomically). Ignored for downgrades.
+	// FirstChargeBaseUnits is the prorated first pull the upgrade must carry.
+	// 0 accepts the amount the merchant co-signed at prepare time (the
+	// subscription route re-quotes at confirm and cannot reproduce it). The
+	// pulled amount is recorded on the new membership. Ignored for downgrades.
 	FirstChargeBaseUnits uint64
 
 	// OldPeriodEndsAt is the OLD lifecycle subscription's CurrentPeriodEndsAt — the
@@ -113,8 +113,11 @@ type ConfirmTierChangeResult struct {
 // ConfirmTierChangeService is the CONFIRM step of the on-chain tier-change loop
 // (#272). Solana is the source of truth: the subscriber signs + sends the single
 // ATOMIC tier-change tx (built by PrepareTierChangeService), then posts its
-// signature here. We confirm it landed + SUCCEEDED on-chain and only then MIRROR
-// it into the DB:
+// signature here. We read that transaction from the chain and require that it
+// is the tier change: signed by the subscriber, cancelling the old
+// subscription, subscribing to the new plan's terms and, for an upgrade,
+// pulling the co-signed prorated charge into the merchant's account. Only then
+// do we MIRROR it into the DB:
 //
 //   - atomically cancel the OLD membership + mirror row, releasing the
 //     database's live tier-group slot;
@@ -127,37 +130,33 @@ type ConfirmTierChangeResult struct {
 // It is idempotent/resumable: if the NEW row already exists (a prior confirm
 // committed), it returns the existing new subscription without re-mirroring.
 type ConfirmTierChangeService struct {
-	rpc        tierChangeConfirmRPC
+	chain      landedTxReader
 	lifecycle  tierChangeLifecycle
 	store      tierChangeStore
 	transactor tierChangeTransactor
 	network    string
 	tokens     map[string]config.TokenConfig
-	commitment rpc.CommitmentType
 	now        func() time.Time
 }
 
-// NewConfirmTierChangeService builds a ConfirmTierChangeService. It confirms to
-// the Confirmed commitment; the wallet-built signature carries no known chain
-// terminal, so the watch runs until the caller's context ends (xs-007 row
-// 36). network ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, transactor tierChangeTransactor, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
+// NewConfirmTierChangeService builds a ConfirmTierChangeService. network
+// ("mainnet"/"devnet") resolves the recurring mint for the new row.
+func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, transactor tierChangeTransactor, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
-		rpc:        rpcClient,
+		chain:      chain,
 		lifecycle:  lifecycle,
 		store:      store,
 		transactor: transactor,
 		network:    network,
 		tokens:     normalizeRecurringTokens(firstTokenMap(tokens)),
-		commitment: rpc.CommitmentConfirmed,
 		now:        time.Now,
 	}
 }
 
-// Confirm verifies the atomic tier-change transaction landed + succeeded on-chain
-// and mirrors it into the DB. Returns an error (and does NOT mutate the DB) if
-// the signature never confirms or confirmed with an on-chain failure — the chain
-// is the source of truth, so an unproven switch must not touch openrails.
+// Confirm verifies the landed transaction is this tier change and mirrors it
+// into the DB. Returns an error (and does NOT mutate the DB) for any signature
+// that is not a successful, confirmed transaction proving the switch — the
+// chain is the source of truth, so an unproven switch must not touch openrails.
 func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierChangeInput) (*ConfirmTierChangeResult, error) {
 	if in.OldSubscriptionID == uuid.Nil {
 		return nil, fmt.Errorf("recurring: old subscription id is required")
@@ -201,19 +200,11 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		return nil, fmt.Errorf("recurring: no solana subscription for %s", in.OldSubscriptionID)
 	}
 
-	// Confirm on-chain: the single atomic tx must have LANDED and SUCCEEDED. The
-	// switch (cancel-old + subscribe-new [+ transfer]) is all-or-nothing on-chain,
-	// so one confirmed-success outcome proves the entire tier change executed.
-	sig, err := solanago.SignatureFromBase58(in.Signature)
+	// The switch (cancel-old + subscribe-new [+ transfer]) is all-or-nothing
+	// on-chain, so one landed transaction proving every part proves the change.
+	charged, err := s.verifyLanded(ctx, oldRow, in)
 	if err != nil {
-		return nil, fmt.Errorf("recurring: invalid signature: %w", err)
-	}
-	outcome, err := s.rpc.WatchTransaction(ctx, sig, s.commitment, solanaint.ChainTerminal{})
-	if err != nil {
-		return nil, fmt.Errorf("recurring: confirm tier-change signature %s: %w", in.Signature, err)
-	}
-	if !outcome.Succeeded() {
-		return nil, fmt.Errorf("recurring: tier-change transaction did not succeed on-chain: %w", outcome.OnChainError())
+		return nil, err
 	}
 
 	// ---- MIRROR (billing-critical) ----
@@ -251,7 +242,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if in.IsUpgrade {
 		paymentMeta = map[string]any{
 			"solana_tier_change":             "upgrade",
-			"solana_first_charge_base_units": in.FirstChargeBaseUnits,
+			"solana_first_charge_base_units": charged,
 		}
 	} else {
 		paymentMeta = map[string]any{"solana_tier_change": "downgrade"}
@@ -278,6 +269,11 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	)
 	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := db.NewWithPgxTx(tx)
+		if in.CheckoutSessionID != uuid.Nil {
+			if err := settlement.ClaimCheckout(ctx, txDB, in.CheckoutSessionID, in.Signature); err != nil {
+				return err
+			}
+		}
 
 		// Release the old row's live tier-group slot before inserting the new
 		// membership. Both operations share this transaction, so any later error
@@ -327,15 +323,62 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	return &ConfirmTierChangeResult{NewSubscription: newSub}, nil
 }
 
-// buildNewRow assembles the NEW solana_subscriptions row. It derives the new plan
-// PDA from the old row's merchant + the new plan id and resolves the mint from the
-// new symbol (falling back to the old row's mint, which is the same for a
-// same-group change).
-func (s *ConfirmTierChangeService) buildNewRow(oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
-	mintStr := oldRow.Mint
-	if resolved, rerr := ResolveRecurringMintFromTokens(in.NewMintSymbol, s.tokens); rerr == nil && resolved != "" {
-		mintStr = resolved
+// verifyLanded reads the tier-change transaction from the chain and proves it
+// switched this subscriber from the old subscription to the new plan's terms,
+// returning the upgrade's pulled amount (0 for a downgrade).
+func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
+	payment, err := fetchLanded(ctx, s.chain, in.Signature)
+	if err != nil {
+		return 0, err
 	}
+	if in.CheckoutSessionID != uuid.Nil {
+		if err := payment.references(in.Reference); err != nil {
+			return 0, err
+		}
+	}
+	var keys [5]solanago.PublicKey
+	for i, v := range []string{oldRow.SubscriberWallet, oldRow.MerchantAddress, s.newMint(oldRow, in.NewMintSymbol), oldRow.PlanPDA, oldRow.SubscriptionPDA} {
+		if keys[i], err = solanago.PublicKeyFromBase58(v); err != nil {
+			return 0, fmt.Errorf("recurring: stored solana subscription %s is malformed: %w", oldRow.SubscriptionPDA, err)
+		}
+	}
+	subscriber, merchantKey, mint, oldPlan, oldSub := keys[0], keys[1], keys[2], keys[3], keys[4]
+	if err := payment.cancels(subscriber, oldPlan, oldSub); err != nil {
+		return 0, err
+	}
+	terms := subscription{
+		subscriber: subscriber, merchant: merchantKey, mint: mint, planID: in.NewPlanID,
+		amount: in.NewAmountBaseUnits, periodHours: in.NewPeriodHours, createdAt: in.NewPlanCreatedAt,
+	}
+	_, newSub, _, err := terms.addresses()
+	if err != nil {
+		return 0, err
+	}
+	if newSub.String() != in.NewSubscriptionPDA {
+		return 0, fmt.Errorf("%w: new subscription %s is not the subscriber's account for plan %d", ErrPaymentUnverified, in.NewSubscriptionPDA, in.NewPlanID)
+	}
+	if err := payment.subscribes(terms); err != nil {
+		return 0, err
+	}
+	if !in.IsUpgrade {
+		return 0, nil
+	}
+	return payment.pulls(terms, in.FirstChargeBaseUnits)
+}
+
+// newMint resolves the new plan's mint, falling back to the old row's mint
+// (the same for a same-group change).
+func (s *ConfirmTierChangeService) newMint(oldRow *models.SolanaSubscription, symbol string) string {
+	if resolved, err := ResolveRecurringMintFromTokens(symbol, s.tokens); err == nil && resolved != "" {
+		return resolved
+	}
+	return oldRow.Mint
+}
+
+// buildNewRow assembles the NEW solana_subscriptions row. It derives the new plan
+// PDA from the old row's merchant + the new plan id.
+func (s *ConfirmTierChangeService) buildNewRow(oldRow *models.SolanaSubscription, newSubID uuid.UUID, in ConfirmTierChangeInput, newPDA string, nextPullAt time.Time) (*models.SolanaSubscription, error) {
+	mintStr := s.newMint(oldRow, in.NewMintSymbol)
 
 	planPDAStr := oldRow.PlanPDA
 	if merchant, perr := solanago.PublicKeyFromBase58(oldRow.MerchantAddress); perr == nil {

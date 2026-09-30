@@ -294,8 +294,9 @@ func TestAdminOperationLimits(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, "an authorized call reaches its handler")
 }
 
-// Buyer routes: checkout and Solana enrollment authenticate first; Solana
-// routes exist only for configured rails, enrollment only with a signer.
+// Buyer routes: checkout authenticates first; Solana routes exist only for
+// configured rails. A Solana subscription activates only through its checkout,
+// so there is no separate enrollment route.
 func TestUserRoutes(t *testing.T) {
 	inventory := func(providers routesurface.ProviderRoutes) []string {
 		table := &router.Table{}
@@ -309,17 +310,18 @@ func TestUserRoutes(t *testing.T) {
 	}
 	oneOff := inventory(routesurface.ProviderRoutes{Solana: true})
 	require.Subset(t, oneOff, []string{"GET /v1/solana/config", "POST /v1/checkout/{id}/solana-pay"})
-	require.NotContains(t, oneOff, "POST /v1/solana/recurring/enroll")
-	require.Contains(t, inventory(routesurface.ProviderRoutes{SolanaSigning: true}), "POST /v1/solana/recurring/enroll")
+	for _, key := range inventory(routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}) {
+		require.NotContains(t, key, "/solana/recurring")
+	}
 
 	for _, tc := range []struct {
 		name, token, subject string
-		status               int
+		reaches              bool
 	}{
-		{"anonymous", "", "", http.StatusUnauthorized},
-		{"invalid token", "bad", "", http.StatusUnauthorized},
-		{"opaque subject", "valid", "user-1", http.StatusUnauthorized},
-		{"authenticated reaches enrollment", "valid", userA, http.StatusServiceUnavailable},
+		{"anonymous", "", "", false},
+		{"invalid token", "bad", "", false},
+		{"opaque subject", "valid", "user-1", false},
+		{"authenticated reaches checkout", "valid", userA, true},
 	} {
 		calls := 0
 		authn := billingauth.AuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
@@ -330,17 +332,16 @@ func TestUserRoutes(t *testing.T) {
 			return billingauth.UserContext{UserID: tc.subject}, nil
 		})
 		rt := &app.Runtime{}
-		providers := routesurface.ProviderRoutes{SolanaSigning: true}
+		providers := routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}
 		mux := http.NewServeMux()
 		RegisterUserRoutes(router.NewMux(mux, "/v1", rt), rt, Options{Authenticator: authn, ProviderRoutes: &providers})
 		header := map[string]string{}
 		if tc.token != "" {
 			header["Authorization"] = "Bearer " + tc.token
 		}
-		rec := do(mux, http.MethodPost, "/v1/solana/recurring/enroll", header)
-		require.Equal(t, tc.status, rec.Code, tc.name)
+		rec := do(mux, http.MethodPost, "/v1/checkout", header)
+		require.Equal(t, tc.reaches, rec.Code != http.StatusUnauthorized, "%s: %d", tc.name, rec.Code)
 		require.Equal(t, 1, calls, tc.name)
-		require.Equal(t, http.StatusUnauthorized, do(mux, http.MethodPost, "/v1/checkout", nil).Code, "checkout requires authentication")
 	}
 }
 

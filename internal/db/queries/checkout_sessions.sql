@@ -94,6 +94,17 @@ WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = sqlc.arg(payer)::text)
   AND deleted_at IS NULL;
 
+-- Binds a verified landed Solana transaction to the one checkout it settles.
+-- Zero rows: the checkout is already settled by another transaction. A unique
+-- violation (uq_checkout_sessions_solana_signature): the transaction already
+-- settles another checkout.
+-- name: ClaimSolanaCheckoutSignature :execrows
+UPDATE openrails.checkout_sessions SET transaction_id = sqlc.arg(signature)::text
+WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND rail = 'solana'
+  AND deleted_at IS NULL
+  AND (transaction_id IS NULL OR transaction_id = sqlc.arg(signature)::text);
+
 -- name: GetCheckoutSessionByReference :one
 SELECT * FROM openrails.checkout_sessions cs
 WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.reference = $1

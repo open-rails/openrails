@@ -58,12 +58,10 @@ const (
 )
 
 // ErrSolanaSubscribePending is returned by ConfirmSolanaSubscribeSession (and
-// surfaced through the poller) when a RECURRING subscribe Solana Pay session has
-// only its init tx landed so far — the authority now exists but the atomic
-// [subscribe+transfer] bundle has not landed yet. The poller treats it as
-// "keep polling": it does NOT consume the reference (the subscribe tx carries the
-// SAME reference) and re-checks until the subscription PDA is funded. It is a
-// normal in-progress state, not a failure.
+// surfaced through the poller) when a RECURRING subscribe Solana Pay session's
+// payment is not yet readable on-chain, or no wallet has bound the session yet.
+// The poller treats it as "keep polling": it does NOT consume the reference and
+// re-checks. It is a normal in-progress state, not a failure.
 var ErrSolanaSubscribePending = errors.New("solana: recurring subscribe pending subscribe step")
 
 // PendingSolanaPayment represents a pending Solana payment stored in Redis
