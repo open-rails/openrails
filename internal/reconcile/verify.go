@@ -357,7 +357,7 @@ func (v *Verifier) verifyBatch(ctx context.Context, mid merchant.ID, ids []uuid.
 			readErr = errors.Join(readErr, err)
 		}
 		if len(nmiSubs) > 0 {
-			reader, psp := nmiReader(armed)
+			reader, psp := NMIReader(armed)
 			if reader != nil {
 				readErr = errors.Join(readErr, resolveNMIBatch(ctx, v.DB, lc, reader, forPSP(nmiSubs, psp), now))
 			}
