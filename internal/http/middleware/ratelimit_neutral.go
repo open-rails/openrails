@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 const maxInMemoryRateLimitCounters = 10_000
@@ -173,14 +174,16 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 		}
 	}
 
-	captchaTriggerEnabled := captcha.ShouldApply(deps.Captcha, bucket)
-	captchaEnforced := captchaShouldEnforce(deps.Captcha, r, bucket)
+	// A captcha gates only the browser buckets (checkout, payment methods,
+	// subscriptions). Merchant, console and server-to-server API traffic is
+	// never challenged: an API key cannot solve a captcha.
+	captchaEnforced := captcha.ShouldApply(deps.Captcha, bucket)
 	if captchaEnforced && deps.ChallengeStore != nil {
 		challenged := false
-		// Site-wide card-testing attack mode (#371): while active, every request to
-		// a captcha-relevant bucket must solve a captcha. The flag lives on its own
-		// subject so an individual solve never clears it.
-		if attack, err := deps.ChallengeStore.IsChallenged(r.Context(), captcha.CardAttackModeSubject); err != nil {
+		// Card-testing attack mode (#371): while the request's merchant is under
+		// attack, every request to its captcha buckets must solve a captcha. The
+		// flag lives on its own subject so an individual solve never clears it.
+		if attack, err := cardAttackMode(r, deps.ChallengeStore); err != nil {
 			log.WithError(err).WithField("bucket", bucket).Warn("attack-mode lookup failed")
 		} else if attack {
 			challenged = true
@@ -205,7 +208,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	} else if !deps.Captcha.IsEnabled() && deps.ChallengeStore != nil && (bucket == "checkout" || bucket == "payment-methods") {
 		// Without a captcha to solve, a card-abuse block is a refusal. Ignoring
 		// it would leave card testing unthrottled beyond the plain rate limit.
-		blocked, err := deps.ChallengeStore.IsChallenged(r.Context(), captcha.CardAttackModeSubject)
+		blocked, err := cardAttackMode(r, deps.ChallengeStore)
 		for _, subject := range subjects {
 			if blocked || err != nil {
 				break
@@ -247,7 +250,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	decision := RateLimitDecision{Bucket: bucket, Headers: headers, SubjectKeys: keys}
 
 	if !combined.result.allowed {
-		if captchaTriggerEnabled && deps.ChallengeStore != nil {
+		if captchaEnforced && deps.ChallengeStore != nil {
 			extremeThreshold := captcha.ExtremeThreshold(limit, deps.Captcha)
 			markedChallenge := false
 			for _, item := range results {
@@ -297,7 +300,7 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 	}
 	// or#865: a `deps.Verifier == nil` leg used to sit here. It could not fire in
 	// any configuration — this function is only reached when captcha enforcement
-	// is on (captchaShouldEnforce ⇒ cfg.IsEnabled()), and captcha.NewVerifier
+	// is on (captcha.ShouldApply ⇒ cfg.IsEnabled()), and captcha.NewVerifier
 	// returns nil only when that same flag is off. A branch that cannot fail is
 	// worse than none: it reads as protection and stops anyone looking. The
 	// coupling it silently depended on is now asserted where it CAN fail —
@@ -758,18 +761,16 @@ func isCheckoutPath(path string) bool {
 	return checkoutPath == "/checkout" || strings.HasPrefix(checkoutPath, "/checkout/")
 }
 
-func captchaShouldEnforce(cfg *config.CaptchaConfig, req *http.Request, bucket string) bool {
-	if !cfg.IsEnabled() || req == nil || bucket == "" || bucket == "webhook" || bucket == "captcha" {
-		return false
+// cardAttackMode reports whether the request's merchant is under a card-testing
+// attack (#371). A merchant not yet known here (a delegated token names it
+// later) leaves the request to its subjects' challenges and the durable
+// failure ledger.
+func cardAttackMode(r *http.Request, store *captcha.ChallengeStore) (bool, error) {
+	id, ok := merchant.FromContext(r.Context())
+	if !ok || id.IsZero() {
+		return false, nil
 	}
-	path := strings.ToLower(policyRequestPath(req))
-	if strings.HasPrefix(path, "/billing") {
-		path = strings.TrimPrefix(path, "/billing")
-		if path == "" {
-			path = "/"
-		}
-	}
-	return strings.HasPrefix(path, "/v1/")
+	return store.IsChallenged(r.Context(), captcha.CardAttackModeSubject(id.UUID()))
 }
 
 func effectiveLimit(limit *config.RateLimit) int {

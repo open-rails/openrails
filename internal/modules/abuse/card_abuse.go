@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/captcha"
@@ -17,8 +18,8 @@ import (
 //     BlockAfter -> aggressive block for the remainder of the window.
 //   - a DAILY window (DailyWindow, 24h): DailyBlockAfter -> blocked for the day.
 //
-// Plus the site-wide GLOBAL cap (GlobalWindow/GlobalAttackAfter): too many
-// failures across everyone flips the whole site into attack mode.
+// Plus the merchant-wide cap (GlobalWindow/GlobalAttackAfter): too many
+// failures at one merchant flips that merchant into attack mode.
 type CardAbuseConfig struct {
 	// FailWindow is the short rolling window for per-subject failed-charge counting.
 	FailWindow time.Duration
@@ -39,10 +40,10 @@ type CardAbuseConfig struct {
 	// DailyBlockTTL is how long the daily block lasts — roughly the remainder of
 	// DailyWindow.
 	DailyBlockTTL time.Duration
-	// GlobalWindow is the rolling window for site-wide failure counting.
+	// GlobalWindow is the rolling window for merchant-wide failure counting.
 	GlobalWindow time.Duration
-	// GlobalAttackAfter: site-wide failures within GlobalWindow that flip the
-	// whole site into attack mode (captcha for everyone).
+	// GlobalAttackAfter: failures at one merchant within GlobalWindow that
+	// flip that merchant into attack mode (captcha on its card routes).
 	GlobalAttackAfter int64
 	// AttackTTL is how long attack mode stays on once triggered.
 	AttackTTL time.Duration
@@ -50,7 +51,8 @@ type CardAbuseConfig struct {
 
 // DefaultCardAbuseConfig returns the agreed policy (#331): per (account+IP), in a
 // 15-min window 3 failures -> captcha and 6 -> block; in a 24h window 10 failures
-// -> block for the day; site-wide 100/24h -> captcha for everyone (attack mode).
+// -> block for the day; 100/24h at one merchant -> captcha for everyone on that
+// merchant's card routes (attack mode).
 func DefaultCardAbuseConfig() CardAbuseConfig {
 	return CardAbuseConfig{
 		FailWindow:        15 * time.Minute,
@@ -68,7 +70,7 @@ func DefaultCardAbuseConfig() CardAbuseConfig {
 }
 
 // CardAbuseGuard records failed card attempts and escalates abusive subjects to
-// captcha (then an aggressive block), plus a site-wide attack mode — all by
+// captcha (then an aggressive block), plus a per-merchant attack mode — all by
 // reusing the existing Redis windowed limiter and the captcha ChallengeStore.
 // Captcha stays dormant for normal users; only repeated FAILURES trigger it.
 type CardAbuseGuard struct {
@@ -119,10 +121,10 @@ func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, win
 // RecordChargeFailure records one failed/declined card attempt for the given
 // captcha subjects (use middleware.SubjectKeysFromContext(ctx): ["ip:x","user:y"],
 // the SAME resolved-client-IP subjects RateLimitHTTP pinned for this request —
-// #746) and escalates each subject's captcha/block state, then advances the
-// site-wide attack-mode counter. Best-effort: errors are logged, never
+// #746) and escalates each subject's captcha/block state, then advances
+// merchantID's attack-mode counter. Best-effort: errors are logged, never
 // propagated, so abuse tracking can't break the (already failed) charge response.
-func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, subjectKeys []string) {
+func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uuid.UUID, subjectKeys []string) {
 	if !g.enabled() {
 		return
 	}
@@ -168,25 +170,20 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, subjectKeys []
 		}
 	}
 
-	globalCount, err := g.countFailure(ctx, "__global__", "fail", g.cfg.GlobalWindow, g.cfg.GlobalAttackAfter)
-	if err != nil {
-		log.WithError(err).Warn("card-abuse: failed to record global charge failure")
+	if merchantID == uuid.Nil {
 		return
 	}
-	if globalCount >= g.cfg.GlobalAttackAfter {
-		if err := g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject, g.cfg.AttackTTL); err != nil {
-			log.WithError(err).Warn("card-abuse: failed to enable site-wide attack mode")
+	fields := log.Fields{"merchant_id": merchantID}
+	count, err := g.countFailure(ctx, "merchant:"+merchantID.String(), "fail", g.cfg.GlobalWindow, g.cfg.GlobalAttackAfter)
+	if err != nil {
+		log.WithError(err).WithFields(fields).Warn("card-abuse: failed to record merchant charge failure")
+		return
+	}
+	if count >= g.cfg.GlobalAttackAfter {
+		if err := g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject(merchantID), g.cfg.AttackTTL); err != nil {
+			log.WithError(err).WithFields(fields).Warn("card-abuse: failed to enable attack mode")
 		} else {
-			log.WithField("failures", globalCount).Warn("card-abuse: site-wide attack mode ENABLED — captcha required for all card requests")
+			log.WithFields(fields).WithField("failures", count).Warn("card-abuse: attack mode ENABLED — captcha required on this merchant's card routes")
 		}
 	}
-}
-
-// AttackModeActive reports whether the site is currently in card-testing attack
-// mode (captcha for everyone on card buckets).
-func (g *CardAbuseGuard) AttackModeActive(ctx context.Context) (bool, error) {
-	if !g.enabled() {
-		return false, nil
-	}
-	return g.challenges.IsChallenged(ctx, captcha.CardAttackModeSubject)
 }

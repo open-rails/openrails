@@ -28,6 +28,7 @@ unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 | Merchant-configured Collect.js origin skims cards (SEC-32) | `TestSecurityProviderConfigurationSafety` | Only NMI's Collect.js is served |
 | Card testing through card saves | `TestSecurityCardTestingIsThrottled` | Per-customer and per-address `payment` rate limit |
 | Leaked rotated-out webhook secret forges "paid" notices after rotation, Stripe and NMI (SEC-29) | `TestSecurityRotatedWebhookSecretExpires` | The previous secret verifies only until `webhook_overlap_expires_at` (default 24h, max 168h), never without one; `retire_webhook_overlap` ends it at once |
+| One merchant's card declines put every merchant's API, API keys and consoles included, behind a captcha | `TestSecurityCardAttackModeIsPerMerchant` | Attack mode is per merchant and challenges only its card routes; merchant and API routes never meet a captcha |
 | Card testing across replicas with no Redis or captcha (SEC-30) | `TestSecurityCardTestingLedgerAcrossReplicas` | PostgreSQL decline ledger per customer, client address and merchant (attack mode); blocked attempts never reach the gateway |
 | Open redirect through checkout success/cancel URLs (SEC-33) | `TestSecurityCheckoutReturnURLsStayOnHost` | Exact-origin `return_origins` allow-list; the billing portal returns only to an allowed origin |
 | Another customer pre-claims a predictable tier-change idempotency key (SEC-33) | `TestSecurityTierChangeKeysAreCustomerScoped` | Tier-change keys are scoped to the customer |

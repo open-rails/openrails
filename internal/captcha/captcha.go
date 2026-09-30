@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
@@ -21,15 +22,17 @@ const (
 	// TokenHeader is the request header clients use to submit a captcha response token.
 	TokenHeader = "X-Captcha-Token"
 
-	// CardAttackModeSubject is the well-known challenge subject set while a
-	// site-wide card-testing attack is in progress (#371). When challenged,
-	// every request to a captcha-relevant bucket must solve a captcha until the
-	// marker's TTL elapses. Separate from per-user/per-IP subjects so one solve
-	// never clears the global flag.
-	CardAttackModeSubject = "__card_attack_mode__"
-
 	maxMemoryEntries = 10_000
 )
+
+// CardAttackModeSubject is the challenge subject set while merchantID is under
+// a card-testing attack (#371). While it is challenged, every request to that
+// merchant's captcha buckets must solve a captcha. It is apart from the
+// per-user/per-IP subjects, so one solve never clears it, and apart per
+// merchant, so one merchant's declines never challenge another's traffic.
+func CardAttackModeSubject(merchantID uuid.UUID) string {
+	return "__card_attack_mode__:" + merchantID.String()
+}
 
 // Verifier validates captcha response tokens against a provider siteverify endpoint.
 type Verifier interface {

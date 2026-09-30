@@ -75,14 +75,16 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 
 - A subject whose request count reaches **3×** its bucket limit within the window is marked
   challenged for **15 minutes**. Only the `checkout`, `payment-methods`, and `subscriptions`
-  buckets escalate — but once challenged, the subject must solve on **any** `/v1` route except
-  webhooks and the captcha endpoints.
+  buckets escalate or ask for a solve. Merchant, console and server-to-server API routes never
+  meet a captcha.
 - While challenged, requests get `403` with `X-Captcha-Required` and error code
   `captcha_required` (metadata carries provider, site key, bucket) until a valid token is sent in
   the `X-Captcha-Token` header. A successful solve clears the challenge and resets the
   challenged buckets' counters.
-- A site-wide card-testing attack mode (#371) can require a solve from every subject regardless
-  of individual counts; an individual solve never clears it.
+- Card-testing attack mode (#371) is per merchant: 100 declines at a merchant in 24 hours
+  require a solve from every subject on that merchant's captcha buckets for an hour. It applies
+  where the merchant is known before authentication (the configured merchant or its `api_host`);
+  an individual solve never clears it.
 - Clients poll `GET /v1/captcha/status` and load `/v1/captcha/client.js` — both exempt from
   limiting.
 
