@@ -2,7 +2,7 @@
 // serves the accounts a test declares — SPL mints, token accounts, published
 // subscription plans and subscription authorities — to an OpenRails whose
 // provider_sandbox.solana_rpc_url points at it, and lands signed transactions
-// the way the chain would: every signature must verify, and SPL token moves
+// (the test's, and the server's own sendTransaction) the way the chain would: every signature must verify, and SPL token moves
 // (transfer, transfer_checked, the subscriptions program's
 // transfer_subscription) and new subscription authorities apply
 // all-or-nothing.
@@ -249,6 +249,14 @@ func (n *Node) tokenBalances(tx *solanago.Transaction) []any {
 	return out
 }
 
+func (n *Node) send(encoded string) (solanago.Signature, error) {
+	tx, err := solanago.TransactionFromBase64(encoded)
+	if err != nil {
+		return solanago.Signature{}, fmt.Errorf("solanafake: decode transaction: %w", err)
+	}
+	return n.Land(tx, time.Now())
+}
+
 func (n *Node) put(address string, data []byte) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -270,6 +278,19 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(req.Params[0], &first)
 	}
 	reply := map[string]any{"jsonrpc": "2.0", "id": req.ID}
+	if req.Method == "sendTransaction" {
+		// The server's own submissions (recurring pulls) land at once, as a
+		// confirmed transaction would; a token move that cannot apply lands failed.
+		sig, err := n.send(first)
+		if err != nil {
+			reply["error"] = map[string]any{"code": -32002, "message": err.Error()}
+		} else {
+			reply["result"] = sig.String()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(reply)
+		return
+	}
 	n.mu.Lock()
 	switch req.Method {
 	case "getAccountInfo":

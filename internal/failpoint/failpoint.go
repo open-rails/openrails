@@ -25,6 +25,9 @@ const (
 	// BeforeRepair fires after convergence detected a finding and before its
 	// repair re-checks the premise under the row lock.
 	BeforeRepair Point = "before-repair"
+	// AfterAttempt fires after a provider's answer is recorded as a payment
+	// attempt and before the lifecycle applies it.
+	AfterAttempt Point = "after-attempt"
 )
 
 // Site is one hit: the point, the operation and its subscription.
