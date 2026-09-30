@@ -178,7 +178,7 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 		if n, err := q.MarkRebillCycleMissed(ctx, gen.MarkRebillCycleMissedParams{MerchantID: sub.MerchantID, ID: cycle, MissedAt: now, MissReason: reason}); err != nil || n == 0 {
 			return err
 		}
-		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "due_at": due, "owner": sub.CollectionPolicy, "reason": reason})
+		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "period_end": due, "owner": sub.CollectionPolicy, "reason": reason})
 		action := fmt.Sprintf("subscription %s was due to rebill at %s and no attempt happened (%s). Check the provider's schedule and the due pass; the member keeps access until the rebill is resolved.", sub.ID, due.Format(time.RFC3339), reason)
 		_, err = q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: sub.MerchantID, FindingType: FindingRebillMissed, SubjectKey: cycle.String(),
