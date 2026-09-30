@@ -22,25 +22,36 @@ type attemptSeed struct {
 	at                                                        time.Time
 	// cycles gives each attempt its own rebill cycle, due a minute earlier.
 	cycles bool
+	// via is how OpenRails learned a provider schedule's charge (webhook or
+	// pull); empty is OpenRails' own attempt, answered in the response.
+	via string
+}
+
+func (s attemptSeed) source() (string, string) {
+	if s.via == "" {
+		return "openrails", "response"
+	}
+	return "provider_schedule", s.via
 }
 
 func (w *world) seedAttempts(customerID string, s attemptSeed) {
 	w.t.Helper()
+	source, via := s.source()
 	if s.cycles {
 		_, err := w.pool.Exec(w.t.Context(), w.q(`WITH m AS (SELECT id FROM openrails.merchants WHERE slug = $1),
 			c AS (INSERT INTO openrails.rebill_cycles (merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
 				SELECT m.id, gen_random_uuid(), $2::uuid, $3::uuid, $4, $5, $6::timestamptz - (g * interval '1 second') - interval '1 minute', 9990000, 'USD'
 				FROM m, generate_series(1, $7::int) g RETURNING id, merchant_id, subscription_id, due_at)
 			INSERT INTO openrails.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, cycle_id, subscription_id)
-			SELECT c.merchant_id, $2::uuid, $3::uuid, $4, 'rebill', $5, 'saved', 'openrails', 'response', $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', c.due_at + interval '1 minute', c.id, c.subscription_id FROM c`),
-			w.slug, customerID, s.psp, s.rail, s.owner, s.at, s.n, s.category, s.reason, s.code)
+			SELECT c.merchant_id, $2::uuid, $3::uuid, $4, 'rebill', $5, 'saved', $11, $12, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', c.due_at + interval '1 minute', c.id, c.subscription_id FROM c`),
+			w.slug, customerID, s.psp, s.rail, s.owner, s.at, s.n, s.category, s.reason, s.code, source, via)
 		require.NoError(w.t, err)
 		return
 	}
 	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO openrails.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at)
-		SELECT m.id, $2::uuid, $3::uuid, $4, $5, $6, $7, 'openrails', 'response', $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', $11::timestamptz - (g * interval '1 second')
+		SELECT m.id, $2::uuid, $3::uuid, $4, $5, $6, $7, $13, $14, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', $11::timestamptz - (g * interval '1 second')
 		FROM openrails.merchants m, generate_series(1, $12::int) g WHERE m.slug = $1`),
-		w.slug, customerID, s.psp, s.rail, s.kind, s.owner, s.cardEntry, s.category, s.reason, s.code, s.at, s.n)
+		w.slug, customerID, s.psp, s.rail, s.kind, s.owner, s.cardEntry, s.category, s.reason, s.code, s.at, s.n, source, via)
 	require.NoError(w.t, err)
 }
 
@@ -168,3 +179,35 @@ func TestPaymentAttemptRetention(t *testing.T) {
 type cleanupPass struct{}
 
 func (cleanupPass) Kind() string { return "openrails.cleanup_expired_data" }
+
+// A PSP whose provider charges normally arrive by webhook goes a day with
+// none while pulls still find its charges: one finding for that PSP, none for
+// the one still delivering or the one that never did; it resolves when a
+// webhook arrives again (#1112).
+func TestWebhookSilenceAlerts(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	now := w.clock.Now()
+	charge := func(psp, via string, n int, at time.Time) attemptSeed {
+		return attemptSeed{psp: psp, rail: "nmi", kind: "rebill", owner: "nmi_schedule", cardEntry: "saved", category: "approved", n: n, at: at, via: via, cycles: true}
+	}
+	earlier := now.Add(-3 * 24 * time.Hour)
+	w.seedAttempts(c.id, charge(w.psp["nmi"], "webhook", 20, earlier))
+	w.seedAttempts(c.id, charge(w.psp["nmi"], "pull", 4, now))
+	w.seedAttempts(c.id, charge(w.psp["stripe"], "webhook", 20, earlier))
+	w.seedAttempts(c.id, charge(w.psp["stripe"], "webhook", 4, now))
+	w.seedAttempts(c.id, charge(w.psp["ccbill"], "pull", 20, earlier))
+	w.seedAttempts(c.id, charge(w.psp["ccbill"], "pull", 4, now))
+	w.converge()
+	silent := w.findings("life.webhooks.silent")
+	require.Len(t, silent, 1)
+	require.Equal(t, "psp:greenfield-nmi", silent[0].subject)
+	require.Equal(t, "high", silent[0].severity)
+	require.Contains(t, silent[0].action, "pulls found 4")
+
+	w.advance(time.Hour)
+	w.seedAttempts(c.id, charge(w.psp["nmi"], "webhook", 1, w.clock.Now()))
+	w.converge()
+	require.Empty(t, w.findings("life.webhooks.silent"), "webhooks resumed")
+}

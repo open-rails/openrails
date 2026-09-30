@@ -1229,7 +1229,7 @@ func (*lifePass) Standing() []string {
 	return []string{"life.checkout_session.stale", findingRenewalOverdue, findingGraceExhausted, "life.subscription.paid_pending",
 		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
 		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld,
-		findingNewCardDeclineSpike, findingRebillFailureSpike, findingSystemErrors, findingDeclineUnmapped}
+		findingNewCardDeclineSpike, findingRebillFailureSpike, findingSystemErrors, findingDeclineUnmapped, findingWebhookSilence}
 }
 
 func (*notifyPass) Standing() []string { return []string{"notify.access_ended.missing"} }
