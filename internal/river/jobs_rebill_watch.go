@@ -63,15 +63,8 @@ type RebillWatchWorker struct {
 
 func (RebillWatchWorker) Kind() string { return KindRebillWatch }
 
-func (w *RebillWatchWorker) now() time.Time {
-	if w.Clock != nil {
-		return w.Clock.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
 func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchArgs]) error {
-	now := w.now()
+	now := w.Clock.Now().UTC()
 	engineCutoff, nmiCutoff := now.Add(-EngineRebillDeadline), now.Add(-NMIRebillDeadline)
 	merchantIDs, err := w.DB.GenDirectory().ListOverdueRebillMerchants(ctx, gen.ListOverdueRebillMerchantsParams{
 		EngineCutoff: engineCutoff, NmiCutoff: nmiCutoff, MerchantLimit: rebillWatchMerchantBatch,
