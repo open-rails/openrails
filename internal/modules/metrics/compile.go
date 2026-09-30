@@ -89,6 +89,9 @@ var merchantCols = map[Family]string{
 	FamBalance:        "lt.merchant_id",
 	FamWebhookHealth:  "wh.merchant_id",
 	FamWebhookDaily:   "whd.merchant_id",
+	FamAttempts:       "a.merchant_id",
+	FamCheckouts:      "ck.merchant_id",
+	FamRebillCycles:   "cy.merchant_id",
 }
 
 func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, leaves []*Measure) (stmt, error) {
@@ -140,6 +143,10 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 		"\nWHERE " + strings.Join(where, "\n  AND ")
 	if len(group) > 0 {
 		sql += "\nGROUP BY " + strings.Join(group, ", ")
+	}
+	// @to is the range end, for states settled as of the query (#1116).
+	if strings.Contains(sql, "@to") {
+		sql = strings.ReplaceAll(sql, "@to", arg(plan.To)+"::timestamptz")
 	}
 	return stmt{family: fam, sql: sql, args: args, leaves: leaves, hasTime: plan.HasTime}, nil
 }

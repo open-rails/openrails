@@ -114,6 +114,7 @@ GRANT UPDATE(qualified_at) ON TABLE openrails.provider_billing_qualifications TO
 GRANT UPDATE(updated_at) ON TABLE openrails.provider_billing_qualifications TO :"runtime_user";
 GRANT SELECT,INSERT ON TABLE openrails.provider_billing_observations TO :"runtime_user";
 GRANT SELECT ON TABLE openrails.freeloader_episodes TO :"runtime_user";
+GRANT SELECT ON TABLE openrails.rebill_cycle_facts TO :"runtime_user";
 GRANT SELECT ON TABLE openrails.orphaned_episodes TO :"runtime_user";
 GRANT SELECT, INSERT ON openrails.admission_operations TO :"runtime_user";
 GRANT UPDATE (expires_at, state, capture_terms, captured_amount, captured_at, released_at) ON openrails.admission_operations TO :"runtime_user";

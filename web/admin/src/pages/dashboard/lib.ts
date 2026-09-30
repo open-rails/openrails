@@ -283,7 +283,6 @@ export function deepLinkFor(query: MetricsQuery): string | null {
   }
   if (has("new_subscriptions")) return "/subscriptions?status=active"
   if (has("cancellations")) return "/subscriptions?status=cancelled"
-  if (has("payment_failures", "unique_failed_customers")) return "/payments"
   if (
     has(
       "payment_count",

@@ -1304,6 +1304,35 @@ type OpenrailsRebillCycle struct {
 	MissReason *string
 }
 
+// #1116 each rebill cycle with its first attempt, the attempt that collected it and when it closes (collected, cancelled, or 15 days past due). A cycle is open until closed_at, lost when closed uncollected.
+type OpenrailsRebillCycleFact struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Owner          string
+	DueAt          time.Time
+	Amount         int64
+	Currency       string
+	MissedAt       *time.Time
+	MissReason     *string
+	CreatedAt      time.Time
+	FirstCategory  string
+	FirstReason    *string
+	FirstAt        time.Time
+	WonAttemptID   uuid.UUID
+	WonKind        string
+	WonSource      string
+	WonAt          time.Time
+	WonOrdinal     int64
+	FirstFailed    *bool
+	FirstOutcome   string
+	ClosedAt       interface{}
+	RecoveredBy    string
+}
+
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
 type OpenrailsReconciliationFinding struct {
 	ID          uuid.UUID

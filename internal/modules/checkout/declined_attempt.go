@@ -15,7 +15,7 @@ import (
 
 // DeclinedAttempt is a parsed hard decline on a checkout charge path (#796):
 // every charge attempt must land in openrails.payments — a decline that only
-// errors the browser silently inflates approval_rate.
+// errors the browser is invisible to decline analysis.
 type DeclinedAttempt struct {
 	UserID  string
 	PriceID uuid.UUID

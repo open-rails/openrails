@@ -40,7 +40,7 @@ func DefaultWidgets(hasUsage bool) []Widget {
 		},
 		{
 			ID: "payment-health", Title: "Payment health by rail account", Viz: "table",
-			Query: metrics.Query{Measures: []string{"approval_rate", "chargeback_rate"},
+			Query: metrics.Query{Measures: []string{"attempt_failure_rate", "chargeback_rate"},
 				By: []string{"rail_account"}, Range: last30},
 			Grid: Grid{X: 6, Y: 2, W: 6, H: 4},
 		},
