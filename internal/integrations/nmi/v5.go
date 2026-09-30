@@ -36,6 +36,9 @@ const (
 // ErrV5NotFound marks a v5 404 — the resource does not exist at NMI.
 var ErrV5NotFound = errors.New("nmi: resource not found")
 
+// ErrV5Refused marks any other v5 4xx: NMI answered and refused the request.
+var ErrV5Refused = errors.New("nmi v5 refused the request")
+
 // centsJSONAmount renders integer cents as an exact two-decimal JSON number
 // (1099 -> 10.99). Never float math: this is a money wire boundary (#671).
 func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
@@ -157,11 +160,10 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("%w: status %d", ErrV5NotFound, resp.StatusCode)
 		}
-		err := fmt.Errorf("nmi v5 request failed: status %d", resp.StatusCode)
 		if resp.StatusCode >= 500 {
-			return classify(err)
+			return classify(fmt.Errorf("nmi v5 request failed: status %d", resp.StatusCode))
 		}
-		return err
+		return fmt.Errorf("%w: status %d", ErrV5Refused, resp.StatusCode)
 	}
 
 	if out != nil && len(bytes.TrimSpace(raw)) > 0 {

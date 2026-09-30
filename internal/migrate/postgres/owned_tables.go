@@ -48,6 +48,7 @@ var OwnedTables = []string{
 	"nmi_bulk_checkpoints",
 	"notifications",
 	"operation_authorizations",
+	"payment_attempts",
 	"payment_methods",
 	"payments",
 	"price_key_movements",

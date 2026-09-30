@@ -80,7 +80,15 @@ func (c *Charger) chargeRecurring(ctx context.Context, req charge.Request) (char
 		}
 		// Expose only the structured refusal. Gateway free text and raw bodies are
 		// not durable financial proof and must not escape through engine evidence.
-		clean := &nmi.CustomerVaultError{Message: "The payment provider refused the charge", ResponseCode: refusal.ResponseCode, LocalizationID: refusal.LocalizationID, RawResponse: url.Values{"response": {"2"}, "response_code": {strconv.Itoa(code)}}.Encode()}
+		// The transaction id and AVS/CVV letters are structured (#1110).
+		answer := url.Values{"response": {"2"}, "response_code": {strconv.Itoa(code)}}
+		for _, key := range []string{"transactionid", "avsresponse", "cvvresponse"} {
+			if value := strings.TrimSpace(fields.Get(key)); value != "" {
+				answer.Set(key, value)
+			}
+		}
+		clean := &nmi.CustomerVaultError{Message: "The payment provider refused the charge", ResponseCode: refusal.ResponseCode, LocalizationID: refusal.LocalizationID, RawResponse: answer.Encode(),
+			TransactionID: refusal.TransactionID, AVSResponse: refusal.AVSResponse, CVVResponse: refusal.CVVResponse}
 		failureCode, message := FailureCode(clean), clean.Message
 		return charge.Result{TokenType: charge.TokenTypePSPToken, Declined: true, FailureCode: &failureCode, FailureMessage: &message}, clean, nil
 	}

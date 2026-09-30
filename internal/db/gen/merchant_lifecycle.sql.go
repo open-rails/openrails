@@ -77,6 +77,17 @@ func (q *Queries) CountMerchantRowsNotificationQueue(ctx context.Context, mercha
 	return count, err
 }
 
+const countMerchantRowsPaymentAttempts = `-- name: CountMerchantRowsPaymentAttempts :one
+SELECT count(*) FROM openrails.payment_attempts WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsPaymentAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsPaymentAttempts, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsPaymentMethods = `-- name: CountMerchantRowsPaymentMethods :one
 SELECT count(*) FROM openrails.payment_methods WHERE merchant_id = $1
 `
@@ -210,6 +221,15 @@ DELETE FROM openrails.notifications WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsNotificationQueue, merchantID)
+	return err
+}
+
+const purgeMerchantRowsPaymentAttempts = `-- name: PurgeMerchantRowsPaymentAttempts :exec
+DELETE FROM openrails.payment_attempts WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsPaymentAttempts(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsPaymentAttempts, merchantID)
 	return err
 }
 

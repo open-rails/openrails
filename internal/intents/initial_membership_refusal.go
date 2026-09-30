@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
+	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -22,6 +24,11 @@ type initialMembershipRefusal struct {
 	StripePaymentIntentID string         `json:"stripe_payment_intent_id,omitempty"`
 	StripeFailureCode     string         `json:"stripe_failure_code,omitempty"`
 	StripeDeclineCode     string         `json:"stripe_decline_code,omitempty"`
+	// The gateway's answer, kept for the attempt ledger (#1110).
+	TransactionID string `json:"transaction_id,omitempty"`
+	AVS           string `json:"avs,omitempty"`
+	CVV           string `json:"cvv,omitempty"`
+	Text          string `json:"text,omitempty"`
 }
 
 func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
@@ -85,6 +92,21 @@ func (r InitialMembershipRefusal) Outcome() Outcome {
 	return TerminalWithEvidence("native enrollment was never submitted", map[string]any{"not_executed": true})
 }
 
+// Declined is the PSP's answer when the refusal is a decline it made.
+func (r InitialMembershipRefusal) Declined() (answer decline.Evidence, transactionID string, ok bool) {
+	switch r.data.Kind {
+	case "provider_declined":
+		return decline.Evidence{Code: strconv.Itoa(r.data.ResponseCode), AVS: r.data.AVS, CVV: r.data.CVV, Text: r.data.Text}, r.data.TransactionID, true
+	case "stripe_canceled":
+		code := r.data.StripeDeclineCode
+		if code == "" {
+			code = r.data.StripeFailureCode
+		}
+		return decline.Evidence{Code: code}, r.data.StripePaymentIntentID, true
+	}
+	return decline.Evidence{}, "", false
+}
+
 func LoadInitialMembershipRefusal(in gen.OpenrailsRailIntent) (InitialMembershipRefusal, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
@@ -134,7 +156,8 @@ func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.Openr
 	if binding != expected {
 		return errors.New("initial decline envelope differs from canonical accepted operation")
 	}
-	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: parsed.LocalizationID}}
+	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: parsed.LocalizationID,
+		TransactionID: parsed.TransactionID, AVS: parsed.AVSResponse, CVV: parsed.CVVResponse, Text: parsed.ResponseText}}
 	if err := fact.Validate(current); err != nil {
 		return err
 	}
