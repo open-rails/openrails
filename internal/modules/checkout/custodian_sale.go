@@ -401,18 +401,6 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 			code = *res.FailureCode
 		}
 		h.recordAttempt(ctx, intent, cfg, p, attempts.Attempt{Answer: decline.Evidence{Code: code}, TokenType: res.TokenType})
-		// #796: the decline is a charge attempt — durable failed payments row.
-		recordDeclinedAttempt(ctx, h.Sale.PurchaseService.PaymentService, DeclinedAttempt{
-			UserID:                 p.UserID,
-			PriceID:                p.PriceID,
-			Rail:                   nmiproxy.Rail,
-			SyntheticTransactionID: "custodian_sale_declined:" + intent.ID.String(),
-			AmountMicros:           p.AmountMicros,
-			Currency:               p.Currency,
-			FailureCode:            code,
-			AttemptKind:            payments.AttemptInitial,
-			TokenType:              res.TokenType,
-		})
 		msg := "declined"
 		if res.FailureMessage != nil {
 			msg = *res.FailureMessage

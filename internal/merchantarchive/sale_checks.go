@@ -58,14 +58,16 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 		paymentID = p.PaymentID
 	}
 	observed, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: paymentID})
-	if op.Status == intents.StatusFailedTerminal && !evidence.Declined {
+	if op.Status == intents.StatusFailedTerminal {
+		// A refused or unexecuted sale moved no money: it has no payment
+		// (a decline is a payment attempt, #1111).
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		return errors.New("unexecuted sale has a payment")
+		return errors.New("refused sale has a payment")
 	}
 	if err != nil {
 		return err
@@ -73,12 +75,6 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 	customer, _ := uuid.Parse(p.UserID)
 	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || observed.PriceID != p.PriceID || observed.Rail != "nmi" || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
 		return errors.New("sale result points to another payment or commercial decision")
-	}
-	if op.Status == intents.StatusFailedTerminal {
-		if observed.Status != "failed" || observed.MoneyMovement != "none" || observed.TransactionID != "nmi_sale_declined:"+op.ID.String() {
-			return errors.New("sale decline points to another attempt")
-		}
-		return nil
 	}
 	if !payments.PaymentStatusCompleted(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
 		return errors.New("sale result is not its exact completed payment")

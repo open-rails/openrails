@@ -716,15 +716,11 @@ func (q *Queries) InsertPaymentMethodUpdate(ctx context.Context, arg InsertPayme
 }
 
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
-SELECT DISTINCT ON (s.payment_method_id)
-    s.payment_method_id AS payment_method_id,
-    p.purchased_at      AS purchased_at,
-    p.status            AS status
-FROM openrails.subscriptions s
-JOIN openrails.payments p ON p.subscription_id = s.id AND p.deleted_at IS NULL
-WHERE s.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND s.payment_method_id = ANY($2::uuid[])
-  AND s.deleted_at IS NULL
-ORDER BY s.payment_method_id, p.purchased_at DESC
+SELECT DISTINCT ON (a.payment_method_id)
+    a.payment_method_id, a.attempted_at, a.category
+FROM openrails.payment_attempts a
+WHERE a.merchant_id = $1::uuid AND a.payment_method_id = ANY($2::uuid[]) AND a.kind <> 'verify'
+ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC
 `
 
 type ListLatestChargeByPaymentMethodIDsParams struct {
@@ -734,14 +730,12 @@ type ListLatestChargeByPaymentMethodIDsParams struct {
 
 type ListLatestChargeByPaymentMethodIDsRow struct {
 	PaymentMethodID *uuid.UUID
-	PurchasedAt     time.Time
-	Status          OpenrailsPaymentStatus
+	AttemptedAt     time.Time
+	Category        string
 }
 
-// #589 derived health: the most recent charge (purchased_at + status) per payment
-// method, derived TRANSITIVELY via the subscription link — payments carry no direct
-// payment_method_id yet (option a; option b = a payments.payment_method_id column,
-// deferred). Source is the durable openrails.payments ledger, never provider_intents.
+// #589 derived health: each payment method's most recent charge attempt
+// (#1111), approved or not.
 func (q *Queries) ListLatestChargeByPaymentMethodIDs(ctx context.Context, arg ListLatestChargeByPaymentMethodIDsParams) ([]ListLatestChargeByPaymentMethodIDsRow, error) {
 	rows, err := q.db.Query(ctx, listLatestChargeByPaymentMethodIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
@@ -751,7 +745,7 @@ func (q *Queries) ListLatestChargeByPaymentMethodIDs(ctx context.Context, arg Li
 	var items []ListLatestChargeByPaymentMethodIDsRow
 	for rows.Next() {
 		var i ListLatestChargeByPaymentMethodIDsRow
-		if err := rows.Scan(&i.PaymentMethodID, &i.PurchasedAt, &i.Status); err != nil {
+		if err := rows.Scan(&i.PaymentMethodID, &i.AttemptedAt, &i.Category); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

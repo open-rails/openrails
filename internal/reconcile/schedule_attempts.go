@@ -15,13 +15,16 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// recordScheduleAttempts records NMI's own scheduled charges of an NMI-owned
-// subscription as rebill attempts (#1111): the first charge at or after the
-// paid period's end is that cycle's rebill, and each approval moves on to the
-// next cycle. Older history has no cycle here. OpenRails' own retries carry
-// the same transaction ids and were recorded when they completed.
+// recordScheduleAttempts records a provider schedule's own charges as rebill
+// attempts (#1111): NMI's for an NMI-owned subscription, Stripe's or CCBill's
+// for a provider-owned one. The first charge at or after the paid period's end
+// is that cycle's rebill (a provider's later ones its retries), and each
+// approval moves on to the next cycle. Older history has no cycle here.
+// OpenRails' own retries carry the same transaction ids and were recorded
+// when they completed.
 func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction, now time.Time) error {
-	if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(*sub.CurrentPeriodStartsAt) {
+	owner := attempts.OwnerOf(sub.CollectionPolicy)
+	if (owner != attempts.OwnerNMISchedule && owner != attempts.OwnerProvider) || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(*sub.CurrentPeriodStartsAt) {
 		return nil
 	}
 	due := sub.CurrentPeriodEndsAt.UTC()
@@ -54,10 +57,13 @@ func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Sub
 		}
 		a := attempts.Attempt{
 			MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: string(sub.Rail),
-			Kind: attempts.Rebill, Owner: attempts.OwnerNMISchedule, ProviderSchedule: true, ObservedVia: via,
+			Kind: attempts.Rebill, Owner: owner, ProviderSchedule: true, ObservedVia: via,
 			Approved: t.Success, Answer: answer,
 			TransactionID: t.TransactionID, Amount: amount, Currency: currency, At: t.OccurredAt,
-			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due}, PaymentMethodID: sub.PaymentMethodID, TokenType: charge.TokenTypePSPToken,
+			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due}, PaymentMethodID: sub.PaymentMethodID,
+		}
+		if owner == attempts.OwnerNMISchedule {
+			a.TokenType = charge.TokenTypePSPToken
 		}
 		if t.Answer.Rail != "" {
 			a.EnrichedAt = now // the transaction report's full answer

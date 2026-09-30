@@ -31,7 +31,8 @@ type PriceRecurrence struct {
 	Interval string `json:"interval"`
 }
 
-// Payment is one rail payment or refund as the merchant surface reports it.
+// Payment is one rail payment or refund as the merchant surface reports it:
+// money that moved. A declined charge is a PaymentAttempt, never a Payment.
 // Amount is native units, positive for payments and negative for refunds;
 // CreatedAt is an RFC3339 instant.
 type Payment struct {
@@ -47,10 +48,7 @@ type Payment struct {
 	TransactionID  string          `json:"transaction_id"`
 	Refunded       bool            `json:"refunded"`
 	Captured       bool            `json:"captured,omitempty"`
-	// FailureCode is the raw rail decline code; FailureReason the normalized category.
-	FailureCode   *string      `json:"failure_code,omitempty"`
-	FailureReason *string      `json:"failure_reason,omitempty"`
-	Refunds       *PaymentList `json:"refunds,omitempty"`
+	Refunds        *PaymentList    `json:"refunds,omitempty"`
 	// Product is the product this charge (or the charge a refund reverses) bought.
 	Product *ProductSummary `json:"product,omitempty"`
 	// RefundedPaymentID and Reason are set on refund objects: the charge the
@@ -68,7 +66,7 @@ type PaymentList struct {
 }
 
 // PaymentFilter selects payments; every field is optional. Status is pending,
-// completed, failed or refunded.
+// completed or refunded.
 type PaymentFilter struct {
 	PageOptions
 	CustomerID string

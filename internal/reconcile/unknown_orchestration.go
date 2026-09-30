@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -320,9 +318,8 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			}
 			continue
 		}
-		status := "completed"
 		if !t.Success {
-			status = "failed"
+			continue // a decline is an attempt (recordScheduleAttempts), never a payment
 		}
 		// CUR-6: this is a provider INGESTION boundary — Stripe reports currency
 		// lower-case on the wire — and the value lands in payments.currency, so
@@ -366,19 +363,15 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			Amount:         amountMicros,
 			ListAmount:     amountMicros,
 			Currency:       currency,
-			Status:         status,
+			Status:         "completed",
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
 			// or#893: a charge belongs to the account that took it, which is the
 			// account that owns the subscription it renewed.
 			PspID: &sub.PspID,
-			// or#827: a mirrored success IS money the rail moved; a mirrored
-			// decline moved nothing and must never reach the host feed.
-			MoneyMovement: string(models.MoneyMovementNone),
-		}
-		if t.Success {
-			params.MoneyMovement = string(models.MoneyMovementRail)
+			// or#827: a mirrored success IS money the rail moved.
+			MoneyMovement: string(models.MoneyMovementRail),
 		}
 		if currencyInherited {
 			params.Metadata = []byte(`{"currency_provenance":"inherited_from_subscription_price"}`)
@@ -387,16 +380,6 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 				"subscription_id": sub.ID,
 				"currency":        currency,
 			}).Warn("reconcile backfill: transaction reported no currency; denominating the attempt in the subscription's billing currency and recording the inheritance as provenance (CUR-9)")
-		}
-		// #796: backfilled declines carry the rail's code VERBATIM so
-		// decline analysis sees them (attempt_kind
-		// stays NULL — the mirror cannot distinguish initial vs renewal).
-		if !t.Success {
-			if code := strings.TrimSpace(t.DeclineCode); code != "" {
-				reason := decline.ReasonFor(string(sub.Rail), code)
-				params.FailureCode = &code
-				params.FailureReason = &reason
-			}
 		}
 		// Provider-driven: NMI can only rebill a card IT holds, so the custody
 		// fact here is stated, not guessed (or#879).

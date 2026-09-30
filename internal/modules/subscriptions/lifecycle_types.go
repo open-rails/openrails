@@ -167,22 +167,16 @@ type FailMembershipParams struct {
 	// FailMembership refuses to terminate and parks the row as `unknown`, access
 	// intact, for the provider-verification plane to resolve.
 	TerminalCertainty string
-	// AttemptRecorded marks that a REAL charge attempt underlies this failure and
-	// was recorded as a payments row by the CALLER (RecordFailedAttempt records
-	// it here instead; either satisfies this). It is what lets schedule
-	// exhaustion count as a certainty leg (#840): attempts we never made — because
-	// our own data was missing — can never exhaust anything.
+	// AttemptRecorded marks that a REAL charge attempt underlies this failure
+	// and the caller recorded it (payment_attempts). It is what lets schedule
+	// exhaustion count as a certainty leg (#840): attempts we never made —
+	// because our own data was missing — can never exhaust anything.
 	AttemptRecorded bool
 	// TerminalBlocked (#836), when non-empty, is the operator kill-switch reason
 	// that forbids destructive outcomes for this merchant. It overrides any
 	// certainty: the row parks instead of cancelling, and no provider delete is
 	// queued. Callers set it from destructive.Gate.Check.
 	TerminalBlocked string
-	// RecordFailedAttempt writes a status='failed' payments row for this decline
-	// in the same tx (#733: attempt_kind=renewal, failure_code verbatim +
-	// normalized failure_reason). Callers set it when a real charge attempt was
-	// declined and no failed row was recorded elsewhere.
-	RecordFailedAttempt bool
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {

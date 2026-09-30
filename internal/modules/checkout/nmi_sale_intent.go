@@ -385,12 +385,6 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 				if err := recordSaleAttempt(ctx, d, in, p, customer, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
 					return err
 				}
-				reason := decline.ReasonFor(in.Rail, code)
-				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
-				_, err := purchase.PaymentService.CreateIfNotExists(ctx, &models.Payment{ID: p.PaymentID, CustomerID: customer, PriceID: p.PriceID, Rail: models.Rail(in.Rail), TransactionID: in.Rail + "_sale_declined:" + in.ID.String(), Amount: p.Amount, ListAmount: p.ListAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.AcceptedAt, CreatedAt: now})
-				if err != nil {
-					return err
-				}
 			}
 		}
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {

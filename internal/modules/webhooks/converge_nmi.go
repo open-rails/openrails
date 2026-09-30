@@ -17,14 +17,15 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // NMIConvergeService is the #684 fetch-and-converge implementation for one NMI
@@ -216,57 +217,9 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 // failPendingFromDecline records the fetched decline and fails the pending
 // membership (FailMembership owns the retry/terminal decision inline).
 func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
-	if s.PaymentService != nil && probe.DeclineTransactionID != "" {
-		existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(rail), probe.DeclineTransactionID)
-		if err != nil && !db.IsNotFound(err) {
-			return fmt.Errorf("nmi converge: lookup fetched decline payment: %w", err)
-		}
-		if existing == nil || db.IsNotFound(err) {
-			amountMicros := int64(0)
-			if raw := strings.TrimSpace(probe.DeclineAmount); raw != "" {
-				if cents, perr := moneyutil.ParseDecimalToCents(raw); perr == nil {
-					amountMicros = int64(moneyutil.CentsToMicros(cents))
-				}
-			}
-			if amountMicros == 0 && sub.Price != nil {
-				amountMicros = sub.Price.Amount
-			}
-			currency := normalizeNMICurrencyValue(probe.DeclineCurrency)
-			if currency == "" && sub.Price != nil {
-				currency = strings.ToLower(strings.TrimSpace(sub.Price.Currency))
-			}
-			purchasedAt := s.now()
-			if !probe.DeclineAt.IsZero() {
-				purchasedAt = probe.DeclineAt
-			}
-			subID := sub.ID
-			failed := &models.Payment{
-				ID:             uuidutil.NewV7(),
-				CustomerID:     sub.CustomerID,
-				PriceID:        sub.PriceID,
-				SubscriptionID: &subID,
-				Rail:           models.Rail(rail),
-				TransactionID:  probe.DeclineTransactionID,
-				Amount:         amountMicros,
-				ListAmount:     amountMicros,
-				Currency:       currency,
-				Status:         "failed",
-				AttemptKind:    func() *string { k := payments.AttemptInitial; return &k }(),
-				MoneyMovement:  models.MoneyMovementNone, // or#827: a decline moved nothing.
-				PurchasedAt:    purchasedAt,
-			}
-			if probe.DeclineResponseCode != 0 {
-				code := strconv.Itoa(probe.DeclineResponseCode)
-				reason := decline.ReasonFor(rail, code)
-				failed.FailureCode = &code
-				failed.FailureReason = &reason
-			}
-			if tt := payments.DefaultTokenType(rail, models.CustodianPSP); tt != "" {
-				failed.TokenType = &tt
-			}
-			if _, err := s.PaymentService.CreateIfNotExists(ctx, failed); err != nil {
-				return fmt.Errorf("nmi converge: record fetched decline: %w", err)
-			}
+	if probe.DeclineTransactionID != "" {
+		if err := s.recordInitialDecline(ctx, rail, sub, probe); err != nil {
+			return fmt.Errorf("nmi converge: record fetched decline: %w", err)
 		}
 	}
 
@@ -286,8 +239,8 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		// or#870: the same ONE classifier the dunning worker uses, so a decline
 		// arriving over the webhook plane gets the identical three-way answer.
 		Decline: decline.Classify(rail, normalize.FromPtr(failureCode)).Action,
-		// The failed payments row for this decline was written above, so a real
-		// provider attempt underlies this failure (#840 certainty input).
+		// The attempt was recorded above: a real provider attempt underlies
+		// this failure (#840 certainty input).
 		AttemptRecorded: true,
 	}); err != nil {
 		return fmt.Errorf("nmi converge: fail pending membership: %w", err)
@@ -303,6 +256,39 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 // stamped at signup, then the signup attempt's payment metadata. Identity
 // resolution only — shared by the converge path and the payload-apply money
 // handlers (refund/void). Returns db.IsNotFound-style error when unresolved.
+// recordInitialDecline records the fetched decline of a pending
+// subscription's first charge as its initial attempt (#1111).
+func (s *NMIConvergeService) recordInitialDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
+	amount := int64(0)
+	if cents, err := moneyutil.ParseDecimalToCents(strings.TrimSpace(probe.DeclineAmount)); err == nil {
+		amount = int64(moneyutil.CentsToMicros(cents))
+	}
+	currency := normalizeNMICurrencyValue(probe.DeclineCurrency)
+	if sub.Price != nil {
+		if amount == 0 {
+			amount = sub.Price.Amount
+		}
+		if currency == "" {
+			currency = strings.ToLower(strings.TrimSpace(sub.Price.Currency))
+		}
+	}
+	at := s.now()
+	if !probe.DeclineAt.IsZero() {
+		at = probe.DeclineAt
+	}
+	code := ""
+	if probe.DeclineResponseCode != 0 {
+		code = strconv.Itoa(probe.DeclineResponseCode)
+	}
+	return attempts.Record(ctx, s.DB.Gen(ctx), attempts.Attempt{
+		MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: rail,
+		Kind: attempts.Initial, Owner: attempts.OwnerOf(sub.CollectionPolicy), ObservedVia: attempts.ObservedFrom(ctx, "pull"),
+		Answer: decline.Evidence{Code: code, Text: strings.TrimSpace(probe.DeclineReason)}, TransactionID: probe.DeclineTransactionID,
+		Amount: amount, Currency: currency, At: at, Target: sub.PriceID.String(),
+		SubscriptionID: &sub.ID, PaymentMethodID: sub.PaymentMethodID, TokenType: charge.TokenTypePSPToken,
+	})
+}
+
 func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc *subscriptions.SubscriptionService, paySvc *payments.PaymentService, reference string) (*models.Subscription, error) {
 	if subSvc == nil {
 		return nil, fmt.Errorf("subscription service is required")

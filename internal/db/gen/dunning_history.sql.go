@@ -24,20 +24,20 @@ SELECT
     CASE WHEN ev.amount_micros IS NULL THEN NULL ELSE ev.amount_micros END AS amount_micros,
     ev.occurred_at
 FROM (
-    SELECT 'payments' AS source_table,
+    SELECT 'payment_attempts' AS source_table,
            'charge_failure' AS event_type,
-           p.rail,
-           p.subscription_id,
+           a.rail,
+           a.subscription_id,
            NULL::text AS rail_subscription_id,
-           p.transaction_id AS rail_transaction_id,
+           COALESCE(a.transaction_id, '') AS rail_transaction_id,
            'failed' AS status,
-           p.amount AS amount_micros,
-           p.purchased_at AS occurred_at
-    FROM openrails.payments p
-    WHERE p.merchant_id = $1::uuid
-      AND p.rail = ANY($2::text[])
-      AND p.deleted_at IS NULL
-      AND p.status = 'failed'
+           a.amount AS amount_micros,
+           a.attempted_at AS occurred_at
+    FROM openrails.payment_attempts a
+    WHERE a.merchant_id = $1::uuid
+      AND a.rail = ANY($2::text[])
+      AND a.subscription_id IS NOT NULL
+      AND a.category <> 'approved'
 ) ev
 WHERE ($3::timestamptz IS NULL OR ev.occurred_at >= $3::timestamptz)
   AND ($4::timestamptz IS NULL OR ev.occurred_at <= $4::timestamptz)
@@ -65,7 +65,7 @@ type ListDunningHistoryEventsRow struct {
 	OccurredAt         time.Time
 }
 
-// Dunning forensics from retained failed-payment evidence.
+// Dunning forensics from the recorded declined attempts (#1111).
 func (q *Queries) ListDunningHistoryEvents(ctx context.Context, arg ListDunningHistoryEventsParams) ([]ListDunningHistoryEventsRow, error) {
 	rows, err := q.db.Query(ctx, listDunningHistoryEvents,
 		arg.MerchantID,

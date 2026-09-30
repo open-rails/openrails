@@ -22,8 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -506,6 +508,9 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		if settled != 1 {
 			return errors.New("settle attempt: claim lost")
 		}
+		if err := recordInvoiceAttempt(ctx, q, intent, p, rail, attempts.Attempt{Approved: true, TransactionID: transactionID}, now); err != nil {
+			return err
+		}
 		released, err := q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, Now: now})
 		if err != nil {
 			return err
@@ -577,6 +582,9 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		}
 		if failed != 1 {
 			return errors.New("fail attempt: claim lost")
+		}
+		if err := recordInvoiceAttempt(ctx, q, intent, p, rail, attempts.Attempt{Answer: decline.Evidence{Code: failureCode, Text: failureMessage}, TransactionID: transactionID}, now); err != nil {
+			return err
 		}
 		updated, err := q.RecordInvoiceCollectionFailure(ctx, gen.RecordInvoiceCollectionFailureParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID,
@@ -743,4 +751,16 @@ func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.
 		return intents.Ambiguous("no exact provider receipt; no automatic resend")
 	}
 	return h.finalizeSettle(ctx, in, receipt)
+}
+
+// recordInvoiceAttempt records the collection charge's answer as an invoice
+// attempt (#1111) in the transaction that settles or fails the invoice.
+func recordInvoiceAttempt(ctx context.Context, q *gen.Queries, in gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload, rail string, a attempts.Attempt, at time.Time) error {
+	if rail == "" {
+		rail = in.Rail
+	}
+	a.MerchantID, a.CustomerID, a.PSPID, a.Rail, a.Kind, a.At, a.Step = in.MerchantID, p.CustomerID, p.Instrument.PSPID, rail, attempts.Invoice, at, "charge"
+	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
+	a.TokenType = payments.DefaultTokenType(rail, p.Instrument.Custodian)
+	return attempts.Record(ctx, q, a)
 }

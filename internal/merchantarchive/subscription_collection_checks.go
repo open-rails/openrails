@@ -3,12 +3,10 @@ package merchantarchive
 import (
 	"context"
 	"errors"
-	"strconv"
 
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -72,33 +70,17 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if price.ProductID != t.ProductID {
 		return errors.New("accepted renewal price belongs to another product")
 	}
-	transaction := "engine_declined:" + op.ID.String()
 	receipt, paid, err := intents.LoadCollectedReceipt(op)
 	if err != nil {
 		return err
 	}
-	if paid {
-		transaction = receipt.TransactionID()
+	if !paid {
+		// A declined or unsent renewal moved no money: it has no payment (a
+		// decline is a payment attempt, #1111).
+		return nil
 	}
+	transaction := receipt.TransactionID()
 	row, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: op.MerchantID, PspID: op.PspID, Rail: op.Rail, TransactionID: transaction})
-	code, _, declined, declineErr := intents.LoadRecurringDecline(op)
-	if declineErr != nil {
-		return declineErr
-	}
-	stripeCode, _, stripeDeclined, stripeErr := intents.LoadStripeRecurringDecline(op)
-	if stripeErr != nil {
-		return stripeErr
-	}
-	declined = declined || stripeDeclined
-	if !paid && !declined {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return errors.New("unsent engine renewal has a payment")
-	}
 	if err != nil {
 		return err
 	}
@@ -108,17 +90,6 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	}
 	if payment.CreatedAt.Before(p.AcceptedAt) {
 		return errors.New("engine payment predates its accepted obligation")
-	}
-	if !paid {
-		response := strconv.Itoa(code)
-		if stripeDeclined {
-			response = stripeCode
-		}
-		reason := decline.ReasonFor(op.Rail, response)
-		if payment.ID != uuid.NewSHA1(op.ID, []byte("decline")) || payment.CustomerID != t.CustomerID || payment.SubscriptionID == nil || *payment.SubscriptionID != t.SubscriptionID || payment.PriceID != t.PriceID || payment.Amount != t.Amount || payment.ListAmount != t.Amount || payment.Currency != t.Currency || payment.Status != payments.PaymentStatusFailedValue || payment.MoneyMovement != models.MoneyMovementNone || payment.FailureCode == nil || *payment.FailureCode != response || payment.FailureReason == nil || *payment.FailureReason != reason || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal {
-			return errors.New("engine decline contradicts its original failed payment")
-		}
-		return nil
 	}
 	accepted := subscriptions.InitialMembershipTerms{PaymentID: payment.ID, SubscriptionID: t.SubscriptionID, CustomerID: t.CustomerID, PSPID: t.PSPID, PriceID: t.PriceID, ProductID: t.ProductID, Amount: t.Amount, RecurringAmount: t.Amount, Currency: t.Currency, Entitlements: t.Entitlements, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd}
 	if accepted.Entitlements == nil {

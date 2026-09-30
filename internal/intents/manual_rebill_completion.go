@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 const rebillDeclineKey = "rebill_decline"
@@ -212,7 +211,6 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 		return Ambiguous(err.Error())
 	}
 	code := fmt.Sprint(refusal.ResponseCode)
-	failureReason := decline.ReasonFor(string(models.RailNMI), code)
 	outcome := TerminalWithEvidence("rebill declined", map[string]any{"declined": true, "response_code": refusal.ResponseCode})
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -230,11 +228,6 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 			return NewStore(d).CompleteManualRebill(ctx, in, outcome, h.now())
 		}
 		if err := recordRebillAttempt(ctx, d, in, p, sub, attempts.Attempt{Answer: decline.Evidence{Code: code}, TransactionID: refusal.ProviderReference}, h.now()); err != nil {
-			return err
-		}
-		kind := payments.AttemptRenewal
-		failed := &models.Payment{ID: uuidutil.NewV7(), CustomerID: p.Renewal.CustomerID, PriceID: p.Renewal.PriceID, SubscriptionID: &p.Renewal.SubscriptionID, Rail: models.Rail(p.Rail), PspID: &p.Instrument.PSPID, TransactionID: "rebill_declined:" + in.ID.String(), Amount: p.Renewal.Amount, ListAmount: p.Renewal.Amount, Currency: p.Renewal.Currency, Status: payments.PaymentStatusFailedValue, FailureCode: &code, FailureReason: &failureReason, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(p.Renewal.Entitlements), PurchasedAt: h.now(), CreatedAt: h.now()}
-		if _, err := payments.NewPaymentService(d, h.Clock).CreateIfNotExists(ctx, failed); err != nil {
 			return err
 		}
 		failures := 0

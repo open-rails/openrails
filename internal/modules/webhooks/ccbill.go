@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	identitydir "github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -646,33 +647,19 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			}
 		}
 
-		// #733: durably record the declined initial attempt as a failed
-		// payments row (verbatim failureCode + normalized reason).
-		if price != nil && userID != "" && strings.TrimSpace(transactionID) != "" {
-			txdb := db.NewWithPgxTx(tx)
-			kind := payments.AttemptInitial
-			failed := &models.Payment{
-				ID:            uuidutil.NewV7(),
-				CustomerID:    identity.CustomerIDFromString(userID).UUID(),
-				PriceID:       price.ID,
-				Rail:          models.RailCCBill,
-				TransactionID: strings.TrimSpace(transactionID),
-				Amount:        price.Amount,
-				ListAmount:    price.Amount,
-				Currency:      price.Currency,
-				Status:        payments.PaymentStatusFailedValue,
-				AttemptKind:   &kind,
-				MoneyMovement: models.MoneyMovementNone, // or#827: a decline moved nothing.
-				PurchasedAt:   s.now(),
-				CreatedAt:     s.now(),
+		// #1111: the declined new sale is an attempt, and moved no money.
+		if price != nil && userID != "" {
+			psp, err := db.RequirePSPID(ctx)
+			if err != nil {
+				return err
 			}
-			if code := strings.TrimSpace(failureCode); code != "" {
-				reason := decline.ReasonFor(string(models.RailCCBill), code)
-				failed.FailureCode = &code
-				failed.FailureReason = &reason
-			}
-			if _, err := payments.NewPaymentService(txdb, s.Clock).CreateIfNotExists(ctx, failed); err != nil {
-				log.WithContext(ctx).WithError(err).WithField("transaction_id", transactionID).Error("failed to record CCBill new-sale decline payment row")
+			if err := attempts.Record(ctx, db.NewWithPgxTx(tx).Gen(ctx), attempts.Attempt{
+				MerchantID: price.MerchantID, CustomerID: identity.CustomerIDFromString(userID).UUID(), PSPID: psp, Rail: string(models.RailCCBill),
+				Kind: attempts.Initial, Owner: attempts.OwnerProvider, NewCard: true, ObservedVia: "webhook", Target: price.ID.String(),
+				Answer: decline.Evidence{Code: strings.TrimSpace(failureCode), Text: strings.TrimSpace(failureReason)}, TransactionID: strings.TrimSpace(transactionID),
+				Amount: price.Amount, Currency: price.Currency, At: s.now(),
+			}); err != nil {
+				return fmt.Errorf("record CCBill new-sale decline: %w", err)
 			}
 		}
 
@@ -1759,6 +1746,11 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 		if periodEnd != nil && sub.CurrentPeriodEndsAt != nil && !periodEnd.After(*sub.CurrentPeriodEndsAt) {
 			return lc.RecordConfirmedChargeWithoutRenewal(ctx, params) // a replay, or a period already paid
 		}
+		if sub.CurrentPeriodEndsAt != nil {
+			if err := s.recordCCBillAttempt(ctx, d, sub, sub.CurrentPeriodEndsAt.UTC(), transactionID, true, decline.Evidence{}); err != nil {
+				return err
+			}
+		}
 		err = lc.RenewMembership(ctx, params)
 		if !subscriptions.IsTerminalTransitionBlocked(err) && !errors.Is(err, lifecycle.ErrTerminal) {
 			return err
@@ -1832,8 +1824,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			return fmt.Errorf("record CCBill retry date for %s: %w", sub.ID, err)
 		}
 		notes = append(notes, ccbillNotice{data: openrails.NotificationData{Rail: string(models.RailCCBill), RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed))
-		s.recordCCBillDecline(ctx, d, sub, transactionID, data.FailureCode)
-		return nil
+		return s.recordCCBillAttempt(ctx, d, sub, period, transactionID, false, decline.Evidence{Code: strings.TrimSpace(data.FailureCode), Text: strings.TrimSpace(data.FailureReason)})
 	})
 	if err != nil {
 		return err
@@ -1856,29 +1847,22 @@ func ccbillDeclinedPeriod(sub *models.Subscription, renewalAt *time.Time) time.T
 	return paidThrough
 }
 
-// recordCCBillDecline keeps the declined rebill on the ledger (#733); it moved
-// no money.
-func (s *CCBillWebhookService) recordCCBillDecline(ctx context.Context, d *db.DB, sub *models.Subscription, transactionID, failureCode string) {
-	if transactionID == "" {
-		return
+// recordCCBillAttempt records CCBill's own rebill (approved or declined) as its
+// cycle's attempt (#1111): the cycle's rebill, then CCBill's retries.
+func (s *CCBillWebhookService) recordCCBillAttempt(ctx context.Context, d *db.DB, sub *models.Subscription, due time.Time, transactionID string, approved bool, answer decline.Evidence) error {
+	if sub.Price == nil {
+		price, err := catalog.NewPriceService(d).GetByID(ctx, sub.PriceID)
+		if err != nil {
+			return err
+		}
+		sub.Price = price
 	}
-	price, err := catalog.NewPriceService(d).GetByID(ctx, sub.PriceID)
-	if err != nil {
-		return
-	}
-	kind, subID, now := payments.AttemptRenewal, sub.ID, s.now()
-	failed := &models.Payment{
-		ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, PriceID: price.ID, SubscriptionID: &subID, Rail: models.RailCCBill,
-		TransactionID: transactionID, Amount: price.Amount, ListAmount: price.Amount, Currency: price.Currency,
-		Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, PurchasedAt: now, CreatedAt: now,
-	}
-	if code := strings.TrimSpace(failureCode); code != "" {
-		reason := decline.ReasonFor(string(models.RailCCBill), code)
-		failed.FailureCode, failed.FailureReason = &code, &reason
-	}
-	if _, err := payments.NewPaymentService(d, s.Clock).CreateIfNotExists(ctx, failed); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("transaction_id", transactionID).Error("failed to record CCBill renewal decline payment row")
-	}
+	return attempts.Record(ctx, d.Gen(ctx), attempts.Attempt{
+		MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: string(models.RailCCBill),
+		Kind: attempts.Rebill, Owner: attempts.OwnerOf(sub.CollectionPolicy), ProviderSchedule: true, ObservedVia: "webhook",
+		Approved: approved, Answer: answer, TransactionID: strings.TrimSpace(transactionID), Amount: sub.Price.Amount, Currency: sub.Price.Currency,
+		At: s.now(), SubscriptionID: &sub.ID, PaymentMethodID: sub.PaymentMethodID, Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due},
+	})
 }
 
 // handleCancel mirrors CCBill ending its schedule. The paid period is kept,

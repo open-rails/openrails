@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -357,6 +358,9 @@ func (v *Verifier) bulkRead(ctx context.Context, mid merchant.ID) error {
 				if _, err := backfillSubscriptionPayments(ctx, q, sub, txns, now, defaultBackfillLookback); err != nil {
 					return err
 				}
+				if err := recordScheduleAttempts(attempts.ObservedVia(ctx, "pull"), q, sub, txns, now); err != nil {
+					return err
+				}
 			}
 			if err := saveCheckpoint(ctx, v.DB, mid, psp, page+1); err != nil {
 				return err
@@ -448,8 +452,8 @@ func listUnverifiedNMI(ctx context.Context, database *db.DB, mid merchant.ID, ps
 	return loadUnverified(ctx, database, mid, ids)
 }
 
-// recordedCharges is each row's recorded charges and declines since, the
-// evidence a bulk pass decides from.
+// recordedCharges is each row's recorded charges (payments) and declines
+// (payment attempts) since, the evidence a bulk pass decides from.
 func recordedCharges(ctx context.Context, database *db.DB, mid merchant.ID, subs []*models.Subscription, since time.Time) (map[uuid.UUID][]RemoteTransaction, error) {
 	ids := make([]uuid.UUID, 0, len(subs))
 	rail := map[uuid.UUID]string{}
@@ -457,9 +461,13 @@ func recordedCharges(ctx context.Context, database *db.DB, mid merchant.ID, subs
 		ids = append(ids, s.ID)
 		rail[s.ID] = s.RailSubscriptionID
 	}
-	rows, err := database.Qx(ctx).Query(ctx, `SELECT subscription_id, transaction_id, status, purchased_at, amount, currency, COALESCE(failure_code, '')
+	rows, err := database.Qx(ctx).Query(ctx, `SELECT subscription_id, transaction_id, 'completed', purchased_at, amount, currency, ''
 		FROM openrails.payments
-		WHERE merchant_id = $1 AND subscription_id = ANY($2) AND purchased_at >= $3 AND status IN ('completed', 'failed') AND deleted_at IS NULL`, mid.UUID(), ids, since)
+		WHERE merchant_id = $1 AND subscription_id = ANY($2) AND purchased_at >= $3 AND status = 'completed' AND deleted_at IS NULL
+		UNION ALL
+		SELECT subscription_id, transaction_id, 'failed', attempted_at, amount, COALESCE(currency, ''), COALESCE(response_code, '')
+		FROM openrails.payment_attempts
+		WHERE merchant_id = $1 AND subscription_id = ANY($2) AND attempted_at >= $3 AND category <> 'approved' AND transaction_id IS NOT NULL`, mid.UUID(), ids, since)
 	if err != nil {
 		return nil, fmt.Errorf("verify: load recorded charges: %w", err)
 	}

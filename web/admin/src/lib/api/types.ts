@@ -160,8 +160,6 @@ export interface PaymentObject {
   transaction_id: string
   refunded: boolean
   captured?: boolean
-  failure_code?: string
-  failure_message?: string
   refunds?: { object: "list"; data: PaymentObject[] }
   created_at: string
 }

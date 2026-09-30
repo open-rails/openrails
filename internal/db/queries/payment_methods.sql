@@ -133,19 +133,13 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = $1
 ORDER BY pm.created_at DESC;
 
 -- name: ListLatestChargeByPaymentMethodIDs :many
--- #589 derived health: the most recent charge (purchased_at + status) per payment
--- method, derived TRANSITIVELY via the subscription link — payments carry no direct
--- payment_method_id yet (option a; option b = a payments.payment_method_id column,
--- deferred). Source is the durable openrails.payments ledger, never provider_intents.
-SELECT DISTINCT ON (s.payment_method_id)
-    s.payment_method_id AS payment_method_id,
-    p.purchased_at      AS purchased_at,
-    p.status            AS status
-FROM openrails.subscriptions s
-JOIN openrails.payments p ON p.subscription_id = s.id AND p.deleted_at IS NULL
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND s.payment_method_id = ANY(sqlc.arg(ids)::uuid[])
-  AND s.deleted_at IS NULL
-ORDER BY s.payment_method_id, p.purchased_at DESC;
+-- #589 derived health: each payment method's most recent charge attempt
+-- (#1111), approved or not.
+SELECT DISTINCT ON (a.payment_method_id)
+    a.payment_method_id, a.attempted_at, a.category
+FROM openrails.payment_attempts a
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.payment_method_id = ANY(sqlc.arg(ids)::uuid[]) AND a.kind <> 'verify'
+ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;
 
 -- name: CountPaymentMethodsSharingCustomerRef :one
 -- #682 shared-vault guard: how many OTHER stored methods share this rail
