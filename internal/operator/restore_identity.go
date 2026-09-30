@@ -17,15 +17,17 @@ import (
 // and authority from the destination. The host supplies the authenticated local
 // owner; group identity and permissions must never come from the archive.
 type ProvisionMerchantForRestoreRequest struct {
-	MerchantID      merchant.ID
+	MerchantID merchant.ID
+	// Slug is the name the restored merchant claims at the destination.
+	Slug            string
 	ExistingGroupID string
 	OwnerUserID     string
 }
 
 // ProvisionMerchantForRestore preserves a merchant UUID under an existing
-// destination merchant group. It checks live owner authority and uses that
-// group's canonical name. It creates no groups, roles, credentials or host
-// routes. The importer separately requires an empty billing book.
+// destination merchant group whose live owner is req.OwnerUserID, claiming
+// req.Slug. It creates no groups, roles, credentials or host routes. The
+// importer separately requires an empty billing book.
 func ProvisionMerchantForRestore(ctx context.Context, a *app.App, req ProvisionMerchantForRestoreRequest) (*ProvisionMerchantResult, error) {
 	if req.MerchantID.IsZero() {
 		return nil, fmt.Errorf("control plane restore provision: merchant_id is required")
@@ -53,18 +55,12 @@ func ProvisionMerchantForRestore(ctx context.Context, a *app.App, req ProvisionM
 	if !allowed {
 		return nil, authkit.ErrInsufficientRoleAuthority
 	}
-	// Match ordinary provisioning: obtain the current canonical name after the
-	// ownership check, so a rename during authorization is not projected stale.
-	group, err = core.GroupInstanceByID(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
 	directory, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {
 		return nil, err
 	}
 	m, created, err := directory.ProvisionForRestore(ctx, req.MerchantID, merchants.ProvisionRequest{
-		Slug: group.InstanceSlug, PermissionGroupID: group.ID,
+		Slug: req.Slug, PermissionGroupID: group.ID,
 	})
 	if err != nil {
 		return nil, err

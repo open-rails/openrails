@@ -54,7 +54,6 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if err != nil {
 		return nil, err
 	}
-	directory.WithNameAuthority(controlplane.MerchantNameAuthority(cp.Core()))
 	selected, err := directory.GetBySlug(ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("lookup merchant %q: %w", slug, err)

@@ -339,8 +339,8 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "prepare-target --merchant UUID",
 		Short: "Provision the exact merchant identity in the local destination database",
-		Long: "Create the destination merchant identity before import. Use an existing destination AuthKit " +
-			"group and its owner, or explicitly select an unbound host-local merchant. This does not import billing data.",
+		Long: "Create the destination merchant identity with --slug before import. Bind it to an existing destination " +
+			"AuthKit group and its owner, or explicitly select an unbound host-local merchant. This does not import billing data.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			mid, err := parseBillingArchiveMerchant(rawMerchant)
@@ -377,7 +377,7 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 					return err
 				}
 				if _, err := cp.ProvisionMerchantForRestore(ctx, controlplane.ProvisionMerchantForRestoreRequest{
-					MerchantID: mid, ExistingGroupID: strings.TrimSpace(groupID), OwnerUserID: strings.TrimSpace(ownerID),
+					MerchantID: mid, Slug: strings.TrimSpace(slug), ExistingGroupID: strings.TrimSpace(groupID), OwnerUserID: strings.TrimSpace(ownerID),
 				}); err != nil {
 					return err
 				}
@@ -388,7 +388,7 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&rawMerchant, "merchant", "", "Exact source merchant UUID to preserve (required)")
 	cmd.Flags().BoolVar(&unbound, "unbound-merchants", false, "Create a host-local merchant without an OpenRails control-plane AuthKit group")
-	cmd.Flags().StringVar(&slug, "slug", "", "Host-local merchant slug (required with --unbound-merchants)")
+	cmd.Flags().StringVar(&slug, "slug", "", "Destination merchant name (required)")
 	cmd.Flags().StringVar(&groupID, "authkit-group-id", "", "Existing destination AuthKit merchant group UUID")
 	cmd.Flags().StringVar(&ownerID, "owner-user-id", "", "Destination AuthKit user UUID holding live ownership of that group")
 	return cmd
@@ -396,12 +396,13 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 
 func validateBillingPrepareTarget(unbound bool, slug, groupID, ownerID string) error {
 	slug, groupID, ownerID = strings.TrimSpace(slug), strings.TrimSpace(groupID), strings.TrimSpace(ownerID)
-	if unbound {
-		if slug == "" || groupID != "" || ownerID != "" {
-			return fmt.Errorf("--unbound-merchants requires --slug and cannot use --authkit-group-id or --owner-user-id")
-		}
-	} else if slug != "" || groupID == "" || ownerID == "" {
-		return fmt.Errorf("provide --authkit-group-id and --owner-user-id without --slug, or use --unbound-merchants --slug")
+	switch {
+	case slug == "":
+		return fmt.Errorf("--slug is required")
+	case unbound && (groupID != "" || ownerID != ""):
+		return fmt.Errorf("--unbound-merchants cannot use --authkit-group-id or --owner-user-id")
+	case !unbound && (groupID == "" || ownerID == ""):
+		return fmt.Errorf("provide --authkit-group-id and --owner-user-id, or use --unbound-merchants")
 	}
 	return nil
 }

@@ -63,7 +63,6 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	if err != nil {
 		return fail(err)
 	}
-	directory.WithNameAuthority(opts.NameAuthority)
 	selected, err := directory.GetBySlug(ctx, opts.Merchant)
 	if err != nil {
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
@@ -71,7 +70,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 	rt.SetConfiguredMerchant(selected.ID)
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		rt.Merchants, err = pullProviderManifestPlane(ctx, cfg, database, PullProviderOptions{
-			MerchantID: selected.ID, NameAuthority: opts.NameAuthority, MerchantManifestPath: opts.MerchantManifestPath,
+			MerchantID: selected.ID, MerchantManifestPath: opts.MerchantManifestPath,
 		})
 		if err != nil {
 			return fail(fmt.Errorf("catalog runtime credential plane: %w", err))
@@ -92,7 +91,6 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		}
 	}
 	rt.Merchants.StripeClients = rt.StripeClients
-	rt.Merchants.WithNameAuthority(opts.NameAuthority)
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
 	// Catalog application verifies existing plans. This graph never constructs
 	// a signer, signing submitter, subscription lifecycle, poller, or worker fleet.

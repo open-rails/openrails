@@ -48,21 +48,18 @@ type PullProviderOptions struct {
 	// NMITransport); nil is the real gateway.
 	NMITransport http.RoundTripper
 	PGXPool      *pgxpool.Pool
-	// NameAuthority resolves names in an external merchant manifest. The pull
-	// itself is always scoped by MerchantID; nil selects unbound host names only.
-	NameAuthority merchant.NameAuthority
-	Config        *config.Config
-	MerchantID    merchant.ID
-	Providers     []string
-	PSP           string
-	Since         string
-	Until         string
-	Format        string
-	LogDir        string
-	Insert        bool
-	Overwrite     bool
-	Prune         bool
-	Out           io.Writer
+	Config       *config.Config
+	MerchantID   merchant.ID
+	Providers    []string
+	PSP          string
+	Since        string
+	Until        string
+	Format       string
+	LogDir       string
+	Insert       bool
+	Overwrite    bool
+	Prune        bool
+	Out          io.Writer
 
 	// PruneExpectRows is the operator's typed confirmation and the ONLY way a
 	// prune writes (or#858). Nil = dry-run: discover, report the number to
@@ -483,7 +480,6 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	if err != nil {
 		return nil, err
 	}
-	directory.WithNameAuthority(opts.NameAuthority)
 	var selected *boot.MerchantConfig
 	for name, mt := range manifest.Merchants {
 		owner, err := directory.GetBySlug(ctx, name)
@@ -511,7 +507,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	if err != nil {
 		return nil, fmt.Errorf("pull-provider: build merchants service over the manifest plane: %w", err)
 	}
-	return svc.WithNameAuthority(opts.NameAuthority), nil
+	return svc, nil
 }
 
 func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr string) (reconcile.Provider, reconcile.PSPBinding, error) {

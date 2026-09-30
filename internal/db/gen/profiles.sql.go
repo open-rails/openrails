@@ -57,68 +57,15 @@ func (q *Queries) GetMerchantDirectoryByID(ctx context.Context, id uuid.UUID) (G
 	return i, err
 }
 
-const getUnboundMerchantBySlug = `-- name: GetUnboundMerchantBySlug :one
-SELECT id, slug, status, display_name
-FROM openrails.merchants
-WHERE slug = $1 AND deleted_at IS NULL AND permission_group_id IS NULL
-`
-
-type GetUnboundMerchantBySlugRow struct {
-	ID          uuid.UUID
-	Slug        string
-	Status      string
-	DisplayName *string
-}
-
-func (q *Queries) GetUnboundMerchantBySlug(ctx context.Context, slug string) (GetUnboundMerchantBySlugRow, error) {
-	row := q.db.QueryRow(ctx, getUnboundMerchantBySlug, slug)
-	var i GetUnboundMerchantBySlugRow
-	err := row.Scan(
-		&i.ID,
-		&i.Slug,
-		&i.Status,
-		&i.DisplayName,
-	)
-	return i, err
-}
-
-const listMerchantBindingsByGroups = `-- name: ListMerchantBindingsByGroups :many
-SELECT id,status,coalesce(permission_group_id,'')::text AS group_id
-FROM openrails.merchants
-WHERE permission_group_id=ANY($1::text[]) AND deleted_at IS NULL
-`
-
-type ListMerchantBindingsByGroupsRow struct {
-	ID      uuid.UUID
-	Status  string
-	GroupID string
-}
-
-func (q *Queries) ListMerchantBindingsByGroups(ctx context.Context, groupIds []string) ([]ListMerchantBindingsByGroupsRow, error) {
-	rows, err := q.db.Query(ctx, listMerchantBindingsByGroups, groupIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMerchantBindingsByGroupsRow
-	for rows.Next() {
-		var i ListMerchantBindingsByGroupsRow
-		if err := rows.Scan(&i.ID, &i.Status, &i.GroupID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMerchantDirectoryRefs = `-- name: ListMerchantDirectoryRefs :many
-SELECT id, slug, COALESCE(display_name, '')::text AS display_name
-FROM openrails.merchants
-WHERE slug = ANY($1::text[]) AND deleted_at IS NULL AND permission_group_id IS NULL
-ORDER BY slug
+SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
+FROM openrails.merchants m
+WHERE m.deleted_at IS NULL
+  AND (m.slug = ANY($1::text[])
+       OR m.id IN (SELECT a.merchant_id FROM openrails.merchant_slug_aliases a
+                    WHERE a.slug = ANY($1::text[])
+                      AND (a.expires_at IS NULL OR a.expires_at > now())))
+ORDER BY m.slug
 `
 
 type ListMerchantDirectoryRefsRow struct {
@@ -128,9 +75,9 @@ type ListMerchantDirectoryRefsRow struct {
 }
 
 // The read counterpart of the display-name write path: a host that reaches a
-// merchant through a MEMBERSHIP knows only slugs, and needs names to label its
-// own surfaces. openrails.merchants is global/policy-free, so this is an
-// ordinary query. Slugs that do not exist simply do not come back.
+// merchant through a MEMBERSHIP knows only names, and needs display names to
+// label its own surfaces. Live names and unexpired former names resolve to the
+// live merchant's current name; names that do not resolve do not come back.
 func (q *Queries) ListMerchantDirectoryRefs(ctx context.Context, slugs []string) ([]ListMerchantDirectoryRefsRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantDirectoryRefs, slugs)
 	if err != nil {
@@ -151,44 +98,13 @@ func (q *Queries) ListMerchantDirectoryRefs(ctx context.Context, slugs []string)
 	return items, nil
 }
 
-const listMerchantDirectoryRefsByIDs = `-- name: ListMerchantDirectoryRefsByIDs :many
-SELECT id,slug,coalesce(display_name,'')::text AS display_name
-FROM openrails.merchants WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL
-ORDER BY slug,id
-`
-
-type ListMerchantDirectoryRefsByIDsRow struct {
-	ID          uuid.UUID
-	Slug        string
-	DisplayName string
-}
-
-func (q *Queries) ListMerchantDirectoryRefsByIDs(ctx context.Context, ids []uuid.UUID) ([]ListMerchantDirectoryRefsByIDsRow, error) {
-	rows, err := q.db.Query(ctx, listMerchantDirectoryRefsByIDs, ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMerchantDirectoryRefsByIDsRow
-	for rows.Next() {
-		var i ListMerchantDirectoryRefsByIDsRow
-		if err := rows.Scan(&i.ID, &i.Slug, &i.DisplayName); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const registerUnboundMerchant = `-- name: RegisterUnboundMerchant :one
 INSERT INTO openrails.merchants (slug, status, display_name)
 VALUES ($1, 'active', $2)
-ON CONFLICT (slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL DO UPDATE SET
+ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
     updated_at = now()
+WHERE openrails.merchants.permission_group_id IS NULL
 RETURNING id
 `
 
@@ -200,48 +116,11 @@ type RegisterUnboundMerchantParams struct {
 // Register a merchant (billing bucket) from config, idempotently (#480). The
 // merchant carries ONLY billing/rail state; NO auth. A re-register without a
 // display_name keeps any existing one (COALESCE), so config that omits it never
-// clears a name set elsewhere.
+// clears a name set elsewhere. A live group-bound merchant holding the name
+// returns no row: it is never adopted as a host-owned merchant.
 func (q *Queries) RegisterUnboundMerchant(ctx context.Context, arg RegisterUnboundMerchantParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, registerUnboundMerchant, arg.Slug, arg.DisplayName)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
-}
-
-const searchUnboundMerchants = `-- name: SearchUnboundMerchants :many
-SELECT id,slug,status FROM openrails.merchants
-WHERE deleted_at IS NULL AND permission_group_id IS NULL
-  AND strpos(lower(slug),lower($1::text)) > 0
-ORDER BY slug,id LIMIT $2::bigint
-`
-
-type SearchUnboundMerchantsParams struct {
-	Query     string
-	PageLimit int64
-}
-
-type SearchUnboundMerchantsRow struct {
-	ID     uuid.UUID
-	Slug   string
-	Status string
-}
-
-func (q *Queries) SearchUnboundMerchants(ctx context.Context, arg SearchUnboundMerchantsParams) ([]SearchUnboundMerchantsRow, error) {
-	rows, err := q.db.Query(ctx, searchUnboundMerchants, arg.Query, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SearchUnboundMerchantsRow
-	for rows.Next() {
-		var i SearchUnboundMerchantsRow
-		if err := rows.Scan(&i.ID, &i.Slug, &i.Status); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }

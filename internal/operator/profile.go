@@ -18,12 +18,8 @@ var ErrMerchantUnresolved = policy.ErrMerchantUnresolved
 
 // ListMerchantRefs returns the directory identity — slug plus display name — of
 // each requested slug, for the slugs that exist. It is the read counterpart of
-// SetMerchantDisplayName, and the seam a host needs to label merchant surfaces
-// it reaches through a MEMBERSHIP rather than a customer record: AuthKit
-// subject-group membership carries only the instance slug, and the customer-side
-// enumeration (ListMerchantsForSubject) is scoped to customer records, which a
-// merchant's own owner does not hold. Unknown slugs are omitted. This is a
-// privileged host seam; callers must authorize the slugs before use.
+// SetMerchantDisplayName. Unknown slugs are omitted. This is a privileged host
+// seam; callers must authorize the slugs before use.
 func ListMerchantRefs(ctx context.Context, a *app.App, slugs []string) ([]MerchantRef, error) {
 	cp := Get(a)
 	if cp == nil {
@@ -33,7 +29,6 @@ func ListMerchantRefs(ctx context.Context, a *app.App, slugs []string) ([]Mercha
 	if err != nil {
 		return nil, fmt.Errorf("control plane list merchant refs: build merchant directory service: %w", err)
 	}
-	dir.WithGroupSlugResolver(cp.MerchantGroupSlugResolver()).WithGroupIDResolver(cp.MerchantGroupIDResolver())
 	rows, err := dir.ListDirectoryRefs(ctx, slugs)
 	if err != nil {
 		return nil, fmt.Errorf("control plane list merchant refs: %w", err)
@@ -60,6 +55,20 @@ func SetMerchantDisplayName(ctx context.Context, a *app.App, id merchant.ID, dis
 	}
 	if err := dir.SetDisplayName(ctx, id, displayName); err != nil {
 		return fmt.Errorf("control plane set merchant display name: %w", err)
+	}
+	return nil
+}
+
+// RenameMerchant renames an active merchant as the operator: no reserved-name
+// or rename-interval check, and the former name forwards to it under the site
+// naming policy. This is a privileged host seam; callers must authorize it.
+func RenameMerchant(ctx context.Context, a *app.App, id merchant.ID, name string) error {
+	cp := Get(a)
+	if cp == nil {
+		return fmt.Errorf("control plane rename merchant: no control plane attached (call Attach first)")
+	}
+	if _, err := cp.RenameMerchant(ctx, id, name, "", true); err != nil {
+		return fmt.Errorf("control plane rename merchant: %w", err)
 	}
 	return nil
 }

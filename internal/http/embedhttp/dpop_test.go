@@ -76,10 +76,6 @@ func (d proofDirectory) GetBySlug(context.Context, string) (*merchants.Merchant,
 	row := d.row
 	return &row, nil
 }
-func (d proofDirectory) HasCanonicalNameAuthority() bool { return true }
-func (d proofDirectory) CanonicalSlug(context.Context, merchant.ID) (string, error) {
-	return d.row.Slug, nil
-}
 
 func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	const issuer = "https://delegating-app.test"

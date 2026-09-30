@@ -44,9 +44,10 @@ func (s *Service) restoreIdentity(ctx context.Context, id merchant.ID, slug, gro
 		return nil, false, fmt.Errorf("merchants: restore destination requires a directory database")
 	}
 
-	// The UUID, group and unbound-name unique indexes arbitrate concurrent
-	// provisions. Never UPDATE on conflict: a UUID is not permission to replace
-	// another binding, resurrect a retired row, or rename an existing destination.
+	// The UUID, group and live-name unique indexes arbitrate concurrent
+	// provisions; the name guard refuses another merchant's former name. Never
+	// UPDATE on conflict: a UUID is not permission to replace another binding,
+	// resurrect a retired row, or rename an existing destination.
 	var inserted string
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
@@ -54,6 +55,9 @@ func (s *Service) restoreIdentity(ctx context.Context, id merchant.ID, slug, gro
 		ON CONFLICT DO NOTHING
 		RETURNING id::text
 	`, id.String(), slug, groupID).Scan(&inserted)
+	if isUniqueViolation(err) {
+		return nil, false, ErrMerchantRestoreConflict
+	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, fmt.Errorf("merchants: create restore destination: %w", err)
 	}

@@ -1,16 +1,16 @@
 package operator
 
-// or#914 item 3: the hosted-SaaS MayCreateInstance predicate — the host cost
-// gate behind ak#263's WithInstanceAdmission seam, composed from openrails'
-// own state: verified email ALWAYS; a free allowance of owned merchants; and
-// beyond it, a VAULTED payment method on file (setup-intent vault + Radar
-// check, no charge — openrails holds the vault) unlocks more. This is the
-// "card before your 3rd org" gate.
+// or#914 item 3: the hosted-SaaS merchant creation cost gate, composed from
+// openrails' own state: verified email ALWAYS; a free allowance of owned
+// merchants; and beyond it, a VAULTED payment method on file (setup-intent
+// vault + Radar check, no charge — openrails holds the vault) unlocks more.
+// This is the "card before your 3rd org" gate.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,9 +48,9 @@ type MerchantCreationPolicy struct {
 // MerchantCreationConfig.Admission. Late-bound: the control plane is resolved
 // per call (the predicate is constructed before Attach completes). Every
 // unanswerable question refuses — admission is a judgment about identity and
-// money, never made on an unanswered question. An already-owned group is an
-// idempotent repair, not a creation event, so it returns before allowance and
-// vault checks; stable group identity keeps that true across slug renames.
+// money, never made on an unanswered question. A name the user already owns is
+// an idempotent repair, not a creation event, so it returns before allowance
+// and vault checks. The allowance counts live merchants the user owns.
 func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
 	if a == nil {
 		return nil, errors.New("merchant creation admission: app is required")
@@ -77,30 +78,30 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 		if err != nil {
 			return fmt.Errorf("list user's merchant memberships: %w", err)
 		}
-
-		claimedGroupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(merchant.NormalizeSlug(instanceSlug)))
-		switch {
-		case err == nil:
-			for _, membership := range memberships {
-				if membership.Persona == controlplane.MerchantType &&
-					strings.EqualFold(string(membership.Role), controlplane.MerchantRoleOwner) &&
-					membership.GroupID == claimedGroupID {
-					return nil
-				}
-			}
-		case errors.Is(err, authkit.ErrGroupNotFound):
-			// A fresh slug has no group identity to match; apply the creation gate.
-		default:
-			return fmt.Errorf("resolve claimed merchant group: %w", err)
-		}
-
-		owned := 0
+		var ownedGroups []string
 		for _, m := range memberships {
 			if m.Persona == controlplane.MerchantType && strings.EqualFold(string(m.Role), controlplane.MerchantRoleOwner) {
-				owned++
+				ownedGroups = append(ownedGroups, m.GroupID)
 			}
 		}
-		if owned < policy.FreeAllowance {
+		directory, err := merchants.NewDirectoryService(cp.Pool())
+		if err != nil {
+			return err
+		}
+		claimed, err := directory.GetBySlug(ctx, instanceSlug)
+		switch {
+		case err == nil:
+			if slices.Contains(ownedGroups, claimed.PermissionGroupID) {
+				return nil
+			}
+		case !errors.Is(err, merchants.ErrMerchantNotFound):
+			return fmt.Errorf("resolve claimed merchant: %w", err)
+		}
+		owned, err := directory.ListByGroups(ctx, ownedGroups)
+		if err != nil {
+			return fmt.Errorf("list user's merchants: %w", err)
+		}
+		if len(owned) < policy.FreeAllowance {
 			return nil
 		}
 		if policy.HasVaultedPaymentMethod == nil {

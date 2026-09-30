@@ -23,7 +23,6 @@ import (
 )
 
 type CatalogDumpOptions struct {
-	NameAuthority merchant.NameAuthority
 	Config        *config.Config
 	PGXPool       *pgxpool.Pool
 	Merchant      string
@@ -50,7 +49,6 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if err != nil {
 		return err
 	}
-	directory.WithNameAuthority(opts.NameAuthority)
 	mctx, _, err := catalogMerchantContext(ctx, directory, opts.Merchant)
 	if err != nil {
 		return err

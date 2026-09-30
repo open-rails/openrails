@@ -6,6 +6,15 @@ import (
 	authhttp "github.com/open-rails/authkit/authhttp"
 )
 
+// excludedAuthRoutes are AuthKit routes OpenRails shadows or withholds. JWKS
+// is not served on this surface. The merchant group's settings routes read and
+// rename AuthKit's group name, which is not the merchant's name (#1106).
+var excludedAuthRoutes = []authhttp.RouteRef{
+	{Method: http.MethodGet, Path: authhttp.JWKSPath},
+	{Method: http.MethodGet, Path: "/" + string(MerchantType) + "/{instance_slug}"},
+	{Method: http.MethodPatch, Path: "/" + string(MerchantType) + "/{instance_slug}"},
+}
+
 // IntentionalRouteGroups is the set of AuthKit route groups OpenRails
 // intentionally exposes in locked-down / self-hosted mode (issue #224 task 4).
 //
@@ -55,35 +64,4 @@ func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
 		}
 	}
 	return out
-}
-
-// RouteSpecs returns the concrete AuthKit route specs the control plane
-// serves (the posture's groups). The HTTP layer mounts
-// this exact surface via authhttp.MountHandler (#250) with the same
-// MountedRouteGroups + WrapAuthRoute inputs; the route-surface test pins the
-// two against each other.
-func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
-	if c == nil || c.authSvc == nil {
-		return nil
-	}
-	groups := c.MountedRouteGroups()
-	if len(groups) == 0 {
-		return nil
-	}
-	specs := c.authSvc.APIRoutes(groups...)
-	out := make([]authhttp.RouteSpec, len(specs))
-	copy(out, specs)
-	for i := range out {
-		out[i].Handler = c.WrapAuthRoute(out[i], out[i].Handler)
-	}
-	return out
-}
-
-// WrapAuthRoute attaches the merchant directory row around explicit hosted
-// merchant creation. Ordinary auth/billing requests never create portal groups.
-func (c *ControlPlane) WrapAuthRoute(spec authhttp.RouteSpec, h http.Handler) http.Handler {
-	if c != nil && spec.Group == authhttp.RoutePermissionGroups && c.merchantCreation != nil && spec.Method == http.MethodPost && spec.Path == "/"+string(MerchantType) {
-		return c.merchantCreationAttachHandler(h)
-	}
-	return h
 }

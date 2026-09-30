@@ -15,20 +15,11 @@ import (
 )
 
 type directory struct {
-	m         *merchants.Merchant
-	err       error
-	calls     int
-	named     bool
-	canonical string
-	nameErr   error
-	nameCalls int
+	m     *merchants.Merchant
+	err   error
+	calls int
 }
 
-func (d *directory) HasCanonicalNameAuthority() bool { return d.named }
-func (d *directory) CanonicalSlug(context.Context, merchant.ID) (string, error) {
-	d.nameCalls++
-	return d.canonical, d.nameErr
-}
 func (d *directory) Get(context.Context, merchant.ID) (*merchants.Merchant, error) {
 	d.calls++
 	return d.m, d.err
@@ -100,37 +91,18 @@ func TestResolvedAliasKeepsCanonicalTargetAndOriginalSelector(t *testing.T) {
 	requireGate(t, Assert(r, target), 409)
 }
 
-func TestIDSelectionDoesNotRequireOptionalNameAuthority(t *testing.T) {
+// The stored name is the merchant's current name (#1106): ID selection
+// presents it without another lookup.
+func TestIDSelectionPresentsTheStoredName(t *testing.T) {
 	id := merchant.ID(uuid.New())
 	group := uuid.NewString()
-	for _, tc := range []struct {
-		name      string
-		installed bool
-		canonical string
-		err       error
-		status    int
-	}{
-		{name: "absent"}, {name: "current", installed: true, canonical: "current"},
-		{name: "failed", installed: true, err: errors.New("unavailable"), status: 503},
-		{name: "empty", installed: true, status: 503},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			d := &directory{m: &merchants.Merchant{ID: id, Slug: "stale-reassigned-name", Status: merchants.StatusActive, PermissionGroupID: group}, named: tc.installed, canonical: tc.canonical, nameErr: tc.err}
-			r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
-			r.Header.Set(merchant.BindingHeader, id.String())
-			target, err := Resolve(r.Context(), r, d, merchant.ID{}, "")
-			if tc.status != 0 {
-				requireGate(t, err, tc.status)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, billingauth.Target{MerchantID: id, MerchantSlug: tc.canonical, AuthorityGroupID: group}, target, "stored mutable name is never presented")
-			require.Equal(t, 1, d.calls)
-			if !tc.installed {
-				require.Zero(t, d.nameCalls, "missing name capability is not an outage")
-			}
-		})
-	}
+	d := &directory{m: &merchants.Merchant{ID: id, Slug: "current", Status: merchants.StatusActive, PermissionGroupID: group}}
+	r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
+	r.Header.Set(merchant.BindingHeader, id.String())
+	target, err := Resolve(r.Context(), r, d, merchant.ID{}, "")
+	require.NoError(t, err)
+	require.Equal(t, billingauth.Target{MerchantID: id, MerchantSlug: "current", AuthorityGroupID: group}, target)
+	require.Equal(t, 1, d.calls)
 }
 
 func TestBindingMismatchRefusedBeforeDirectoryLookup(t *testing.T) {

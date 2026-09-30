@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	authcore "github.com/open-rails/authkit/embedded"
-	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -25,25 +23,25 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (merc
 		}
 		return tid, database.RequireMerchantID(ctx, tid)
 	}
-	// The authority owns a separate pool: callers may already hold a billing pin.
-	authorityPool, err := pgxpool.NewWithConfig(ctx, database.Pool().Config())
-	if err != nil {
-		return merchant.ID{}, err
-	}
-	defer authorityPool.Close()
-	groups, err := authcore.NewGroupDirectory(authorityPool, "")
-	if err != nil {
-		return merchant.ID{}, err
-	}
-	defer groups.Close()
 	directory, err := merchants.NewDirectoryService(database.DataPool())
 	if err != nil {
 		return merchant.ID{}, err
 	}
-	directory.WithNameAuthority(controlplane.MerchantNameAuthority(groups))
 	selected, err := directory.GetBySlug(ctx, slug)
 	if err != nil {
-		return merchant.ID{}, fmt.Errorf("resolve merchant %q through AuthKit: %w", slug, err)
+		return merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", slug, err)
 	}
 	return selected.ID, nil
+}
+
+func resolveConfiguredCLIMerchant(ctx context.Context, cfg *config.Config, name string) (merchant.ID, error) {
+	if cfg == nil || cfg.DB == nil {
+		return merchant.ID{}, fmt.Errorf("config not loaded")
+	}
+	database, err := db.NewDB(ctx, cfg.DB)
+	if err != nil {
+		return merchant.ID{}, err
+	}
+	defer database.Close()
+	return resolveCLIMerchant(ctx, database, name)
 }

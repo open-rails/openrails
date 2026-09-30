@@ -19,7 +19,6 @@ type catalogOptions struct {
 	file             string
 	merchant         string
 	merchantManifest string
-	unboundMerchants bool
 }
 
 // newApplyCatalogCmd executes the same atomic batch as the merchant Client
@@ -38,9 +37,8 @@ func newApplyCatalogCmd() *cobra.Command {
 		},
 	}
 	flags := cmd.Flags()
-	flags.BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve only host-local merchants without an AuthKit group binding")
 	flags.StringVarP(&opts.file, "file", "f", defaultCatalogManifestPath, "catalog manifest YAML file")
-	flags.StringVar(&opts.merchant, "merchant", "", "merchant name resolved through the configured identity authority")
+	flags.StringVar(&opts.merchant, "merchant", "", "merchant name")
 	flags.StringVar(&opts.merchantManifest, "merchant-manifest", "", "host-owned merchant credential snapshot (defaults to the conventional merchant manifest)")
 	return cmd
 }
@@ -75,14 +73,6 @@ func runApplyCatalog(cmd *cobra.Command, opts catalogOptions) error {
 		Out:                  cmd.OutOrStdout(),
 		Merchant:             opts.merchant,
 		MerchantManifestPath: opts.merchantManifest,
-	}
-	if !opts.unboundMerchants && cfg != nil && cfg.DB != nil {
-		_, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
-		if err != nil {
-			return err
-		}
-		defer close()
-		push.NameAuthority = authority
 	}
 	_, err := hosttools.ApplyMerchantCatalog(cmd.Context(), push)
 	return err

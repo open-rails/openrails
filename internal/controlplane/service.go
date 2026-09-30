@@ -25,6 +25,7 @@ import (
 	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -42,15 +43,14 @@ type ControlPlane struct {
 	authClient *authcore.Runtime
 	client     authkit.Client
 	hosted     bool
-	// merchantCreation is the WithMerchantCreation config when the merchant
-	// persona is opted into authkit's generated creation path (or#914); nil
-	// otherwise. WrapAuthRoute attaches the directory row around the
-	// generated POST /merchant, and ProvisionMerchant enforces the same
-	// declared policy on in-process user-claimed slugs.
+	// merchantCreation is the hosted policy for user-claimed merchant names
+	// (WithMerchantCreation, or#914); nil otherwise.
 	merchantCreation *MerchantCreationConfig
 	// merchantCreationPattern is merchantCreation.SlugPattern compiled and
 	// anchored at construction (nil when no extra pattern is declared).
 	merchantCreationPattern *regexp.Regexp
+	// naming is the rename policy for merchant names (#1106).
+	naming merchants.NamingPolicy
 	// pool is the schema-aware wrapper used for OpenRails' own control-plane
 	// queries (openrails.* tables). AuthKit's own profiles.* queries go through
 	// authSvc, which holds the raw pool (#471).
@@ -105,14 +105,10 @@ func WithHostedPosture() Option {
 	}
 }
 
-// WithMerchantCreation opts the merchant persona into authkit's generated
-// instance-creation path (ak#263, or#914): merchant slugs claimed by USERS —
-// the hosted "registration is provisioning" flow — go through
-// CreateInstanceForSubject, so the slug pattern, the reserved-slug list
-// (merchant.ReservedHostedSlugs plus cfg.ReservedSlugs), and the host
-// admission cost gate all apply automatically, and authkit mounts
-// POST /merchant with its own per-IP/per-user velocity limits. Standalone
-// never passes this.
+// WithMerchantCreation declares the hosted policy for merchant names claimed
+// by users (or#914): the reserved names (merchant.ReservedHostedSlugs plus
+// cfg.ReservedSlugs), the creation pattern and the admission cost gate.
+// Standalone never passes this.
 func WithMerchantCreation(cfg MerchantCreationConfig) Option {
 	return func(o *options) {
 		o.merchantCreation = &cfg
@@ -394,13 +390,8 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	options := newOptions(opts)
 	lockedRegistration := !options.hosted
 
-	// or#914: hosted merchant creation goes through authkit's generated
-	// creation path (ak#263) — the merchant persona opts in and the host cost
-	// gate is wired as the WithInstanceAdmission seam below.
-	rbac := Groups()
 	var merchantCreationPattern *regexp.Regexp
 	if options.merchantCreation != nil {
-		rbac = withMerchantCreation(rbac, *options.merchantCreation)
 		if pat := strings.TrimSpace(options.merchantCreation.SlugPattern); pat != "" {
 			re, perr := regexp.Compile("^(?:" + pat + ")$")
 			if perr != nil {
@@ -413,6 +404,10 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	naming := auth.Naming
 	if options.naming != nil {
 		naming = *options.naming
+	}
+	merchantNaming, err := merchantNamingPolicy(naming)
+	if err != nil {
+		return nil, err
 	}
 	coreCfg := authcore.Config{
 		Naming: naming,
@@ -440,7 +435,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 		// outside permission groups. Each type's `owner` role is auto-seeded
 		// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
 		// its own namespace directly; the flat case needs no cross-namespace grant).
-		RBAC: rbac,
+		RBAC: Groups(),
 		// Private standalone posture: no public user self-registration. Embedded
 		// privileged Client calls (CreatePermissionGroup/OperatorAssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
@@ -477,19 +472,6 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 			return nil
 		},
 	}
-	if options.merchantCreation != nil && options.merchantCreation.Admission != nil {
-		// ak#263 host admission seam: the predicate receives the normalized
-		// slug. Personas other than merchant never reach the host gate —
-		// openrails enables creation on the merchant persona only.
-		admit := options.merchantCreation.Admission
-		deps.InstanceAdmission = func(ctx context.Context, group authkit.GroupRef, subject string) error {
-			if group.Persona != MerchantType {
-				return nil
-			}
-			return admit(ctx, group.Instance, subject)
-		}
-	}
-
 	httpCfg, err := clientIPPosture(cfg, auth, options)
 	if err != nil {
 		return nil, err
@@ -501,8 +483,8 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 
 	cp2 := &ControlPlane{
 		cfg: cfg, hosted: options.hosted, merchantCreation: options.merchantCreation,
-		merchantCreationPattern: merchantCreationPattern,
-		pool:                    db.WrapPool(pool, cfg.DB.SchemaName()), issuer: issuer,
+		merchantCreationPattern: merchantCreationPattern, naming: merchantNaming,
+		pool: db.WrapPool(pool, cfg.DB.SchemaName()), issuer: issuer,
 		delegatedAudiences: []string{billingauth.TokenAudience},
 	}
 	coreCfg.HTTP = controlPlaneHTTP{controlPlane: cp2, config: httpCfg,

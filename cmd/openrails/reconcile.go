@@ -91,20 +91,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, pspStr, sinceSt
 	if err != nil {
 		return err
 	}
-	directory, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
-	if err != nil {
-		return err
-	}
-	defer close()
-	selected, err := directory.Get(cmd.Context(), mid)
-	if err != nil {
-		return err
-	}
-	if selected.PermissionGroupID == "" {
-		authority = nil
-	}
 	return hosttools.PullProvider(cmd.Context(), hosttools.PullProviderOptions{
-		NameAuthority:        authority,
 		Config:               cfg,
 		MerchantID:           mid,
 		Providers:            providerNames,

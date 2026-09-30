@@ -71,8 +71,10 @@ import (
 //     Redis client (app.App.RedisClient) into authhttp.Config.Redis for
 //     shared rate limits; AuthKit keeps no other state in Redis. Without it
 //     the control plane requires auth.allow_memory (per-process limits).
-//   - NameAdmission / InstanceAdmission: FORWARDED via AttachOptions.NameAdmission
-//     and MerchantCreation.Admission.
+//   - NameAdmission: FORWARDED via AttachOptions.NameAdmission (usernames and
+//     customer groups; merchant names are OpenRails', #1106).
+//   - InstanceAdmission: NOT forwarded. OpenRails creates merchant groups
+//     itself; MerchantCreation.Admission gates merchant creation.
 //   - Entitlements / DelegatedAuthorization / ApplicationAdmission /
 //     SolanaSNSResolver / OutboundHTTP / Clock: NOT forwarded — unrelated
 //     feature areas OpenRails' control plane does not use.
@@ -97,7 +99,8 @@ type AttachOptions struct {
 	// rewrites mounted billing paths. It must use trusted routing configuration.
 	DPoPRequestURL func(*http.Request) string
 
-	// Naming overrides Auth.Naming as one site policy input. Nil uses config.
+	// Naming overrides Auth.Naming, the site naming policy for usernames and
+	// merchant names. Nil uses config.
 	Naming *authkit.NamingConfig
 	// NameAdmission is a side-effect-free host claim check; creation charges use MerchantCreation.Admission.
 	NameAdmission func(context.Context, authkit.NameAdmissionRequest) error
@@ -158,15 +161,11 @@ type AttachOptions struct {
 	// no OpenRails wrapper needed, matching Frontend/EmailSender above.
 	AuthRateLimitOverrides map[string]ratelimit.Limit
 
-	// MerchantCreation opts the merchant persona into authkit's generated
-	// instance-creation path (ak#263, or#914). With it set,
-	// ProvisionMerchant routes USER-claimed slugs (OwnerUserID != "") through
-	// CreateInstanceForSubject — slug pattern, reserved slugs
-	// (merchant.ReservedHostedSlugs + cfg.ReservedSlugs) and the
-	// cfg.Admission cost gate all apply automatically — and authkit mounts
-	// POST /merchant with its own per-IP/per-user velocity limits. Hosted
-	// "registration is provisioning" products should set this; leave nil for
-	// operator-provisioned (manifest/bootstrap) deployments.
+	// MerchantCreation declares the hosted policy for merchant names claimed by
+	// users (or#914): reserved names (merchant.ReservedHostedSlugs +
+	// cfg.ReservedSlugs), the creation pattern and the cfg.Admission cost gate
+	// apply to ProvisionMerchant with an OwnerUserID and to merchant renames.
+	// Leave nil for operator-provisioned (manifest/bootstrap) deployments.
 	MerchantCreation *MerchantCreationConfig
 }
 
@@ -302,10 +301,6 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		a.SetControlPlane(cp, nil)
 	}
 
-	// or#914: install the rename-forwarding seam so directory slug resolution
-	// (webhook routes, GetBySlug) follows ak#264 group renames. Covers both
-	// wiring orders: a merchants service armed LATER picks the seam up from
-	// the runtime (ArmMerchantsService); one armed EARLIER is wired here.
 	if a.Runtime != nil {
 		// The standalone control plane explicitly opts billing into AuthKit's
 		// public directory API. Preserve independently injected host adapters.
@@ -315,13 +310,6 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		}
 		if a.Runtime.WebhookDispatcher != nil && a.Runtime.WebhookDispatcher.ProfileRepo == nil {
 			a.Runtime.WebhookDispatcher.ProfileRepo = directory
-		}
-		resolver := cp.MerchantGroupSlugResolver()
-		a.Runtime.MerchantGroupResolver = resolver
-		a.Runtime.MerchantGroupCanonicalResolver = cp.MerchantGroupIDResolver()
-		a.Runtime.MerchantGroupSearchResolver = cp.MerchantGroupSearchResolver()
-		if a.Runtime.Merchants != nil {
-			a.Runtime.Merchants.WithGroupSlugResolver(resolver).WithGroupIDResolver(cp.MerchantGroupIDResolver()).WithGroupSearchResolver(cp.MerchantGroupSearchResolver())
 		}
 	}
 	return nil

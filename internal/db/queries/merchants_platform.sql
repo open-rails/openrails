@@ -5,16 +5,19 @@
 -- (internal/merchants/delete.go), which stays the only row-destroying path.
 
 -- name: ListPlatformMerchants :many
+-- query searches current names only; former names are not listed.
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
 FROM openrails.merchants
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+  AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0)
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: CountPlatformMerchants :one
 SELECT count(*)
 FROM openrails.merchants
-WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text);
+WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+  AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0);
 
 -- name: GetPlatformMerchant :one
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at

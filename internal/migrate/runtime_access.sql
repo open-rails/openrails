@@ -27,6 +27,7 @@ GRANT ALL ON FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit inte
 GRANT ALL ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_after uuid, p_limit integer) TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.destructive_action_switch TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO :"runtime_user";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_slug_aliases TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.metered_rating_watermarks TO :"runtime_user";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO :"runtime_user";
 GRANT SELECT,INSERT ON TABLE openrails.maintenance_runs TO :"runtime_user";

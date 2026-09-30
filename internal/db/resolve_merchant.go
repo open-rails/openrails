@@ -2,8 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -28,6 +31,9 @@ func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnbo
 		displayName = &dn
 	}
 	id, err := gen.New(qx).RegisterUnboundMerchant(ctx, gen.RegisterUnboundMerchantParams{Slug: slug, DisplayName: displayName})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return merchant.ID{}, fmt.Errorf("register merchant slug %q: the name belongs to a group-bound merchant", slug)
+	}
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", slug, err)
 	}
