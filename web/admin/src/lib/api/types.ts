@@ -712,7 +712,6 @@ export interface AuthCapabilities {
   external_login_providers: {
     id: string
     name: string
-    kind: string
     supports_login: boolean
   }[]
   password: { login?: boolean; [k: string]: unknown }
@@ -723,39 +722,38 @@ export interface TwoFactorFactor {
   id: string
   method: string
   is_default?: boolean
-  phone_number?: string
+  phone_number?: string | null
+  email?: string | null
 }
 
-// AuthKit TokenSet: the 200 body of /password/login, /2fa/verify and /token.
+// AuthKit TokenSet.
 export interface AuthTokens {
   access_token: string
   token_type: string
   expires_in: number
-  refresh_token?: string
+  refresh_token?: string | null
 }
 
-// Pending challenges are 403 error envelopes with the challenge in
-// `error.metadata` (authkit #313): `2fa_required` from /password/login ...
-export interface TwoFactorRequiredMetadata {
+// AuthKit AuthResult: the 200 body of every sign-in (/password/login,
+// /2fa/verify, /2fa/challenge, /token, /oidc/exchange). A finished sign-in
+// carries its tokens; otherwise status names the step it waits on.
+export interface AuthResult {
+  status:
+    | "complete"
+    | "second_factor_required"
+    | "enrollment_required"
+    | "verification_required"
+    | "account_recovery_required"
+  token_set: AuthTokens | null
+  second_factor: SecondFactorStep | null
+  recovery: { token: string; expires_at: string; purge_at: string } | null
+}
+
+export interface SecondFactorStep {
   user_id: string
   challenge: string
-  method: string
-  verification_id?: string
-  default_factor: TwoFactorFactor
-  available_factors: TwoFactorFactor[]
-}
-
-// ... `2fa_required` from /2fa/challenge (factor switch) ...
-export interface TwoFactorChallengeMetadata {
-  method: string
-  verification_id?: string
   factor: TwoFactorFactor
-}
-
-// ... and `verification_required` from /password/login.
-export interface VerificationRequiredMetadata {
-  identifier: string
-  channel: string
+  factors: TwoFactorFactor[]
 }
 
 export interface Me {

@@ -1,7 +1,6 @@
 package controlplane
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -73,8 +72,9 @@ func TestCredentialPermissionGlob(t *testing.T) {
 	require.False(t, (*ResolvedServiceCredential)(nil).AllowsCustomer(uuid.New()))
 }
 
+// The roles' permissions are read from the running AuthKit catalog; the
+// greenfield TestMerchantRolePermissionsInTheRunningCatalog covers them.
 func TestMerchantRoleCatalog(t *testing.T) {
-	require.Equal(t, []iam.Perm{MerchantType.OwnerGrant()}, MerchantRolePermissions(MerchantOwner))
 	for _, name := range []string{" OWNER ", "viewer", "support", "creator"} {
 		role, ok := MerchantRole(name)
 		require.True(t, ok, name)
@@ -82,56 +82,7 @@ func TestMerchantRoleCatalog(t *testing.T) {
 	}
 	_, ok := MerchantRole("superadmin")
 	require.False(t, ok)
-	require.ElementsMatch(t, []string{permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate}, texts(MerchantRolePermissions(MerchantCreator)))
 	require.Equal(t, []iam.Role{MerchantViewer, MerchantSupport, MerchantOwner}, MerchantAPIKeyRoles(), "machine keys cannot resolve a creator subject")
 	require.Equal(t, []string{"creator", "viewer", "support", "owner"}, RoleNames(MerchantRoles()), "the wire shows bare role names")
-	for _, p := range texts(MerchantRolePermissions(MerchantViewer)) {
-		require.True(t, strings.HasSuffix(p, ":read"), "viewer is read-only: %s", p)
-	}
-
-	ownerOnly := []string{
-		permissions.MerchantSettingsUpdate, permissions.MerchantPaymentProvidersUpdate, permissions.MerchantCatalogUpdate,
-		permissions.MerchantCreditsGrant, permissions.MerchantCreditsRevoke, permissions.MerchantCredentialsManage,
-		permissions.MerchantMembersRead, permissions.MerchantMembersManage, permissions.MerchantBillingImport,
-		permissions.MerchantBillingExport, permissions.MerchantAdmissionsCreate, permissions.MerchantCheckoutCreate,
-	}
-	for _, role := range []iam.Role{MerchantCreator, MerchantSupport, MerchantViewer} {
-		for _, p := range ownerOnly {
-			require.False(t, (&ResolvedServiceCredential{Permissions: texts(MerchantRolePermissions(role))}).HasPermission(p), "%s must not hold %s", role, p)
-		}
-	}
 	require.Equal(t, CustomerType, CustomerMember.Persona())
-}
-
-// #757: a non-user principal may only mint keys for authority it already holds.
-func TestMerchantRoleCoveredByPreventsEscalation(t *testing.T) {
-	support, viewer := texts(MerchantRolePermissions(MerchantSupport)), texts(MerchantRolePermissions(MerchantViewer))
-	for _, tc := range []struct {
-		role   iam.Role
-		grants []string
-		want   bool
-	}{
-		{MerchantOwner, []string{"merchant:*"}, true},
-		{MerchantSupport, []string{"merchant:*"}, true},
-		{MerchantViewer, []string{"merchant:*"}, true},
-		{MerchantViewer, []string{"merchant:*:read"}, true},
-		{MerchantSupport, []string{"merchant:*:read"}, false},
-		{MerchantOwner, support, false},
-		{MerchantViewer, support, false},
-		{MerchantSupport, viewer, false},
-		{MerchantViewer, viewer, true},
-		{MerchantOwner, []string{"customer:*", "root:*"}, false},
-		{CustomerMember, []string{"customer:*"}, false},
-		{MerchantViewer, nil, false},
-	} {
-		require.Equal(t, tc.want, MerchantRoleCoveredBy(tc.role, tc.grants), "%s by %v", tc.role, tc.grants)
-	}
-}
-
-func texts(perms []iam.Perm) []string {
-	out := make([]string, len(perms))
-	for i, p := range perms {
-		out[i] = p.String()
-	}
-	return out
 }

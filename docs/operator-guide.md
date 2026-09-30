@@ -16,6 +16,9 @@ OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
 (file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
 `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` / `AUTHKIT_PUBLIC_KEYS` envs — the same names
 the authkit binary reads (ak#266/or#917); the old unprefixed names refuse boot.
+The same directory holds `totp.key`, the key for authenticator-app secrets.
+The root owner always needs a second factor, so boot refuses a control plane
+with neither `totp.key` nor an email or SMS sender.
 
 Postgres specifics worth knowing:
 

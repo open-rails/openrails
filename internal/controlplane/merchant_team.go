@@ -122,7 +122,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 			return MerchantTeamInviteResult{}, lastOwner(err)
 		}
 		return MerchantTeamInviteResult{Added: true, Member: &MerchantTeamMember{
-			UserID: user.ID, Email: user.Email, Username: user.Username, Role: role.Name(),
+			UserID: user.ID, Email: text(user.Email), Username: user.Username, Role: role.Name(),
 		}}, nil
 	case err != nil && !errors.Is(err, iam.ErrUserNotFound):
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: resolve invite email: %w", err)
@@ -244,16 +244,26 @@ func (c *ControlPlane) teamMember(ctx context.Context, mid merchant.ID, targetUs
 // team is the merchant group's users keyed by id, display fields hydrated.
 func (c *ControlPlane) team(ctx context.Context, group iam.GroupRef) (map[string]MerchantTeamMember, error) {
 	out := map[string]MerchantTeamMember{}
-	q := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, WithUsers: true, Page: iam.PageRequest{Limit: iam.MaxPageLimit}}
+	q := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, Page: iam.PageRequest{Limit: min(iam.MaxPageLimit, iam.MaxBatch)}}
 	for {
 		batch, err := c.client.ListGroupMembers(ctx, group, q)
 		if err != nil {
 			return nil, err
 		}
+		ids := make([]string, len(batch.Items))
+		for i, m := range batch.Items {
+			ids[i] = m.Subject.ID
+		}
+		// The staff roster shows teammates' contact details: the privileged
+		// user view, not the public one members carry.
+		users, err := c.client.Users(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
 		for _, m := range batch.Items {
 			member := MerchantTeamMember{UserID: m.Subject.ID, Role: m.Role.Name()}
-			if m.User != nil {
-				member.Email, member.Username = m.User.Email, m.User.Username
+			if u, ok := users[m.Subject.ID]; ok {
+				member.Email, member.Username = text(u.Email), u.Username
 			}
 			out[m.Subject.ID] = member
 		}
@@ -291,4 +301,12 @@ func teamMemberLabel(m MerchantTeamMember) string {
 		return m.Username
 	}
 	return m.UserID
+}
+
+// text is *s, "" when unset.
+func text(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

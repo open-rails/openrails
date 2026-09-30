@@ -2,9 +2,13 @@ package controlplane
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -62,8 +66,8 @@ type options struct {
 	hosted                       bool
 	passwordlessLogin            bool
 	passwordlessAutoRegistration bool
-	email                        func(context.Context, iam.EmailMessage) error
-	sms                          func(context.Context, iam.SMSMessage) error
+	email                        authkit.EmailSender
+	sms                          authkit.SMSSender
 	frontend                     authkit.FrontendConfig
 	trustedProxies               []string
 	cloudflareProxies            []string
@@ -103,13 +107,13 @@ func WithPasswordless(autoRegistration bool) Option {
 
 // WithEmailSender wires the host's email delivery (#738). Hosted posture
 // requires verified registration, so it needs an email or SMS sender.
-func WithEmailSender(send func(context.Context, iam.EmailMessage) error) Option {
-	return func(o *options) { o.email = send }
+func WithEmailSender(sender authkit.EmailSender) Option {
+	return func(o *options) { o.email = sender }
 }
 
 // WithSMSSender wires the host's SMS delivery (#738); see WithEmailSender.
-func WithSMSSender(send func(context.Context, iam.SMSMessage) error) Option {
-	return func(o *options) { o.sms = send }
+func WithSMSSender(sender authkit.SMSSender) Option {
+	return func(o *options) { o.sms = sender }
 }
 
 // WithFrontend sets the host-owned frontend routes AuthKit builds emailed
@@ -232,6 +236,28 @@ func inlineKeySource(auth *hostconfig.AuthConfig) (keys.Source, error) {
 	return ks, nil
 }
 
+// twoFactor is the second-factor policy. The root owner always needs MFA, so
+// AuthKit refuses to start without an enrollable factor: a TOTP key at
+// <keys_path>/totp.key, or an email or SMS sender. A deployment allowed a
+// disposable signing key also gets a disposable TOTP key when totp.key is
+// absent; its authenticator enrollments last one process.
+func twoFactor(auth *hostconfig.AuthConfig) authkit.TwoFactorConfig {
+	if !auth.AllowEphemeralSigningKey {
+		return authkit.TwoFactorConfig{}
+	}
+	dir := strings.TrimSpace(auth.KeysPath)
+	if dir == "" {
+		dir = "/vault/auth" // AuthKit's default Keys.Path
+	}
+	if _, err := os.Stat(filepath.Join(dir, "totp.key")); !errors.Is(err, fs.ErrNotExist) {
+		return authkit.TwoFactorConfig{}
+	}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	log.Warn("controlplane: no totp.key; authenticator enrollments use a disposable key (auth.allow_ephemeral_signing_key)")
+	return authkit.TwoFactorConfig{TOTPSecretKey: key}
+}
+
 // usernames maps the site naming policy onto AuthKit's username rule.
 func usernames(p merchant.NamingPolicy) authkit.UsernameConfig {
 	u := authkit.UsernameConfig{Renames: p.Enabled, RenameInterval: p.RenameInterval}
@@ -264,6 +290,7 @@ func authConfig(auth *hostconfig.AuthConfig, options options, naming merchant.Na
 		},
 		Frontend:     options.frontend,
 		Registration: registration(options, auth),
+		TwoFactor:    twoFactor(auth),
 		Username:     usernames(naming),
 		APIKeys:      authkit.APIKeysConfig{Prefix: APIKeyPrefix},
 		Roles:        Roles,
@@ -355,7 +382,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	// header; without auth.request_origin it is the issuer's origin.
 	var verifierOpts []verify.VerifierOption
 	if origin := strings.TrimRight(strings.TrimSpace(auth.RequestOrigin), "/"); origin != "" {
-		verifierOpts = append(verifierOpts, verify.WithRequestOrigin(origin))
+		verifierOpts = append(verifierOpts, verify.WithPublicURL(origin))
 	}
 	if cp.delegatedVerifier, err = client.NewVerifier([]string{billingauth.TokenAudience}, verifierOpts...); err != nil {
 		client.Close()

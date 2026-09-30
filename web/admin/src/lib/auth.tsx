@@ -2,13 +2,12 @@
 // AuthKit-backed auth for the console. The issuer's authhttp surface (base
 // from /admin/config.json) provides capabilities discovery, password login,
 // refresh, logout, /me, and — when the deployment mounts browser OIDC — the
-// {provider}/login redirect flow whose callback lands back here with tokens
-// in the URL fragment.
+// {provider}/login redirect flow whose callback lands back here with a
+// one-time code in the URL fragment. Every sign-in answers an AuthResult.
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import {
-  ApiError,
   authApi,
   getBootstrap,
   getTokens,
@@ -20,20 +19,24 @@ import {
 } from "@/lib/api/client"
 import type {
   AuthCapabilities,
+  AuthResult,
   AuthTokens,
   Me,
   MerchantMembership,
-  TwoFactorChallengeMetadata,
-  TwoFactorFactor,
-  TwoFactorRequiredMetadata,
 } from "@/lib/api/types"
 import {
   authStateQueryKey,
   authStateQueryOptions,
   loadIdentity,
+  sessionFrom,
+  signInStep,
   type AuthStateData,
+  type PendingSignIn,
+  type TwoFactorChallenge,
 } from "@/lib/auth-state"
 import { queryClient } from "@/lib/query-client"
+
+export type { TwoFactorChallenge }
 
 interface AuthState {
   ready: boolean
@@ -41,6 +44,8 @@ interface AuthState {
   config?: BootstrapConfig
   capabilities?: AuthCapabilities
   me: Me | null
+  /** A browser sign-in that returned still waiting on a step. */
+  pendingSignIn?: PendingSignIn
   merchants: MerchantMembership[]
   activeMerchant?: MerchantMembership
   selectMerchant: (slug: string) => void
@@ -60,19 +65,6 @@ interface AuthState {
   ) => Promise<TwoFactorChallenge>
   startOIDC: (providerId: string) => void
   logout: () => Promise<void>
-}
-
-// Everything /2fa/verify needs, carried between the two sign-in steps. The
-// expected session is captured at the password step so a session that changes
-// underneath us mid-sign-in is still caught.
-export interface TwoFactorChallenge {
-  challenge: string
-  userID: string
-  factor: TwoFactorFactor
-  factors: TwoFactorFactor[]
-  method: string
-  verificationID?: string
-  expectedSession: ReturnType<typeof getTokens>
 }
 
 export type TwoFactorVerificationMode = "factor" | "backup_code"
@@ -109,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const config = authState.data?.config
   const capabilities = authState.data?.capabilities
   const me = authState.data?.identity?.who ?? null
+  const pendingSignIn = authState.data?.pending
   const merchants = authState.data?.identity?.merchants ?? EMPTY_MERCHANTS
   const activeMerchant = authState.data?.identity?.activeMerchant
 
@@ -122,17 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [])
 
-  // Both sign-in paths end the same way: store the pair, load the identity,
+  // Every sign-in ends the same way: store the pair, load the identity,
   // drop any merchant data belonging to whoever was signed in before.
   const completeSession = React.useCallback(
-    async (res: AuthTokens, expectedSession: ReturnType<typeof getTokens>) => {
-      const session = {
-        access_token: res.access_token,
-        refresh_token: res.refresh_token,
-        expires_at: res.expires_in
-          ? Date.now() + res.expires_in * 1000
-          : undefined,
-      }
+    async (tokens: AuthTokens, expectedSession: ReturnType<typeof getTokens>) => {
+      const session = sessionFrom(tokens)
       if (!setTokensIfCurrent(session, expectedSession)) {
         throw new Error("Your session changed while sign-in was completing")
       }
@@ -145,47 +132,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  // A finished sign-in completes; one that needs a second factor hands the
+  // challenge back so the caller can ask for a code.
+  const settle = React.useCallback(
+    async (
+      result: AuthResult,
+      expectedSession: ReturnType<typeof getTokens>
+    ): Promise<TwoFactorChallenge | null> => {
+      const step = signInStep(result, expectedSession)
+      if ("challenge" in step) return step.challenge
+      await completeSession(step.tokens, expectedSession)
+      return null
+    },
+    [completeSession]
+  )
+
   const loginWithPassword = React.useCallback(
     async (
       identifier: string,
       password: string
     ): Promise<TwoFactorChallenge | null> => {
       const expectedSession = getTokens()
-      let res: AuthTokens
-      try {
-        res = await authApi<AuthTokens>("/password/login", {
-          method: "POST",
-          body: { identifier, password },
-        })
-      } catch (err) {
-        // Pending challenges are 403 envelopes carrying the challenge in
-        // error.metadata. A 2FA account gets no tokens here: hand the
-        // challenge back so the caller can ask for a code, rather than
-        // treating a normal policy as a failure.
-        if (err instanceof ApiError && err.code === "2fa_required") {
-          const meta = err.metadata as unknown as TwoFactorRequiredMetadata
-          return {
-            challenge: meta.challenge,
-            userID: meta.user_id,
-            factor: meta.default_factor,
-            factors: meta.available_factors,
-            method: meta.method,
-            verificationID: meta.verification_id,
-            expectedSession,
-          }
-        }
-        if (err instanceof ApiError && err.code === "verification_required") {
-          throw new Error(
-            "This account requires verification before it can sign in.",
-            { cause: err }
-          )
-        }
-        throw err
-      }
-      await completeSession(res, expectedSession)
-      return null
+      const result = await authApi<AuthResult>("/password/login", {
+        method: "POST",
+        body: { identifier, password },
+      })
+      return settle(result, expectedSession)
     },
-    [completeSession]
+    [settle]
   )
 
   const completeTwoFactor = React.useCallback(
@@ -194,41 +168,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       code: string,
       mode: TwoFactorVerificationMode
     ) => {
-      const res = await authApi<AuthTokens>("/2fa/verify", {
+      const result = await authApi<AuthResult>("/2fa/verify", {
         method: "POST",
         body: twoFactorVerificationBody(challenge, code, mode),
       })
-      await completeSession(res, challenge.expectedSession)
+      if (await settle(result, challenge.expectedSession)) {
+        throw new Error("Unexpected second verification step")
+      }
     },
-    [completeSession]
+    [settle]
   )
 
   const selectTwoFactor = React.useCallback(
     async (challenge: TwoFactorChallenge, factorId: string) => {
-      // Switching factors re-issues the challenge as a 403 2fa_required
-      // envelope; a 200 here would mean the route contract changed.
-      try {
-        await authApi<never>("/2fa/challenge", {
-          method: "POST",
-          body: {
-            user_id: challenge.userID,
-            challenge: challenge.challenge,
-            factor_id: factorId,
-          },
-        })
-      } catch (err) {
-        if (err instanceof ApiError && err.code === "2fa_required") {
-          const meta = err.metadata as unknown as TwoFactorChallengeMetadata
-          return {
-            ...challenge,
-            factor: meta.factor,
-            method: meta.method,
-            verificationID: meta.verification_id,
-          }
-        }
-        throw err
+      // Switching factors re-issues the challenge for the chosen factor.
+      const result = await authApi<AuthResult>("/2fa/challenge", {
+        method: "POST",
+        body: {
+          user_id: challenge.userID,
+          challenge: challenge.challenge,
+          factor_id: factorId,
+        },
+      })
+      const step = signInStep(result, challenge.expectedSession)
+      if (!("challenge" in step)) {
+        throw new Error(
+          "Unexpected response while selecting a verification factor"
+        )
       }
-      throw new Error("Unexpected response while selecting a verification factor")
+      return step.challenge
     },
     []
   )
@@ -288,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       config,
       capabilities,
       me,
+      pendingSignIn,
       merchants,
       activeMerchant,
       selectMerchant,
@@ -303,6 +272,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       config,
       capabilities,
       me,
+      pendingSignIn,
       merchants,
       activeMerchant,
       selectMerchant,

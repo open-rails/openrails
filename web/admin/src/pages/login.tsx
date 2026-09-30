@@ -23,14 +23,13 @@ import {
 } from "@/lib/auth"
 import { authMutations } from "@/lib/auth-mutations"
 import {
-  clearRecoveryFragment,
   confirmAccountRecovery,
-  readRecoveryFragment,
   takeAccountRecovery,
   type RecoveryState,
 } from "@/lib/account-recovery"
+import type { PendingSignIn } from "@/lib/auth-state"
 
-function factorLabel(method: string, phoneNumber?: string) {
+function factorLabel(method: string, phoneNumber?: string | null) {
   switch (method) {
     case "email":
       return "Email"
@@ -61,10 +60,23 @@ function verificationPrompt(challenge: TwoFactorChallenge) {
 }
 
 export function LoginPage() {
+  const { ready, me, pendingSignIn } = useAuth()
+  if (!ready) {
+    return (
+      <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    )
+  }
+  if (me) return <Navigate to="/" replace />
+  return <LoginForm pending={pendingSignIn} />
+}
+
+// LoginForm starts from a browser sign-in that returned still waiting on a
+// step: its second-factor challenge or account recovery.
+function LoginForm({ pending }: { pending?: PendingSignIn }) {
   const {
-    ready,
     bootError,
-    me,
     capabilities,
     loginWithPassword,
     completeTwoFactor,
@@ -75,10 +87,9 @@ export function LoginPage() {
   const [login, setLogin] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [recoveryState, setRecoveryState] = React.useState<RecoveryState>(
-    () => readRecoveryFragment() ?? {}
+    () => pending?.recovery ?? {}
   )
   const { recovery, notice, pending: restoring } = recoveryState
-  React.useEffect(clearRecoveryFragment, [])
   React.useEffect(() => {
     if (!recovery) return
     const timeout = setTimeout(
@@ -94,7 +105,7 @@ export function LoginPage() {
   // Set once the password step succeeds but the account needs a second factor.
   // Its presence is what swaps the form for the code step.
   const [challenge, setChallenge] = React.useState<TwoFactorChallenge | null>(
-    null
+    () => pending?.challenge ?? null
   )
   const [code, setCode] = React.useState("")
   const [verificationMode, setVerificationMode] =
@@ -148,15 +159,6 @@ export function LoginPage() {
       })
     }
   }
-
-  if (!ready) {
-    return (
-      <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">
-        Loading…
-      </div>
-    )
-  }
-  if (me) return <Navigate to="/" replace />
 
   // External login buttons only when the issuer advertises login-capable
   // providers; otherwise password-only.

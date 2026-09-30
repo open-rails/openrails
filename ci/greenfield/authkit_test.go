@@ -97,9 +97,10 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 func newAccount(t *testing.T, cp *controlplane.ControlPlane) authtest.User {
 	t.Helper()
 	name := "a" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: name + "@greenfield.test", Username: name, Password: authtest.Password, EmailVerified: true})
+	email := name + "@greenfield.test"
+	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: email, Username: name, Password: authtest.Password, EmailVerified: true})
 	require.NoError(t, err)
-	return authtest.User{User: u, Password: authtest.Password}
+	return authtest.User{User: u, Email: email, Password: authtest.Password}
 }
 
 // A merchant's own AuthKit deployment signs for it (#259): OpenRails trusts
@@ -283,6 +284,8 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)
-	_, err = cp.Core().ParseBootstrapManifestYAML(raw)
+	manifest, err := authkit.ParseBootstrapManifestYAML(raw)
+	require.NoError(t, err)
+	_, err = cp.Core().ApplyBootstrapManifest(ctx, manifest, iam.BootstrapOptions{DryRun: true})
 	require.NoError(t, err)
 }

@@ -81,7 +81,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		}
 		used[key] = true
 		return true, nil
-	}), verify.WithRequestOrigin(origin))
+	}), verify.WithPublicURL(origin))
 	require.NoError(t, verifier.AddIssuer(issuer, []string{"billing"}, verify.IssuerOptions{Keys: []iam.RemoteApplicationKey{{KID: "proof-issuer", PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))}}}))
 	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: proofVerifier{proofAuthority{verifier, groupID}}, Authority: func(context.Context, billingauth.Requirement) (billingauth.Authority, error) {
 		return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: groupID}, Permission: permissions.MerchantCatalogRead}, nil

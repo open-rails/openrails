@@ -105,20 +105,12 @@ var catalogPerms = func() map[string]iam.Perm {
 
 func declared(perm string) iam.Perm { return catalogPerms[perm] }
 
-// merchantRoleGrants is each declared merchant role's permissions, for the
-// no-escalation check on non-user principals (MerchantRoleCoveredBy).
-var merchantRoleGrants = map[iam.Role][]iam.Perm{}
-
 func merchantRole(name string, perms ...string) iam.Role {
 	grants := make([]iam.Grant, 0, len(perms))
-	held := make([]iam.Perm, 0, len(perms))
 	for _, perm := range perms {
 		grants = append(grants, declared(perm))
-		held = append(held, declared(perm))
 	}
-	role := merchantPersona.Role(name, grants...)
-	merchantRoleGrants[role] = held
-	return role
+	return merchantPersona.Role(name, grants...)
 }
 
 // MerchantRoles are the merchant team roles, least privilege first. Creator
@@ -153,19 +145,20 @@ func RoleNames(roles []iam.Role) []string {
 	return out
 }
 
-// MerchantRolePermissions is a merchant role's permissions (the owner's is
-// `merchant:*`).
-func MerchantRolePermissions(role iam.Role) []iam.Perm {
-	if role == MerchantOwner {
-		return []iam.Perm{MerchantType.OwnerGrant()}
+// RoleCoveredBy reports whether grants cover every permission role confers in
+// the running catalog: a non-user principal may hand out only authority it
+// holds.
+func (c *ControlPlane) RoleCoveredBy(role iam.Role, grants []string) (bool, error) {
+	perms, err := c.client.RolePermissions(role)
+	if err != nil {
+		return false, err
 	}
-	return append([]iam.Perm(nil), merchantRoleGrants[role]...)
+	return coveredAll(perms, grants), nil
 }
 
-// MerchantRoleCoveredBy reports whether grants cover every permission role
-// confers: a non-user principal may hand out only authority it holds.
-func MerchantRoleCoveredBy(role iam.Role, grants []string) bool {
-	perms := MerchantRolePermissions(role)
+// coveredAll reports whether grants cover every one of perms, and perms is
+// not empty.
+func coveredAll(perms []iam.Perm, grants []string) bool {
 	if len(perms) == 0 {
 		return false
 	}

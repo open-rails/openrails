@@ -57,10 +57,10 @@ func (d *Directory) EmailIdentity(ctx context.Context, userID string) (username,
 	if err != nil {
 		return "", "", false, err
 	}
-	if user.Email == "" {
+	if user.Email == nil || *user.Email == "" {
 		return "", "", false, nil
 	}
-	return user.Username, user.Email, true, nil
+	return user.Username, *user.Email, true, nil
 }
 
 // GetUserIDByUsername follows AuthKit's username resolution, including

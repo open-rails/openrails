@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
@@ -23,10 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
-
-// unsentEmail satisfies the hosted posture's sender requirement; nothing here
-// sends email.
-func unsentEmail(context.Context, iam.EmailMessage) error { return nil }
 
 // SEC: adding a teammate by email never grants a merchant role to an account
 // that has not proved the address: anyone can register an address they do not
@@ -60,7 +57,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
 			if hosted {
-				opts.HostedPosture, opts.EmailSender = true, unsentEmail
+				opts.HostedPosture, opts.EmailSender = true, new(authtest.Outbox).Email()
 			}
 			cp, err := controlplane.Attach(ctx, rt, opts)
 			require.NoError(t, err)
@@ -131,12 +128,12 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 					require.NoError(t, err)
 					require.NoError(t, results[0].Err)
 				}
-				require.Equal(t, unknown, shape(invite(u.Email)), "%s: answered like an unregistered address", what)
+				require.Equal(t, unknown, shape(invite(*u.Email)), "%s: answered like an unregistered address", what)
 				require.False(t, onTeam(u), "%s: an account that has not proved the address holds no merchant role", what)
 			}
 
 			verified := account(true)
-			status, body := invite(strings.ToUpper(verified.Email))
+			status, body := invite(strings.ToUpper(*verified.Email))
 			require.Equal(t, http.StatusCreated, status, "%v", body)
 			require.Equal(t, true, body["added"])
 			require.True(t, onTeam(verified), "control: the account that proved the address joins")

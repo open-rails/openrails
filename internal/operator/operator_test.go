@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/authtest"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -18,8 +18,8 @@ import (
 )
 
 func TestAttachOptionsPasswordlessPolicy(t *testing.T) {
-	emailSender := func(context.Context, iam.EmailMessage) error { return nil }
-	smsSender := func(context.Context, iam.SMSMessage) error { return nil }
+	outbox := new(authtest.Outbox)
+	emailSender, smsSender := outbox.Email(), outbox.SMS()
 	for name, tc := range map[string]struct {
 		opts    AttachOptions
 		wantErr bool

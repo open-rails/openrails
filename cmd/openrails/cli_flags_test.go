@@ -30,7 +30,9 @@ func writeTemp(t *testing.T, name, body string) string {
 }
 
 // Each push command accepts only its own document shape, so authority and
-// catalog state cannot be smuggled through another command's file.
+// catalog state cannot be smuggled through another command's file. AuthKit
+// warns about and ignores unknown authority keys, so another document is an
+// empty authority manifest, which it refuses.
 func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cmd  *cobra.Command
@@ -38,7 +40,7 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 		args []string
 		want string
 	}{
-		"authkit authority rejects merchants": {newPushAuthBootstrapCmd(), "merchants: []\n", nil, "merchants"},
+		"authkit authority rejects merchants": {newPushAuthBootstrapCmd(), "merchants: []\n", nil, "invalid_bootstrap_manifest"},
 		"merchant config rejects authority":   {newPushMerchantConfigCmd(), "users:\n  - username: operator\n", nil, "users"},
 		"catalog rejects merchants":           {newApplyCatalogCmd(), "schema_version: 1\napplication_id: x\nexpected_revision: 0\nmerchants: []\n", []string{"--merchant", "example"}, "merchants"},
 	} {

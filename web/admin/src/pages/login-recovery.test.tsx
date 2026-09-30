@@ -17,17 +17,12 @@ const recovery = () => ({
   expires_at: new Date(Date.now() + 60_000).toISOString(),
   purge_at: new Date(Date.now() + 86400_000).toISOString(),
 })
-const recoveryError = () =>
-  Response.json(
-    {
-      error: {
-        code: "account_recovery_required",
-        message: "Recovery required",
-        metadata: { recovery: recovery() },
-      },
-    },
-    { status: 409 }
-  )
+const recoveryResult = (value = recovery()) => ({
+  status: "account_recovery_required",
+  token_set: null,
+  second_factor: null,
+  recovery: value,
+})
 
 beforeEach(() => {
   browserEnvironment()
@@ -77,7 +72,7 @@ async function signIn() {
 
 it("requires explicit confirmation after password proof and returns to fresh sign-in", async () => {
   const requests = await screen({
-    "/password/login": recoveryError,
+    "/password/login": () => recoveryResult(),
     "/account/recovery/confirm": () => new Response(null, { status: 204 }),
   })
   await signIn()
@@ -112,23 +107,18 @@ it("requires explicit confirmation after password proof and returns to fresh sig
 
 it("waits for the normal second factor before showing recovery", async () => {
   const requests = await screen({
-    "/password/login": () =>
-      Response.json(
-        {
-          error: {
-            code: "2fa_required",
-            metadata: {
-              user_id: "user",
-              challenge: "challenge",
-              method: "totp",
-              default_factor: { id: "totp-1", method: "totp" },
-              available_factors: [{ id: "totp-1", method: "totp" }],
-            },
-          },
-        },
-        { status: 403 }
-      ),
-    "/2fa/verify": recoveryError,
+    "/password/login": () => ({
+      status: "second_factor_required",
+      token_set: null,
+      recovery: null,
+      second_factor: {
+        user_id: "user",
+        challenge: "challenge",
+        factor: { id: "totp-1", method: "totp" },
+        factors: [{ id: "totp-1", method: "totp" }],
+      },
+    }),
+    "/2fa/verify": () => recoveryResult(),
   })
   await signIn()
   expect(document.body.textContent).toContain("Enter your verification code")
@@ -148,18 +138,17 @@ it("waits for the normal second factor before showing recovery", async () => {
   expect(getTokens()).toBeNull()
 })
 
-it("takes provider recovery from the fragment, clears history, and does not adopt mixed tokens", async () => {
+it("takes provider recovery from the code exchange, clears history, and does not adopt fragment tokens", async () => {
   history.replaceState(
     null,
     "",
     "/admin/login?next=console#" +
-      new URLSearchParams({
-        error: "account_recovery_required",
-        recovery: JSON.stringify(recovery()),
-        access_token: "must-not-adopt",
-      })
+      new URLSearchParams({ code: "one-time", access_token: "must-not-adopt" })
   )
-  await screen()
+  const requests = await screen({ "/oidc/exchange": () => recoveryResult() })
+  expect(
+    requests.filter((r) => r.path === "/oidc/exchange").map((r) => r.body)
+  ).toEqual([{ code: "one-time" }])
   expect(window.location.hash).toBe("")
   expect(window.location.search).toBe("?next=console")
   expect(document.body.textContent).toContain("Restore account")
@@ -170,20 +159,11 @@ it("takes provider recovery from the fragment, clears history, and does not adop
 })
 
 it("discards expired provider proofs and failed confirmations without automatic retries", async () => {
-  history.replaceState(
-    null,
-    "",
-    "/admin/login#" +
-      new URLSearchParams({
-        error: "account_recovery_required",
-        recovery: JSON.stringify({
-          ...recovery(),
-          expires_at: "2000-01-01T00:00:00Z",
-        }),
-      })
-  )
+  history.replaceState(null, "", "/admin/login#code=one-time")
   const requests = await screen({
-    "/password/login": recoveryError,
+    "/oidc/exchange": () =>
+      recoveryResult({ ...recovery(), expires_at: "2000-01-01T00:00:00Z" }),
+    "/password/login": () => recoveryResult(),
     "/account/recovery/confirm": () =>
       Response.json(
         { error: { code: "invalid_credentials" } },
