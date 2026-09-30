@@ -29,10 +29,12 @@ races, revocation, credential class, provider configuration) are indexed in
 See the [feature coverage map](greenfield-coverage.md) for what these tests do
 and do not establish. Test count is not a percentage of functionality covered.
 
-Run the exact CI command against a disposable PostgreSQL database:
+Run the exact CI command against a disposable PostgreSQL database and Redis
+(the card-attack captcha test needs Redis):
 
 ```sh
 OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
+OPENRAILS_GREENFIELD_REDIS_ADDR=127.0.0.1:6379 \
   bash scripts/greenfield.sh
 ```
 
@@ -42,7 +44,7 @@ Each test owns a random schema; migrations use the libraries' public entry
 points. Lifecycle setup and assertions use public clients/HTTP. The crash
 fixture rewinds durable job/intent state to model interrupted execution, and
 operator fixtures arm destructive switches through SQL; these narrow exceptions
-are explicit. The suite uses no legacy harness, Redis, testcontainers, browser
+are explicit. The suite uses no legacy harness, testcontainers, browser
 or real PSP credentials. It fails when its database DSN is missing.
 
 Fakes check provider request/receipt contracts; they are not live PSP or chain

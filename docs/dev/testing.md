@@ -3,7 +3,7 @@
 OpenRails' required database and provider behavior is tested by the compact
 greenfield suite. It uses the public embedded API, one disposable PostgreSQL
 DSN, a random schema per test, and deterministic Stripe/NMI transports. It does
-not use the former integration harness, Redis, testcontainers, browser
+not use the former integration harness, testcontainers, browser
 automation. Ordinary lifecycle setup uses the public client and HTTP routes;
 the subscription suite uses narrow SQL fixtures to simulate crash recovery and
 arm operator-controlled destructive-action policy.
@@ -12,6 +12,7 @@ Run the focused suite locally:
 
 ```bash
 OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
+OPENRAILS_GREENFIELD_REDIS_ADDR=127.0.0.1:6379 \
   bash scripts/greenfield.sh
 ```
 
