@@ -721,6 +721,14 @@ type OpenrailsMerchant struct {
 	SlugChangedAt *time.Time
 }
 
+// #1107: a merchant's unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.
+type OpenrailsMerchantApiHostClaim struct {
+	MerchantID uuid.UUID
+	ApiHost    string
+	Token      string
+	CreatedAt  time.Time
+}
+
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
 type OpenrailsMerchantConfiguration struct {
 	MerchantID uuid.UUID

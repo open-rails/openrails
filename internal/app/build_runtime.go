@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"net"
 	"net/http"
 
 	"context"
@@ -72,6 +73,7 @@ const (
 type runtimeOverrides struct {
 	StripeTransport  http.RoundTripper
 	NMITransport     http.RoundTripper
+	DNSResolver      *net.Resolver
 	HostRiver        bool
 	RiverSchema      string
 	DB               *db.DB
@@ -491,6 +493,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
 	runtime.ReserveAPIHosts(cfg.PublicBillingBaseURL, cfg.DashboardBaseURL)
+	if overrides != nil {
+		runtime.DNSResolver = overrides.DNSResolver
+	}
 
 	return runtime, nil
 }

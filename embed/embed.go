@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -84,6 +85,9 @@ type Options struct {
 	// endpoints against a fake wire. It exempts nothing from sandbox posture.
 	// Refused with a live posture.
 	NMITransport http.RoundTripper
+	// DNSResolver is the test seam for api_host proof lookups (TXT records at
+	// _openrails-challenge.<host>). Refused with a live posture.
+	DNSResolver *net.Resolver
 	// Clock is the test seam for engine time: renewal due dates, retry
 	// schedules and entitlement windows read it. River scheduling and webhook
 	// signature tolerance stay on wall time. Refused with a live posture.
@@ -165,6 +169,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.NMITransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
 		return nil, fmt.Errorf("openrails embed: Options.NMITransport is a test seam and is refused with config.TestMode=live")
 	}
+	if opts.DNSResolver != nil && opts.Config.TestMode == config.CredentialPostureLive {
+		return nil, fmt.Errorf("openrails embed: Options.DNSResolver is a test seam and is refused with config.TestMode=live")
+	}
 	if opts.Clock != nil && opts.Config.TestMode == config.CredentialPostureLive {
 		return nil, fmt.Errorf("openrails embed: Options.Clock is a test seam and is refused with config.TestMode=live")
 	}
@@ -178,6 +185,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		UsernameResolver: opts.UsernameResolver,
 		StripeTransport:  opts.StripeTransport,
 		NMITransport:     opts.NMITransport,
+		DNSResolver:      opts.DNSResolver,
 		Clock:            opts.Clock,
 	})
 	if err != nil {

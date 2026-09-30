@@ -355,6 +355,7 @@ func RegisterMerchantConfigRoutes(rr router.Router, rt *app.Runtime, opts Option
 	if rt != nil && rt.Merchants != nil {
 		rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), read)
 		rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), write)
+		rr.Handle(http.MethodPost, "/api-host/verify", h(httphandlers.VerifyMerchantAPIHost), write)
 	}
 	webhooks := rr.Group("/webhooks")
 	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), append([]router.Middleware{read}, dbMW...)...)

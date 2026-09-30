@@ -1,14 +1,12 @@
 package handlers
 
-// Merchant api_host operator surface (#850): read + assign the merchant's
-// canonical #734 API host (the Host-header value public routes resolve the
-// merchant from) without SQL. The write is gated on merchant:settings:update —
-// owner-only in the fixed #567 catalog. MODE 1 deployments declare `api_host`
-// in the merchant manifest instead; this route and the manifest write the same
-// merchants.Service.SetHostConfig seam the saas wrapper's assign-api-host
-// action uses (engine.SetMerchantAPIHost -> SetHostConfig).
-// The deployment's own hosts (Runtime.ReservedAPIHosts) are never claimable
-// here: one merchant pinning the shared host locks every other merchant out.
+// Merchant api_host surface (#850, #1107): the Host-header value public routes
+// resolve the merchant from. Owner-only (merchant:settings:update). A merchant
+// claims a host, publishes the claim's token in a TXT record at
+// _openrails-challenge.<host>, and verifies; only a proven host routes. The
+// deployment's own hosts (Runtime.ReservedAPIHosts) are never claimable.
+// Operators bind hosts directly through the merchant manifest or
+// ControlPlane.SetMerchantAPIHost.
 
 import (
 	"errors"
@@ -33,43 +31,73 @@ func apiHostMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
 	return mid, true
 }
 
-func apiHostReserved() *api.APIError {
-	return api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "api_host_reserved",
-		"that api_host serves this deployment; use a host of your own")
-}
-
-func apiHostResponse(host string) map[string]any {
-	resp := map[string]any{"api_host": nil}
+func apiHostResponse(host string, claim *merchants.APIHostClaim) map[string]any {
+	resp := map[string]any{"api_host": nil, "claim": nil}
 	if host != "" {
 		resp["api_host"] = host
+	}
+	if claim != nil {
+		resp["claim"] = map[string]any{
+			"api_host":   claim.APIHost,
+			"created_at": claim.CreatedAt,
+			"dns_record": map[string]string{"type": "TXT", "name": claim.Record(), "value": claim.Token},
+		}
 	}
 	return resp
 }
 
-// GetMerchantAPIHost handles GET /v1/merchant/api-host: the caller's merchant's
-// canonical API host, null when unset.
+// writeAPIHostError maps the api_host errors onto their refusals.
+func writeAPIHostError(r *httprequest.Request, err error, claim *merchants.APIHostClaim) {
+	refuse := func(status int, code, message string) {
+		r.APIError(api.NewAPIError(status, api.ErrorTypeInvalidRequest, code, message))
+	}
+	switch {
+	case errors.Is(err, merchants.ErrInvalidAPIHost):
+		refuse(http.StatusBadRequest, "invalid_api_host",
+			"api_host must be a bare lowercase domain name (no scheme, port, path or address), e.g. api.myapp.example")
+	case errors.Is(err, merchants.ErrAPIHostReserved):
+		refuse(http.StatusBadRequest, "api_host_reserved", "that api_host serves this deployment; use a host of your own")
+	case errors.Is(err, merchants.ErrAPIHostTaken):
+		refuse(http.StatusConflict, "api_host_taken", "that api_host is already assigned to another merchant")
+	case errors.Is(err, merchants.ErrAPIHostClaimMissing):
+		refuse(http.StatusConflict, "api_host_claim_missing", "claim an api_host with PUT /v1/merchant/api-host first")
+	case errors.Is(err, merchants.ErrAPIHostUnproven):
+		message := "the challenge record does not carry the claim's token yet"
+		if claim != nil {
+			message = "publish a TXT record at " + claim.Record() + " with value " + claim.Token + ", then verify again"
+		}
+		refuse(http.StatusConflict, "api_host_unproven", message)
+	case errors.Is(err, merchants.ErrMerchantNotFound):
+		r.ErrorJSON(http.StatusNotFound, "merchant not found")
+	default:
+		r.InternalError("api_host change failed", err)
+	}
+}
+
+// GetMerchantAPIHost handles GET /v1/merchant/api-host: the proven api_host
+// (null when unset) and the open claim, if any.
 func GetMerchantAPIHost(r *httprequest.Request) {
 	mid, ok := apiHostMerchantScope(r)
 	if !ok {
 		return
 	}
-	cfg, err := r.State.Merchants.GetHostConfig(r.Request.Context(), mid)
+	ctx := r.Request.Context()
+	cfg, err := r.State.Merchants.GetHostConfig(ctx, mid)
 	if err != nil {
-		if errors.Is(err, merchants.ErrMerchantNotFound) {
-			r.ErrorJSON(http.StatusNotFound, "merchant not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "read api_host failed")
+		writeAPIHostError(r, err, nil)
 		return
 	}
-	r.JSON(http.StatusOK, apiHostResponse(cfg.APIHost))
+	claim, err := r.State.Merchants.APIHostClaimOf(ctx, mid)
+	if err != nil {
+		writeAPIHostError(r, err, nil)
+		return
+	}
+	r.JSON(http.StatusOK, apiHostResponse(cfg.APIHost, claim))
 }
 
-// PutMerchantAPIHost handles PUT /v1/merchant/api-host {"api_host": …}:
-// assigns the caller's merchant's canonical API host (bare lowercase hostname;
-// "" clears the mapping). The very next request against the new Host resolves
-// immediately on every node (#734 — live directory row, no boot map). 409 when
-// the host is already assigned to a different active merchant.
+// PutMerchantAPIHost handles PUT /v1/merchant/api-host {"api_host": …}. A new
+// host opens a claim (202) that routes nothing until verified; "" releases
+// the api_host and any claim at once; the current host is a no-op.
 func PutMerchantAPIHost(r *httprequest.Request) {
 	mid, ok := apiHostMerchantScope(r)
 	if !ok {
@@ -81,32 +109,50 @@ func PutMerchantAPIHost(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	ctx := r.Request.Context()
 	host := merchants.NormalizeAPIHost(req.APIHost)
-	if host != "" {
-		if err := merchants.ValidateAPIHost(host); err != nil {
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_api_host",
-				"api_host must be a bare lowercase hostname (no scheme, port, or path), e.g. api.myapp.example"))
+	if host == "" {
+		if err := r.State.Merchants.ReleaseAPIHost(ctx, mid); err != nil {
+			writeAPIHostError(r, err, nil)
 			return
 		}
-	}
-	if merchants.ClaimableAPIHost(host, r.State.ReservedAPIHosts) != nil {
-		r.APIError(apiHostReserved())
+		r.JSON(http.StatusOK, apiHostResponse("", nil))
 		return
 	}
-	if err := r.State.Merchants.SetHostConfig(r.Request.Context(), mid, host); err != nil {
-		switch {
-		case errors.Is(err, merchants.ErrAPIHostTaken):
-			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "api_host_taken",
-				"that api_host is already assigned to another merchant"))
-		case errors.Is(err, merchants.ErrInvalidAPIHost):
-			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_api_host",
-				"api_host must be a bare lowercase hostname (no scheme, port, or path), e.g. api.myapp.example"))
-		case errors.Is(err, merchants.ErrMerchantNotFound):
-			r.ErrorJSON(http.StatusNotFound, "merchant not found")
-		default:
-			r.ErrorJSON(http.StatusInternalServerError, "api_host assignment failed")
-		}
+	cfg, err := r.State.Merchants.GetHostConfig(ctx, mid)
+	if err != nil {
+		writeAPIHostError(r, err, nil)
 		return
 	}
-	r.JSON(http.StatusOK, apiHostResponse(host))
+	if cfg.APIHost == host {
+		r.JSON(http.StatusOK, apiHostResponse(host, nil))
+		return
+	}
+	if err := merchants.ClaimableAPIHost(host, r.State.ReservedAPIHosts); err != nil {
+		writeAPIHostError(r, err, nil)
+		return
+	}
+	claim, err := r.State.Merchants.ClaimAPIHost(ctx, mid, host)
+	if err != nil {
+		writeAPIHostError(r, err, nil)
+		return
+	}
+	r.JSON(http.StatusAccepted, apiHostResponse(cfg.APIHost, claim))
+}
+
+// VerifyMerchantAPIHost handles POST /v1/merchant/api-host/verify: proves the
+// open claim through DNS and binds its host.
+func VerifyMerchantAPIHost(r *httprequest.Request) {
+	mid, ok := apiHostMerchantScope(r)
+	if !ok {
+		return
+	}
+	ctx := r.Request.Context()
+	host, err := r.State.Merchants.VerifyAPIHost(ctx, mid, r.State.ReservedAPIHosts, r.State.DNSResolver)
+	if err != nil {
+		claim, _ := r.State.Merchants.APIHostClaimOf(ctx, mid)
+		writeAPIHostError(r, err, claim)
+		return
+	}
+	r.JSON(http.StatusOK, apiHostResponse(host, nil))
 }

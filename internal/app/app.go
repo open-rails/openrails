@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"time"
 
@@ -63,12 +64,14 @@ type BootstrapOptions struct {
 	// NMITransport replaces the NMI wire at the real endpoints (test seam);
 	// posture is still verified through it.
 	NMITransport http.RoundTripper
-	HostRiver    bool
-	RiverSchema  string
-	PGXPool      *pgxpool.Pool
-	Redis        *redis.Client
-	Cache        cache.Cache
-	Clock        clockwork.Clock
+	// DNSResolver answers api_host proof lookups (test seam).
+	DNSResolver *net.Resolver
+	HostRiver   bool
+	RiverSchema string
+	PGXPool     *pgxpool.Pool
+	Redis       *redis.Client
+	Cache       cache.Cache
+	Clock       clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
 	UserDirectory    openrails.UserDirectory
@@ -136,6 +139,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		NMITransport: func() http.RoundTripper {
 			if opts != nil {
 				return opts.NMITransport
+			}
+			return nil
+		}(),
+		DNSResolver: func() *net.Resolver {
+			if opts != nil {
+				return opts.DNSResolver
 			}
 			return nil
 		}(),

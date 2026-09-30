@@ -1,0 +1,182 @@
+package merchants
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"net"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+// A merchant proves it controls a domain before the domain routes to it
+// (#1107): the claim's random token must appear in a TXT record at
+// _openrails-challenge.<host>. The proof is a DNS query to the configured
+// resolver only; OpenRails never connects to the claimed host.
+
+// ChallengeLabel is the DNS label a claim's token is published under.
+const ChallengeLabel = "_openrails-challenge"
+
+// ChallengeLookupTimeout bounds one proof lookup.
+const ChallengeLookupTimeout = 5 * time.Second
+
+// ErrAPIHostUnproven indicates the challenge record does not carry the
+// claim's token, or could not be read.
+var ErrAPIHostUnproven = errors.New("merchants: api host control is not proven")
+
+// ErrAPIHostClaimMissing indicates the merchant has no open claim to prove.
+var ErrAPIHostClaimMissing = errors.New("merchants: no api host claim to verify")
+
+// APIHostClaim is a merchant's unproven api_host: the host and the token to
+// publish at Record.
+type APIHostClaim struct {
+	APIHost   string
+	Token     string
+	CreatedAt time.Time
+}
+
+// Record is the DNS name that must carry the claim's token as a TXT value.
+func (c APIHostClaim) Record() string { return ChallengeLabel + "." + c.APIHost }
+
+// ClaimAPIHost opens id's claim on host with a fresh token, replacing any
+// earlier claim. A claim routes nothing; VerifyAPIHost binds the host.
+func (s *Service) ClaimAPIHost(ctx context.Context, id merchant.ID, host string) (*APIHostClaim, error) {
+	if id.IsZero() {
+		return nil, errors.New("merchants: merchant id is required")
+	}
+	host = NormalizeAPIHost(host)
+	if err := ValidateAPIHost(host); err != nil {
+		return nil, err
+	}
+	if net.ParseIP(host) != nil {
+		return nil, fmt.Errorf("%w: %q is an address, not a domain", ErrInvalidAPIHost, host)
+	}
+	var taken bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM openrails.merchants WHERE api_host = $1 AND id <> $2::uuid AND deleted_at IS NULL)
+	`, host, id.UUID()).Scan(&taken); err != nil {
+		return nil, fmt.Errorf("merchants: claim api host: %w", err)
+	}
+	if taken {
+		return nil, fmt.Errorf("merchants: claim api host %q: %w", host, ErrAPIHostTaken)
+	}
+	token := rand.Text()
+	var claim APIHostClaim
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO openrails.merchant_api_host_claims (merchant_id, api_host, token)
+		SELECT id, $2, $3 FROM openrails.merchants WHERE id = $1::uuid AND deleted_at IS NULL
+		ON CONFLICT (merchant_id) DO UPDATE
+		   SET api_host = EXCLUDED.api_host, token = EXCLUDED.token, created_at = now()
+		RETURNING api_host, token, created_at
+	`, id.UUID(), host, token).Scan(&claim.APIHost, &claim.Token, &claim.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrMerchantNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("merchants: claim api host: %w", err)
+	}
+	return &claim, nil
+}
+
+// APIHostClaimOf returns id's open claim, or nil.
+func (s *Service) APIHostClaimOf(ctx context.Context, id merchant.ID) (*APIHostClaim, error) {
+	var claim APIHostClaim
+	err := s.pool.QueryRow(ctx, `
+		SELECT api_host, token, created_at FROM openrails.merchant_api_host_claims WHERE merchant_id = $1::uuid
+	`, id.UUID()).Scan(&claim.APIHost, &claim.Token, &claim.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("merchants: read api host claim: %w", err)
+	}
+	return &claim, nil
+}
+
+// VerifyAPIHost proves id's open claim through resolver (nil: the system
+// resolver): a TXT record at the claim's Record must carry its token. Proven,
+// the host becomes id's api_host and the claim closes; a host another merchant
+// already holds is ErrAPIHostTaken, one reserved for the deployment
+// ErrAPIHostReserved.
+func (s *Service) VerifyAPIHost(ctx context.Context, id merchant.ID, reserved []string, resolver *net.Resolver) (string, error) {
+	claim, err := s.APIHostClaimOf(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if claim == nil {
+		return "", ErrAPIHostClaimMissing
+	}
+	if err := ClaimableAPIHost(claim.APIHost, reserved); err != nil {
+		return "", err
+	}
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	lookup, cancel := context.WithTimeout(ctx, ChallengeLookupTimeout)
+	defer cancel()
+	values, err := resolver.LookupTXT(lookup, claim.Record())
+	if err != nil || !slices.ContainsFunc(values, func(v string) bool { return strings.TrimSpace(v) == claim.Token }) {
+		return "", ErrAPIHostUnproven
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// The token proven is the one still open: a newer claim waits for its own proof.
+		tag, err := tx.Exec(ctx, `
+			DELETE FROM openrails.merchant_api_host_claims
+			 WHERE merchant_id = $1::uuid AND api_host = $2 AND token = $3
+		`, id.UUID(), claim.APIHost, claim.Token)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrAPIHostClaimMissing
+		}
+		tag, err = tx.Exec(ctx, `
+			UPDATE openrails.merchants SET api_host = $2, updated_at = current_timestamp
+			 WHERE id = $1::uuid AND deleted_at IS NULL
+		`, id.UUID(), claim.APIHost)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrMerchantNotFound
+		}
+		return nil
+	})
+	switch {
+	case err == nil:
+		return claim.APIHost, nil
+	case isUniqueViolation(err):
+		return "", fmt.Errorf("merchants: verify api host %q: %w", claim.APIHost, ErrAPIHostTaken)
+	case errors.Is(err, ErrAPIHostClaimMissing), errors.Is(err, ErrMerchantNotFound):
+		return "", err
+	default:
+		return "", fmt.Errorf("merchants: verify api host: %w", err)
+	}
+}
+
+// ReleaseAPIHost clears id's api_host and any open claim: giving a host up
+// needs no proof.
+func (s *Service) ReleaseAPIHost(ctx context.Context, id merchant.ID) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM openrails.merchant_api_host_claims WHERE merchant_id = $1::uuid`, id.UUID()); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `
+			UPDATE openrails.merchants SET api_host = NULL, updated_at = current_timestamp
+			 WHERE id = $1::uuid AND deleted_at IS NULL
+		`, id.UUID())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrMerchantNotFound
+		}
+		return nil
+	})
+}

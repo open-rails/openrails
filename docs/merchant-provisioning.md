@@ -199,8 +199,9 @@ Per merchant:
 - `api_host` — the merchant's canonical API host (bare lowercase hostname,
   globally unique): the `Host` header public routes and Host-routed webhooks
   resolve this merchant from. Declared hosts are asserted on every apply;
-  omitted leaves the stored value untouched. Also assignable at runtime via
-  `PUT /v1/merchant/api-host` (owner-gated).
+  omitted leaves the stored value untouched. An owner claims one at runtime
+  with `PUT /v1/merchant/api-host` and binds it once a TXT record proves
+  control of the domain (`POST /v1/merchant/api-host/verify`).
 - `remote_application` — the host app's issuer (JWKS URI, inline static
   `jwks`, or raw `public_keys`), registered as merchant **owner**: delegated
   tokens signed by that issuer fully administer this one merchant and no other.
