@@ -43,3 +43,13 @@ func (c *ControlPlane) RenameMerchant(ctx context.Context, mid merchant.ID, name
 	}
 	return directory.Rename(ctx, mid, name, policy)
 }
+
+// SetMerchantDisplayName sets an active merchant's display name; an empty name
+// is a no-op.
+func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id merchant.ID, displayName string) error {
+	directory, err := c.directory()
+	if err != nil {
+		return err
+	}
+	return directory.SetDisplayName(ctx, id, displayName)
+}

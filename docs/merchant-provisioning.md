@@ -100,8 +100,14 @@ cp, err := controlplane.Attach(ctx, rt, controlplane.Options{
 })
 ```
 
-That policy holds in-process `ProvisionMerchant` calls that name an
-`OwnerUserID` (typed refusals `controlplane.ErrSlugReserved` /
+With it set, signed-in users create merchants they own with
+`POST /v1/merchants {"name", "display_name"?}`: 201 on creation, 200 when the
+name already resolves to a merchant the caller owns (the idempotent repair).
+Refusals: 400 `invalid_name`, 409 `name_taken` / `name_reserved`, 403
+`email_unverified` / `creation_refused`, 402 `payment_method_required`. Creation
+is capped at 12 per 24 hours per client IP and per user (429 with
+`Retry-After`). The same policy holds in-process `ProvisionMerchant` calls that
+name an `OwnerUserID` (typed refusals `controlplane.ErrSlugReserved` /
 `controlplane.ErrCreationRefused`) and merchant renames. Ownerless
 `ProvisionMerchant` and Bootstrap are operator acts and stay ungated — that is
 how a platform merchant claims a reserved name.

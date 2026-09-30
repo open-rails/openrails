@@ -922,6 +922,9 @@ func authorizationToken(header string) string {
 	return ""
 }
 
+// RequireUser requires an authenticated user session.
+func (opts Options) RequireUser() router.Middleware { return opts.requiredMW() }
+
 // RequireMerchantPermission applies the same billing merchant gate to host routes.
 func (opts Options) RequireMerchantPermission(permission string) router.Middleware {
 	return opts.merchantActionPermissionMW(permission)

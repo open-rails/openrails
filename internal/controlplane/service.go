@@ -540,8 +540,8 @@ func (c *ControlPlane) Core() authkit.Client {
 	return c.client
 }
 
-// MerchantCreationEnabled reports whether the merchant persona is opted into
-// authkit's generated instance-creation path (or#914, WithMerchantCreation).
+// MerchantCreationEnabled reports whether users may create merchants: a hosted
+// creation policy is declared (or#914, WithMerchantCreation).
 func (c *ControlPlane) MerchantCreationEnabled() bool {
 	return c != nil && c.merchantCreation != nil
 }
