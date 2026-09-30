@@ -22,7 +22,8 @@ a pure passthrough. Host-facing summaries: [frontend-integration.md](frontend-in
 
 The IP is the proxy-aware resolved client (#746): with `trusted_proxies` empty (default) it is
 the raw socket peer — a spoofed `X-Forwarded-For` has zero effect; with your LB's CIDRs
-configured, `X-Forwarded-For` is walked right-to-left past trusted hops to the real client. Set
+configured, `X-Forwarded-For` (every header line, joined in order) is walked right-to-left past
+trusted hops to the real client. Set
 it whenever OpenRails sits behind a proxy, or all traffic collapses onto the proxy's one IP
 bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 

@@ -1,36 +1,50 @@
 package iputil
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 // #746: proxy trust is opt-in; an untrusted peer's X-Forwarded-For has no effect.
-func TestResolveClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
+// Every X-Forwarded-For line counts, in order.
+func TestClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
 	lb := []string{"10.0.0.0/8", " fd00::/8 "}
 	for _, tc := range []struct {
-		name       string
-		cidrs      []string
-		remote, ff string
-		want       string
+		name   string
+		cidrs  []string
+		remote string
+		ff     []string
+		want   string
 	}{
-		{"nothing trusted", nil, "10.0.0.5:443", "203.0.113.9", "10.0.0.5"},
-		{"untrusted peer spoofing", lb, "203.0.113.9:443", "64.38.212.5", "203.0.113.9"},
-		{"trusted peer single hop", lb, "10.0.0.5:443", "64.38.212.5", "64.38.212.5"},
-		{"walks right to left past trusted hops", lb, "10.0.0.5:443", "198.51.100.1, 64.38.212.5 , 10.0.0.6", "64.38.212.5"},
-		{"all hops trusted falls back to peer", lb, "10.0.0.5:443", "10.0.0.6,10.0.0.7", "10.0.0.5"},
-		{"trusted peer without header", lb, "10.0.0.5:443", "", "10.0.0.5"},
-		{"ipv6 trusted peer", lb, "[fd00::1]:443", "2001:db8::7", "2001:db8::7"},
-		{"bare host remote addr", nil, "203.0.113.9", "", "203.0.113.9"},
-		{"malformed cidr trusts nothing", []string{"not-a-cidr", ""}, "10.0.0.5:443", "64.38.212.5", "10.0.0.5"},
+		{"nothing trusted", nil, "10.0.0.5:443", []string{"203.0.113.9"}, "10.0.0.5"},
+		{"untrusted peer spoofing", lb, "203.0.113.9:443", []string{"64.38.212.5"}, "203.0.113.9"},
+		{"trusted peer single hop", lb, "10.0.0.5:443", []string{"64.38.212.5"}, "64.38.212.5"},
+		{"walks right to left past trusted hops", lb, "10.0.0.5:443", []string{"198.51.100.1, 64.38.212.5 , 10.0.0.6"}, "64.38.212.5"},
+		{"a proxy's own line follows the client's", lb, "10.0.0.5:443", []string{"64.38.212.5", "203.0.113.9"}, "203.0.113.9"},
+		{"lines join in order past trusted hops", lb, "10.0.0.5:443", []string{"198.51.100.1", "64.38.212.5, 10.0.0.6", "10.0.0.7"}, "64.38.212.5"},
+		{"all hops trusted falls back to peer", lb, "10.0.0.5:443", []string{"10.0.0.6,10.0.0.7"}, "10.0.0.5"},
+		{"trusted peer without header", lb, "10.0.0.5:443", nil, "10.0.0.5"},
+		{"ipv6 trusted peer", lb, "[fd00::1]:443", []string{"2001:db8::7"}, "2001:db8::7"},
+		{"bare host remote addr", nil, "203.0.113.9", nil, "203.0.113.9"},
+		{"malformed cidr trusts nothing", []string{"not-a-cidr", ""}, "10.0.0.5:443", []string{"64.38.212.5"}, "10.0.0.5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, ParseTrustedProxies(tc.cidrs).ResolveClientIP(tc.remote, tc.ff))
+			r := httptest.NewRequest(http.MethodPost, "/", nil)
+			r.RemoteAddr = tc.remote
+			for _, line := range tc.ff {
+				r.Header.Add("X-Forwarded-For", line)
+			}
+			require.Equal(t, tc.want, ParseTrustedProxies(tc.cidrs).ClientIP(r))
 		})
 	}
 	var nilResolver *TrustedProxies
-	require.Equal(t, "10.0.0.5", nilResolver.ResolveClientIP("10.0.0.5:443", "64.38.212.5"))
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r.RemoteAddr = "10.0.0.5:443"
+	r.Header.Set("X-Forwarded-For", "64.38.212.5")
+	require.Equal(t, "10.0.0.5", nilResolver.ClientIP(r))
 }
 
 func TestSourceAllowlists(t *testing.T) {

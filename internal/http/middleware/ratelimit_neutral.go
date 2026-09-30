@@ -423,7 +423,7 @@ func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []R
 		return nil
 	}
 	subjects := make([]RateLimitSubject, 0, 2)
-	resolved := resolver.ResolveClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+	resolved := resolver.ClientIP(r)
 	if clientIP := strings.TrimSpace(resolved); clientIP != "" {
 		subjects = append(subjects, RateLimitSubject{Scope: RateLimitScopeIP, Value: clientIP, Key: RateLimitScopeIP + ":" + clientIP})
 	}

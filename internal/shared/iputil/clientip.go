@@ -2,6 +2,7 @@ package iputil
 
 import (
 	"net"
+	"net/http"
 	"strings"
 )
 
@@ -16,7 +17,7 @@ import (
 // Semantics: a nil/empty TrustedProxies trusts NOTHING — every resolution
 // returns the raw socket peer, so a spoofed X-Forwarded-For has zero effect.
 // When the immediate socket peer falls inside a trusted CIDR,
-// ResolveClientIP walks X-Forwarded-For right-to-left, skipping trusted
+// ClientIP walks X-Forwarded-For right-to-left, skipping trusted
 // hops, to the first untrusted address — the standard reverse-proxy
 // algorithm: everything to the right of that address was appended by a
 // proxy we trust, so it is the closest honest claim of "who is the client".
@@ -55,13 +56,18 @@ func (t *TrustedProxies) trusts(ip net.IP) bool {
 	return false
 }
 
-// ResolveClientIP returns the real client IP for one request. remoteAddr is
-// the transport-level peer (http.Request.RemoteAddr — "host:port" or a bare
-// host); forwardedFor is the raw X-Forwarded-For header value (possibly
-// empty, possibly several comma-separated hops). Nil-safe: a nil
-// *TrustedProxies always returns the socket peer, matching "empty = trust
-// nothing".
-func (t *TrustedProxies) ResolveClientIP(remoteAddr, forwardedFor string) string {
+// ClientIP returns r's real client IP. Every X-Forwarded-For line counts,
+// joined in order as repeated fields combine (RFC 9110 §5.3): a proxy that
+// appends its own line (HAProxy's option forwardfor) must not leave a
+// client-written first line in charge. Nil-safe: a nil *TrustedProxies
+// always returns the socket peer, matching "empty = trust nothing".
+func (t *TrustedProxies) ClientIP(r *http.Request) string {
+	return t.resolve(r.RemoteAddr, strings.Join(r.Header.Values("X-Forwarded-For"), ","))
+}
+
+// resolve walks forwardedFor, the joined X-Forwarded-For hops, back from
+// remoteAddr, the transport-level peer ("host:port" or a bare host).
+func (t *TrustedProxies) resolve(remoteAddr, forwardedFor string) string {
 	peer := hostOnly(remoteAddr)
 	if !t.trusts(net.ParseIP(peer)) {
 		return peer

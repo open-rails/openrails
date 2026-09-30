@@ -88,6 +88,17 @@ func ccbillTimestamp(t time.Time) string { return t.UTC().Format("2006-01-02 15:
 // form-encoded body with eventType/eventGroupType in the query string.
 func (w *world) postCCBill(eventType, sourceIP string, fields map[string]string) (int, map[string]any) {
 	w.t.Helper()
+	var forwardedFor []string
+	if sourceIP != "" {
+		forwardedFor = []string{sourceIP}
+	}
+	return w.postCCBillVia(eventType, forwardedFor, fields)
+}
+
+// postCCBillVia is postCCBill through the site's proxy, each forwardedFor
+// entry its own X-Forwarded-For line.
+func (w *world) postCCBillVia(eventType string, forwardedFor []string, fields map[string]string) (int, map[string]any) {
+	w.t.Helper()
 	form := url.Values{"clientAccnum": {"945280"}, "clientSubacc": {"0000"}, "timestamp": {ccbillTimestamp(w.clock.Now())}}
 	for k, v := range fields {
 		form.Set(k, v)
@@ -96,8 +107,8 @@ func (w *world) postCCBill(eventType, sourceIP string, fields map[string]string)
 	req, err := http.NewRequestWithContext(w.t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/webhooks/ccbill/"+ccbillAcct+"?"+query.Encode(), strings.NewReader(form.Encode()))
 	require.NoError(w.t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if sourceIP != "" {
-		req.Header.Set("X-Forwarded-For", sourceIP)
+	for _, line := range forwardedFor {
+		req.Header.Add("X-Forwarded-For", line)
 	}
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
