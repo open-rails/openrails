@@ -398,7 +398,7 @@ func (r *Request) ClientIP() string {
 	if r.State != nil {
 		resolver = r.State.TrustedProxies
 	}
-	return resolver.ResolveClientIP(r.Request.RemoteAddr, r.t.Header("X-Forwarded-For"))
+	return resolver.ClientIP(r.Request)
 }
 
 func (r *Request) GetRemoteIP() string {
