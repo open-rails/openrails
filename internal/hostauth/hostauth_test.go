@@ -3,76 +3,13 @@ package hostauth
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	authkit "github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/verify"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
-
-const boundMerchant = "6a68e70a-4dd9-4b39-a3ba-4657303c6f70"
-
-type hostVerifier struct{ claims verify.Claims }
-
-func (h hostVerifier) VerifyRequest(*http.Request) (verify.Claims, error) { return h.claims, nil }
-
-func req() *http.Request {
-	r := httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/settings", nil)
-	r.Header.Set("Authorization", "Bearer host.session.token")
-	return r
-}
-
-// Misconfiguration fails at boot, never as a quiet downgrade at request time.
-func TestConstructorsRefuseLoudly(t *testing.T) {
-	_, err := NewAuthenticator(nil)
-	require.ErrorContains(t, err, "verifier is required")
-	_, err = NewDelegatedAuthenticator(nil, boundMerchant)
-	require.ErrorContains(t, err, "verifier is required")
-	for _, bad := range []string{"", "not-a-uuid", "acme"} {
-		_, err = NewDelegatedAuthenticator(hostVerifier{}, bad)
-		require.ErrorContains(t, err, "merchant id", bad)
-	}
-	_, err = NewVerifierAuthenticator(nil, "aud")
-	require.ErrorContains(t, err, "auth issuer")
-	_, err = NewVerifierDelegatedAuthenticator(nil, "aud", boundMerchant)
-	require.ErrorContains(t, err, "auth issuer")
-}
-
-func TestOptionsReachThePrincipal(t *testing.T) {
-	v := hostVerifier{verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d", Roles: []string{"owner"}, Issuer: "https://auth.host.example"}}
-	banned := errors.New("user is banned")
-	var admission error
-	admit := func(context.Context, *http.Request, verify.Claims) error { return admission }
-	a, err := NewDelegatedAuthenticator(v, boundMerchant, nil, WithMerchantSlug("acme"), WithIssuer("openrails:self"),
-		WithAdmission(admit),
-		WithPermissionResolver(func(context.Context, *http.Request, verify.Claims) ([]string, error) {
-			return []string{permissions.MerchantAll}, nil
-		}))
-	require.NoError(t, err)
-	p, err := a.AuthenticateDelegated(t.Context(), req())
-	require.NoError(t, err)
-	require.Equal(t, []string{boundMerchant, "acme", "openrails:self"}, []string{p.MerchantID, p.MerchantSlug, p.Issuer})
-	require.Equal(t, []string{permissions.MerchantAll}, p.Permissions)
-
-	user, err := NewAuthenticator(v, nil, WithoutTokenRoles(), WithUserAdmission(admit))
-	require.NoError(t, err)
-	uc, err := user.Authenticate(t.Context(), req())
-	require.NoError(t, err)
-	require.Empty(t, uc.Roles)
-
-	admission = banned
-	_, err = a.AuthenticateDelegated(t.Context(), req())
-	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
-	_, err = user.Authenticate(t.Context(), req())
-	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
-}
 
 type fakeIdentity struct {
 	users     map[string]*authkit.AdminUser

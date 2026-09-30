@@ -1,3 +1,5 @@
+// Package hostauth adapts the control plane's AuthKit client to billing's user
+// directory (billing email and the CCBill username bridge).
 package hostauth
 
 import (

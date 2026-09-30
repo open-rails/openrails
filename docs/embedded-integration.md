@@ -494,11 +494,8 @@ without a role lookup; selecting the fixed merchant as payer requires live
 merchant/payer IDs. Sibling customer IDs remain denied.
 
 Advanced, genuinely delegated audiences can instead supply their own
-`CustomerRoutesConfig.DelegatedAuthenticator`. The existing
-`NewDelegatedAuthenticator` / `NewVerifierDelegatedAuthenticator` helpers remain
-for those explicit integrations, with `WithAdmission` and
-`WithPermissionResolver` for host policy. They confer no permissions by default
-and never infer authority from token roles. The host must preserve verified
+`CustomerRoutesConfig.DelegatedAuthenticator`. It must confer no permissions by
+default, never infer authority from token roles, and preserve verified
 merchant/payer binding, issuer, credential class and invoker restrictions.
 An invoker-scoped principal may read its own `/v1/me/spend-limits`; the other
 personal and treasury operations continue to refuse it.
