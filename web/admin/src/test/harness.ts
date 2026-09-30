@@ -36,7 +36,7 @@ export type Reply =
 
 const BOOTSTRAP = {
   api_base_url: "/v1",
-  auth_base_url: "/auth",
+  auth_base_url: "/auth/v1",
   nl_widgets_enabled: true,
   ask_enabled: true,
   catalog_copilot_enabled: true,
@@ -69,7 +69,7 @@ export async function server(routes: Record<string, Reply> = {}) {
       const [target, query = ""] = url.split("?")
       const request: Recorded = {
         method: init.method ?? "GET",
-        path: target.replace(/^\/v1|^\/auth/, ""),
+        path: target.replace(/^\/v1|^\/auth\/v1/, ""),
         query,
         body: init.body ? JSON.parse(String(init.body)) : undefined,
         headers: new Headers(init.headers),

@@ -6,10 +6,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// authAPIBase is where the control plane's AuthKit JSON API lives (#224):
-// /auth beneath an origin issuer, else the issuer's path.
-func (s *Server) authAPIBase() string { return s.controlPlane.AuthAPIBase() }
-
 // registerControlPlaneAuthRoutes mounts the AuthKit route groups OpenRails
 // intentionally exposes (#224 task 4): the posture's explicit group list
 // (ControlPlane.MountedRouteGroups, never AuthKit's default surface or browser

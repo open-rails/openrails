@@ -31,7 +31,7 @@ Two independent requirements, both needed (#740/#754):
 ```yaml
 admin_console:
   enabled: true
-  # auth_base_url: /auth   # default: the standalone control-plane authhttp mount
+  # auth_base_url: /auth/v1   # default: the standalone control plane's AuthKit JSON API
   # api_base_url: /v1      # default standalone; embedded hosts typically /billing/v1
 ```
 
@@ -88,7 +88,7 @@ which mounts `/admin/` per the table above. The embedded mount surface
 that mount billing under their own mux serve the console themselves by mounting
 `adminconsole.Handler(cfg, assets)` (package `pkg/adminconsole`), gated on
 `adminconsole.Present(assets)`, with `APIBaseURL` set to their billing mount
-(e.g. `/billing/v1`) and `AuthBaseURL` to their AuthKit base.
+(e.g. `/billing/v1`) and `AuthBaseURL` to their AuthKit JSON API (`/api/v1` by default).
 
 Fail-loud behaviors, verified: enabled without assets refuses boot
 (`admin_console.enabled is set but no console assets were provided: …`);
@@ -130,9 +130,9 @@ Browse to `https://<your-openrails-host>/admin/` (bare `/admin` redirects). The
 SPA bootstraps from `GET /admin/config.json`:
 `{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled}`.
 
-- `auth_base_url` — where AuthKit's authhttp surface lives. Standalone default
-  `/auth` (same server). Embedded: the host's AuthKit base, possibly another
-  origin (CORS is then the host's concern).
+- `auth_base_url` — AuthKit's JSON API. Standalone default `/auth/v1` (same
+  server). Embedded: the host's AuthKit JSON API (`/api/v1` by default),
+  possibly another origin (CORS is then the host's concern).
 - `api_base_url` — the merchant API base: `/v1` standalone, typically
   `/billing/v1` embedded.
 

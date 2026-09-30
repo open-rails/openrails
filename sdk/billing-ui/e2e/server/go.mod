@@ -6,7 +6,7 @@ require (
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v0.149.0
+	github.com/open-rails/authkit v1.0.2
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 )
 
@@ -68,7 +68,7 @@ require (
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/helpers v0.3.0 // indirect
+	github.com/open-rails/helpers v1.0.0 // indirect
 	github.com/open-rails/migratekit v1.10.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/redis/go-redis/v9 v9.22.0 // indirect

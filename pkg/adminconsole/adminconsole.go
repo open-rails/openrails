@@ -18,8 +18,8 @@ import (
 type Config struct {
 	// AuthBaseURL is the base under which the AuthKit authhttp routes live
 	// (capabilities, password/login, token, me, OIDC). Standalone default:
-	// "/auth" (the control plane mount). Embedded: the host AuthKit base,
-	// possibly another origin.
+	// "/auth/v1" (the control plane mount). Embedded: the host's AuthKit JSON
+	// API, "/api/v1" by default, possibly on another origin.
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the merchant API base. Standalone default "/v1";
 	// embedded hosts typically "/billing/v1".
@@ -61,7 +61,7 @@ func Present(assets fs.FS) bool {
 // without a build anyway, every request answers 503 naming the build step.
 func Handler(cfg Config, assets fs.FS) http.Handler {
 	if cfg.AuthBaseURL == "" {
-		cfg.AuthBaseURL = "/auth"
+		cfg.AuthBaseURL = "/auth/v1"
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "/v1"

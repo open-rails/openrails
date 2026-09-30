@@ -29,10 +29,11 @@ requests only from that exact configured origin, including bodyless POSTs;
 missing, opaque, cross-origin and sibling origins are refused. Do not wrap
 AuthKit's own auth routes, which own their refresh/CSRF cookie protocol.
 
-Standalone and SaaS browser clients use AuthKit v0.101.0 browser delegation:
+Standalone and SaaS browser clients use AuthKit v1 browser delegation:
 
 1. Create a non-extractable WebCrypto P-256 signing key in memory.
-2. Call the merchant issuer's `POST /delegated/token` using its normal local
+2. Call the merchant issuer's `POST /api/v1/delegated/token` (AuthKit's
+   default mount) using its normal local
    `Authorization: Bearer` credential and a fresh ES256 `DPoP` proof. Include
    `audiences: ["openrails"]` and the application's `requested_grant`. The
    issuer's host authorizer determines the actual grant; the browser does not.

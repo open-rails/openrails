@@ -355,7 +355,7 @@ Server-to-server billing operations. Every route is gated on the listed
 Same `/v1/merchant` prefix and permission gate; these are the console/support
 surface. The merchant admin console SPA (when enabled and built) is served at
 `GET /admin/`, and the selected AuthKit control-plane route groups (login,
-tokens, membership) are mounted under `/auth/*` — see AuthKit's own reference
+tokens, membership) are mounted under `/auth/v1/*` — see AuthKit's own reference
 for those routes.
 
 ### Customers & support

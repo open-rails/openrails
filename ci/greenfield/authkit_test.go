@@ -117,7 +117,7 @@ func TestMerchantIssuerIsTrustedWithinItsGroup(t *testing.T) {
 	merchantAuth, _ := authtest.New(t, authtest.WithConfig(func(c *authkit.Config) { c.Token.Issuer = issuer }),
 		authtest.WithDeps(func(d *authkit.Deps) {
 			d.Postgres = f.pool
-			d.KeySource = keys.Static{Active: signer, Pubs: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}
+			d.KeySource = keys.Static{Active: signer, Public: map[string]crypto.PublicKey{signer.KID(): signer.Public()}}
 		}))
 
 	var rt *embed.Runtime
