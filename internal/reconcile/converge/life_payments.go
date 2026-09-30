@@ -11,7 +11,8 @@ import (
 )
 
 // Payment health findings (#1118): decline and rebill-failure spikes per PSP
-// account and owner, system errors, and decline codes no table maps. They
+// account and owner, system errors, decline codes no table maps, and PSPs
+// whose webhooks went silent (#1112). They
 // read the #1116 measures, so an alert and the console's health page agree on
 // every number. Each is a standing finding: it stays open while its condition
 // holds (one notification per episode) and resolves when it no longer does.
@@ -21,6 +22,7 @@ const (
 	findingRebillFailureSpike  = "life.payments.rebill_failure_spike"
 	findingSystemErrors        = "life.payments.system_errors"
 	findingDeclineUnmapped     = "life.decline.unmapped"
+	findingWebhookSilence      = "life.webhooks.silent"
 )
 
 // Starting thresholds; each rate needs its minimum volume first.
@@ -34,6 +36,11 @@ const (
 	systemErrorPercent   = 2
 	systemErrorMin       = 20
 	unmappedLookback     = 30 * 24 * time.Hour
+	// A PSP whose provider charges arrived by webhook over the baseline, with
+	// none by webhook in the silence window while pulls found some, is silent.
+	silenceWindow      = 24 * time.Hour
+	silenceBaselineMin = 10
+	silenceMinPulled   = 3
 )
 
 // credentialCodes are NMI's answers about our own account (410 invalid
@@ -47,7 +54,7 @@ var newCardFilters = map[string][]string{"kind": {"verify", "initial"}, "card_en
 func (p *lifePass) paymentHealthFindings(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
 	var out []ConvergeFinding
 	for _, step := range []func(context.Context, time.Time) ([]ConvergeFinding, error){
-		p.newCardSpikes, p.rebillSpikes, p.systemErrors, p.unmappedDeclines,
+		p.newCardSpikes, p.rebillSpikes, p.systemErrors, p.unmappedDeclines, p.webhookSilence,
 	} {
 		fs, err := step(ctx, now)
 		if err != nil {
@@ -235,6 +242,57 @@ func (p *lifePass) unmappedDeclines(ctx context.Context, now time.Time) ([]Conve
 			Evidence: map[string]any{"rail": rail, "code": code, "declines": n, "lookback_days": int(unmappedLookback.Hours()) / 24},
 			RecommendedAction: fmt.Sprintf("%s decline code %q is in no table: it is retried as an ordinary decline and reads as \"unknown\". Map it in internal/billing/decline.",
 				rail, code),
+		})
+	}
+	return out, nil
+}
+
+// webhookSilence: a PSP whose provider-scheduled charges normally arrive by
+// webhook has sent none for a day while pulls still find its charges. One per
+// PSP account; it resolves when webhooks resume.
+func (p *lifePass) webhookSilence(ctx context.Context, now time.Time) ([]ConvergeFinding, error) {
+	observed := func(from, to time.Time) (map[string]map[string]int64, error) {
+		rows, err := p.metricRows(ctx, metrics.Query{Measures: []string{"attempts"}, By: []string{"rail_account", "observed_via"},
+			Filters: map[string][]string{"source": {"provider_schedule"}}}, from, to, now)
+		if err != nil {
+			return nil, err
+		}
+		out := map[string]map[string]int64{}
+		for _, r := range rows {
+			account := str(r["rail_account"])
+			if out[account] == nil {
+				out[account] = map[string]int64{}
+			}
+			out[account][str(r["observed_via"])] += count(r["attempts"])
+		}
+		return out, nil
+	}
+	recent, err := observed(now.Add(-silenceWindow), now)
+	if err != nil {
+		return nil, err
+	}
+	baseline, err := observed(now.Add(-silenceWindow-baselineWindow), now.Add(-silenceWindow))
+	if err != nil {
+		return nil, err
+	}
+	accounts := make([]string, 0, len(recent))
+	for account := range recent {
+		accounts = append(accounts, account)
+	}
+	sort.Strings(accounts)
+	var out []ConvergeFinding
+	for _, account := range accounts {
+		cur, base := recent[account], baseline[account]
+		if base["webhook"] < silenceBaselineMin || cur["webhook"] > 0 || cur["pull"] < silenceMinPulled {
+			continue
+		}
+		out = append(out, ConvergeFinding{
+			Type: findingWebhookSilence, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
+			SubjectKey: "psp:" + account, Provider: "self",
+			Evidence: map[string]any{"rail_account": account, "window_hours": int(silenceWindow.Hours()),
+				"pulled": cur["pull"], "baseline_days": int(baselineWindow.Hours()) / 24, "baseline_webhook": base["webhook"]},
+			RecommendedAction: fmt.Sprintf("%s sent no webhooks in the last 24 hours, but pulls found %d of its charges; it had sent %d in the 28 days before. Its charges and declines reach OpenRails late: check the webhook registration and signing key at the gateway.",
+				account, cur["pull"], base["webhook"]),
 		})
 	}
 	return out, nil

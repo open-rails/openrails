@@ -561,6 +561,7 @@ account and owner and keeps these findings open while their condition holds
 | `life.payments.rebill_failure_spike` | the last 24h's rebill first-attempt failure rate is 10 points above that baseline, or above 25%, over 50 cycles |
 | `life.payments.system_errors` | system errors are over 2% of the last hour's attempts (at least 20); critical at once on NMI 410/411 (our account refused) |
 | `life.decline.unmapped` | a decline code of the last 30 days that no table maps, per rail and code |
+| `life.webhooks.silent` | a PSP account whose provider charges came by webhook (at least 10 in the 28 days before) sent none in the last 24h while pulls found at least 3; per PSP account |
 
 Payment attempts and rebill cycles are kept 25 months; the cleanup worker
 deletes older ones.
