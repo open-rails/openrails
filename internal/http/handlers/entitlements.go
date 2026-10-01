@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +22,9 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -238,7 +243,16 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-func GrantAdminEntitlement(r *httprequest.Request) {
+// maxGrantHours is the longest hours value a time.Duration holds.
+const maxGrantHours = math.MaxInt64 / int64(time.Hour)
+
+// GrantAdminEntitlement records a manual grant. One with no end also needs
+// merchant:access:grant-permanent.
+func GrantAdminEntitlement(gate billingauth.Gate) func(*httprequest.Request) {
+	return func(r *httprequest.Request) { grantAdminEntitlement(r, gate) }
+}
+
+func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 	var path adminUserEntitlementsPath
 	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -267,8 +281,8 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "hours and end_at are mutually exclusive")
 		return
 	case req.Hours != nil:
-		if *req.Hours <= 0 {
-			r.ErrorJSON(http.StatusBadRequest, "hours must be > 0 (or omit for indefinite)")
+		if *req.Hours <= 0 || int64(*req.Hours) > maxGrantHours {
+			r.ErrorJSON(http.StatusBadRequest, fmt.Sprintf("hours must be between 1 and %d (or omit for indefinite)", maxGrantHours))
 			return
 		}
 		d := time.Duration(*req.Hours) * time.Hour
@@ -281,6 +295,9 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		endAt := req.EndAt.UTC()
 		params.EndAt = &endAt
 	default:
+		if !permitPermanentGrant(r, gate) {
+			return
+		}
 		params.Indefinite = true
 	}
 	var err error
@@ -296,6 +313,25 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 	}
 	convergeAfterMutation(r, params.CustomerID) // #511: re-converge the customer inline
 	r.JSON(http.StatusCreated, entitlementRecordFromModel(ent))
+}
+
+// permitPermanentGrant requires merchant:access:grant-permanent for a manual
+// grant with no end, on top of the route's own permission.
+func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
+	if gate != nil {
+		_, err := gate.Authorize(r.Request.Context(), r.Request, permissions.MerchantAccessGrantPermanent)
+		if err == nil {
+			return true
+		}
+		var refusal billingauth.GateError
+		if errors.As(err, &refusal) && refusal.Status != http.StatusForbidden {
+			r.ErrorJSON(refusal.Status, refusal.Message)
+			return false
+		}
+	}
+	r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeForStatus(http.StatusForbidden), "permanent_grant_forbidden",
+		"a grant with no end needs "+permissions.MerchantAccessGrantPermanent))
+	return false
 }
 
 func entitlementRecordFromModel(e *models.Entitlement) openrails.EntitlementRecord {

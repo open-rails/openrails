@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // ProductAccessGrantResponse is the application-facing view of a durable product
@@ -202,8 +203,13 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 
 // GrantAdminProductAccess creates a durable product access grant for a user
 // (support comps / migrations / manual purchases). Idempotent at the service
-// layer per (user, product, source).
-func GrantAdminProductAccess(r *httprequest.Request) {
+// layer per (user, product, source). One with no end also needs
+// merchant:access:grant-permanent.
+func GrantAdminProductAccess(gate billingauth.Gate) func(*httprequest.Request) {
+	return func(r *httprequest.Request) { grantAdminProductAccess(r, gate) }
+}
+
+func grantAdminProductAccess(r *httprequest.Request, gate billingauth.Gate) {
 	var path adminUserProductAccessPath
 	if err := r.ShouldBindURI(&path); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -227,6 +233,9 @@ func GrantAdminProductAccess(r *httprequest.Request) {
 		}
 		e := parsed.UTC()
 		endsAt = &e
+	}
+	if endsAt == nil && !permitPermanentGrant(r, gate) {
+		return
 	}
 	admin := r.GetUser()
 	if admin == nil || admin.ID == "" {

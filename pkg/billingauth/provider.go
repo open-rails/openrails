@@ -72,7 +72,7 @@ func NewIntegration(options IntegrationOptions) (*Integration, error) {
 		return nil, fmt.Errorf("billing authentication: verifier is required")
 	}
 	p := &providerIntegration{options: options}
-	result := &Integration{Authentication: p}
+	result := &Integration{Authentication: p, RecentSignIn: p}
 	if options.Authority != nil || options.PlatformAuthority != nil {
 		result.Authorization = p
 	}
@@ -191,6 +191,20 @@ func (p *providerIntegration) Authorize(ctx context.Context, r *http.Request, id
 		}
 	}
 	return GateError{Status: http.StatusForbidden, Message: "permission_required"}
+}
+
+// CheckRecentSignIn asks the verified principal, through its helpers/auth
+// RecentSignInChecker, whether the user signed in recently enough.
+func (p *providerIntegration) CheckRecentSignIn(ctx context.Context, r *http.Request) error {
+	principal, err := p.principal(ctx, r)
+	if err != nil {
+		return err
+	}
+	checker, ok := principal.(auth.RecentSignInChecker)
+	if !ok || nilInterface(checker) {
+		return ErrRecentSignInUnavailable
+	}
+	return checker.CheckRecentSignIn(ctx)
 }
 
 // permissionCheckFailure answers a failed live check. A credential the check

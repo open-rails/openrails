@@ -81,10 +81,25 @@ func (f AuthorizationFunc) Authorize(ctx context.Context, r *http.Request, i Ide
 	return f(ctx, r, i, q)
 }
 
+// RecentSignIn checks the request's native user signed in recently enough for
+// an operation that moves money or grants access, with helpers/auth
+// RecentSignInChecker's errors.
+type RecentSignIn interface {
+	CheckRecentSignIn(context.Context, *http.Request) error
+}
+type RecentSignInFunc func(context.Context, *http.Request) error
+
+func (f RecentSignInFunc) CheckRecentSignIn(ctx context.Context, r *http.Request) error {
+	return f(ctx, r)
+}
+
 // Integration is supplied at construction. Authorization can be omitted only
 // when no privileged route is published. Personal customer ownership is checked
 // by OpenRails against the explicitly mapped canonical customer and selected merchant.
+// Without RecentSignIn, native users are refused the operations that need a
+// recent sign-in; NewIntegration derives it from the provider's principal.
 type Integration struct {
 	Authentication Authentication
 	Authorization  Authorization
+	RecentSignIn   RecentSignIn
 }

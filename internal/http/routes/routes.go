@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -374,19 +375,19 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			}
 			principal, err := opts.Gate.Authorize(r.Request.Context(), r.Request, perm)
 			if err != nil {
-				var ge billingauth.GateError
-				if errors.As(err, &ge) {
-					if ge.Message == "sender_proof_required" {
-						r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
-					}
-					r.AbortJSON(ge.Status, ge.Message)
-				} else {
-					r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
-				}
+				abortGate(r, err)
 				return
 			}
 			if !middleware.EnforceMerchantBinding(r, principal.MerchantID) {
 				return
+			}
+			// Per operation, so every route serving it (v1, v2, import,
+			// catalog) asks for the same recent sign-in.
+			if permissions.RequiresRecentSignIn(perm) {
+				if err := opts.Gate.RequireRecentSignIn(r.Request.Context(), r.Request, principal); err != nil {
+					abortGate(r, err)
+					return
+				}
 			}
 			if r.Request != nil && !principal.MerchantID.IsZero() {
 				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), principal.MerchantID))
@@ -402,6 +403,22 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			r.Set(httphandlers.MerchantRoutePrincipalContextKey, principal)
 			next(r)
 		}
+	}
+}
+
+// abortGate answers a Gate refusal.
+func abortGate(r *httprequest.Request, err error) {
+	var ge billingauth.GateError
+	switch {
+	case !errors.As(err, &ge):
+		r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
+	case ge.Code != "":
+		r.AbortAPIError(api.NewAPIError(ge.Status, api.ErrorTypeForStatus(ge.Status), ge.Code, ge.Message).WithMetadata(ge.Metadata))
+	default:
+		if ge.Message == "sender_proof_required" {
+			r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
+		}
+		r.AbortJSON(ge.Status, ge.Message)
 	}
 }
 
@@ -423,7 +440,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if !resolved.HasPermission(perm) {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		}
-		return billingauth.Principal{MerchantID: hp.MerchantID, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
+		return billingauth.Principal{MerchantID: hp.MerchantID, Kind: billingauth.Machine, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
 	}
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
@@ -446,7 +463,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if !resolved.HasPermission(perm) {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		}
-		return billingauth.Principal{MerchantID: resolved.MerchantID, Permissions: resolved.Permissions}, nil
+		return billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Machine, Permissions: resolved.Permissions}, nil
 	}
 	if g.DelegatedResolver != nil && req != nil {
 		if token := authorizationToken(req.Header.Get("Authorization")); credential.LooksLikeJWT(token) {
@@ -467,6 +484,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				}
 				return billingauth.Principal{
 					MerchantID: resolved.MerchantID,
+					Kind:       billingauth.DelegatedUser,
 					Subject:    resolved.DelegatedSubject,
 					UserContext: billingauth.UserContext{
 						UserID:        resolved.DelegatedSubject,
@@ -494,6 +512,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 		return billingauth.Principal{
 			MerchantID: resolved.MerchantID,
+			Kind:       billingauth.DelegatedUser,
 			Subject:    resolved.DelegatedSubject,
 			UserContext: billingauth.UserContext{
 				UserID:        resolved.DelegatedSubject,
@@ -563,7 +582,17 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if mid != membershipMID {
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
-	return billingauth.Principal{MerchantID: mid, Subject: uc.UserID, UserContext: uc}, nil
+	return billingauth.Principal{MerchantID: mid, Kind: billingauth.NativeUser, Subject: uc.UserID, UserContext: uc}, nil
+}
+
+// RequireRecentSignIn implements billingauth.Gate with the control plane's
+// AuthKit Sensitive check.
+func (g legacyGate) RequireRecentSignIn(ctx context.Context, req *http.Request, p billingauth.Principal) error {
+	var check func(context.Context) error
+	if g.AdminPermissionChecker != nil {
+		check = func(ctx context.Context) error { return g.AdminPermissionChecker.CheckRecentSignIn(ctx, req) }
+	}
+	return billingauth.RequireRecentSignIn(ctx, p, check)
 }
 
 func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*credential.ResolvedServiceCredential, error, bool) {
@@ -756,9 +785,9 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	customers.Handle(http.MethodPut, "/default-payment-method", h(httphandlers.AdminSetDefaultPaymentMethod), customerWrite...)
 	customers.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminUserPayments), payRead...)
 	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), offChannelWrite...)
-	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement), grantWrite...)
+	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement(opts.Gate)), grantWrite...)
 	customers.Handle(http.MethodDelete, "/entitlements/:id", h(httphandlers.RevokeAdminEntitlement), revokeWrite...)
-	customers.Handle(http.MethodPost, "/product-access", h(httphandlers.GrantAdminProductAccess), grantWrite...)
+	customers.Handle(http.MethodPost, "/product-access", h(httphandlers.GrantAdminProductAccess(opts.Gate)), grantWrite...)
 	customers.Handle(http.MethodDelete, "/product-access/:id", h(httphandlers.RevokeAdminProductAccess), revokeWrite...)
 	// or#906: human-admin credit grant. Money-in gets its OWN permission
 	// (merchant:credits:grant — owner-level, NOT held by the fixed support

@@ -241,6 +241,12 @@ reference: `docs/api/endpoints.md`.
 | Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
 | Repair alerts / drift findings | `GET /v1/merchant/repair-alerts` | Ops |
 
+A user session needs a recent sign-in for every write here (403
+`step_up_required` otherwise); API keys and service JWTs do not. A manual grant
+with no end (no `hours`, `end_at` or `ends_at`) also needs
+`merchant:access:grant-permanent`, owner-level by default; `hours` is at most
+2562047.
+
 Destructive semantics are deliberate: refunds and cancels require an explicit
 `revoke_access` decision — refunding money and revoking access are separate choices.
 For refunds, requested access revocation commits with successful local refund

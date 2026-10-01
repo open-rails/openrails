@@ -70,6 +70,15 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Re
 	return mid, slug, err
 }
 
+// CheckRecentSignIn is AuthKit's Sensitive check for r's user token, with
+// helpers/auth RecentSignInChecker's errors.
+func (c *ControlPlane) CheckRecentSignIn(ctx context.Context, r *http.Request) error {
+	if c == nil || c.users == nil {
+		return ErrNoControlPlane
+	}
+	return c.users.CheckRecentSignIn(ctx, r)
+}
+
 // HasRootPermission reports whether the request's user holds perm in the root
 // group (#721), checked live with its session. The root owner holds root:*;
 // the bounded operator roles hold root:merchants:*. It gates /v1/platform/*.

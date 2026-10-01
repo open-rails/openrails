@@ -33,6 +33,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -58,9 +59,11 @@ const (
 )
 
 // verifier is a neutral host identity provider: HS256 tokens, a staff subject
-// with merchant authority and UUID subjects as native customers. Like AuthKit,
-// its permission check is live: a session revoked after its token was minted
-// fails the check as a revoked credential.
+// with merchant authority, a support subject with all of it but permanent
+// grants, and UUID subjects as native customers. Like AuthKit, its permission
+// check is live: a session revoked after its token was minted fails the check
+// as a revoked credential. A sign-in (auth_time) older than 15 minutes needs
+// a step-up for operations that move money or grant access.
 type verifier struct {
 	secret  []byte
 	slug    string
@@ -68,16 +71,33 @@ type verifier struct {
 }
 
 type principal struct {
-	id auth.Identity
-	v  *verifier
+	id       auth.Identity
+	v        *verifier
+	signedIn time.Time
 }
 
 func (p principal) Identity() auth.Identity { return p.id }
-func (p principal) Can(context.Context, auth.Scope, string) (bool, error) {
+func (p principal) Can(_ context.Context, _ auth.Scope, permission string) (bool, error) {
 	if _, gone := p.v.revoked.Load(p.id.SessionID); gone {
 		return false, errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
 	}
-	return p.id.Subject == "staff", nil
+	return p.id.Subject == "staff" || p.id.Subject == "support" && permission != permissions.MerchantAccessGrantPermanent, nil
+}
+
+// stepUpChallenge is the provider's step-up refusal: how to sign in again.
+type stepUpChallenge map[string]any
+
+func (stepUpChallenge) Error() string              { return "step_up_required" }
+func (c stepUpChallenge) Metadata() map[string]any { return c }
+
+func (p principal) CheckRecentSignIn(context.Context) error {
+	if _, gone := p.v.revoked.Load(p.id.SessionID); gone {
+		return errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
+	}
+	if time.Since(p.signedIn) > 15*time.Minute {
+		return errors.Join(auth.ErrStepUpRequired, stepUpChallenge{"step_up_methods": []string{"password"}})
+	}
+	return nil
 }
 
 func (v *verifier) AuthenticateRequest(_ context.Context, r *http.Request) (auth.Principal, error) {
@@ -91,15 +111,26 @@ func (v *verifier) AuthenticateRequest(_ context.Context, r *http.Request) (auth
 		return nil, auth.ErrUnauthenticated
 	}
 	sid, _ := token.Claims.(jwt.MapClaims)["sid"].(string)
-	return principal{auth.Identity{Kind: auth.KindUser, Issuer: issuer, Subject: subject, SessionID: sid}, v}, nil
+	authTime, _ := token.Claims.(jwt.MapClaims)["auth_time"].(float64)
+	return principal{auth.Identity{Kind: auth.KindUser, Issuer: issuer, Subject: subject, SessionID: sid}, v, time.Unix(int64(authTime), 0)}, nil
 }
 
 func (v *verifier) token(t testing.TB, subject string) string {
 	return v.sessionToken(t, subject, "")
 }
 
+// staleToken is subject's live session signed in an hour ago, as a stolen
+// token's is.
+func (v *verifier) staleToken(t testing.TB, subject string) string {
+	return v.mint(t, subject, "", time.Now().Add(-time.Hour))
+}
+
 func (v *verifier) sessionToken(t testing.TB, subject, sid string) string {
-	claims := jwt.MapClaims{"sub": subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix()}
+	return v.mint(t, subject, sid, time.Now())
+}
+
+func (v *verifier) mint(t testing.TB, subject, sid string, signedIn time.Time) string {
+	claims := jwt.MapClaims{"sub": subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix(), "auth_time": signedIn.Unix()}
 	if sid != "" {
 		claims["sid"] = sid
 	}

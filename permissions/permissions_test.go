@@ -61,3 +61,20 @@ func TestForRolesComposesWithHasPermission(t *testing.T) {
 		require.Equal(t, tc.allow, billingauth.HasPermission(permissions.ForRoles(tc.role), tc.perm), "%s -> %s", tc.role, tc.perm)
 	}
 }
+
+// The step-up policy: merchant operations that move money, grant access or
+// mint credentials; never reads or a buyer's own billing.
+func TestRequiresRecentSignIn(t *testing.T) {
+	for perm, want := range map[string]bool{
+		permissions.MerchantCustomerSettingsUpdate: true, permissions.MerchantPaymentsRefund: true,
+		permissions.MerchantPaymentProvidersUpdate: true, permissions.MerchantCatalogUpdate: true,
+		permissions.MerchantCreditsGrant: true, permissions.MerchantBillingImport: true,
+		permissions.MerchantBillingExport: true, permissions.MerchantCredentialsManage: true,
+		permissions.MerchantMembersManage: true, permissions.MerchantAccessGrantPermanent: true,
+		permissions.MerchantPaymentsRead: false, permissions.MerchantCatalogOwnRead: false,
+		permissions.MerchantDashboardUpdate: false, permissions.MerchantHostEventsAcknowledge: false,
+		permissions.CustomerCheckoutCreate: false, permissions.CustomerSpendDelegationsUpdate: false,
+	} {
+		require.Equal(t, want, permissions.RequiresRecentSignIn(perm), perm)
+	}
+}

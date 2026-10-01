@@ -31,6 +31,10 @@ func (g *deny) Authorize(_ context.Context, _ *http.Request, perm string) (billi
 	return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 }
 
+func (*deny) RequireRecentSignIn(context.Context, *http.Request, billingauth.Principal) error {
+	return nil
+}
+
 var wildcard = regexp.MustCompile(`\{[^}]+\}`)
 
 func routeKeys(table *router.Table) []string {

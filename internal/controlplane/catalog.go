@@ -93,7 +93,7 @@ var catalogPerms = func() map[string]iam.Perm {
 		permissions.MerchantAdmissionsCreate, permissions.MerchantUsageRead, permissions.MerchantRepairAlertsRead,
 		permissions.MerchantMetricsRead, permissions.MerchantDashboardUpdate, permissions.MerchantFindingsResolve,
 		permissions.MerchantBillingImport, permissions.MerchantBillingExport,
-		permissions.MerchantCreditsGrant, permissions.MerchantCreditsRevoke)
+		permissions.MerchantCreditsGrant, permissions.MerchantCreditsRevoke, permissions.MerchantAccessGrantPermanent)
 	declare(customerPersona,
 		permissions.CustomerBalanceRead, permissions.CustomerBillingUpdate, permissions.CustomerPaymentMethodsUpdate,
 		permissions.CustomerCheckoutCreate, permissions.CustomerSpendDelegationsRead, permissions.CustomerSpendDelegationsUpdate)

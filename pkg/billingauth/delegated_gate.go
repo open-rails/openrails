@@ -41,6 +41,7 @@ func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permissio
 	}
 	return Principal{
 		MerchantID:  mid,
+		Kind:        DelegatedUser,
 		Subject:     principal.SubjectID,
 		Permissions: append([]string(nil), principal.Permissions...),
 		UserContext: UserContext{
@@ -51,6 +52,12 @@ func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permissio
 			Merchant:      principal.MerchantSlug,
 		},
 	}, nil
+}
+
+// RequireRecentSignIn implements Gate: a delegated principal carries no
+// sign-in of its own; its issuer vouches for it.
+func (g DelegatedGate) RequireRecentSignIn(ctx context.Context, _ *http.Request, p Principal) error {
+	return RequireRecentSignIn(ctx, p, nil)
 }
 
 // HasPermission reports whether the grant set covers permission: an exact

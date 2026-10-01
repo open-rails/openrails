@@ -19,6 +19,9 @@ const PermMerchantCatalogUpdate = "merchant:catalog:update"
 // is an error joined with helpers/auth ErrRevoked.
 type AdminPermissionChecker interface {
 	ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, merchantRef, perm string) (merchant.ID, string, error)
+	// CheckRecentSignIn is the user's recent sign-in, with helpers/auth
+	// RecentSignInChecker's errors.
+	CheckRecentSignIn(ctx context.Context, r *http.Request) error
 }
 
 var ErrPermissionRequired = errors.New("merchant permission required")

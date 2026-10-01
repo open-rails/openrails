@@ -8,6 +8,7 @@ import (
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -20,6 +21,9 @@ type NativeTreasuryAuthority struct {
 	CustomerID string
 	Target     billingauth.Target
 	Authorize  func(context.Context, string, billingauth.Target) error
+	// RecentSignIn checks the user's sign-in before they move another payer's
+	// money, such as the merchant's own balance; nil refuses that.
+	RecentSignIn func(context.Context) error
 }
 
 func SetNativeTreasuryAuthority(r *request.Request, authority NativeTreasuryAuthority) {
@@ -63,11 +67,18 @@ func requireNativeTreasuryPermission(r *request.Request, authority NativeTreasur
 		r.AbortJSON(http.StatusForbidden, "customer_scope_mismatch")
 		return false
 	}
-	if err := authority.Authorize(r.Request.Context(), permission, authority.Target); err != nil {
+	err := authority.Authorize(r.Request.Context(), permission, authority.Target)
+	if err == nil && r.Request.Method != http.MethodGet && r.Request.Method != http.MethodHead {
+		err = billingauth.RequireRecentSignIn(r.Request.Context(), billingauth.Principal{Kind: billingauth.NativeUser}, authority.RecentSignIn)
+	}
+	if err != nil {
 		var gate billingauth.GateError
-		if errors.As(err, &gate) && gate.Status >= 400 && gate.Status <= 599 {
+		switch {
+		case errors.As(err, &gate) && gate.Code != "":
+			r.AbortAPIError(api.NewAPIError(gate.Status, api.ErrorTypeForStatus(gate.Status), gate.Code, gate.Message).WithMetadata(gate.Metadata))
+		case errors.As(err, &gate) && gate.Status >= 400 && gate.Status <= 599:
 			r.AbortJSON(gate.Status, gate.Message)
-		} else {
+		default:
 			r.AbortJSON(http.StatusServiceUnavailable, "authorization unavailable")
 		}
 		return false

@@ -22,7 +22,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	handler, err := cp.Handler()
 	require.NoError(t, err)
 	member, memberToken := newUser(t, cp)
-	owner, ownerToken := newUser(t, cp)
+	owner, ownerToken := newOwner(t, cp)
 	verifyEmail(t, cp, member)
 	u, err := cp.Core().User(ctx, iam.UserByID(member))
 	require.NoError(t, err)

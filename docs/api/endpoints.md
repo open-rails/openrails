@@ -40,7 +40,11 @@ Merchant permissions: API keys carry the permissions they were minted with;
 service JWTs (`token_use=service`, max 15-min lifetime, signed by a registered
 issuer) carry a self-asserted `permissions` claim scoped to the issuer's
 merchant; human sessions are checked against the user's merchant-group role.
-The required permission is listed per route below. Delegated merchant requests
+The required permission is listed per route below. A human session also needs a
+recent sign-in for every `merchant:` permission except reads, the dashboard
+layout and host-event acknowledgement, whichever route (`/v1`, `/v2`, import,
+catalog) serves the operation: otherwise 403 `step_up_required` with the auth
+provider's step-up methods in `metadata`. Delegated merchant requests
 use the same DPoP or native certificate profile as self-service requests.
 
 ### Idempotency-Key
@@ -371,9 +375,9 @@ for those routes.
 | DELETE | `/v1/merchant/customers/{customer_id}/credits/{grant_id}` | `merchant:credits:revoke` | Revoke the unspent remainder of one credit grant |
 | GET | `/v1/merchant/customers/{customer_id}/credit-transactions` | `merchant:customer-settings:read` | Paginated credit ledger. Query: `currency`, `limit`, `offset` |
 | POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger) |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger): `hours` (at most 2562047) or `end_at`; neither (no end) also needs `merchant:access:grant-permanent` |
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
-| POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access |
+| POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access; without `ends_at` (no end) also needs `merchant:access:grant-permanent` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
 | POST | `/v1/merchant/customers/{customer_id}/credits` | `merchant:credits:grant` | Grant credits (or#906): `{ currency, amount, source_id, invoker?, source?, expires_at?, description? }` — the human-admin deposit. `source_id` is the reproducible idempotency key (same semantics as the machine deposit above); `source` defaults to `admin`, `invoker` to the customer id. Owner-level permission (NOT held by the fixed support role); rate-limited as an admin grant operation |
 | GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo |
