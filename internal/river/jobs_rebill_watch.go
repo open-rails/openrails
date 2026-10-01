@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -42,6 +43,12 @@ const (
 	// MissProviderSkipped: NMI's schedule moved past the period without
 	// charging it, and OpenRails collects it.
 	MissProviderSkipped = "provider_skipped"
+	// MissProviderReversed: NMI charged the cycle and the charge was voided
+	// or refunded in full. OpenRails never charges it again.
+	MissProviderReversed = "provider_reversed"
+	// MissProviderUnrecorded: NMI holds a transaction in the cycle that no
+	// attempt records. OpenRails never charges the cycle.
+	MissProviderUnrecorded = "provider_unrecorded"
 
 	rebillWatchMerchantBatch = 500
 )
@@ -105,16 +112,16 @@ func (w *RebillWatchWorker) Work(ctx context.Context, _ *river.Job[RebillWatchAr
 func (w *RebillWatchWorker) watch(ctx context.Context, sub *models.Subscription, now time.Time) error {
 	due := sub.CurrentPeriodEndsAt.UTC()
 	if sub.CollectionPolicy == models.CollectionPolicyNMISchedule {
-		reason, missed, err := w.probeNMI(ctx, sub, now)
+		reason, held, missed, err := w.probeNMI(ctx, sub, now)
 		if err != nil || !missed {
 			return err
 		}
-		return w.miss(ctx, sub, due, reason, now)
+		return w.miss(ctx, sub, due, reason, held, now)
 	}
 	if open, err := w.DB.Gen(ctx).CountOpenSubscriptionCollections(ctx, gen.CountOpenSubscriptionCollectionsParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID}); err != nil || open > 0 {
 		return err // a renewal in flight decides the cycle itself
 	}
-	return w.miss(ctx, sub, due, w.engineReason(ctx, sub), now)
+	return w.miss(ctx, sub, due, w.engineReason(ctx, sub), nil, now)
 }
 
 func (w *RebillWatchWorker) engineReason(ctx context.Context, sub *models.Subscription) string {
@@ -132,47 +139,80 @@ func (w *RebillWatchWorker) engineReason(ctx context.Context, sub *models.Subscr
 }
 
 // probeNMI fetches NMI's record of the cycle and converges on it. A charge
-// found is recorded (observed by pull) and decides the cycle; none found is a
-// miss, named by what NMI's schedule shows.
-func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscription, now time.Time) (string, bool, error) {
+// found is recorded (observed by pull) and decides the cycle. Any other
+// transaction NMI holds for the cycle (a voided or refunded sale, a charge off
+// the schedule's date or order) is a miss OpenRails never collects. Only when
+// NMI holds nothing is the miss named by what its schedule shows.
+func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscription, now time.Time) (string, []nmi.CycleTransaction, bool, error) {
 	if w.NMIResolver == nil || w.Lifecycle == nil {
-		return "", false, errors.New("nmi resolver or lifecycle not wired")
+		return "", nil, false, errors.New("nmi resolver or lifecycle not wired")
 	}
 	client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, &sub.PspID)
 	if err != nil || !ok || client == nil {
-		return "", false, fmt.Errorf("nmi client for %s unavailable: %v", sub.PspID, err)
+		return "", nil, false, fmt.Errorf("nmi client for %s unavailable: %v", sub.PspID, err)
 	}
+	due, since := sub.CurrentPeriodEndsAt.UTC(), cycleWindowStart(sub)
 	snap, err := (&reconcile.NMISubscriptionProber{Client: client}).ProbeSubscription(ctx, reconcile.ProbeSubject{
 		LocalID: sub.ID, RailSubscriptionID: sub.RailSubscriptionID, PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt, ObservedAt: now,
 	})
 	if err != nil {
-		return "", false, err
+		return "", nil, false, err
 	}
-	due := sub.CurrentPeriodEndsAt.UTC()
 	if _, err := reconcile.ConvergeSubscriptionFromSnapshot(attempts.ObservedVia(ctx, "pull"), w.DB, w.Lifecycle, sub, snap, now, 0); err != nil {
-		return "", false, err
+		return "", nil, false, err
 	}
 	attempted, err := w.DB.Gen(ctx).CycleHasAttempt(ctx, gen.CycleHasAttemptParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, DueAt: due})
 	if err != nil || attempted {
-		return "", false, err
+		return "", nil, false, err
 	}
 	if len(snap.Transactions) > 0 {
-		return "", false, errors.New("NMI shows a charge in the cycle that no attempt records")
+		return "", nil, false, errors.New("NMI shows a charge in the cycle that no attempt records")
+	}
+	scope := nmi.CycleScope{ScheduleID: sub.RailSubscriptionID, OrderIDs: []string{sub.ID.String()}}
+	if sub.PaymentMethodID != nil {
+		method, err := w.DB.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *sub.PaymentMethodID})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, false, fmt.Errorf("payment method: %w", err)
+		}
+		scope.VaultID = method.RailCustomerRef
+	}
+	held, err := client.ReadCycleTransactions(ctx, scope, since)
+	if err != nil {
+		return "", nil, false, err
+	}
+	for _, txn := range held {
+		if txn.Reversed {
+			return MissProviderReversed, held, true, nil
+		}
+	}
+	if len(held) > 0 {
+		return MissProviderUnrecorded, held, true, nil
 	}
 	if len(snap.Subscriptions) == 0 {
-		return "schedule_gone", true, nil
+		return "schedule_gone", nil, true, nil
 	}
 	next := snap.Subscriptions[0].NextBillingAt
 	if next != nil && next.After(due.Add(reconcile.AlignmentSlack(sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt))) {
-		return MissProviderSkipped, true, nil
+		return MissProviderSkipped, nil, true, nil
 	}
-	return "provider_stalled", true, nil
+	return "provider_stalled", nil, true, nil
 }
 
-// miss records the cycle as missed and raises its finding. A period NMI's
-// schedule skipped (its records show no charge and its next date moved on)
-// is handed to OpenRails' collection in the same transaction.
-func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, due time.Time, reason string, now time.Time) error {
+// cycleWindowStart is the earliest a cycle's own transaction can be: half way
+// through its period, so neither the charge that opened it nor one off the
+// schedule's date by days passes for the other. Unknown bounds read all.
+func cycleWindowStart(sub *models.Subscription) time.Time {
+	start, end := sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt
+	if start == nil || end == nil || !end.After(*start) {
+		return time.Time{}
+	}
+	return start.Add(end.Sub(*start) / 2).UTC()
+}
+
+// miss records the cycle as missed and raises its finding with what NMI holds
+// for it. A period NMI's schedule skipped (NMI holds nothing and its next
+// date moved on) is handed to OpenRails' collection in the same transaction.
+func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, due time.Time, reason string, held []nmi.CycleTransaction, now time.Time) error {
 	if sub.Price == nil {
 		return errors.New("subscription price not loaded")
 	}
@@ -190,10 +230,13 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 		if n, err := q.MarkRebillCycleMissed(ctx, gen.MarkRebillCycleMissedParams{MerchantID: sub.MerchantID, ID: cycle, MissedAt: now, MissReason: reason}); err != nil || n == 0 {
 			return err
 		}
-		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "period_end": due, "owner": sub.CollectionPolicy, "reason": reason, "collected": collect})
+		evidence, _ := json.Marshal(map[string]any{"subscription_id": sub.ID, "cycle_id": cycle, "period_end": due, "owner": sub.CollectionPolicy, "reason": reason, "collected": collect, "nmi_transactions": held})
 		action := fmt.Sprintf("subscription %s was due to rebill at %s and no attempt happened (%s). Check the provider's schedule and the due pass; the member keeps access until the rebill is resolved.", sub.ID, due.Format(time.RFC3339), reason)
-		if collect {
+		switch {
+		case collect:
 			action = fmt.Sprintf("NMI's schedule passed subscription %s's rebill due at %s without charging it. OpenRails charges the period now and duns a decline on the merchant's schedule; check the schedule at NMI.", sub.ID, due.Format(time.RFC3339))
+		case len(held) > 0:
+			action = fmt.Sprintf("NMI holds %d transaction(s) for subscription %s's rebill due at %s that no attempt records (%s; ids in the evidence). OpenRails will not charge this period. Review them at NMI and settle the period there; the member keeps access until then.", len(held), sub.ID, due.Format(time.RFC3339), reason)
 		}
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID: sub.MerchantID, FindingType: FindingRebillMissed, SubjectKey: cycle.String(),

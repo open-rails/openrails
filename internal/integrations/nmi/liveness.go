@@ -174,6 +174,76 @@ func (c *NMIClient) FindSuccessfulSaleByOrderID(ctx context.Context, orderID str
 // neither grant it nor send again; the operation waits for review.
 var ErrSaleReversed = errors.New("nmi sale was voided or refunded in full")
 
+// CycleScope is everything a rebill cycle's transactions can be filed under:
+// the schedule, the order references, and the card vault that would be charged.
+type CycleScope struct {
+	ScheduleID string
+	OrderIDs   []string
+	VaultID    string
+}
+
+// CycleTransaction is one transaction NMI holds in a cycle's window.
+type CycleTransaction struct {
+	TransactionID string    `json:"transaction_id"`
+	Action        string    `json:"action"`
+	Approved      bool      `json:"approved"`
+	Reversed      bool      `json:"reversed"`
+	Condition     string    `json:"condition"`
+	At            time.Time `json:"at,omitzero"`
+}
+
+// ReadCycleTransactions reads every transaction created on or after since
+// under the scope's schedule, orders or vault: sales, voids, refunds and
+// authorizations, approved or not. One with an unreadable date counts. Card
+// validations move no money and are left out. Each read is unpaged, so it is
+// NMI's whole answer.
+func (c *NMIClient) ReadCycleTransactions(ctx context.Context, scope CycleScope, since time.Time) ([]CycleTransaction, error) {
+	var filters []QueryFilter
+	if id := strings.TrimSpace(scope.ScheduleID); id != "" {
+		filters = append(filters, QueryFilter{SubscriptionID: id})
+	}
+	for _, order := range scope.OrderIDs {
+		if order = strings.TrimSpace(order); order != "" {
+			filters = append(filters, QueryFilter{OrderID: order})
+		}
+	}
+	if vault := strings.TrimSpace(scope.VaultID); vault != "" {
+		filters = append(filters, QueryFilter{CustomerVaultID: vault})
+	}
+	if len(filters) == 0 {
+		return nil, errors.New("a schedule, order or vault is required")
+	}
+	seen := map[string]bool{}
+	var out []CycleTransaction
+	for _, filter := range filters {
+		if !since.IsZero() {
+			filter.StartDate = since.UTC().Format(QueryTimeFormat)
+		}
+		report, err := c.TransactionReport(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		for _, txn := range report.Transactions {
+			id := strings.TrimSpace(txn.TransactionID)
+			first, ok := txn.Authorization()
+			if (id != "" && seen[id]) || (ok && first.Is("validate")) {
+				continue
+			}
+			at, err := txn.at()
+			if err == nil && at.Before(since) {
+				continue
+			}
+			if !ok && len(txn.Actions) > 0 {
+				first = txn.Actions[0]
+			}
+			seen[id] = true
+			out = append(out, CycleTransaction{TransactionID: id, Action: strings.ToLower(strings.TrimSpace(first.ActionType)), Approved: first.Succeeded(),
+				Reversed: txn.Reversed(), Condition: strings.TrimSpace(txn.Condition), At: at})
+		}
+	}
+	return out, nil
+}
+
 // RecurringLiveness is the parsed remote-truth view of one NMI recurring
 // subscription. Found=false means NMI no longer knows the subscription id —
 // at NMI that IS terminal (cancelled records are deleted, and the v5 GET

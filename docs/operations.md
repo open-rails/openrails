@@ -546,9 +546,14 @@ finding (resolved automatically once it processes) and never fails the pass.
 **Missed rebills.** Every 15 minutes the rebill watch looks for renewals with
 no attempt past their deadline (engine: 1h; `nmi_schedule`: 24h, after reading
 NMI's Query API and schedule) and raises one `life.rebill.missed` finding per
-cycle. When NMI's records show no charge and its schedule has moved to the next
-period (`provider_skipped`), OpenRails charges the period itself, then duns a
-decline on the same schedule. A stalled or deleted NMI schedule only raises the
+cycle. When NMI holds nothing for the cycle and its schedule has moved to the
+next period (`provider_skipped`), OpenRails charges the period itself, then duns
+a decline on the same schedule. "Nothing" means no transaction of any kind or
+outcome since the period's midpoint under the schedule, the subscription's order
+reference or the card's vault. A sale NMI voided or refunded in full
+(`provider_reversed`), or any other transaction no attempt records
+(`provider_unrecorded`), is never charged again: the finding lists the
+transactions for review. A stalled or deleted NMI schedule only raises the
 finding: NMI may still bill it.
 
 **Payment health alerts.** Each LIFE sweep reads the decline measures per PSP
