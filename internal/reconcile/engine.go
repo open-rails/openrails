@@ -28,7 +28,7 @@ import (
 // to the Convergence Engine, never here (#665).
 //
 // The caller must run the engine on a merchant-scoped context (a pinned merchant
-// connection / merchant in context) so every read and write is RLS-constrained
+// connection / merchant in context) so every read and write is scoped
 // to one merchant; a run executes under exactly one merchant.
 type Engine struct {
 	Fetchers map[Provider]RailFetcher

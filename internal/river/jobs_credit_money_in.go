@@ -19,9 +19,9 @@ import (
 
 // forEachActiveMerchant runs fn once per active merchant under a merchant-scoped
 // connection (#673): River job contexts carry no merchant, and every money path
-// these workers call requires one. Mirrors ConvergeSweepWorker — privileged
-// (no-GUC) read of the control-plane merchant directory, then each merchant's
-// work runs RLS-scoped inside its own RunInMerchantConn. One merchant's failure
+// these workers call requires one. Mirrors ConvergeSweepWorker — a no-GUC
+// read of the control-plane merchant directory, then each merchant's
+// work runs inside its own RunInMerchantConn. One merchant's failure
 // is logged and does not abort the rest; the joined error is returned so a
 // failing run is visible in River instead of silently "succeeding".
 func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, fn func(ctx context.Context) error) error {

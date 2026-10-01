@@ -34,7 +34,7 @@ type LiveRailProbe func(ctx context.Context) (merchants.LiveRailPresence, error)
 // Anything unproven — no probe wired, probe error, LiveRailUnknown — refuses.
 // There is no test_mode-alone bypass any more (SEC-19): it read as protective
 // while in fact accepting every source IP on earth, and the live-account guard
-// that was supposed to constrain it could never fire under production RLS.
+// that was supposed to constrain it could never fire under the since-removed RLS.
 func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProbe, clientIP string) bool {
 	if iputil.IsValidCCBillIP(clientIP) {
 		return true

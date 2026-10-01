@@ -50,7 +50,7 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 
 // MerchantMetricsAsk handles POST /v1/merchant/metrics/ask (#756): a free-form
 // question answered by an LLM that runs compiler-validated metrics queries as
-// tools on the caller's RLS-pinned merchant context. UNLIKE widget generation
+// tools on the caller's merchant-scoped context. UNLIKE widget generation
 // (#741, schema-only), the model sees aggregate query RESULTS — so this is
 // registered only with the separate llm.ask_enabled consent and
 // rate-limited per merchant. The response carries the model's answer plus the

@@ -54,10 +54,11 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	// transaction". No such pool exists — it worked only where an HTTP request
 	// had already pinned a merchant connection and pgxBegin inherited its GUC.
 	// Off that path (internal/service.FinalizeInvoice, MoneyService.SweepUsage, both
-	// embedded seams) the transaction carried no app.merchant_id and every
-	// insert below was denied 42501, so metered/arrears billing was inoperable
-	// there. MerchantTx sets the GUC transaction-locally from the context's
-	// merchant, which the explicit merchant_id predicates then agree with.
+	// embedded seams) the transaction carried no app.merchant_id and the
+	// since-removed RLS denied every insert below (42501), so metered/arrears
+	// billing was inoperable there. MerchantTx sets the GUC transaction-locally
+	// from the context's merchant, which the explicit merchant_id predicates
+	// then agree with.
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
@@ -150,8 +151,8 @@ func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.Custom
 	if err := RequireBillingCurrency(cur); err != nil {
 		return err
 	}
-	// or#868 B2: merchant-pinned, not a bare RunInTx — the ensureCustomer inside
-	// ensureSettingsRowTx is denied 42501 on a GUC-less transaction.
+	// or#868 B2: merchant-pinned, not a bare RunInTx (under the since-removed RLS
+	// the ensureCustomer inside ensureSettingsRowTx was denied 42501 without it).
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		// Ensure a settings row exists (arrears mode if creating — a credit line
@@ -199,8 +200,8 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 	if err := RequireBillingCurrency(cur); err != nil {
 		return 0, err
 	}
-	// or#868 B2: still pinned — ledger_accounts is RLS-forced, so an unpinned
-	// read sees no account and reports zero exposure, which is fail-OPEN.
+	// or#868 B2: still pinned (under the since-removed RLS an unpinned read saw
+	// no account and reported zero exposure, which is fail-OPEN).
 	var owed int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error

@@ -88,17 +88,17 @@ type GetDestructivePolicyRow struct {
 
 // #836 destructive-action kill switch / #835 first-enforce gate.
 //
-// destructive_action_switch is instance-level and RLS-exempt so the no-GUC
+// destructive_action_switch is instance-level (no merchant) so the no-GUC
 // background connections (intent runner, sweep scheduler) can read it — a kill
 // switch scoped by the connection it polices is not a kill switch.
-// merchant_destructive_policy is ordinary RLS-protected tenant data.
+// merchant_destructive_policy is ordinary merchant-owned tenant data.
 // The effective policy for one merchant in ONE read:
 //
 //	switch_enabled   the instance kill switch (false = everything destructive halts)
 //	merchant_enabled the per-merchant stop; no row = inherit (true)
 //	enforce_armed_at #835: NULL (including "no row") = this merchant's pulls run advisory
 //
-// Must be run merchant-scoped: merchant_destructive_policy is RLS-protected.
+// Must be run merchant-scoped: merchant_destructive_policy is merchant-owned.
 func (q *Queries) GetDestructivePolicy(ctx context.Context, merchantID uuid.UUID) (GetDestructivePolicyRow, error) {
 	row := q.db.QueryRow(ctx, getDestructivePolicy, merchantID)
 	var i GetDestructivePolicyRow

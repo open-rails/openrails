@@ -1,5 +1,5 @@
 -- #786 webhook-health recording. All statements run merchant-scoped (MerchantTx
--- or a pinned merchant connection); INSERTs pass merchant_id for RLS WITH CHECK.
+-- or a pinned merchant connection); INSERTs pass merchant_id explicitly.
 
 -- name: RecordWebhookAccepted :exec
 -- Verified-accepted webhook: stamp the silence watermark. The lifetime tallies
@@ -71,7 +71,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- Expectation gate for the webhook_silence template: rails that are ARMED
 -- (declared in psps; archived rows count — drain accounts
 -- still receive provider events, #655) AND carry subscriptions projected to
--- keep billing (billable_subscriptions doctrine). RLS-scoped.
+-- keep billing (billable_subscriptions doctrine). Merchant-scoped.
 SELECT s.rail, count(*) AS billable
 FROM openrails.subscriptions s
 JOIN openrails.prices pr ON pr.id = s.price_id

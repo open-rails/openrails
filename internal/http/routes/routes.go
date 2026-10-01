@@ -133,8 +133,8 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	}
 
 	// Pin a merchant-scoped DB connection for the request (merchant resolved by the
-	// global ResolveMerchant middleware) so RLS constrains merchant-owned queries
-	// (issue #227). It applies to every route in this group.
+	// global ResolveMerchant middleware) so merchant-owned queries share one
+	// merchant session (issue #227). It applies to every route in this group.
 	var group router.Router = rr
 	if rt != nil && rt.DB != nil {
 		group = rr.Group("", middleware.MerchantDBConnMW(rt.DB))
@@ -173,7 +173,7 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // RegisterMerchantArchiveRoutes mounts the complete portable billing archive
 // surface, shared by the server and database-only CLI runtime.
 func RegisterMerchantArchiveRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	// Archives own their snapshot/restore transaction and its merchant RLS pin;
+	// Archives own their snapshot/restore transaction and its merchant pin;
 	// no outer merchant connection is held while transferring the artifact.
 	rr.Handle(http.MethodGet, "/billing-archive", h(httphandlers.ExportMerchantBilling), opts.merchantActionPermissionMW(permissions.MerchantBillingExport))
 	rr.Handle(http.MethodPost, "/billing-archive", h(httphandlers.ImportMerchantBilling), opts.merchantActionPermissionMW(permissions.MerchantBillingImport))
@@ -333,7 +333,7 @@ func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // (POST <prefix>/billing). Gated on the distinct owner-level
 // merchant:billing:import grant (a bulk book import rewrites
 // subscriptions/payments/payment methods wholesale). No MerchantDBConnMW:
-// the import seam pins its own merchant-scoped RLS connection.
+// the import seam pins its own merchant-scoped connection.
 func RegisterImportRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	write := opts.merchantActionPermissionMW(permissions.MerchantBillingImport)
 	rr.Handle(http.MethodPost, "/billing", h(httphandlers.ImportDeclaredBilling), write)

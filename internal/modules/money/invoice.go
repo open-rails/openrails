@@ -49,9 +49,10 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	// 076) is satisfied even if no prior money op touched this subject (#317).
 	//
 	// or#868 B2: on a merchant-PINNED connection. FinalizeInvoice is a
-	// host/embedded-facing seam (internal/service.Service.FinalizeInvoice), so nothing
-	// upstream necessarily pinned one, and off the request path this INSERT was
-	// denied 42501 — taking the whole arrears close down with it.
+	// host/embedded-facing seam (internal/service.Service.FinalizeInvoice), so
+	// nothing upstream necessarily pinned one, and off the request path the
+	// since-removed RLS denied this INSERT (42501) — taking the whole arrears
+	// close down with it.
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID())
 	}); err != nil {
@@ -353,9 +354,9 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	return inv, nil
 }
 
-// ListInvoices lists an merchant subject's finalized invoices, newest period first,
-// paginated (issue #303). It filters customer_id directly (the payer) and is
-// RLS-scoped to the request merchant via Qx(ctx), mirroring GetTransactionsByCustomer.
+// ListInvoices lists an merchant subject's finalized invoices, newest period
+// first, paginated (issue #303). It filters customer_id directly (the payer)
+// and is scoped to the request merchant, mirroring GetTransactionsByCustomer.
 // Returns the page plus the total count for pagination.
 func (s *MoneyService) ListInvoices(ctx context.Context, payer identity.CustomerID, limit, offset int) ([]models.Invoice, int, error) {
 	if s == nil || s.db == nil {
@@ -411,9 +412,9 @@ func (s *MoneyService) ListInvoices(ctx context.Context, payer identity.Customer
 	return items, total, nil
 }
 
-// GetInvoiceByID returns one finalized invoice (with its snapshotted line items)
-// for an merchant subject by id (issue #303). It filters merchant + payer + id and is
-// RLS-scoped via Qx(ctx); an invoice belonging to another payer/merchant is
+// GetInvoiceByID returns one finalized invoice (with its snapshotted line
+// items) for an merchant subject by id (issue #303). It filters merchant +
+// payer + id on Qx(ctx); an invoice belonging to another payer/merchant is
 // unreachable (fail closed, pgx.ErrNoRows).
 func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*models.Invoice, error) {
 	if s == nil || s.db == nil {

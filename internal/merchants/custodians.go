@@ -271,8 +271,8 @@ func nonNilVersions(in map[string]int) map[string]int {
 
 // ErrCustodianOwnedByAnotherMerchant reports that the declared (kind,
 // environment, account_id) identity already belongs to a different merchant.
-// The unique index would reject the write anyway — but under RLS the
-// conflicting row is invisible, so without this preflight the operator sees an
+// The unique index would reject the write anyway — but the conflicting row
+// belongs to another merchant, so without this preflight the operator sees an
 // opaque constraint violation instead of "that tenant is not yours" (#650).
 var ErrCustodianOwnedByAnotherMerchant = errors.New("merchants: custodian tenant is declared by another merchant")
 

@@ -236,10 +236,10 @@ func (r *RepriceRepo) ListRedrivableMerchants(ctx context.Context, limit int) ([
 // stay terminal and are excluded by the reason prefix.
 //
 // or#861: this used to read the rows off the base pool, believing that gave it
-// a cross-merchant view. It did not — subscription_reprices FORCEs RLS, so a
-// GUC-less read matched `merchant_id = NULL` and the #816 re-driver never
-// re-drove anything. The enumeration is now ListRedrivableMerchants and the
-// rows come from the merchant's own scope, where RLS supplies the predicate.
+// a cross-merchant view. It did not — under the since-removed RLS a GUC-less
+// read matched nothing and the #816 re-driver never re-drove anything. The
+// enumeration is now ListRedrivableMerchants and the rows come from the
+// merchant's own scope, with an explicit merchant predicate.
 func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batchSize int) ([]*models.SubscriptionReprice, error) {
 	batch32, _ := safecast.Convert[int32](batchSize)
 	scopeMerchantID, scopeErr := merchant.Require(ctx)

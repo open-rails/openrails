@@ -77,14 +77,11 @@ type MerchantForSubject struct {
 // yields no rows rather than an error.
 //
 // #824: this is a deliberately cross-merchant read — the hosted portal asks it
-// BEFORE a merchant is chosen — and it used to be a plain pool query commented
-// as running on "the privileged, non-RLS role". There is no such role: the
-// control plane shares the app's single pool and DSN, and a pool query carries
-// no app.merchant_id GUC, so under openrails_app the customers half of the join
-// matched nothing and the portal's merchant list was always EMPTY. The customers
-// lookup now goes through the SECURITY DEFINER directory function (migration
-// 0016); openrails.merchants is a global, policy-free table, so the rest is an
-// ordinary query.
+// BEFORE a merchant is chosen. As a plain pool query under the since-removed
+// RLS, the customers half of the join matched nothing and the portal's
+// merchant list was always EMPTY. The customers lookup now goes through the
+// SECURITY DEFINER directory function (migration 0016); openrails.merchants is
+// a global table, so the rest is an ordinary query.
 func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject string) ([]MerchantForSubject, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {

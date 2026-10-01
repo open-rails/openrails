@@ -279,8 +279,8 @@ func RevokeAdminProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	// Guard: the grant must belong to the path user (merchant scoping already
-	// enforced by RLS).
+	// Guard: the grant must belong to the path user (the query already
+	// scopes by merchant).
 	grant, err := svc.GetGrant(r.Request.Context(), grantID)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load grant")

@@ -10,7 +10,7 @@ import (
 
 // workerHealthItem is the view of one registered River worker kind (#689).
 //
-// #SEC-22: worker_state is deliberately RLS-exempt and has NO merchant column
+// #SEC-22: worker_state is deliberately global and has NO merchant column
 // — every merchant's rows sit in it. last_error is the verbatim Go error string
 // of some merchant's job and routinely embeds slugs, subscription/customer
 // UUIDs and PSP account ids, so the TEXT is platform-only. The merchant tier

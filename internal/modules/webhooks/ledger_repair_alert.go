@@ -89,7 +89,7 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 		CreatedAt: now.UTC(),
 	}
 	// The alert is owned by this merchant's well-known system subject. Its ID is
-	// merchant-derived because customers.id is globally unique under RLS (#889).
+	// merchant-derived because customers.id is globally unique (#889).
 	if database != nil {
 		merchantID, err := merchant.Require(ctx)
 		if err != nil {

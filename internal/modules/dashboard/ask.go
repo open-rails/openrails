@@ -73,7 +73,7 @@ type AskResult struct {
 
 // Ask answers a natural-language metrics question by letting the model run
 // compiler-validated #733 queries as tools (executed through the normal
-// metrics service on the caller's RLS-pinned merchant context) and answering
+// metrics service on the caller's merchant-scoped context) and answering
 // from the results. Unlike Generate, the model DOES see aggregate query
 // results — hence the separate llm.ask_enabled consent.
 func (s *Service) Ask(ctx context.Context, question string) (*AskResult, error) {

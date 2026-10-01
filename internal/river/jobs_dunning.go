@@ -169,17 +169,16 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		return nil
 	}
 
-	// or#877 B5: the due scan used to run on the job's BARE context.
-	// subscriptions FORCEs RLS, so under openrails_app it matched
-	// `merchant_id = NULL` — an empty slice, a "no subscriptions due" debug line
-	// and a successful return, every four hours since the worker shipped. The
-	// per-subscription RunInMerchantConn below it never executed because the
-	// loop it lived in never had a row. Scheduled dunning — retries, #839
-	// staleness parking, #840 terminal handling — had therefore never run at
-	// all. Enumerate the merchants with due work through migration 0023's
-	// SECURITY DEFINER work queue (ids only; it RAISES if its definer cannot
-	// bypass RLS), then scan and charge inside each merchant's own scope.
-	// Use w.now() instead of SQL NOW() to support time mocking in tests.
+	// or#877 B5: the due scan used to run on the job's BARE context. Under
+	// the since-removed RLS it matched nothing — an empty slice, a "no
+	// subscriptions due" debug line and a successful return, every four hours
+	// since the worker shipped. The per-subscription RunInMerchantConn below it
+	// never executed because the loop it lived in never had a row. Scheduled
+	// dunning — retries, #839 staleness parking, #840 terminal handling — had
+	// therefore never run at all. Enumerate the merchants with due work through
+	// migration 0023's SECURITY DEFINER work queue (ids only), then scan and
+	// charge inside each merchant's own scope. Use w.now() instead of SQL NOW()
+	// to support time mocking in tests.
 	nmiRails := []string{string(models.RailNMI)}
 	if w.EngineCollections != nil {
 		nmiRails = append(nmiRails, string(models.RailStripe))

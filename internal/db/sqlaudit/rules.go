@@ -17,8 +17,7 @@ const (
 	// but the merchant. Row count grows with records on file, not with activity.
 	RuleUnboundedMany = "unbounded-many"
 	// RuleUnscopedWrite: UPDATE/DELETE that pins neither merchant_id nor a key.
-	// Under a merchant-scoped pool RLS saves it; a worker pool that bypasses
-	// RLS rewrites the deployment.
+	// Nothing else scopes it: it rewrites every merchant's rows.
 	RuleUnscopedWrite = "unscoped-write"
 	// RuleSeqScan: no index condition serves a predicate. A full index scan
 	// with a residual filter is no better than a sequential scan for this rule.
@@ -28,11 +27,12 @@ const (
 	RuleUnplannable = "unplannable"
 	// RuleUnindexedFilter: the query looks something up by `col = $n`, the scan
 	// is narrowed by nothing but merchant_id, and no index on that table covers
-	// col. This is what a missing index looks like UNDER RLS, where the
-	// merchant_id index always hands the planner some index path so the miss
-	// never surfaces as a Seq Scan. Catalog truth, not planner choice: a column
-	// indexed by any other index is never flagged. (openrails-only — host-four
-	// has no RLS, so it has no equivalent.)
+	// col. This is what a missing index looks like behind the mandatory
+	// merchant_id predicate: the merchant_id index always hands the planner
+	// some index path so the miss never surfaces as a Seq Scan. Catalog truth,
+	// not planner choice: a column indexed by any other index is never flagged.
+	// (openrails-only — host-four has no merchant predicate, so it has no
+	// equivalent.)
 	RuleUnindexedFilter = "unindexed-filter"
 )
 
@@ -234,7 +234,7 @@ func filterPinsPrimaryKey(scan planNode, cat *Catalog) bool {
 }
 
 // indexCondNarrows reports whether the scan's index condition pins something
-// other than merchant_id — i.e. the index does real work beyond RLS.
+// other than merchant_id — i.e. the index does real work beyond the merchant scope.
 func indexCondNarrows(n planNode, cat *Catalog) bool {
 	cond := n.IndexCond + " " + n.RecheckCond
 	for _, col := range cat.Columns[n.RelationName] {

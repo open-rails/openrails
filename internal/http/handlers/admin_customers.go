@@ -28,7 +28,7 @@ const (
 // ListAdminCustomers lists/searches the merchant's customers (#740).
 // q matches subject (external ref) prefix, customer id prefix, or a
 // subscription email substring. Orchestration-free read: handler -> gen on
-// the merchant-pinned conn (RLS scopes rows).
+// the merchant-pinned conn, scoped by the explicit merchant predicate.
 func ListAdminCustomers(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	q := strings.TrimSpace(r.Query("q"))
@@ -52,9 +52,7 @@ func ListAdminCustomers(r *httprequest.Request) {
 		offset = n
 	}
 
-	// Explicit merchant predicate (defense-in-depth, #227): RLS also pins the
-	// merchant on enforcing roles, but a BYPASSRLS connection (development's
-	// owner role) must never list another merchant's customers.
+	// The explicit merchant predicate is this list's only merchant scope (#227).
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "merchant scope required")

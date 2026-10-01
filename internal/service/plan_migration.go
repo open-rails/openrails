@@ -16,12 +16,11 @@ import (
 // callers never import internal/.
 //
 // Every method here pins a merchant-scoped connection the way the money
-// surfaces do (spend.go). Without it, a host calling in-process under the
-// or#885-mandated openrails_app role read NOTHING — the reads resolved to the
-// base pool, where `app.merchant_id` is unset, so RLS answered zero rows and no
-// error and Preview reported "source price: no rows" about a price the same
-// host had just written (or#900). RunInMerchantConn reuses an already-pinned
-// connection, so this is correct from a request, a worker, or a bare Go call.
+// surfaces do (spend.go). Without it, under the since-removed RLS, a host
+// calling in-process read NOTHING and Preview reported "source price: no rows"
+// about a price the same host had just written (or#900). RunInMerchantConn
+// reuses an already-pinned connection, so this is correct from a request, a
+// worker, or a bare Go call.
 
 // PlanMigrationRequest re-exports the operator request.
 type PlanMigrationRequest = subscriptions.PlanMigrationRequest

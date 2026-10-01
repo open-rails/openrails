@@ -158,7 +158,7 @@ func (p *SolanaPayPoller) Stop() {
 
 // pollPendingPayments checks all pending payments for confirmation. It fans
 // out PER MERCHANT (#728): each merchant's references are processed inside
-// that merchant's RLS scope with that merchant's store-armed RPC client
+// that merchant's scope with that merchant's store-armed RPC client
 // (store-wins, boot fallback) — resolved fresh every pass, nothing cached.
 func (p *SolanaPayPoller) pollPendingPayments(ctx context.Context) {
 	if p.solanaPayService == nil {
@@ -186,7 +186,7 @@ func (p *SolanaPayPoller) pollPendingPayments(ctx context.Context) {
 
 // pollMerchantPendingPayments runs one merchant's pass: arm the merchant's RPC
 // (fail LOUD on malformed declared settings — the pass is skipped, never run
-// with a wrong-plane client), then check each reference RLS-scoped.
+// with a wrong-plane client), then check each reference in its scope.
 func (p *SolanaPayPoller) pollMerchantPendingPayments(ctx context.Context, mid merchant.ID, refs []string) {
 	mctx := merchant.WithID(ctx, mid)
 	rpc, err := p.rpcBuilder.Resolve(mctx, mid)

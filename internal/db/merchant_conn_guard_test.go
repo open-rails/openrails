@@ -12,10 +12,10 @@ import (
 
 // TestNoPoolInsideRunInMerchantConn guards the #826 bug class: a
 // RunInMerchantConn callback querying the raw pool (Pool()/DataPool()) instead
-// of Qx(ctx). The raw pool has no merchant GUC — under the RLS-enforced
-// openrails_app role such queries see ZERO rows fail-closed — and skips the
-// #471 schema rewrite. Lexical AST check: any zero-arg .Pool()/.DataPool()
-// call inside a function literal passed to RunInMerchantConn fails.
+// of Qx(ctx). The raw pool is a different session with no merchant GUC and
+// skips the #471 schema rewrite. Lexical AST check: any zero-arg
+// .Pool()/.DataPool() call inside a function literal passed to
+// RunInMerchantConn fails.
 func TestNoPoolInsideRunInMerchantConn(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()
@@ -72,7 +72,7 @@ func TestNoPoolInsideRunInMerchantConn(t *testing.T) {
 		t.Fatalf("walk: %v", err)
 	}
 	if len(violations) > 0 {
-		t.Fatalf("raw pool used inside RunInMerchantConn bodies (use Qx(ctx) — the raw pool has no merchant GUC, RLS returns zero rows fail-closed, and it skips the schema rewrite):\n  %s",
+		t.Fatalf("raw pool used inside RunInMerchantConn bodies (use Qx(ctx) — the raw pool has no merchant GUC and skips the schema rewrite):\n  %s",
 			strings.Join(violations, "\n  "))
 	}
 }

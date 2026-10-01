@@ -47,10 +47,9 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// withTx runs fn inside a merchant-scoped transaction so the migration-063 RLS
-// policy constrains every query to the request's merchant (MerchantTx pins the
+// withTx runs fn inside a merchant-scoped transaction (MerchantTx pins the
 // app.merchant_id GUC as the first statement). repo calls inside fn use the
-// tx-scoped repo so they ride that GUC.
+// tx-scoped repo so they ride that transaction.
 func (s *Service) withTx(ctx context.Context, fn func(ctx context.Context, r *ProductAccessGrantRepo) error) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("product access service not initialized")

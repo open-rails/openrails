@@ -337,8 +337,8 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = 
 -- CROSS-MERCHANT: merchants holding a due past_due subscription on the named
 -- rails, through migration 0023's SECURITY DEFINER work queue (or#877 B5). The
 -- dunning worker used to run ListDueDunningSubscriptions on the bare job
--- context; subscriptions FORCEs RLS, so the scan returned an empty slice and
--- scheduled dunning has never retried, parked or terminated anything. Ids only
+-- context; under the since-removed RLS the scan returned an empty slice and
+-- scheduled dunning had never retried, parked or terminated anything. Ids only
 -- — the due rows and every charge run per-merchant under RunInMerchantScope.
 -- name: ListDueDunningMerchants :many
 SELECT merchant_id FROM openrails.due_dunning_merchant_ids(

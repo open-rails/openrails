@@ -102,7 +102,7 @@ LIMIT 1;
 -- name: ListCustomersWithEntitlement :many
 -- Reverse lookup (#535): customer ids holding an ACTIVE window of `entitlement`,
 -- keyset-paginated by customer_id (after_id is an exclusive lower bound — pass the
--- zero uuid to start). merchant scoping is RLS (no explicit merchant_id), matching
+-- zero uuid to start). merchant_id is an explicit predicate, matching
 -- ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
 SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.entitlement = sqlc.arg(entitlement)::text

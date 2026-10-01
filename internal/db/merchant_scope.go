@@ -9,8 +9,8 @@ import (
 
 // ErrUnscopedMerchantWork is returned by AssertMerchantScope when the handle a
 // caller is about to query carries no app.merchant_id. Callers should treat it
-// as fatal for the unit of work: continuing would read zero rows (silently) or
-// be denied 42501 (loudly), never do the intended thing.
+// as fatal for the unit of work: SQL scoped by current_merchant_id() would
+// match nothing (silently) or refuse with 42501 (loudly).
 type ErrUnscopedMerchantWork struct {
 	Op   string
 	Want merchant.ID
@@ -20,8 +20,8 @@ type ErrUnscopedMerchantWork struct {
 func (e *ErrUnscopedMerchantWork) Error() string {
 	if e.Got == "" {
 		return fmt.Sprintf(
-			"db: %s runs UNSCOPED — the connection carries no %s, so every read of a policied table "+
-				"returns zero rows and no error, and every write is denied 42501. There is no privileged "+
+			"db: %s runs UNSCOPED — the connection carries no %s, so SQL scoped by current_merchant_id() "+
+				"matches nothing or refuses with 42501. There is no privileged "+
 				"pool: wrap the work in RunInMerchantConn/MerchantTx for merchant %s, or route a genuinely "+
 				"cross-merchant read through the SECURITY DEFINER helpers (migrations 0016/0021/0022) (or#868)",
 			e.Op, MerchantGUC, e.Want)
@@ -36,12 +36,13 @@ func (e *ErrUnscopedMerchantWork) Error() string {
 // carries the app.merchant_id GUC, and that it names the merchant on the
 // context.
 //
-// This exists because the failure it detects is SILENT. A GUC-less read of a
-// policied table returns an empty result and no error, which is
-// indistinguishable from "there was no work to do" — that is the single reason
-// a whole class of background sweeps shipped, passed their tests, and never
-// processed a row (#824, or#860, or#861, or#862, or#868). One cheap round trip
-// at the top of an unattended unit of work converts that silence into a failure.
+// This exists because the failure it detects is SILENT. A GUC-less read that
+// depends on the merchant GUC returns an empty result and no error, which is
+// indistinguishable from "there was no work to do" — under the since-removed
+// RLS that is why a whole class of background sweeps shipped, passed their
+// tests, and never processed a row (#824, or#860, or#861, or#862, or#868).
+// One cheap round trip at the top of an unattended unit of work converts that
+// silence into a failure.
 //
 // Call it where nothing upstream pinned a connection for you: River workers,
 // embedded/in-process seams, anything reachable off the HTTP request path. On

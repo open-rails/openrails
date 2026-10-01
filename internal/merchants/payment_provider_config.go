@@ -450,7 +450,7 @@ func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id m
 
 func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.OpenrailsPsp, error) {
 	// #650: reject a cross-merchant claim with a clear error before the upsert
-	// (which would otherwise fail with an opaque unique-violation under RLS).
+	// (which would otherwise fail with an opaque unique-violation).
 	queries := gen.New(s.pool)
 	if err := AssertPSPUnowned(ctx, queries, id.UUID(), rail, environment, accountID); err != nil {
 		return gen.OpenrailsPsp{}, err

@@ -50,11 +50,11 @@ func (LedgerIntegrityArgs) Kind() string { return KindLedgerIntegrity }
 // ledger_accounts plus one grouped pass over that merchant's transfer log, off
 // the request path, on the maintenance queue.
 //
-// or#824/or#861: no bare-context sweep. `ledger_accounts` and `ledger_transfers`
-// FORCE RLS, so a no-GUC pass would read NOTHING and report a perfectly clean
-// fleet forever — the exact silence this job exists to break. The merchant list
-// comes from the global control-plane `merchants` table via GenDirectory(); both
-// checks then run inside each merchant's own RunInMerchantScope.
+// or#824/or#861: no bare-context sweep. Under the since-removed RLS a no-GUC
+// pass read NOTHING and reported a perfectly clean fleet — the exact silence
+// this job exists to break. The merchant list comes from the global
+// control-plane `merchants` table via GenDirectory(); both checks then run
+// inside each merchant's own RunInMerchantScope.
 type LedgerIntegrityWorker struct {
 	river.WorkerDefaults[LedgerIntegrityArgs]
 	DB    *db.DB
@@ -76,8 +76,8 @@ func (w LedgerIntegrityWorker) Work(ctx context.Context, job *river.Job[LedgerIn
 		merchantID := merchant.ID(mid)
 		progress.Mark(ctx, "ledger integrity merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "ledger integrity audit", func(mctx context.Context) error {
-			// Scoped to this merchant twice over: the RLS policy on the
-			// connection, and the explicit merchant predicate.
+			// The connection is pinned to this merchant; the explicit
+			// merchant predicate scopes the check.
 			report, cerr := ledger.CheckIntegrity(mctx, w.DB.Qx(mctx), mid)
 			if cerr != nil {
 				return cerr

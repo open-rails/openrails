@@ -117,7 +117,7 @@ type refreshJobInserter interface {
 // active merchants and enqueues ONE per-merchant refresh job each, spread
 // evenly over Stagger. Merchants that cannot possibly arm (no declared
 // rail accounts AND no boot-config fallback plane) are skipped before enqueue
-// via a cheap RLS-scoped EXISTS. River supplies the rest: per-merchant error
+// via a cheap merchant-scoped EXISTS. River supplies the rest: per-merchant error
 // isolation + retries, and the bounded queue caps refresh concurrency.
 type ProviderRefreshSchedulerWorker struct {
 	river.WorkerDefaults[ProviderRefreshArgs]
@@ -168,7 +168,7 @@ func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]u
 }
 
 // merchantHasRailAccounts: cheap accounts-exist predicate. psps
-// is RLS-isolated, so the EXISTS runs under the merchant GUC. Archived rows
+// is merchant-owned, so the EXISTS runs per merchant. Archived rows
 // count — drain pulls still arm (#655). Environment is NOT filtered: a
 // wrong-environment row enqueues a job that arms nothing (fail open, cheap).
 func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Context, mid uuid.UUID) (bool, error) {
@@ -178,8 +178,7 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 	var exists bool
 	mctx := merchant.WithID(ctx, merchant.ID(mid))
 	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
-		// Explicit merchant_id predicate: redundant under RLS, load-bearing on
-		// BYPASSRLS roles (tests, superuser self-hosts).
+		// The explicit merchant_id predicate is the scope.
 		return tx.QueryRow(tctx, `SELECT EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = $1)`, mid).Scan(&exists)
 	})
 	return exists, err

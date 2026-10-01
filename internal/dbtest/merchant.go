@@ -23,8 +23,8 @@ var (
 	TestMerchantSlug = "test"
 )
 
-// EnsureTestMerchant inserts the canonical test merchant (idempotent). qx should be
-// a privileged/RLS-bypassing handle (the merchants table is control-plane).
+// EnsureTestMerchant inserts the canonical test merchant (idempotent). qx needs no
+// merchant scope (the merchants table is control-plane).
 func EnsureTestMerchant(ctx context.Context, t testing.TB, qx gen.DBTX) {
 	t.Helper()
 	_, err := qx.Exec(ctx,

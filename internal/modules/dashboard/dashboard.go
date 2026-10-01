@@ -1,6 +1,6 @@
 // Package dashboard is the #741 configurable merchant dashboard: a saved
 // per-merchant widget grid where every widget is a #733 metrics query plus a
-// visualization + grid position. Persistence is one RLS-scoped row per
+// visualization + grid position. Persistence is one row per
 // merchant; queries pass the metrics compiler's validation before every save,
 // so a stored widget can never be an invalid query. The optional LLM turns a
 // natural-language prompt into a validated widget (generate.go) — the

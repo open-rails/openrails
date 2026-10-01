@@ -12,7 +12,7 @@ import (
 const maxActiveMerchantPageSize = 200
 
 // ListActiveMerchantIDs returns one directory page for privileged host
-// orchestration that must enter each merchant's RLS scope independently.
+// orchestration that must enter each merchant's scope independently.
 func (c *ControlPlane) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]merchant.ID, error) {
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for merchant enumeration")

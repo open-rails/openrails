@@ -143,8 +143,8 @@ ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;
 
 -- name: CountPaymentMethodsSharingCustomerRef :one
 -- #682 shared-vault guard: how many OTHER stored methods share this rail
--- customer-scope handle (e.g. an imported multi-card NMI vault). RLS scopes to
--- the merchant.
+-- customer-scope handle (e.g. an imported multi-card NMI vault) within the
+-- merchant.
 SELECT count(*) FROM openrails.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = $1
@@ -210,7 +210,7 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND psp_id = sqlc.arg(psp_id)::uuid
 -- #795: dedup lookup — an intent whose fingerprint matches a stored instrument
 -- reuses that instrument instead of minting a duplicate. Scoped by CUSTODIAN,
 -- not rail (or#879): the fingerprint is issued by whoever holds the card.
--- RLS scopes merchant.
+-- merchant_id scopes merchant.
 SELECT * FROM openrails.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
   AND pm.custodian = sqlc.arg(custodian)
@@ -264,7 +264,7 @@ RETURNING id, customer_id, psp_id;
 
 -- name: ParkStripePaymentMethodByRef :execrows
 -- A Stripe detach is irreversible provider truth. Preserve the local evidence,
--- but make the exact PSP-owned instrument unusable. RLS adds merchant scope.
+-- but make the exact PSP-owned instrument unusable, within the merchant.
 UPDATE openrails.payment_methods SET
     park_reason = sqlc.arg(park_reason),
     parked_at = COALESCE(parked_at, now()),

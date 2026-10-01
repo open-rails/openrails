@@ -540,8 +540,6 @@ func createDatabase(ctx context.Context, cfg *config.Config) (*db.DB, error) {
 	if err := validateDatabase(cfg, database); err != nil {
 		return nil, err
 	}
-	// RLS posture (issue #227/#763) is enforced once, in buildRuntimeWithOverrides,
-	// for both this path and the overrides.DB (embedded) path — see there.
 	return database, nil
 }
 

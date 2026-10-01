@@ -407,7 +407,7 @@ func validateBillingPrepareTarget(unbound bool, slug, groupID, ownerID string) e
 	return nil
 }
 
-// Export/import and host-local provisioning need only an RLS-enforcing pool.
+// Export/import and host-local provisioning need only a database pool.
 // Hosted provisioning still validates the full AuthKit runtime configuration.
 func isDatabaseOnlyBillingCommand(cmd *cobra.Command) bool {
 	if cmd.Parent() == nil || cmd.Parent().Name() != "billing" {

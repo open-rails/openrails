@@ -233,9 +233,8 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 }
 
 // enrichPlatformMerchant fills rails-armed + last-activity under a MerchantTx:
-// psps and payments are RLS merchant-isolated, so the probes
-// must run with the merchant GUC pinned (one tiny tx per directory row —
-// page-bounded, both queries indexed).
+// psps and payments are merchant-owned, so each probe is a per-merchant query
+// (one tiny tx per directory row — page-bounded, both queries indexed).
 func enrichPlatformMerchant(ctx context.Context, d *db.DB, id uuid.UUID, item *platformMerchantItem) error {
 	item.RailsArmed = []string{}
 	mctx := merchant.WithID(ctx, merchant.ID(id))

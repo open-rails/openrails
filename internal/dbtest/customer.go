@@ -33,8 +33,7 @@ func EnsureCustomerIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, userID 
 
 // EnsureCustomerIDPgxFor is EnsureCustomerIDPgx under an EXPLICIT merchant, for
 // tests that own a merchant of their own rather than sharing the canonical one.
-// customers is RLS-forced, so a handle pinned to merchant X cannot materialize a
-// customer under the canonical test merchant — the WITH CHECK refuses it. The
+// The customer is created under merchantID, not the canonical test merchant. The
 // caller is expected to have created the merchant row already.
 func EnsureCustomerIDPgxFor(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID uuid.UUID, userID string) uuid.UUID {
 	t.Helper()

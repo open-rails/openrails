@@ -214,7 +214,7 @@ func (p *Pool) Begin(ctx context.Context) (pgx.Tx, error) {
 
 // MerchantTx runs hand-written pool queries inside a transaction whose
 // app.merchant_id GUC is pinned to the target merchant. Use this for direct Pool
-// stores that touch RLS-protected merchant-owned tables but do not have a *DB.
+// stores that touch merchant-owned tables but do not have a *DB.
 func (p *Pool) MerchantTx(ctx context.Context, id merchant.ID, fn func(context.Context, pgx.Tx) error) error {
 	if p == nil {
 		return errors.New("db: MerchantTx on nil Pool")

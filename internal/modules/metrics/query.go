@@ -1,7 +1,7 @@
 // Package metrics is the #733 merchant analytics engine: a fixed in-code
 // registry of measures/dimensions and a compiler that turns a JSON query into
 // one parameterized SQL statement per source family, executed under MerchantTx
-// (RLS-pinned). No client string ever becomes SQL text — names resolve through
+// (merchant-scoped). No client string ever becomes SQL text — names resolve through
 // the registry allowlist, values ride as bind parameters.
 package metrics
 

@@ -2,8 +2,8 @@
 // database pool, the River client and HTTP serving; billing code uses the same
 // *openrails.Client a remote deployment uses.
 //
-// Apply migrations first (openrails migrate) and connect as the unprivileged
-// NOBYPASSRLS role. OPENRAILS_DATABASE_URL and OPENRAILS_MERCHANT are required;
+// Apply migrations first (openrails migrate) and connect with the runtime
+// login. OPENRAILS_DATABASE_URL and OPENRAILS_MERCHANT are required;
 // OPENRAILS_EXAMPLE_ADDR serves the mounted checkout and webhook routes.
 package main
 

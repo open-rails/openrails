@@ -178,8 +178,7 @@ type DeleteSeenNotificationsBeforeParams struct {
 
 // Retention sweeps (or#877 B4). The merchant predicate is explicit, not
 // implied: the sweep walks the merchant directory and runs one pass per
-// merchant, and an unqualified DELETE would be a cross-merchant delete the
-// moment it ran on a BYPASSRLS connection (a superuser self-host, a test).
+// merchant, and an unqualified DELETE would be a cross-merchant delete.
 //
 // or#837: BATCHED. row_limit bounds one statement (and so one transaction);
 // the caller loops until a short batch comes back. A merchant with a year of

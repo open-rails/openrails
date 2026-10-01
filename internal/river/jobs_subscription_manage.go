@@ -29,7 +29,7 @@ const (
 
 // MerchantID is REQUIRED on both kinds (or#877 B7). A River job context carries
 // no ambient merchant and no pinned connection, and every subscription read
-// below is RLS-scoped: without it the worker cannot see the very subscription
+// below is merchant-scoped: without it the worker cannot find the subscription
 // it was asked to act on. The enqueuing request always knows the merchant, so
 // the merchant travels with the job rather than being guessed at execution.
 type CancelSubscriptionArgs struct {
@@ -71,7 +71,8 @@ func (w CancelSubscriptionWorker) Work(ctx context.Context, job *river.Job[Cance
 	}
 	// or#877 B7: pin BEFORE the first read. This used to call GetByID on the
 	// bare job context and pin afterwards from the row it found — which under
-	// RLS it never found. Same defect as the resume worker, one file over.
+	// the since-removed RLS it never found. Same defect as the resume worker,
+	// one file over.
 	if job.Args.MerchantID == uuid.Nil {
 		return fmt.Errorf("cancel subscription %s: merchant_id required on the job args", job.Args.SubscriptionID)
 	}
@@ -193,7 +194,7 @@ func (ResumeSubscriptionWorker) Kind() string { return KindSubscriptionResume }
 // Work resumes ONE subscription inside its merchant's scope (or#877 B7).
 //
 // It used to read the subscription on the bare River job context. Under
-// openrails_app that read matched `merchant_id = NULL`, took the not-found
+// the since-removed RLS that read matched nothing, took the not-found
 // branch, logged at INFO and returned NIL — so a user who cancelled and then
 // resumed inside the undo window stayed cancelled, the job was recorded
 // completed, and nothing above INFO said otherwise. Of the whole or#877 family

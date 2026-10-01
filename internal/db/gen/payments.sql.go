@@ -240,8 +240,7 @@ type CreatePaymentParams struct {
 // Insert semantics replicate the bun-era model tags: a zero value on a
 // column with a default (status, currency, purchased_at, created_at) falls
 // back to that default via COALESCE/NULLIF, matching bun's
-// "zero + default tag => DEFAULT" rule. merchant_id is written explicitly
-// (RLS WITH CHECK still enforces it).
+// "zero + default tag => DEFAULT" rule. merchant_id is written explicitly.
 func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPayment,
 		arg.ID,

@@ -4,7 +4,7 @@ import "strings"
 
 // ID-11 (was GAP-10): every UNIQUE index on a merchant-owned table must
 // constrain uniqueness WITHIN a merchant. A cross-merchant unique is an
-// existence oracle — under RLS the conflicting row is invisible, so the victim
+// existence oracle — the conflicting row belongs to another merchant, so the victim
 // merchant sees only an opaque insert failure and cannot tell a collision from
 // a bug.
 //
@@ -29,8 +29,8 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	"uq_merchants_api_host_live":       "api_host routes unauthenticated webhooks; it must be globally unique (ID-10)",
 	"uq_merchants_permission_group_id": "org<->merchant is 1:1 across the whole install (GAP-9)",
 	"merchant_slug_aliases_pkey":       "a former name shares the global merchant name namespace (#1106)",
-	"worker_state_pkey":                "RLS-exempt: per-worker-kind process health",
-	"destructive_action_switch_pkey":   "RLS-exempt: instance-level operator kill switch",
+	"worker_state_pkey":                "global: per-worker-kind process health",
+	"destructive_action_switch_pkey":   "global: instance-level operator kill switch",
 	"schema_migrations_pkey":           "migration ledger",
 
 	// Keyed on a surrogate uuid that is ITSELF merchant-owned. The FK target

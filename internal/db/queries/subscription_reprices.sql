@@ -115,8 +115,8 @@ WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND repric
 
 -- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
 -- through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
--- used to read the ROWS themselves off GenGlobal(); subscription_reprices FORCEs
--- RLS, so it enumerated nothing and never re-drove. A definer must not vend
+-- used to read the ROWS themselves off GenGlobal(); under the since-removed
+-- RLS it enumerated nothing and never re-drove. A definer must not vend
 -- whole merchant rows, so it vends ids and the rows are read per-merchant.
 -- name: ListRedrivablePlanChangeMerchants :many
 SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(

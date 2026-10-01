@@ -20,8 +20,7 @@ import (
 // so uq_psps_identity (rail, environment, account_id) never collides across
 // fixtures sharing a database.
 //
-// Call it with a privileged/RLS-bypassing handle, or under the merchant's own
-// connection — psps is merchant-scoped and RLS-protected either way.
+// Any handle works: every statement carries merchantID explicitly.
 func EnsureTestPSP(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID uuid.UUID, rail string) uuid.UUID {
 	t.Helper()
 	// Reuse an account the merchant already has on this rail. Adding a second

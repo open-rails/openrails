@@ -61,12 +61,12 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 		excludeArg = exclude.UUID()
 	}
 
-	// or#861: the aggregates over RLS-bearing tables (payments, subscriptions)
+	// or#861: the aggregates over merchant-owned tables (payments, subscriptions)
 	// go through migration 0022's SECURITY DEFINER readers — read on the base
-	// pool they were silently empty under the production openrails_app role.
+	// pool they were silently empty under the since-removed RLS.
 	// The week list and the new-merchant series stay ordinary queries:
 	// generate_series touches no table, and openrails.merchants is the
-	// policy-free directory.
+	// global directory.
 	//
 	// Canonical week list from Postgres so bucket alignment can never drift
 	// from the aggregates' date_trunc semantics.

@@ -129,8 +129,8 @@ func (c *Catalog) indexedAnywhere(col string, relations []string) bool {
 	return c.lookup(c.Indexed, col, relations)
 }
 
-// capsRowCount reports whether pinning col (plus merchant_id, which RLS always
-// pins, plus any column the query pins to a literal) covers an entire unique key
+// capsRowCount reports whether pinning col (plus merchant_id, which every tenant
+// query pins, plus any column the query pins to a literal) covers an entire unique key
 // on one of the query's tables. Only then does `col = ANY($n)` cap the result at
 // one row per list element. A column that is merely PART of a composite key and
 // leaves the rest open (subscriptions.rail alone in UNIQUE(rail,

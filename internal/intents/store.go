@@ -23,7 +23,7 @@ import (
 )
 
 // Store persists intents on the ledger. Producers call Enqueue/Supersede from
-// request contexts (merchant-pinned connections, RLS double-checks the stamp);
+// request contexts (merchant-pinned connections, explicit merchant stamp);
 // the Runner's claims and transitions run on the worker pool.
 type Store struct {
 	db *db.DB
@@ -431,9 +431,9 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent,
 
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
 //
-// or#862: this MUST run on a merchant-pinned connection. rail_intents FORCEs
-// RLS, so a bare-context claim matched `merchant_id = NULL` and leased ZERO
-// intents — silently, with no error — which is how the entire outbound
+// or#862: this MUST run on a merchant-pinned connection; it claims only that
+// merchant's intents. Under the since-removed RLS a bare-context claim leased
+// ZERO intents — silently, with no error — which is how the entire outbound
 // provider-mutation plane came to be inert while its tests passed.
 func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
@@ -603,8 +603,8 @@ var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 // Cutover tombstones retain accepted terms, step receipts and append-only account
 // continuity history even if a caller supplies a weaker handler prune policy.
 //
-// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
-// apply exactly as they do for the generated queries.
+// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and the
+// merchant connection apply exactly as they do for the generated queries.
 func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error {
 	if err := refuseCustodyKeys(evidence); err != nil {
 		return err
@@ -686,8 +686,8 @@ func slimEvidence(evidence map[string]any) map[string]any {
 // Solana tx signature) BEFORE the side effect is sent (#674), so a crash
 // mid-send resolves via a provider read keyed on the recorded reference.
 //
-// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
-// apply exactly as for the generated queries.
+// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and the
+// merchant connection apply exactly as for the generated queries.
 func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
 	if _, ok := keys["initial_submitted"]; ok {
 		return errors.New("initial submission fence is write-once")

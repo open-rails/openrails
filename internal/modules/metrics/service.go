@@ -18,8 +18,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Service executes validated metrics plans. RLS pinning is structural: every
-// statement runs inside MerchantTx.
+// Service executes validated metrics plans. Merchant scoping is structural:
+// every statement runs inside MerchantTx with an explicit merchant predicate.
 type Service struct {
 	db *db.DB
 }

@@ -104,8 +104,7 @@ type AdminListReconciliationFindingsRow struct {
 // The operator work list. Default view = OPEN findings only; an explicit
 // status filter overrides it (e.g. status=ignored). Sort: severity desc
 // (critical first) then age desc (oldest first). total_count rides every row
-// for pagination. merchant_id stamped explicitly (multi-merchant pattern);
-// RLS double-checks on merchant-pinned connections.
+// for pagination. merchant_id stamped explicitly (multi-merchant pattern).
 func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg AdminListReconciliationFindingsParams) ([]AdminListReconciliationFindingsRow, error) {
 	rows, err := q.db.Query(ctx, adminListReconciliationFindings,
 		arg.MerchantID,
@@ -299,7 +298,7 @@ type AutoResolveVanishedReconciliationFindingsParams struct {
 // covering their provider "vanished on their own" (design decision 1).
 // or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
 // no merchant predicate at all — a long transaction on a big backlog, and a
-// cross-merchant write the moment it ran on a BYPASSRLS connection.
+// cross-merchant write.
 func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context, arg AutoResolveVanishedReconciliationFindingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings,
 		arg.MerchantID,
@@ -560,7 +559,7 @@ type CreateReconciliationRunParams struct {
 // #107 phase 2: reconciliation runs + findings persistence, the engine's
 // merchant-scoped local-state reads, and the enforce appliers' idempotent local
 // writes. merchant_id is stamped explicitly (multi-merchant writer pattern); all
-// statements run on a merchant-pinned connection so RLS double-checks the stamp.
+// statements run on a merchant-pinned connection.
 // ============================================================================
 // Run lifecycle
 // ============================================================================
@@ -700,14 +699,12 @@ SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, ope
 WHERE id = $1 AND merchant_id = openrails.current_merchant_id()
 `
 
-// SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
+// SEC-18: the merchant predicate is this query's only merchant scope. This is a
 // merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
 // below EXECUTES cancel/refund/revoke/grant against whatever the finding
-// names); before this it was `WHERE id = $1` and RLS was its ONLY control, so a
-// deployment connected as a superuser/BYPASSRLS role let merchant A's owner
-// address merchant B's finding. openrails.current_merchant_id() is the same
-// expression the merchant_isolation policy uses, so under the enforcing role
-// behaviour is unchanged; under a bypassing one the scope still holds.
+// names); before this it was `WHERE id = $1`, which let merchant A's owner
+// address merchant B's finding on any connection the since-removed RLS did
+// not filter.
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, getReconciliationFinding, id)
 	var i OpenrailsReconciliationFinding
@@ -995,8 +992,8 @@ WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id
 `
 
-// #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
-// to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).
+// #511 Phase E (Converge sweep worker): the no-GUC list of merchants
+// to sweep. merchants is a GLOBAL control-plane table.
 func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listActiveMerchantIDs)
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 
 // Fleet analytics (openrails-saas #28): cross-merchant operator aggregates over
 // the engine's truth tables. Like SearchMerchants (#226) this is a sensitive
-// cross-merchant read — no per-merchant RLS scope could compute a fleet view —
+// cross-merchant read — no per-merchant scope could compute a fleet view —
 // and the CALLER is responsible for gating (platform superadmin) and auditing
 // each request. It reaches across merchants the ONE sanctioned way: migration
 // 0022's SECURITY DEFINER aggregates. The control-plane pool is not privileged;
@@ -79,14 +79,12 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		excludeArg = exclude.UUID()
 	}
 
-	// or#861: every aggregate below reads RLS-bearing tables (payments,
-	// subscriptions, prices, psps). Read on the base pool they returned ZERO
-	// ROWS AND NO ERROR under the production openrails_app role, so this
-	// dashboard reported all zeros — it only ever "worked" where the connected
-	// role bypassed RLS. A fleet dashboard IS a genuinely cross-merchant read,
+	// or#861: every aggregate below reads merchant-owned tables (payments,
+	// subscriptions, prices, psps). Read on the base pool under the
+	// since-removed RLS they returned ZERO ROWS AND NO ERROR, so this dashboard
+	// reported all zeros. A fleet dashboard IS a genuinely cross-merchant read,
 	// so it goes through migration 0022's SECURITY DEFINER aggregates: they
-	// RAISE when their definer cannot bypass RLS (no silent zeros ever again)
-	// and they return AGGREGATES ONLY — counts and sums grouped by
+	// return AGGREGATES ONLY — counts and sums grouped by
 	// currency/rail — never a merchant-owned row.
 	out := &FleetAnalytics{WindowDays: windowDays}
 	if err := c.pool.QueryRow(ctx,

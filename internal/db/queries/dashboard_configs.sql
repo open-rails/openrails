@@ -1,5 +1,5 @@
 -- openrails.dashboard_configs — #741 per-merchant dashboard widget layout.
--- RLS (app.merchant_id GUC) scopes every statement to the request's merchant.
+-- An explicit merchant_id scopes every statement to the request's merchant.
 
 -- name: GetDashboardConfig :one
 SELECT merchant_id, layout, updated_at, updated_by

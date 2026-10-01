@@ -145,11 +145,9 @@ type CleanupResult struct {
 // merchant's own scope.
 //
 // or#877 B4 fixed the scope bug: three of the five sweeps carried UNQUALIFIED
-// predicates, which under the production openrails_app role match
-// `merchant_id = NULL` — zero rows, no error, an hourly log line claiming
-// success. All six now delete inside the merchant's scope with the merchant
-// predicate ALSO written into the SQL, so the walk stays honest on a BYPASSRLS
-// connection.
+// predicates, which under the since-removed RLS matched nothing — zero rows,
+// no error, an hourly log line claiming success. All six now delete inside
+// the merchant's scope with the merchant predicate written into the SQL.
 //
 // or#837 fixes what that left: the walk itself. It enumerated EVERY active
 // merchant every hour, `ORDER BY id`, no cursor and no LIMIT, then opened six

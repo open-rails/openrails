@@ -531,11 +531,9 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 	}
 
 	var accrued int64
-	// or#868 B2: merchant-pinned, matching AccrueOwed. The watermark INSERT
-	// below is the exact statement that failed with "new row violates
-	// row-level security policy for table metered_rating_watermarks" (42501)
-	// off the request path — the bare RunInTx this replaces carried no
-	// app.merchant_id, so nothing but a caller-supplied pin ever made it work.
+	// or#868 B2: merchant-pinned, matching AccrueOwed. Under the since-removed
+	// RLS the watermark INSERT below failed (42501) off the request path: the
+	// bare RunInTx this replaces carried no app.merchant_id.
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Upsert-lock the watermark row: ON CONFLICT DO UPDATE takes the row lock
 		// and returns the current committed values, serializing concurrent sweeps.

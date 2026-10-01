@@ -500,8 +500,7 @@ type ExpireCheckoutSessionsParams struct {
 }
 
 // Retention sweep (or#877 B4): one pass per merchant off the directory walk,
-// with the merchant predicate written out so it stays scoped on a BYPASSRLS
-// connection too.
+// with the merchant predicate written out.
 // or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckoutSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, expireCheckoutSessions, arg.Now, arg.MerchantID, arg.RowLimit)
