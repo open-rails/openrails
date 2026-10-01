@@ -279,7 +279,7 @@ func receiptRead(f *fleet, e *engineCase) func(*http.Request) bool {
 // pass: nothing stalls behind the dead leader.
 func TestReplicasLeaderCrash(t *testing.T) {
 	t.Parallel()
-	f := newFleet(t, 3)
+	f := newScheduledFleet(t, 3)
 	var cases []*engineCase
 	for i := range 4 {
 		cases = append(cases, enroll(t, f.replicas[i%3], rails[i%2], embedded))

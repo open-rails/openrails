@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +28,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -48,6 +51,8 @@ type fleet struct {
 	base     *world
 	replicas []*world
 	dead     map[*world]bool
+	// scheduled replicas also run River's own schedule (see newFleet).
+	scheduled bool
 	// latency delays every provider charge request, so restarts can land
 	// while renewals are in flight.
 	latency atomic.Int64
@@ -64,12 +69,28 @@ type replicaEnv struct {
 	pool  *pgxpool.Pool
 }
 
+// fleetDeadline bounds a fleet test, its cleanup included.
+const fleetDeadline = 5 * time.Minute
+
 // newFleet starts n replicas; skews offsets each replica's engine clock.
+// The replicas run only the passes their test starts. River's own schedule
+// (the leader's due pass on taking leadership, a few seconds into the fleet's
+// life, then every minute) would land mid-scenario: a pass that renews the
+// membership between a test's setup and its barrier leaves the contenders
+// nothing to race.
 func newFleet(t *testing.T, n int, skews ...time.Duration) *fleet {
+	return startFleet(t, n, false, skews)
+}
+
+// newScheduledFleet keeps River's own schedule, for scenarios about it.
+func newScheduledFleet(t *testing.T, n int) *fleet { return startFleet(t, n, true, nil) }
+
+func startFleet(t *testing.T, n int, scheduled bool, skews []time.Duration) *fleet {
 	t.Helper()
 	fleetSlots <- struct{}{}
 	t.Cleanup(func() { <-fleetSlots })
-	f := &fleet{t: t, base: prepareWorld(t, 4), dead: map[*world]bool{}}
+	deadline(t, fleetDeadline)
+	f := &fleet{t: t, base: prepareWorld(t, 4), dead: map[*world]bool{}, scheduled: scheduled}
 	for i := range n {
 		var skew time.Duration
 		if i < len(skews) {
@@ -89,6 +110,19 @@ func (f *fleet) spawn(i int, skew time.Duration) *world {
 	r.start()
 	f.t.Cleanup(r.stop)
 	return r
+}
+
+// deadline fails the run if t, cleanup included, is still running after d.
+// Every harness wait has its own timeout; this catches a wait that does not,
+// with every goroutine's stack (where t is stuck, on what), instead of holding
+// the shard until the binary's own timeout.
+func deadline(t *testing.T, d time.Duration) {
+	name := t.Name()
+	timer := time.AfterFunc(d, func() {
+		debug.SetTraceback("all")
+		panic(fmt.Sprintf("%s still running after %v, cleanup included", name, d))
+	})
+	t.Cleanup(func() { timer.Stop() })
 }
 
 // connect opens this process generation's database link through its own
@@ -437,6 +471,13 @@ func (f *fleet) lockCustomer(e *engineCase) *rowLock {
 	f.t.Helper()
 	tx, err := f.base.pool.Begin(f.t.Context())
 	require.NoError(f.t, err)
+	// A test that fails holding the barrier lets its waiters go before the
+	// replicas stop: a stop waits for their requests, the pool for this tx.
+	f.t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = tx.Rollback(ctx)
+	})
 	var id string
 	require.NoError(f.t, tx.QueryRow(f.t.Context(), f.q(`SELECT c.id::text FROM openrails.customers c
 		JOIN openrails.subscriptions s ON s.merchant_id = c.merchant_id AND s.customer_id = c.id
@@ -449,26 +490,27 @@ func (f *fleet) lockCustomer(e *engineCase) *rowLock {
 func (l *rowLock) awaitWaiters(on ...*world) {
 	f := l.f
 	f.t.Helper()
-	require.Eventually(f.t, func() bool {
-		rows, err := f.base.pool.Query(f.t.Context(), `SELECT DISTINCT application_name FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`)
-		if err != nil {
-			return false
+	if !assert.Eventually(f.t, func() bool { return len(l.absent(on)) == 0 }, 30*time.Second, 10*time.Millisecond, "every contender reaches the barrier") {
+		f.any().dumpJobs()
+		f.t.Fatalf("replicas %v never reached the barrier", l.absent(on))
+	}
+}
+
+// absent names the replicas in on with no connection waiting on a lock.
+func (l *rowLock) absent(on []*world) []string {
+	f := l.f
+	var waiting []string
+	rows, err := f.base.pool.Query(f.t.Context(), `SELECT DISTINCT application_name FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`)
+	if err == nil {
+		waiting, _ = pgx.CollectRows(rows, pgx.RowTo[string])
+	}
+	var out []string
+	for _, r := range on {
+		if !slices.Contains(waiting, r.replica.application(f.base.schema)) {
+			out = append(out, r.replica.name)
 		}
-		waiting, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
-			return false
-		}
-		for _, r := range on {
-			found := false
-			for _, app := range waiting {
-				found = found || app == r.replica.application(f.base.schema)
-			}
-			if !found {
-				return false
-			}
-		}
-		return true
-	}, 30*time.Second, 10*time.Millisecond, "every contender reaches the barrier")
+	}
+	return out
 }
 
 func (l *rowLock) release() {
@@ -502,6 +544,7 @@ func (f *fleet) hold(rail string, match func(*http.Request) bool, commit bool) *
 	} else {
 		f.base.nmi.hold(h.g)
 	}
+	f.t.Cleanup(h.release) // a failed test lets held requests go before the replicas stop
 	return h
 }
 
@@ -678,6 +721,10 @@ func (f *fleet) requireExactlyOnce(e *engineCase, renewals, submissions int) {
 	}
 }
 
+// replicaHTTP bounds requests made off the test goroutine, whose answers a
+// test awaits.
+var replicaHTTP = &http.Client{Timeout: time.Minute}
+
 // post delivers a signed provider notice to r's webhook route without
 // waiting for its work; safe off the test goroutine.
 func (r *world) post(rail string, payload any) (int, error) {
@@ -698,7 +745,7 @@ func (r *world) post(rail string, payload any) (int, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(header, fmt.Sprintf("t=%s,%s=%s", ts, scheme, hex.EncodeToString(mac.Sum(nil))))
-	res, err := http.DefaultClient.Do(req)
+	res, err := replicaHTTP.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -716,7 +763,7 @@ func (r *world) retryNow(c *customer, sub openrails.SubscriptionID, key string) 
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", key)
-	res, err := http.DefaultClient.Do(req)
+	res, err := replicaHTTP.Do(req)
 	if err != nil {
 		return 0, "", err
 	}
