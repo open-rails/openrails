@@ -474,6 +474,16 @@ explicit credentials on headless Client calls and published routes.
   refunds, or access to another catalog owner. Native JWT roles never provide a
   permission fallback. Machine and delegated credentials retain their ceilings
   and cannot become native personal sessions.
+- `RecentSignIn` answers whether a native user signed in recently. Every
+  operation that moves money, grants access or mints credentials needs it
+  (`permissions.RequiresRecentSignIn`: each `merchant:` permission except reads,
+  the dashboard layout and host-event acknowledgement), on every route that
+  serves the operation, and so does a native user moving another payer's money
+  on the treasury. A stale sign-in is 403 `step_up_required` with the provider's
+  challenge in `metadata`. `NewIntegration` takes it from the principal's
+  helpers/auth `RecentSignInChecker` (AuthKit: `Sensitive`'s check); without one,
+  native users are refused those operations. Machine and delegated credentials
+  carry no sign-in of their own and are exempt. Hosts add no step-up gate.
 
 The optional AuthKit adapter is `orauthkit.New(orauthkit.Config{...})`. Supply the
 host's existing, initialized `VerifyRequest` verifier; an AuthKit Runtime's local

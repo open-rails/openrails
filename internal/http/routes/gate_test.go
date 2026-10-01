@@ -64,6 +64,8 @@ func (m *membership) ResolveAuthorizedMerchant(_ context.Context, _ *http.Reques
 	return id, ref, nil
 }
 
+func (m *membership) CheckRecentSignIn(context.Context, *http.Request) error { return nil }
+
 type credResolver struct {
 	key, remote, jwt          *credential.ResolvedServiceCredential
 	keyErr, remoteErr, jwtErr error
@@ -262,6 +264,10 @@ type gateFunc func(context.Context, *http.Request, string) (billingauth.Principa
 
 func (f gateFunc) Authorize(ctx context.Context, r *http.Request, perm string) (billingauth.Principal, error) {
 	return f(ctx, r, perm)
+}
+
+func (gateFunc) RequireRecentSignIn(context.Context, *http.Request, billingauth.Principal) error {
+	return nil
 }
 
 // The permission middleware turns the gate's answer into the request's only

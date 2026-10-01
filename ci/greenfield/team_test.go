@@ -69,16 +69,18 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				require.NoError(t, err)
 				return u
 			}
-			owner := account(true)
+			id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+			email := "owner-" + id + "@greenfield.test"
+			owner, err := core.CreateUser(ctx, iam.NewUser{Email: email, Username: "owner_" + id, Password: authtest.Password, EmailVerified: true})
+			require.NoError(t, err)
 			_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
 			require.NoError(t, err)
 			handler, err := cp.Handler()
 			require.NoError(t, err)
 			server := httptest.NewServer(handler)
 			t.Cleanup(server.Close)
-			access, err := core.MintAccessToken(ctx, owner.ID, iam.AccessTokenOptions{})
-			require.NoError(t, err)
-			token := access.Value
+			// Inviting needs a recent sign-in, which a minted token is not.
+			token := authtest.SignIn(t, core, authtest.User{User: owner, Email: email, Password: authtest.Password}).AccessToken
 
 			call := func(method, path string, body any) (int, map[string]any) {
 				var data io.Reader

@@ -170,6 +170,13 @@ func (r *Request) InternalError(msg string, cause error) {
 	r.t.WriteJSON(http.StatusInternalServerError, response)
 }
 
+// AbortAPIError is APIError that also stops the middleware chain.
+func (r *Request) AbortAPIError(err *api.APIError) {
+	err.WithRequestID(r.RequestID())
+	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}, err.Message)
+	r.t.AbortJSON(err.HTTPStatus, err.ToResponse())
+}
+
 func (r *Request) APIError(err *api.APIError) {
 	err.WithRequestID(r.RequestID())
 	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}, err.Message)

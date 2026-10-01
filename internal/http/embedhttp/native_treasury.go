@@ -26,6 +26,9 @@ func nativeTreasury(authenticate router.Middleware, auth *billingauth.Integratio
 					return auth.Authorization.Authorize(ctx, r.Request, identity, billingauth.Requirement{Scope: billingauth.CustomerScope, Permission: permission, Target: payer})
 				}
 			}
+			if auth.RecentSignIn != nil {
+				authority.RecentSignIn = func(ctx context.Context) error { return auth.RecentSignIn.CheckRecentSignIn(ctx, r.Request) }
+			}
 			middleware.SetNativeTreasuryAuthority(r, authority)
 			next(r)
 		})

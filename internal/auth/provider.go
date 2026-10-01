@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -52,6 +54,33 @@ func (p *Authenticator) Actor(r *http.Request) (iam.Actor, error) {
 		return iam.Actor{}, billingauth.ErrUnauthenticated
 	}
 	return actor, nil
+}
+
+// CheckRecentSignIn is AuthKit's Sensitive check for r's user token, with
+// helpers/auth RecentSignInChecker's errors.
+func (p *Authenticator) CheckRecentSignIn(ctx context.Context, r *http.Request) error {
+	cl, err := p.claims(ctx, r)
+	if err != nil {
+		return err
+	}
+	sessions, ok := p.verifier.(verify.SessionChecker)
+	if !ok {
+		return billingauth.ErrRecentSignInUnavailable
+	}
+	err = sessions.CheckRecentSignIn(ctx, cl)
+	e, _ := iam.AsError(err)
+	switch {
+	case err == nil:
+		return nil
+	case e != nil && e.Code() == "step_up_required":
+		return errors.Join(helpersauth.ErrStepUpRequired, err)
+	case errors.Is(err, iam.ErrSessionRevoked):
+		return errors.Join(helpersauth.ErrRevoked, err)
+	case e != nil && e.Status() == http.StatusForbidden:
+		return errors.Join(helpersauth.ErrForbidden, err)
+	default:
+		return errors.Join(helpersauth.ErrUnavailable, err)
+	}
 }
 
 // claims verifies r once per request.

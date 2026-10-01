@@ -49,10 +49,10 @@ func TestDelegatedGateAndExplicitMapping(t *testing.T) {
 		gate DelegatedGate
 		want GateError
 	}{
-		{NewDelegatedGate(nil), GateError{500, "authorization unavailable"}},
-		{gate(nil, ErrUnauthenticated), GateError{401, "authentication required"}},
-		{gate(func(p *DelegatedPrincipal) { p.Permissions = []string{"catalog:read"} }, nil), GateError{403, "permission_required"}},
-		{gate(func(p *DelegatedPrincipal) { p.MerchantID = "not-a-merchant-id" }, nil), GateError{401, "delegated_principal_invalid"}},
+		{NewDelegatedGate(nil), GateError{Status: 500, Message: "authorization unavailable"}},
+		{gate(nil, ErrUnauthenticated), GateError{Status: 401, Message: "authentication required"}},
+		{gate(func(p *DelegatedPrincipal) { p.Permissions = []string{"catalog:read"} }, nil), GateError{Status: 403, Message: "permission_required"}},
+		{gate(func(p *DelegatedPrincipal) { p.MerchantID = "not-a-merchant-id" }, nil), GateError{Status: 401, Message: "delegated_principal_invalid"}},
 	} {
 		_, err := tc.gate.Authorize(context.Background(), req, "billing:read")
 		require.Equal(t, tc.want, err)
@@ -199,11 +199,11 @@ func TestIntegrationClassifiesVerifierFailures(t *testing.T) {
 		err       error
 		want      error
 	}{
-		{nil, fmt.Errorf("provider: %w", auth.ErrForbidden), GateError{403, "permission_required"}},
-		{nil, auth.ErrUnavailable, GateError{503, "authentication unavailable"}},
-		{nil, auth.ErrSenderProofRequired, GateError{401, "sender_proof_required"}},
-		{nil, auth.ErrExpired, GateError{401, "credential_expired"}},
-		{nil, auth.ErrRevoked, GateError{401, "credential_revoked"}},
+		{nil, fmt.Errorf("provider: %w", auth.ErrForbidden), GateError{Status: 403, Message: "permission_required"}},
+		{nil, auth.ErrUnavailable, GateError{Status: 503, Message: "authentication unavailable"}},
+		{nil, auth.ErrSenderProofRequired, GateError{Status: 401, Message: "sender_proof_required"}},
+		{nil, auth.ErrExpired, GateError{Status: 401, Message: "credential_expired"}},
+		{nil, auth.ErrRevoked, GateError{Status: 401, Message: "credential_revoked"}},
 		{nil, errors.New("db password=hunter2"), ErrUnauthenticated},
 		{nil, nil, ErrUnauthenticated},
 		{typedNil, nil, ErrUnauthenticated},
@@ -259,4 +259,38 @@ func TestIntegrationAuthorityResolution(t *testing.T) {
 			require.Equal(t, PlatformScope, platformQuery.Scope, tc.name)
 		}
 	}
+}
+
+type stepUpChallenge map[string]any
+
+func (stepUpChallenge) Error() string              { return "step_up_required" }
+func (c stepUpChallenge) Metadata() map[string]any { return c }
+
+// A native user needs the provider's recent sign-in: a principal without the
+// capability is refused, a stale one gets the provider's challenge. Machine
+// and delegated credentials carry no sign-in and are exempt.
+func TestRequireRecentSignIn(t *testing.T) {
+	integration, r, _, err := authenticate(t, IntegrationOptions{Verifier: &fakeVerifier{principal: userPrincipal(true)}, Customer: SubjectCustomerID})
+	require.NoError(t, err)
+	ctx := r.Context()
+	native := Principal{Kind: NativeUser}
+	unavailable := GateError{Status: 403, Message: "step_up_unavailable"}
+	require.Equal(t, unavailable, RequireRecentSignIn(ctx, native, func(ctx context.Context) error { return integration.RecentSignIn.CheckRecentSignIn(ctx, r) }))
+	require.Equal(t, unavailable, RequireRecentSignIn(ctx, Principal{}, nil), "an unset kind is a native user")
+	for _, kind := range []PrincipalKind{Machine, DelegatedUser} {
+		require.NoError(t, RequireRecentSignIn(ctx, Principal{Kind: kind}, nil))
+	}
+	challenge := stepUpChallenge{"step_up_methods": []string{"password"}}
+	for _, tc := range []struct {
+		err  error
+		want GateError
+	}{
+		{errors.Join(auth.ErrStepUpRequired, challenge), GateError{Status: 403, Message: "step_up_required", Code: "step_up_required", Metadata: challenge}},
+		{errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked), GateError{Status: 401, Message: "credential_revoked"}},
+		{auth.ErrForbidden, GateError{Status: 403, Message: "permission_required"}},
+		{auth.ErrUnavailable, GateError{Status: 503, Message: "authorization unavailable"}},
+	} {
+		require.Equal(t, tc.want, RequireRecentSignIn(ctx, native, func(context.Context) error { return tc.err }))
+	}
+	require.NoError(t, RequireRecentSignIn(ctx, native, func(context.Context) error { return nil }))
 }

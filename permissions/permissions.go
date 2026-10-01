@@ -85,7 +85,27 @@ const (
 	// core's own mint authorization agree exactly. In the fixed merchant role
 	// catalog (#567) only the owner (merchant:*) holds it.
 	MerchantCredentialsManage = "merchant:credentials:manage"
+	// MerchantAccessGrantPermanent allows a manual entitlement or product-access
+	// grant with no end, on top of merchant:customer-settings:update. Owner-level
+	// (merchant:*) by default; a host that allows only finite manual grants
+	// gives it to nobody.
+	MerchantAccessGrantPermanent = "merchant:access:grant-permanent"
 )
+
+// RequiresRecentSignIn reports whether perm guards an operation that moves
+// money, grants access or changes who can: a native user needs a recent
+// sign-in (step-up) for it, on every route that serves it. Merchant reads,
+// the dashboard layout and host-event acknowledgement do not, and neither do
+// customer:* operations (a buyer acting on their own billing). Machine and
+// delegated credentials carry no sign-in of their own and are exempt.
+func RequiresRecentSignIn(perm string) bool {
+	switch perm {
+	case MerchantDashboardUpdate, MerchantHostEventsAcknowledge:
+		return false
+	}
+	rest, ok := strings.CutPrefix(perm, "merchant:")
+	return ok && !strings.HasSuffix(rest, ":read") && !strings.HasSuffix(rest, ":read-own")
+}
 
 // Platform-operator (root) permissions (#721). AuthKit's #111 rename made
 // `root:` the platform-operator namespace (was `platform:`); namespace purity

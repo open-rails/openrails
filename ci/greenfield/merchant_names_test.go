@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
@@ -61,6 +62,14 @@ func newUser(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
 	token, err := cp.Core().MintAccessToken(t.Context(), u.ID, iam.AccessTokenOptions{})
 	require.NoError(t, err)
 	return u.ID, token.Value
+}
+
+// newOwner is a verified account signed in with its password: owner
+// operations need a recent sign-in, which a minted token is not.
+func newOwner(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
+	t.Helper()
+	u := newAccount(t, cp)
+	return u.ID, authtest.SignIn(t, cp.Core(), u).AccessToken
 }
 
 // verifyEmail marks the user's email proven, as the system.
@@ -167,7 +176,7 @@ func TestMerchantRenameRoute(t *testing.T) {
 	reserved := uniqueName("house")
 	cp := f.attachControlPlane(t, reserving(reserved))
 	ctx := t.Context()
-	owner, token := newUser(t, cp)
+	owner, token := newOwner(t, cp)
 	shop := uniqueName("shop")
 	m, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner})
 	require.NoError(t, err)

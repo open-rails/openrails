@@ -53,7 +53,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 		if err := merchanttarget.Assert(r, target); err != nil {
 			return billingauth.Principal{}, err
 		}
-		return billingauth.Principal{MerchantID: host.MerchantID, Subject: host.Subject, Permissions: append([]string(nil), host.Permissions...)}, nil
+		return billingauth.Principal{MerchantID: host.MerchantID, Kind: billingauth.Machine, Subject: host.Subject, Permissions: append([]string(nil), host.Permissions...)}, nil
 	}
 	if g.auth == nil || g.auth.Authentication == nil || g.auth.Authorization == nil {
 		return billingauth.Principal{}, billingauth.GateError{Status: 503, Message: "authorization unavailable"}
@@ -93,13 +93,23 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 		}
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
 	}
-	principal := billingauth.Principal{MerchantID: target.MerchantID, Subject: subject}
+	principal := billingauth.Principal{MerchantID: target.MerchantID, Kind: identity.Kind, Subject: subject}
 	if identity.Kind == billingauth.NativeUser {
 		principal.UserContext = billingauth.UserContext{UserID: identity.CustomerID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
 	} else {
 		principal.Permissions = append([]string(nil), identity.Permissions...)
 	}
 	return principal, nil
+}
+
+// RequireRecentSignIn implements billingauth.Gate with the integration's
+// recent sign-in check.
+func (g integrationGate) RequireRecentSignIn(ctx context.Context, r *http.Request, p billingauth.Principal) error {
+	var check func(context.Context) error
+	if g.auth != nil && g.auth.RecentSignIn != nil {
+		check = func(ctx context.Context) error { return g.auth.RecentSignIn.CheckRecentSignIn(ctx, r) }
+	}
+	return billingauth.RequireRecentSignIn(ctx, p, check)
 }
 
 func nativeCustomer(auth *billingauth.Integration, target billingauth.Target) billingauth.DelegatedAuthenticator {

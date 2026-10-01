@@ -214,7 +214,7 @@ func TestIntegrationGate(t *testing.T) {
 
 	p, err := authorize(staff, allow, resolved("/v2/merchant/products"), permissions.MerchantCatalogRead)
 	require.NoError(t, err)
-	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
+	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Kind: billingauth.NativeUser, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
 
 	_, err = authorize(staff, allow, resolved("/v1/catalog"), permissions.MerchantCatalogOwnRead)
 	requireGate(t, err, http.StatusForbidden)
