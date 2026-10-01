@@ -154,6 +154,14 @@ type PaymentMethodError struct {
 	Reason openrails.DeclineReason
 }
 
+// CardRefused reports whether the provider refused the card: a verification
+// decline or a refused vault entry. A request refused before any provider call,
+// or a transport failure, is not a refusal of the card.
+func CardRefused(err error) bool {
+	var pmErr *PaymentMethodError
+	return errors.As(err, &pmErr) || errors.Is(err, nmi.ErrV5Refused)
+}
+
 func (e *PaymentMethodError) Error() string {
 	if e.Message != "" {
 		return e.Message
