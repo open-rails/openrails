@@ -302,6 +302,9 @@ func (w *world) start() {
 	w.rt = rt
 	jobs, err := riverkit.New(t.Context(), pool, riverConfig, rt.RiverJobs())
 	require.NoError(t, err)
+	if w.replica != nil && !w.replica.f.scheduled {
+		jobs.PeriodicJobs().Clear()
+	}
 	require.NoError(t, jobs.Start(context.WithoutCancel(t.Context())))
 	w.jobs = jobs
 	bundle, err := openrailshttp.Routes(rt)
