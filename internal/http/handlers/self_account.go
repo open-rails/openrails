@@ -20,7 +20,7 @@ import (
 //
 // The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
-// GetMyUsage/GetMyInvoices), and every query runs RLS-scoped to the pinned
+// GetMyUsage/GetMyInvoices), and every query is scoped to the request
 // merchant.
 
 // selfAccountPayer resolves the acting payer from the delegated principal, or

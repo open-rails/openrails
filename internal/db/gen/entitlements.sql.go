@@ -745,7 +745,7 @@ type ListCustomersWithEntitlementParams struct {
 
 // Reverse lookup (#535): customer ids holding an ACTIVE window of `entitlement`,
 // keyset-paginated by customer_id (after_id is an exclusive lower bound — pass the
-// zero uuid to start). merchant scoping is RLS (no explicit merchant_id), matching
+// zero uuid to start). merchant_id is an explicit predicate, matching
 // ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
 func (q *Queries) ListCustomersWithEntitlement(ctx context.Context, arg ListCustomersWithEntitlementParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listCustomersWithEntitlement,

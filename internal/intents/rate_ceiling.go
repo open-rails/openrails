@@ -196,15 +196,10 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 
 	since := now.Add(-RateCeilingWindow).UTC()
 	types := DestructiveIntentTypes()
-	// Neither count can run on the base pool. It is the same openrails_app role;
-	// dropping the GUC does not bypass rail_intents' policy, it fails it, so the
-	// count came back 0 and this ceiling never tripped (or#860). Both queries
-	// call SECURITY DEFINER readers (migrations 0021/0028) which RAISE if their
-	// owner cannot bypass RLS — so a mis-owned schema fails loudly here instead
-	// of silently permitting the burst. That still holds for the per-merchant
-	// count: this handle is the ROOT pool and carries no app.merchant_id, so a
-	// plain RLS-scoped SELECT would match `merchant_id = NULL` and fail OPEN.
-	// GenDirectory is the right accessor: the definer needs no merchant GUC.
+	// Both counts call SECURITY DEFINER readers (migrations 0021/0028) that take
+	// their scope (merchant or actor) as an argument, so this ROOT pool needs no
+	// app.merchant_id. GenDirectory is the right accessor. (or#860: a base-pool
+	// count read 0 under the since-removed RLS, so this ceiling never tripped.)
 	q := c.db.GenDirectory()
 
 	merchantCount, err := q.CountDestructiveIntentsForMerchantSince(ctx, gen.CountDestructiveIntentsForMerchantSinceParams{
@@ -265,9 +260,8 @@ func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.T
 	}
 
 	// The same definer reader the anti-theft leg uses, with the system origin
-	// set (migration 0028 generalized 0024's system-only function): this DB is
-	// the root pool and carries no app.merchant_id, so a plain SELECT would
-	// match `merchant_id = NULL`, count 0 and fail OPEN.
+	// set (migration 0028 generalized 0024's system-only function). It takes the
+	// merchant as an argument, so the root pool needs no app.merchant_id.
 	count, err := c.db.GenDirectory().CountDestructiveIntentsForMerchantSince(ctx,
 		gen.CountDestructiveIntentsForMerchantSinceParams{
 			MerchantID:  p.MerchantID,
@@ -401,7 +395,7 @@ func (c *RateCeiling) evidence(which ceilingKind, p CheckParams, counts ceilingC
 	}
 }
 
-// emitFinding writes the operator finding on an INDEPENDENT, RLS-correct
+// emitFinding writes the operator finding on an INDEPENDENT merchant-scoped
 // transaction (fresh pool connection with the merchant GUC pinned), so the
 // alert PERSISTS even though the refused op rolls back the caller's transaction.
 // A fresh background context (bounded) drops the caller's merchant-pinned

@@ -289,7 +289,7 @@ type UsageRollupRow struct {
 }
 
 // AggregateUsage rolls up an payer's usage_events over [from, to) grouped by
-// event_type, with summed dimensions. RLS-scoped to the request merchant. This is
+// event_type, with summed dimensions. Scoped to the request merchant. This is
 // the rollup layer — it is NEVER called on the per-request admission hot path.
 func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRollupRow, error) {
 	if s == nil || s.db == nil {

@@ -68,8 +68,8 @@ func runLedgerAudit(cmd *cobra.Command, merchantSlug, format string) error {
 		res := ledgerAuditResult{MerchantID: target.id.UUID(), MerchantSlug: target.slug}
 		ctx := merchant.WithID(cmd.Context(), target.id)
 		runErr := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			// The connection is already RLS-scoped to this merchant; the explicit
-			// id keeps the predicate honest on a privileged connection too.
+			// The connection is pinned to this merchant; the explicit id is
+			// the predicate that scopes the check.
 			rep, err := ledger.CheckIntegrity(ctx, database.Qx(ctx), target.id.UUID())
 			res.Report = rep
 			return err

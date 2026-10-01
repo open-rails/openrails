@@ -18,7 +18,7 @@ import (
 )
 
 // Recorder writes webhook-health rows. Merchant comes from ctx; every write
-// runs in MerchantTx so RLS holds on app-role pools. Accepted/Rejected are
+// runs in MerchantTx for that merchant. Accepted/Rejected are
 // telemetry: they log-and-swallow errors so recording can never fail a webhook.
 type Recorder struct {
 	DB    *db.DB

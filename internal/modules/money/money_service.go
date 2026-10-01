@@ -370,8 +370,8 @@ func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency 
 // GetTransactionsByCustomer lists money transactions for an EXPLICIT merchant subject
 // (the payer), newest first, paginated. Unlike GetTransactions it does not derive
 // the payer from a invoker id — it filters customer_id directly, which is what the
-// customer-level billing-account usage view (issue #242) needs. RLS-scoped to the
-// request merchant via Qx(ctx).
+// customer-level billing-account usage view (issue #242) needs. Scoped to the
+// request merchant.
 func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("money service not initialized")
@@ -417,7 +417,7 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 }
 
 // GetAccountSettingsForCustomer returns the stored money-account settings for an
-// payer (billing mode and expiry default), RLS-scoped to
+// payer (billing mode and expiry default), scoped to
 // the request merchant (issue #242). Never nil — missing rows return the defaults.
 func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	var out *models.MoneyAccount

@@ -105,11 +105,10 @@ func newRootCmd() *cobra.Command {
 	}
 	workerCmd.Flags().String("merchant-manifest", "", "Merchant manifest converged before starting workers (default: the conventional "+bootstrap.DefaultMerchantConfigManifestPath+" when present; an explicit path must exist)")
 
-	// migrate is the ONE deliberately RLS-posture-EXEMPT command (or#888): DDL
-	// requires the privileged owner role — it creates the merchant_isolation
-	// policies and provisions direct access for the host runtime login, so it
-	// cannot run behind that gate. It opens its own handle in internal/migrate;
-	// every other command that touches merchant rows goes through openCLIDB.
+	// migrate needs the owner role (or#888): it runs DDL and provisions direct
+	// access for the host runtime login. It opens its own handle in
+	// internal/migrate; every other command that touches merchant rows goes
+	// through openCLIDB.
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Manage all database tables",

@@ -58,14 +58,13 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 	batchSize32, _ := safecast.Convert[int32](batchSize)
 
 	// or#868 B1: this used to enumerate customers with a bare `RunInTx` on the
-	// base pool, under a comment calling it a "privileged (no-GUC) cross-merchant
-	// sweep". There is no privileged pool — grants and customers both FORCE RLS,
-	// so with no app.merchant_id the enumeration matched `merchant_id = NULL` and
+	// base pool, under a comment calling it a "privileged (no-GUC)
+	// cross-merchant sweep". Under the since-removed RLS that enumeration
 	// returned nothing, every run. This worker had NEVER expired a credit lot:
 	// lots lapsed and customers kept spending them. Enumerate the merchants
-	// through 0022's SECURITY DEFINER work queue (ids only; it RAISES if its
-	// definer cannot bypass RLS), then do the real work — the per-customer list
-	// AND the ledger claw-back — inside each merchant's own scope.
+	// through 0022's SECURITY DEFINER work queue (ids only), then do the real
+	// work — the per-customer list AND the ledger claw-back — inside each
+	// merchant's own scope.
 	merchantIDs, err := w.DB.GenDirectory().ListLapsedCreditLotMerchants(ctx, gen.ListLapsedCreditLotMerchantsParams{
 		AsOf: now, MerchantLimit: batchSize32,
 	})

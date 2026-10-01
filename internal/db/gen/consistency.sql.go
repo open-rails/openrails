@@ -194,7 +194,7 @@ type ConDuplicateOwnershipGrantsRow struct {
 // reopening; the access-side residue is derive.grant.excess's domain.
 // Purchases ride as a jsonb array (payment linkage nullable) ordered
 // oldest-first, so the LAST element is the later purchase — the default
-// cancel/refund target. RLS scopes the merchant. customer_id nullable:
+// cancel/refund target. merchant_id scopes the merchant. customer_id nullable:
 // NULL = merchant-wide sweep.
 func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplicateOwnershipGrantsParams) ([]ConDuplicateOwnershipGrantsRow, error) {
 	rows, err := q.db.Query(ctx, conDuplicateOwnershipGrants, arg.MerchantID, arg.Now, arg.CustomerID)
@@ -304,7 +304,7 @@ type ConOrphanEntitlementSubscriptionSourceRow struct {
 // #511 CON plane queries (conPass). Each takes an OPTIONAL customer_id: when set
 // (inline Converge(customer)), the scan is restricted to that one customer's rows
 // so an after-every-mutation invocation is O(customer), not O(merchant); when
-// NULL (the merchant-wide sweep) it scans the whole merchant. All are RLS-scoped.
+// NULL (the merchant-wide sweep) it scans the whole merchant. All are merchant-scoped.
 // These replace the retired internal/audit checks (#511 Phase F hard cut).
 // Partition (#690): a LIVE window with a dangling subscription source is the
 // freeloader case — derive.entitlement.unjustified (severity high, revoke

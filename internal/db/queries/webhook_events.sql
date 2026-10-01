@@ -1,6 +1,5 @@
 -- Webhook dedup truth (#678): a row = the event's effects are durably applied.
--- Explicit merchant_id predicates on top of RLS so privileged (RLS-bypassing)
--- connections stay merchant-scoped too.
+-- Explicit merchant_id predicates scope every statement.
 
 -- name: WebhookEventCompleted :one
 SELECT EXISTS(

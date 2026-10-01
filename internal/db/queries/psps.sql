@@ -92,10 +92,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- #824: cross-merchant PSP ownership by the GLOBAL (rail, environment,
 -- account_id) natural key, for webhook routing and the uniqueness preflight —
 -- both of which run BEFORE any merchant context exists. GetPSPByRailIdentity
--- above carries no merchant predicate, so under the RLS-enforcing app role it
--- can only ever return no rows; the SECURITY DEFINER directory function
--- (migration 0016) is the sanctioned way to make that read, and it RAISES
--- rather than returning empty if its definer cannot bypass RLS.
+-- above needs the merchant; the SECURITY DEFINER directory function
+-- (migration 0016) is the sanctioned way to make that read.
 -- name: ResolvePSPOwnerByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id
 FROM openrails.psp_owner_by_identity(
@@ -106,8 +104,8 @@ FROM openrails.psp_owner_by_identity(
 
 -- CROSS-MERCHANT: merchants armed on one of the named rails, through migration
 -- 0023's SECURITY DEFINER work queue (or#877 B6). The Stripe webhook reconciler
--- used to JOIN merchants to psps on the base pool; psps FORCEs RLS, so the join
--- yielded nothing and the managed endpoint was never registered or
+-- used to JOIN merchants to psps on the base pool; under the since-removed RLS
+-- the join yielded nothing and the managed endpoint was never registered or
 -- version-bumped. Ids only — each merchant's PSP rows are read inside its own
 -- scope.
 -- name: ListRailArmedMerchants :many

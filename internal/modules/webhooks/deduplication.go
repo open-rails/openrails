@@ -135,7 +135,7 @@ func (s *DeduplicationService) newDedupMark(ctx context.Context, op, eventID str
 	return &dedupMark{merchantID: mid, op: op, eventID: eventID}
 }
 
-// markCompleted reports whether the truth row exists (RLS-scoped via MerchantTx).
+// markCompleted reports whether the truth row exists (merchant-scoped via MerchantTx).
 func (s *DeduplicationService) markCompleted(ctx context.Context, m *dedupMark) (bool, error) {
 	var done bool
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

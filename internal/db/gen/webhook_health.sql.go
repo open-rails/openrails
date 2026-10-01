@@ -60,7 +60,7 @@ type ListWebhookExpectedRailsRow struct {
 // Expectation gate for the webhook_silence template: rails that are ARMED
 // (declared in psps; archived rows count — drain accounts
 // still receive provider events, #655) AND carry subscriptions projected to
-// keep billing (billable_subscriptions doctrine). RLS-scoped.
+// keep billing (billable_subscriptions doctrine). Merchant-scoped.
 func (q *Queries) ListWebhookExpectedRails(ctx context.Context, merchantID uuid.UUID) ([]ListWebhookExpectedRailsRow, error) {
 	rows, err := q.db.Query(ctx, listWebhookExpectedRails, merchantID)
 	if err != nil {
@@ -97,7 +97,7 @@ type RecordWebhookAcceptedParams struct {
 }
 
 // #786 webhook-health recording. All statements run merchant-scoped (MerchantTx
-// or a pinned merchant connection); INSERTs pass merchant_id for RLS WITH CHECK.
+// or a pinned merchant connection); INSERTs pass merchant_id explicitly.
 // Verified-accepted webhook: stamp the silence watermark. The lifetime tallies
 // this used to bump were dropped in or#823 — a monotonic total answers no
 // windowed question, which is what webhook_health_daily is for.

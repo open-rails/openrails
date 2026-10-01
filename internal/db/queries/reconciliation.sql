@@ -1,7 +1,7 @@
 -- #107 phase 2: reconciliation runs + findings persistence, the engine's
 -- merchant-scoped local-state reads, and the enforce appliers' idempotent local
 -- writes. merchant_id is stamped explicitly (multi-merchant writer pattern); all
--- statements run on a merchant-pinned connection so RLS double-checks the stamp.
+-- statements run on a merchant-pinned connection.
 
 -- ============================================================================
 -- Run lifecycle
@@ -121,14 +121,12 @@ SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
 
--- SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
+-- SEC-18: the merchant predicate is this query's only merchant scope. This is a
 -- merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
 -- below EXECUTES cancel/refund/revoke/grant against whatever the finding
--- names); before this it was `WHERE id = $1` and RLS was its ONLY control, so a
--- deployment connected as a superuser/BYPASSRLS role let merchant A's owner
--- address merchant B's finding. openrails.current_merchant_id() is the same
--- expression the merchant_isolation policy uses, so under the enforcing role
--- behaviour is unchanged; under a bypassing one the scope still holds.
+-- names); before this it was `WHERE id = $1`, which let merchant A's owner
+-- address merchant B's finding on any connection the since-removed RLS did
+-- not filter.
 -- name: GetReconciliationFinding :one
 SELECT * FROM openrails.reconciliation_findings
 WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
@@ -151,7 +149,7 @@ ORDER BY finding_type, subject_key;
 -- covering their provider "vanished on their own" (design decision 1).
 -- or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
 -- no merchant predicate at all — a long transaction on a big backlog, and a
--- cross-merchant write the moment it ran on a BYPASSRLS connection.
+-- cross-merchant write.
 -- name: AutoResolveVanishedReconciliationFindings :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'fixed',
@@ -237,8 +235,7 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id =
 -- The operator work list. Default view = OPEN findings only; an explicit
 -- status filter overrides it (e.g. status=ignored). Sort: severity desc
 -- (critical first) then age desc (oldest first). total_count rides every row
--- for pagination. merchant_id stamped explicitly (multi-merchant pattern);
--- RLS double-checks on merchant-pinned connections.
+-- for pagination. merchant_id stamped explicitly (multi-merchant pattern).
 -- name: AdminListReconciliationFindings :many
 SELECT sqlc.embed(f), count(*) OVER () AS total_count
 FROM openrails.reconciliation_findings f
@@ -895,8 +892,8 @@ CROSS JOIN (SELECT count(*) AS total,
               FROM openrails.orphaned_episodes
              WHERE merchant_id = sqlc.arg(merchant_id)::uuid) o;
 
--- #511 Phase E (Converge sweep worker): the privileged, no-GUC list of merchants
--- to sweep. merchants is a GLOBAL control-plane table (not RLS-scoped).
+-- #511 Phase E (Converge sweep worker): the no-GUC list of merchants
+-- to sweep. merchants is a GLOBAL control-plane table.
 -- name: ListActiveMerchantIDs :many
 SELECT id FROM openrails.merchants
 WHERE status = 'active' AND deleted_at IS NULL

@@ -136,7 +136,7 @@ type serviceBalanceResponse = openrails.CreditAccount
 
 // ServiceGetCreditsBalance returns the customer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
-// Merchant-bound by the API key (RLS); customer supplied via ?customer_id=.
+// Merchant-bound by the API key; customer supplied via ?customer_id=.
 func ServiceGetCreditsBalance(r *httprequest.Request) {
 	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
 	if !ok {

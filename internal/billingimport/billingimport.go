@@ -67,7 +67,7 @@ type Options struct {
 // ambiguous cohort is seeded `unknown` and resolved by the #665 decider against
 // the declared snapshot at AsOf — park-as-unknown and cancellation-last-resort
 // hold server-side by construction. Charges land idempotently by
-// (rail, transaction_id). Runs in a single merchant-scoped transaction (RLS):
+// (rail, transaction_id). Runs in a single merchant-scoped transaction:
 // infrastructure failures roll back the whole declared book, while per-source
 // business blocks remain ordinary committed outcomes for the other rows.
 func Import(ctx context.Context, opts Options) (Result, error) {

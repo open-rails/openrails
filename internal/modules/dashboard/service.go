@@ -22,7 +22,7 @@ type MetricsExecutor interface {
 }
 
 // Service persists per-merchant dashboards, drives NL widget generation and
-// the #756 metrics Q&A loop. All reads/writes ride the request's RLS-pinned
+// the #756 metrics Q&A loop. All reads/writes ride the request's pinned
 // merchant connection.
 type Service struct {
 	db         *db.DB

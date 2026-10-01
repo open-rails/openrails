@@ -119,10 +119,9 @@ WHERE merchant_id = $1 AND NOT archived
 ORDER BY rail
 `
 
-// Per-merchant list-view enrichment. Runs under a MerchantTx (RLS GUC pinned to
-// the merchant): psps + payments are merchant-isolated, so a
-// single cross-merchant JOIN is impossible under the openrails_app role — the
-// directory page loops cheap GUC-scoped index probes per row instead
+// Per-merchant list-view enrichment. Runs under a MerchantTx per directory
+// row: psps + payments are merchant-owned, so the directory page loops cheap
+// per-merchant index probes instead of one cross-merchant JOIN
 // (page-bounded).
 func (q *Queries) ListPlatformMerchantRailsArmed(ctx context.Context, merchantID uuid.UUID) ([]string, error) {
 	rows, err := q.db.Query(ctx, listPlatformMerchantRailsArmed, merchantID)
@@ -172,7 +171,7 @@ type ListPlatformMerchantsRow struct {
 }
 
 // Platform merchant directory (#721): cross-merchant operator reads over the
-// GLOBAL (non-RLS) openrails.merchants table, plus the directory-only
+// GLOBAL openrails.merchants table, plus the directory-only
 // soft-delete/restore tombstone. Soft delete here is DIRECTORY state (list
 // exclusion + merchant-auth resolution failure); it is NOT the #225 gated purge
 // (internal/merchants/delete.go), which stays the only row-destroying path.

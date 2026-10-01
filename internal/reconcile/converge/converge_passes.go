@@ -903,9 +903,9 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// admin/operator decision — so they are ADMIN, no Repair closure.
 	//
 	// consistency.reference.source_reference — an entitlement's polymorphic
-	// source_type/source_id pair resolves to no row (or, under the merchant GUC, a
+	// source_type/source_id pair resolves to no row (or to a
 	// row in the wrong merchant). EXCESS/MISMATCH → ADMIN. Customer-scope filters
-	// in code (the underlying audit queries are merchant-wide via RLS); merchant-
+	// in code (the underlying audit queries are merchant-wide); merchant-
 	// scope reports all. The remaining CON subtypes (duplicate.*, amount_mismatch.*)
 	// layer onto this same harness.
 	q := p.e.DB.Gen(ctx)

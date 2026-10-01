@@ -373,8 +373,8 @@ SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
 
 // CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
 // through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver
-// used to read the ROWS themselves off GenGlobal(); subscription_reprices FORCEs
-// RLS, so it enumerated nothing and never re-drove. A definer must not vend
+// used to read the ROWS themselves off GenGlobal(); under the since-removed
+// RLS it enumerated nothing and never re-drove. A definer must not vend
 // whole merchant rows, so it vends ids and the rows are read per-merchant.
 func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchantLimit int32) ([]*uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listRedrivablePlanChangeMerchants, merchantLimit)

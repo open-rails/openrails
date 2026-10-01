@@ -71,7 +71,7 @@ const (
 	DomainGrants        SourceDomain = "grants"
 )
 
-// Scope narrows a Converge pass. Merchant is required (RLS scope); Customer and
+// Scope narrows a Converge pass. Merchant is required; Customer and
 // Subscription narrow it for the cheap inline path. A merchant-only scope (both
 // nil) is the exhaustive sweep / post-pull pass.
 type Scope struct {
@@ -206,7 +206,7 @@ type ConvergeResult struct {
 //
 // Best-effort: convergence failures are returned for the caller to LOG, never to
 // fail the mutation that already succeeded — the sweep is the backstop. Must run
-// on the request's merchant-scoped connection (RLS), after the mutation committed.
+// on the request's merchant-scoped connection, after the mutation committed.
 func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID, customer uuid.UUID, clocks ...clockwork.Clock) (ConvergeResult, error) {
 	return NewConvergeEngine(database, clocks...).Converge(ctx, Scope{Merchant: merchantID, Customer: &customer})
 }
@@ -214,7 +214,7 @@ func AfterMutation(ctx context.Context, database *db.DB, merchantID merchant.ID,
 // Converge runs every plane pass for the scope (DERIVE → LIFE → CON), persists
 // + remediates each finding, then runs the post-repair NOTIFY stage (#789) on
 // the converged state. It must be called inside a merchant-scoped
-// connection (RunInMerchantConn) so RLS + the gen queries resolve to the merchant.
+// connection (RunInMerchantConn) so the gen queries resolve to the merchant.
 // When the scope is clean (no findings) it does no writes at all — the idempotent
 // no-op that keeps the inline hot path cheap.
 func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeResult, error) {

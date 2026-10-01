@@ -58,7 +58,7 @@ type PlanMigrationRedriveResult struct {
 // has one. batchSize bounds one pass (default 200).
 //
 // or#861: this used to read the ROWS deployment-wide off the base pool, which
-// is not a cross-merchant read path — subscription_reprices FORCEs RLS, so the
+// is not a cross-merchant read path — under the since-removed RLS the
 // list came back empty and the #816 re-driver has never re-driven anything.
 // The enumeration is now a SECURITY DEFINER work queue returning merchant IDS
 // (migration 0022), and every row read, every rail push and every batch-header

@@ -73,8 +73,8 @@ func compile(plan *Plan, merchantID uuid.UUID) ([]stmt, error) {
 	return stmts, nil
 }
 
-// merchantCols: explicit merchant predicate per family (defense in depth on top
-// of RLS, and it anchors the (merchant_id, time) indexes).
+// merchantCols: explicit merchant predicate per family (the merchant scope,
+// and it anchors the (merchant_id, time) indexes).
 var merchantCols = map[Family]string{
 	FamPayments:       "p.merchant_id",
 	FamSubsNew:        "s.merchant_id",

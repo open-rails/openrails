@@ -71,7 +71,7 @@ func (r *RunResult) PullProofs() PullProofs {
 //     sourced: no pull ever proves it (manual/bulk-import decision only).
 //   - The flag is a ratchet: proven domains flip true; nothing is unset.
 //
-// Callers run it merchant-scoped (RLS) after mirror writes were applied
+// Callers run it merchant-scoped after mirror writes were applied
 // (enforce insert+overwrite) — an advisory dry-run proves nothing about the
 // LOCAL mirror.
 func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, proofs PullProofs) ([]string, error) {

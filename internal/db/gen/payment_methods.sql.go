@@ -205,8 +205,8 @@ type CountPaymentMethodsSharingCustomerRefParams struct {
 }
 
 // #682 shared-vault guard: how many OTHER stored methods share this rail
-// customer-scope handle (e.g. an imported multi-card NMI vault). RLS scopes to
-// the merchant.
+// customer-scope handle (e.g. an imported multi-card NMI vault) within the
+// merchant.
 func (q *Queries) CountPaymentMethodsSharingCustomerRef(ctx context.Context, arg CountPaymentMethodsSharingCustomerRefParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countPaymentMethodsSharingCustomerRef,
 		arg.Rail,
@@ -417,7 +417,7 @@ type GetPaymentMethodByFingerprintParams struct {
 // #795: dedup lookup — an intent whose fingerprint matches a stored instrument
 // reuses that instrument instead of minting a duplicate. Scoped by CUSTODIAN,
 // not rail (or#879): the fingerprint is issued by whoever holds the card.
-// RLS scopes merchant.
+// merchant_id scopes merchant.
 func (q *Queries) GetPaymentMethodByFingerprint(ctx context.Context, arg GetPaymentMethodByFingerprintParams) (OpenrailsPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByFingerprint,
 		arg.MerchantID,
@@ -1334,7 +1334,7 @@ type ParkStripePaymentMethodByRefParams struct {
 }
 
 // A Stripe detach is irreversible provider truth. Preserve the local evidence,
-// but make the exact PSP-owned instrument unusable. RLS adds merchant scope.
+// but make the exact PSP-owned instrument unusable, within the merchant.
 func (q *Queries) ParkStripePaymentMethodByRef(ctx context.Context, arg ParkStripePaymentMethodByRefParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkStripePaymentMethodByRef,
 		arg.ParkReason,

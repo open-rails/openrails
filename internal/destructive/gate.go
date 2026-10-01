@@ -49,7 +49,7 @@ func New(database *db.DB) *Gate { return &Gate{DB: database} }
 
 // Check evaluates the policy for a merchant. ctx MUST already be
 // merchant-scoped (inside RunInMerchantConn / MerchantTx): the per-merchant
-// half is RLS-protected tenant data. Use CheckMerchant when you are not.
+// half is merchant-owned tenant data. Use CheckMerchant when you are not.
 func (g *Gate) Check(ctx context.Context, merchantID uuid.UUID) Verdict {
 	if g == nil || g.DB == nil {
 		return Verdict{Reason: "destructive gate not wired; refusing destructive actions (fail closed)"}

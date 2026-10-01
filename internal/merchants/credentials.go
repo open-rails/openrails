@@ -848,14 +848,11 @@ func AssertPSPUnowned(ctx context.Context, q *gen.Queries, merchantID uuid.UUID,
 //
 // #824: this is a genuinely cross-merchant read — inbound webhooks have no
 // merchant context yet, which is the whole point. It used to run
-// GetPSPByRailIdentity on the base pool under a comment claiming a "privileged,
-// non-RLS role"; no such role exists (one pool, one DSN), so under the
-// production openrails_app role psps' FORCE'd merchant_isolation policy made it
+// GetPSPByRailIdentity on the base pool, where the since-removed RLS made it
 // return zero rows and no error, and EVERY account-routed CCBill/Basis
 // Theory/Stripe-account webhook answered 404 "Unknown PSP". It now
 // goes through the explicit SECURITY DEFINER directory function (migration
-// 0016), which raises instead of returning empty when it cannot see across
-// merchants.
+// 0016).
 func (s *Service) ResolvePSPByIdentity(ctx context.Context, rail, environment, accountID string) (PSPIdentity, bool, error) {
 	if s == nil || s.pool == nil || strings.TrimSpace(accountID) == "" {
 		return PSPIdentity{}, false, nil
@@ -932,15 +929,13 @@ func (p LiveRailPresence) String() string {
 
 // ProbeLiveRailPSPs reports whether ANY merchant declares a PSP on rail with
 // environment=live. Deliberately cross-merchant: webhook ingestion has no
-// merchant yet. It walks the control-plane merchant directory (a global,
-// non-RLS table) and asks each merchant INSIDE ITS OWN RLS scope, so the answer
-// is the same whether or not the connected role enforces RLS.
+// merchant yet. It walks the control-plane merchant directory (a global
+// table) and asks each merchant INSIDE ITS OWN scope.
 //
-// SEC-19: the predecessor ran one no-GUC `EXISTS` on the base pool. psps FORCEs
-// RLS, so under the unprivileged app role — mandatory outside development — the
-// policy predicate is NULL and the query returns zero rows AND no error. The
-// probe therefore reported "no live accounts" everywhere it mattered, silently
-// disarming the guard built on it.
+// SEC-19: the predecessor ran one no-GUC `EXISTS` on the base pool, which the
+// since-removed RLS answered with zero rows AND no error. The probe therefore
+// reported "no live accounts" everywhere it mattered, silently disarming the
+// guard built on it.
 //
 // Cost is O(merchants) small transactions, so this is for gate decisions on a
 // cold path (the CCBill dev-allowlist gate), not per-event work.
@@ -984,7 +979,7 @@ func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailP
 
 // allMerchantIDs lists every merchant, INCLUDING soft-deleted ones — their psps
 // rows survive the tombstone and still make a deployment "live".
-// openrails.merchants is a global control-plane table (no RLS), so this read is
+// openrails.merchants is a global control-plane table, so this read is
 // legitimate on the base pool.
 func (s *Service) allMerchantIDs(ctx context.Context) ([]merchant.ID, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id FROM openrails.merchants ORDER BY id`)

@@ -56,16 +56,15 @@ type FleetSnapshot struct {
 }
 
 // FleetAnalytics returns cross-merchant operator aggregates (openrails-saas
-// #28) — the fleet view no per-merchant RLS scope can compute. It reaches
-// across merchants through migration 0022's SECURITY DEFINER aggregates, not a
-// privileged pool: the control plane shares the app's role and DSN, so a
-// base-pool read of these tables returns zero rows and no error (or#861). Like SearchMerchants (#226) this is a
-// sensitive cross-merchant read: the CALLER gates it behind platform-superadmin
-// authority and audits every request. exclude removes one merchant from every
-// aggregate (a hosted platform passes its own platform merchant); zero excludes
-// nothing. windowDays outside 1..365 falls back to 30. Calling without an
-// attached control plane is a wiring error (call Attach/AttachWithOptions
-// first).
+// #28) — the fleet view no per-merchant scope can compute. It reaches
+// across merchants through migration 0022's SECURITY DEFINER aggregates,
+// which return aggregates only, never merchant rows (or#861). Like
+// SearchMerchants (#226) this is a sensitive cross-merchant read: the CALLER
+// gates it behind platform-superadmin authority and audits every request.
+// exclude removes one merchant from every aggregate (a hosted platform passes
+// its own platform merchant); zero excludes nothing. windowDays outside 1..365
+// falls back to 30. Calling without an attached control plane is a wiring error
+// (call Attach/AttachWithOptions first).
 func FleetAnalytics(ctx context.Context, a *app.App, exclude merchant.ID, windowDays int) (*FleetSnapshot, error) {
 	cp := Get(a)
 	if cp == nil {

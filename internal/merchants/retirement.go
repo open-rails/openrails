@@ -77,7 +77,7 @@ type RetireResult struct {
 }
 
 // ListRetirementCandidates returns one page of candidates. Activity is probed
-// per merchant inside its own RLS scope.
+// per merchant inside its own scope.
 func (s *Service) ListRetirementCandidates(ctx context.Context, req RetirementCandidatesRequest, reservedSlugs []string) (RetirementCandidatePage, error) {
 	var page RetirementCandidatePage
 	if s == nil || s.pool == nil {

@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// AuditMerchantID is an arbitrary UUID for the app.merchant_id GUC. RLS
-// predicates plan on the shape of the setting, never on its value.
+// AuditMerchantID is an arbitrary UUID for the app.merchant_id GUC.
+// current_merchant_id() predicates plan on its shape, never on its value.
 const AuditMerchantID = "00000000-0000-0000-0000-0000000a1d17"
 
 // planNode is the subset of EXPLAIN FORMAT JSON the rules read.
@@ -39,8 +39,8 @@ func (n planNode) walk(fn func(planNode)) {
 }
 
 // PrepareSession puts the connection in the state production actually runs in:
-// the unprivileged openrails_app role with the merchant GUC set, so RLS
-// predicates appear in the plan.
+// the unprivileged openrails_app role with the merchant GUC set, so
+// current_merchant_id() predicates plan as they run.
 //
 // This probes index availability, not production plan cost. Empty-table row
 // width estimates can favor a sequential EXISTS scan despite a usable index.

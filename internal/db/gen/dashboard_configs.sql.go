@@ -21,7 +21,7 @@ LIMIT 1
 `
 
 // openrails.dashboard_configs — #741 per-merchant dashboard widget layout.
-// RLS (app.merchant_id GUC) scopes every statement to the request's merchant.
+// An explicit merchant_id scopes every statement to the request's merchant.
 func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) (OpenrailsDashboardConfig, error) {
 	row := q.db.QueryRow(ctx, getDashboardConfig, merchantID)
 	var i OpenrailsDashboardConfig

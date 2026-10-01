@@ -15,7 +15,7 @@ import (
 // convergeCustomerInline runs the #511 Convergence Engine for one customer inline,
 // right after a worker mutated that customer's state — the per-mutation companion
 // to the 15-min ConvergeSweepWorker (Phase E). It establishes the merchant-scoped
-// RLS connection, runs the idempotent Converge(customer) pass (DERIVE → LIFE →
+// connection, runs the idempotent Converge(customer) pass (DERIVE → LIFE →
 // CON), and is BEST-EFFORT: a convergence error is only LOGGED, never returned, so
 // it can never fail the mutation that already committed (the sweep is the backstop).
 // A clean customer scope does zero writes, so the inline call is cheap.

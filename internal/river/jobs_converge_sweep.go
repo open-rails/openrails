@@ -35,10 +35,10 @@ func (ConvergeSweepArgs) Kind() string { return KindConvergeSweep }
 // interval. Clean merchants cost a no-op (Converge does zero writes when nothing
 // drifted), so the sweep is cheap to run often.
 //
-// Cross-merchant by design: the merchant directory is read on a privileged no-GUC
-// connection (merchants is a control-plane table, not RLS-scoped), then each
+// Cross-merchant by design: the merchant directory is read on a no-GUC
+// connection (merchants is a global control-plane table), then each
 // merchant's Converge runs inside its own RunInMerchantConn so all detection and
-// repair is RLS-scoped to that merchant. One merchant's failure is logged and
+// repair is scoped to that merchant. One merchant's failure is logged and
 // skipped — it must never abort the sweep for the rest.
 type ConvergeSweepWorker struct {
 	river.WorkerDefaults[ConvergeSweepArgs]
@@ -77,7 +77,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	}
 	logger := log.WithContext(ctx).WithField("worker", KindConvergeSweep)
 
-	// openrails.merchants is the policy-free directory, so the base pool
+	// openrails.merchants is the global directory, so the base pool
 	// genuinely answers this; the per-merchant work below runs inside
 	// RunInMerchantConn. Not a privilege — there is no privileged pool (or#868).
 	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)

@@ -166,10 +166,9 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 		return out, err
 	}
 
-	// Pinned explicitly. A policied read on an UNPINNED handle matches
-	// `merchant_id = NULL` and returns zero rows with no error, so an
-	// unscoped work-list read is a pass that reports success and evaluates
-	// nothing (or#861/or#877). Reentrant, so the worker's outer scope stands.
+	// Pinned explicitly (or#861/or#877: under the since-removed RLS an unpinned
+	// work-list read evaluated nothing and reported success). Reentrant, so the
+	// worker's outer scope stands.
 	var overdue []gen.ListOverdueInvoiceAggregatesRow
 	var parked []gen.OpenrailsCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {

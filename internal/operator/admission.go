@@ -112,7 +112,7 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 // SubjectHasVaultedPaymentMethod reports whether subjectUserID has an
 // un-parked vaulted payment method on file with vaultMerchant (for a hosted
 // product: its PLATFORM merchant — the book that treats hosted merchants'
-// owners as customers). Runs under MerchantTx so RLS answers truthfully.
+// owners as customers). Runs under MerchantTx for vaultMerchant.
 func SubjectHasVaultedPaymentMethod(ctx context.Context, a *app.App, vaultMerchant merchant.ID, subjectUserID string) (bool, error) {
 	cp := Get(a)
 	if cp == nil || cp.Pool() == nil {

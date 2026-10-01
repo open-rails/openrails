@@ -413,9 +413,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- created_at is the burst gauge. Counts by CREATION (created_at), not execution:
 -- the ceiling stops the burst at the producer chokepoint, before the write-ahead
 -- intent is even created. Both readers are migration 0021/0028 SECURITY DEFINER
--- functions — NOT the base pool. The base pool is not privileged: it is the same
--- openrails_app role, so a GUC-less count is not "everything", it is EMPTY
--- (or#824/or#860).
+-- functions that take their scope as an argument (or#824/or#860).
 
 -- Destructive user/admin intents THIS actor created in the rolling window.
 -- Deliberately CROSS-MERCHANT and unchanged by or#866: one stolen credential

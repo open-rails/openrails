@@ -42,9 +42,8 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
-	// Run inside a merchant-scoped transaction so the migration-050 RLS policies
-	// constrain every entitlement query to the request's merchant (db.MerchantTx
-	// sets the app.merchant_id GUC from the context as the first statement). This is
+	// Run inside a merchant-scoped transaction (db.MerchantTx sets the
+	// app.merchant_id GUC from the context as the first statement). This is
 	// the shared chokepoint for merchant-owned entitlement writes/reads.
 	return s.db.MerchantTx(ctx, fn)
 }
@@ -218,7 +217,7 @@ func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, te
 // ListActiveRecordsByExternalSubjects (#354/#539/#555): one query, grouped by the
 // caller-supplied subject; subjects with no active rows are absent from the map.
 // Customer identity is (merchant, stable host/AuthKit subject) — the merchant is
-// pinned from the request credential (RLS), so no issuer is needed.
+// pinned from the request credential, so no issuer is needed.
 func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Context, subjects []string, at time.Time) (map[string][]models.Entitlement, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -328,7 +327,7 @@ const CustomersWithEntitlementMaxPageSize = 10000
 // keyset-paginated by customer_id (afterID exclusive; uuid.Nil starts). Backs the
 // host directory's filter-by-entitlement (AuthKit's EntitlementFilterProvider).
 // limit <= 0 defaults to 1000; it is capped at CustomersWithEntitlementMaxPageSize.
-// The query is merchant-scoped by RLS (the merchant is pinned from the request).
+// The query is scoped to the request's merchant.
 func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int) ([]uuid.UUID, error) {
 	if strings.TrimSpace(entitlement) == "" {
 		return nil, fmt.Errorf("entitlement is required")

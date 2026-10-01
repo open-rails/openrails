@@ -109,7 +109,7 @@ type GetLatestCustomerEmailParams struct {
 
 // Customers do not own an email column. Project the latest non-empty email from
 // all subscription history so an inactive customer remains identifiable on the
-// detail page. The explicit merchant predicate protects BYPASSRLS connections.
+// detail page. The explicit merchant predicate is the merchant scope.
 func (q *Queries) GetLatestCustomerEmail(ctx context.Context, arg GetLatestCustomerEmailParams) (string, error) {
 	row := q.db.QueryRow(ctx, getLatestCustomerEmail, arg.CustomerID, arg.MerchantID)
 	var email string
@@ -135,7 +135,7 @@ type ListMerchantsForCustomerSubjectRow struct {
 }
 
 // #824: the hosted portal's "which merchants am I a customer of" directory
-// (openrails-saas #18). openrails.merchants is global/policy-free, so only the
+// (openrails-saas #18). openrails.merchants is global, so only the
 // customers half needs the SECURITY DEFINER cross-merchant reader (0016).
 func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject uuid.UUID) ([]ListMerchantsForCustomerSubjectRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
@@ -195,9 +195,7 @@ type SearchCustomersRow struct {
 }
 
 // Merchant-scoped customer list/search (#740). merchant_id is an EXPLICIT
-// predicate (defense-in-depth doctrine, #227): RLS still pins the merchant on
-// enforcing roles, but a BYPASSRLS role (development's owner connection) must
-// never see another merchant's customers. q matches the subject UUID
+// predicate (#227), the list's only merchant scope. q matches the subject UUID
 // prefix or a subscription email substring; empty q lists
 // newest-touched first. email is the latest subscription email on file
 // (customers carry none themselves).

@@ -72,9 +72,9 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 	// new work. Archived accounts keep their existing webhook secrets/routes for
 	// draining, but this worker does not mutate retired Stripe accounts.
 	//
-	// or#877 B6: this list used to be one base-pool query joining the
-	// RLS-EXEMPT openrails.merchants to the RLS-FORCED openrails.psps. The psps
-	// side matched `merchant_id = NULL`, so `targets` was always empty and this
+	// or#877 B6: this list used to be one base-pool query joining
+	// openrails.merchants to openrails.psps. Under the since-removed RLS the psps
+	// side matched nothing, so `targets` was always empty and this
 	// worker returned success having listed, created, patched and retired
 	// nothing — the ONE worker whose entire purpose is that Stripe can always
 	// reach us never registered an endpoint, and #856's zero-gap rollover was
@@ -110,8 +110,8 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 			after = mid
 			merchantID := merchant.ID(*mid)
 			progress.Mark(ctx, "stripe webhook reconcile merchant "+merchantID.String())
-			// The directory carries the slug (openrails.merchants is policy-free);
-			// the PSP rows are the merchant's own and are read under its GUC.
+			// The directory carries the slug (openrails.merchants is global);
+			// the PSP rows are the merchant's own and are read in its scope.
 			row, err := w.DB.GenDirectory().GetPlatformMerchant(ctx, merchantID.UUID())
 			if err != nil {
 				sweepErr = preferSweepError(sweepErr, fmt.Errorf("stripe webhook merchant %s directory: %w", merchantID, err))

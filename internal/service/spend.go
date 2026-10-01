@@ -44,10 +44,10 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	// Pin a merchant-scoped connection so the balance/settings reads set the RLS GUC
-	// and are merchant-scoped under the openrails_app role (#227). RunInMerchantConn
-	// reuses the request's already-pinned connection when the HTTP middleware set
-	// one, so this is safe whether called from a request or directly.
+	// Pin a merchant-scoped connection so the balance/settings reads share one
+	// merchant session (#227). RunInMerchantConn reuses the request's
+	// already-pinned connection when the HTTP middleware set one, so this is
+	// safe whether called from a request or directly.
 	var snap *CreditAccountSnapshot
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
@@ -90,8 +90,8 @@ type UsageRow struct {
 
 // GetUsage rolls up an payer's usage events over [from, to) grouped by
 // event_type with summed dimensions (issue #289). Like GetCreditAccount it pins
-// a merchant-scoped connection so the rollup query runs RLS-scoped under the
-// openrails_app role (#227); RunInMerchantConn reuses the request's already-pinned
+// a merchant-scoped connection so the rollup query runs on the merchant's
+// session (#227); RunInMerchantConn reuses the request's already-pinned
 // connection when one is set.
 func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRow, error) {
 	currency, err := requireCurrency(currency)
@@ -223,10 +223,10 @@ func invoicePaymentAttemptToDTO(attempt models.InvoicePaymentAttempt) InvoicePay
 }
 
 // ListInvoices lists an payer's finalized invoices, newest period first,
-// paginated (issue #303). Like GetUsage it pins a merchant-scoped connection so the
-// read runs RLS-scoped under the openrails_app role (#227); RunInMerchantConn
-// reuses the request's already-pinned connection when one is set. Returns the
-// page of public DTOs plus the total count for pagination.
+// paginated (issue #303). Like GetUsage it pins a merchant-scoped connection so
+// the read runs on the merchant's session (#227); RunInMerchantConn reuses the
+// request's already-pinned connection when one is set. Returns the page of
+// public DTOs plus the total count for pagination.
 func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, limit, offset int) ([]InvoiceDTO, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
@@ -251,9 +251,9 @@ func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, l
 	return out, total, nil
 }
 
-// GetInvoice returns one finalized invoice (with its line items) for an payer by
-// id (issue #303). RLS-scoped like ListInvoices; an invoice belonging to another
-// payer/merchant is unreachable (fail closed). Returns a public DTO.
+// GetInvoice returns one finalized invoice (with its line items) for an payer
+// by id (issue #303). Merchant-scoped like ListInvoices; an invoice belonging
+// to another payer/merchant is unreachable (fail closed). Returns a public DTO.
 func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*InvoiceDTO, error) {
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
@@ -357,7 +357,7 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	if err != nil {
 		return err
 	}
-	// Pin a merchant connection so the upsert sets the RLS GUC under openrails_app (#227).
+	// Pin a merchant connection for the upsert (#227).
 	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
 		return err
@@ -409,7 +409,7 @@ func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID,
 
 // GetCreditAccountSettings returns a payer's stored account settings
 // (billing mode, credit limit and collection method) for the
-// customer billing-account admin surface (issue #242). RLS-scoped.
+// customer billing-account admin surface (issue #242). Merchant-scoped.
 func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -428,7 +428,7 @@ func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.C
 }
 
 // GetCustomerCreditTransactions lists a merchant subject's money transactions for
-// the billing-account admin surface (issue #242). RLS-scoped.
+// the billing-account admin surface (issue #242). Merchant-scoped.
 func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
