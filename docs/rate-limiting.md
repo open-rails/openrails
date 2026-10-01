@@ -101,8 +101,9 @@ creation and confirmation (browser routes and the embedded or remote Client)
 check it before any provider call and answer `429` `card_attempts_blocked`
 with `Retry-After`:
 
-- per customer and per client address (an IPv6 client is its /64): 6 declines
-  in 15 minutes block for the window; 10 in 24 hours block for the day;
+- per customer and per client address (an IPv6 client is its /64; through the
+  Client, the `customer.client_ip` the host supplies): 6 declines in 15
+  minutes block for the window; 10 in 24 hours block for the day;
 - per merchant: 100 declines in the last 24 hours from at least 25 customers
   and 25 addresses is attack mode, where any subject with a decline in the
   last 15 minutes is blocked. Customers with no recent decline are never
