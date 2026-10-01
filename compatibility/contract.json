@@ -1499,6 +1499,7 @@
     "internal/integrations/nmi": [
       "func (c *V5Cursor) UnmarshalJSON(raw []byte) error {\n\ttrimmed := strings.TrimSpace(string(raw))\n\tif trimmed == \"null\" || trimmed == `\"\"` {\n\t\t*c = \"\"\n\t\treturn nil\n\t}\n\tvar s string\n\tif err := json.Unmarshal(raw, \u0026s); err == nil {\n\t\t*c = V5Cursor(s)\n\t\treturn nil\n\t}\n\tvar n json.Number\n\tif err := json.Unmarshal(raw, \u0026n); err != nil {\n\t\treturn fmt.Errorf(\"unrecognized cursor %s\", trimmed)\n\t}\n\t*c = V5Cursor(n.String())\n\treturn nil\n}",
       "type CustomerPage struct {\n\tCustomers  []V5Customer `json:\"customers\"`\n\tNextCursor V5Cursor     `json:\"next_cursor\"`\n\tHasMore    bool         `json:\"has_more\"`\n}",
+      "type CycleTransaction struct {\n\tTransactionID string    `json:\"transaction_id\"`\n\tAction        string    `json:\"action\"`\n\tApproved      bool      `json:\"approved\"`\n\tReversed      bool      `json:\"reversed\"`\n\tCondition     string    `json:\"condition\"`\n\tAt            time.Time `json:\"at,omitzero\"`\n}",
       "type EnrollmentEvidence struct {\n\tVaultBillingID string         `json:\"vault_billing_id,omitempty\"`\n\tSubscription   V5Subscription `json:\"subscription\"`\n\tOrderReference string         `json:\"order_reference\"`\n\tPONumber       string         `json:\"po_number\"`\n\tNextChargeDate string         `json:\"next_charge_date\"`\n}",
       "type PlanPage struct {\n\tPlans      []V5Plan `json:\"plans\"`\n\tNextCursor V5Cursor `json:\"next_cursor\"`\n\tHasMore    bool     `json:\"has_more\"`\n}",
       "type SaleEvidence struct {\n\tVaultBillingID  string          `json:\"vault_billing_id,omitempty\"`\n\tTransactionID   string          `json:\"transaction_id\"`\n\tOrderReference  string          `json:\"order_reference\"`\n\tCustomerVaultID string          `json:\"customer_vault_id\"`\n\tAmount          moneyutil.Cents `json:\"amount,string\"`\n\tCurrency        string          `json:\"currency\"`\n\tApproved        bool            `json:\"approved\"`\n}",
@@ -3116,6 +3117,15 @@
       "strings": "strings",
       "url": "net/url",
       "xml": "encoding/xml"
+    },
+    "internal/integrations/nmi/liveness.go": {
+      "context": "context",
+      "decline": "github.com/open-rails/openrails/internal/billing/decline",
+      "errors": "errors",
+      "fmt": "fmt",
+      "strconv": "strconv",
+      "strings": "strings",
+      "time": "time"
     },
     "internal/integrations/nmi/receipts.go": {
       "big": "math/big",
@@ -5841,6 +5851,7 @@
     "internal/migrate/postgres/0034_fleet_rail_health_attempts.up.sql": "482d6117074f37d1a5dbbdb10c549472e4da30e3acc5f670e49bef162ebb8959",
     "internal/migrate/postgres/0035_attempt_retention.up.sql": "47ac9f4c12993b4e628cc28085bd123a6e17dd01f9030c5e299c753f947e2dab",
     "internal/migrate/postgres/0036_nmi_history.up.sql": "ac3d96ec6d47811363ccc480f369a3421bb6481c8dd9fdbbdaf1994b21b426e2",
+    "internal/migrate/postgres/0037_rebill_nmi_attempted.up.sql": "ffb1ed611cc4f7dd28ddb7a01a76d06b55f92a91656ee130122861c64c9eeb2c",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "797f34742e003f6a96bf6c3ef08df83a47cd607da220d544296e39a1d39d35ad",

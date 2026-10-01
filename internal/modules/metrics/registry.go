@@ -163,7 +163,7 @@ var Dimensions = []Dimension{
 	{Name: "first_outcome", Description: "a rebill cycle's first outcome: approved | declined | error | missed | pending (nothing yet)", Values: []string{"approved", "declined", "error", "missed", "pending"}},
 	{Name: "first_failure_category", Description: "the category of a cycle's failed first attempt (empty otherwise)"},
 	{Name: "first_failure_reason", Description: "the decline reason of a cycle's failed first attempt (empty otherwise)"},
-	{Name: "miss_reason", Description: "why a cycle's rebill never happened (empty when it did)", Values: []string{"", "held", "refused", "method_unusable", "not_attempted", "provider_skipped", "provider_stalled", "schedule_gone"}},
+	{Name: "miss_reason", Description: "why a cycle's rebill never happened (empty when it did)", Values: []string{"", "held", "refused", "method_unusable", "not_attempted", "provider_skipped", "provider_stalled", "provider_reversed", "provider_unrecorded", "schedule_gone"}},
 	{Name: "recovered_by", Description: "what collected a cycle whose first outcome failed: dunning_retry | customer_retry | updated_card | late_provider_charge (empty otherwise)", Values: []string{"", "dunning_retry", "customer_retry", "updated_card", "late_provider_charge"}},
 	{Name: "recovery_attempt", Description: "the attempt that collected a failed cycle, counting the first: 1 (a missed cycle's first attempt) | 2 | 3 | 4 | 5+ (empty otherwise)", Values: []string{"", "1", "2", "3", "4", "5+"}},
 	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},

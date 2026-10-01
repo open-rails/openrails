@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/nmimock"
 )
 
 type rebillWatchPass struct{}
@@ -185,6 +186,65 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 		w.runRenewals()
 		require.Zero(t, len(w.nmi.Attempts()), "NMI's schedule must show the next period when OpenRails charges")
 	})
+}
+
+// NMI attempted the cycle and its webhook never came, but left no charge to
+// record: the merchant voided it, NMI charged days before the schedule's date,
+// or the merchant charged the card from NMI's dashboard. The watch records the
+// miss with what NMI holds and OpenRails never charges the period (#1113).
+func TestNMIAttemptedRebillIsNeverCollected(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		reason string
+		nmi    func(l *legacy, due time.Time)
+	}{
+		"voided": {"provider_reversed", func(l *legacy, _ time.Time) { l.w.nmi.Void(l.w.nmi.RenewSchedule(l.railSub, true).TransactionID) }},
+		"early": {"provider_unrecorded", func(l *legacy, due time.Time) {
+			l.w.nmi.EditSchedule(l.railSub, func(s *nmimock.Schedule) { s.NextBilling = due.Add(-3 * day) })
+			l.w.nmi.RenewSchedule(l.railSub, true)
+		}},
+		"dashboard": {"provider_unrecorded", func(l *legacy, due time.Time) {
+			l.w.nmi.SkipSchedule(l.railSub)
+			l.w.nmi.AddSale(nmimock.Sale{Vault: l.railCust, OrderID: "dashboard", Amount: "9.99", At: due.Add(time.Hour)})
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			if tc.reason == "provider_unrecorded" {
+				w.waive("recorded", "NMI's charge is left to the operator's review, unrecorded by design")
+			}
+			l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
+			w.converge()
+			due := l.periodEnd()
+			tc.nmi(l, due)
+			w.advance(due.Sub(w.clock.Now()) + 25*time.Hour)
+			w.watchRebills()
+			w.runRenewals()
+			require.Equal(t, tc.reason, w.missReason(l.sub, due))
+			require.Zero(t, len(w.nmi.Attempts()), "OpenRails never charges a period NMI attempted")
+			require.NotEqual(t, "past_due", w.subscription(embedded, l.sub).Status)
+			findings := w.openFindings("life.rebill.missed")
+			require.Len(t, findings, 1)
+			var evidence struct {
+				Collected bool `json:"collected"`
+				Held      []struct {
+					TransactionID string `json:"transaction_id"`
+				} `json:"nmi_transactions"`
+			}
+			var raw []byte
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT evidence FROM openrails.reconciliation_findings WHERE finding_type = 'life.rebill.missed' AND subject_key = $1`), findings[0]).Scan(&raw))
+			require.NoError(t, json.Unmarshal(raw, &evidence))
+			require.False(t, evidence.Collected)
+			require.Len(t, evidence.Held, 1)
+			require.NotEmpty(t, evidence.Held[0].TransactionID)
+
+			w.watchRebills()
+			w.runRenewals()
+			require.Zero(t, len(w.nmi.Attempts()))
+			require.Len(t, w.openFindings("life.rebill.missed"), 1, "one finding per cycle")
+		})
+	}
 }
 
 // NMI charged and its webhook never came: the watch finds the charge through

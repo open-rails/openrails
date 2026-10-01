@@ -115,6 +115,7 @@ var providerWriteSurface = map[string]string{
 	"ReadOrderAttempts":            "read",
 	"ReadOrderAttemptsSince":       "read",
 	"ReadVaultTransactions":        "read",
+	"ReadCycleTransactions":        "read",
 	"ProbeTestMode":                "read",
 	"SearchTransactions":           "read",
 	"TransactionReport":            "read",
