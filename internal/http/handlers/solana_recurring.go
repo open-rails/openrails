@@ -260,7 +260,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		return nil, http.StatusBadRequest, "target price is not configured for Solana recurring billing"
 	}
 
-	// Load OLD + NEW products to decide direction and enforce the tier group.
+	// Load OLD + NEW products: SolanaTierChange decides the change.
 	oldPrice, err := r.State.PriceService.GetByID(r.Request.Context(), oldSub.PriceID)
 	if err != nil || oldPrice == nil {
 		return nil, http.StatusInternalServerError, "current price not found"
@@ -273,22 +273,15 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if err != nil || oldProduct == nil {
 		return nil, http.StatusInternalServerError, "current product not found"
 	}
-	if oldProduct.ID == newProduct.ID {
-		return nil, http.StatusBadRequest, "already subscribed to this product"
+	isUpgrade, err := checkout.SolanaTierChange(oldSub, oldProduct, newProduct, oldPrice, newPrice)
+	if err != nil {
+		status := http.StatusBadRequest
+		var tierErr *checkout.TierChangeError
+		if errors.As(err, &tierErr) {
+			status = tierErr.HTTPStatus
+		}
+		return nil, status, err.Error()
 	}
-	if oldProduct.TierGroup != nil && newProduct.TierGroup != nil &&
-		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
-		return nil, http.StatusBadRequest, "tier change must stay within the same tier group"
-	}
-	// #820: same FX refusal as CheckoutService.TierChange — never prorate across
-	// a currency boundary.
-	if err := checkout.RequireSameCurrency(checkout.PriceAmountOf(oldPrice), checkout.PriceAmountOf(newPrice)); err != nil {
-		return nil, http.StatusBadRequest, err.Error()
-	}
-
-	// Direction: higher TierRank => upgrade (charge prorated now), lower =>
-	// downgrade (deferred, no charge) — same rule as CheckoutService.TierChange.
-	isUpgrade := newProduct.TierRank >= oldProduct.TierRank
 
 	out := &resolvedTierChange{
 		oldSub:    oldSub,

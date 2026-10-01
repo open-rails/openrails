@@ -123,6 +123,9 @@ type world struct {
 	cfg    func(*config.Config)
 	// declare adjusts the merchant's provider declaration before start.
 	declare func(map[string]embed.PSPConfig)
+	// selfService mounts the full customer self-service API (tier changes
+	// included) instead of billing management.
+	selfService bool
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
@@ -249,9 +252,13 @@ func (w *world) start() {
 		w.declare(psps)
 	}
 	w.psps = psps
+	scope := embed.CustomerBillingManagement
+	if w.selfService {
+		scope = embed.CustomerSelfService
+	}
 	rt, err := embed.New(t.Context(), embed.Options{
 		Auth:            identity,
-		HTTP:            &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: embed.CustomerBillingManagement}}},
+		HTTP:            &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}},
 		Merchant:        &embed.MerchantDeclaration{Slug: w.slug, Config: embed.MerchantConfig{DisplayName: w.slug, PSPs: psps}},
 		Config:          cfg,
 		PGXPool:         pool,
