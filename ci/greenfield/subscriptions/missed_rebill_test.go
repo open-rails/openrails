@@ -211,6 +211,9 @@ func TestNMIAttemptedRebillIsNeverCollected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
+			if tc.reason == "provider_unrecorded" {
+				w.waive("recorded", "NMI's charge is left to the operator's review, unrecorded by design")
+			}
 			l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
 			w.converge()
 			due := l.periodEnd()
