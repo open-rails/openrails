@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/open-rails/authkit/keys"
+
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 
 	"github.com/open-rails/openrails/internal/merchants"
@@ -104,8 +106,10 @@ func validateManifestRemoteApplication(merchantSlug string, app *RemoteApplicati
 	if jwks := strings.TrimSpace(app.JWKSURI); jwks != "" && !validHTTPURL(jwks) {
 		return fmt.Errorf("merchant %q remote_application.jwks_uri must be an http or https URL", merchantSlug)
 	}
-	if _, err := remoteApplicationStaticPublicKeys(app); err != nil {
-		return fmt.Errorf("merchant %q remote_application.jwks: %w", merchantSlug, err)
+	for _, jwk := range app.JWKS.Keys {
+		if _, err := keys.ParsePublicJWK(jwk.authkitJWK()); err != nil {
+			return fmt.Errorf("merchant %q remote_application.jwks: key %q: %w", merchantSlug, jwk.Kid, err)
+		}
 	}
 	return nil
 }

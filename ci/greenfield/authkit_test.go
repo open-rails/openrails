@@ -9,10 +9,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -104,9 +102,9 @@ func newAccount(t *testing.T, cp *controlplane.ControlPlane) authtest.User {
 }
 
 // A merchant's own AuthKit deployment signs for it (#259): OpenRails trusts
-// the issuer the merchant manifest registers under the merchant's group, for
-// delegated tokens, its own tokens and service JWTs, within the authority of
-// its role there. Nothing else it claims counts.
+// the issuer the merchant manifest registers, with a static JWK, under the
+// merchant's group, for delegated tokens, its own tokens and service JWTs,
+// within the authority of its role there. Nothing else it claims counts.
 func TestMerchantIssuerIsTrustedWithinItsGroup(t *testing.T) {
 	f := newFixture(t)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -122,22 +120,19 @@ func TestMerchantIssuerIsTrustedWithinItsGroup(t *testing.T) {
 
 	var rt *embed.Runtime
 	cp := f.attachControlPlane(t, func(r *embed.Runtime) controlplane.Options { rt = r; return controlplane.Options{} })
-	der, err := x509.MarshalPKIXPublicKey(signer.Public())
-	require.NoError(t, err)
+	jwk := keys.PublicJWK(signer.Public(), signer.KID(), "")
 	shop := uniqueName("federated")
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
-	pemKey := strings.ReplaceAll(strings.TrimSpace(string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))), "\n", "\n            ")
 	require.NoError(t, os.WriteFile(manifest, []byte(fmt.Sprintf(`version: 1
 merchants:
   %s:
     display_name: Federated
     remote_application:
       issuer: %s
-      public_keys:
-        - kid: merchant-key
-          public_key_pem: |
-            %s
-`, shop, issuer, pemKey)), 0o600))
+      jwks:
+        keys:
+          - {kty: "%s", kid: "%s", n: "%s", e: "%s"}
+`, shop, issuer, jwk.Kty, jwk.Kid, jwk.N, jwk.E)), 0o600))
 	graph := app.HostGraph(rt)
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, ""))
 	mid, _, err := cp.ResolveMerchantForGroup(t.Context(), shop)

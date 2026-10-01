@@ -74,17 +74,16 @@ func TestPostureIsCodeOnlyOptIn(t *testing.T) {
 	require.True(t, login.passwordlessLogin && !login.passwordlessAutoRegistration)
 }
 
-// The JSON API sits at /auth/v1 beneath an origin issuer, else at the
-// issuer's path, which is AuthKit's base path, plus /v1.
+// AuthKit's routes sit beneath /auth under an origin issuer, else beneath
+// the issuer's path, which is AuthKit's base path.
 func TestAuthAPIPath(t *testing.T) {
 	for issuer, want := range map[string][2]string{
-		"https://openrails.example":       {"/auth", "/auth/v1"},
-		"https://openrails.example/":      {"/auth", "/auth/v1"},
-		"https://api.example/auth":        {"/", "/auth/v1"},
-		"https://api.example/identity/v2": {"/", "/identity/v2/v1"},
+		"https://openrails.example":       {"/auth", "/auth"},
+		"https://openrails.example/":      {"/auth", "/auth"},
+		"https://api.example/auth":        {"/", "/auth"},
+		"https://api.example/identity/v2": {"/", "/identity/v2"},
 	} {
-		cp := &ControlPlane{authPrefix: authPrefix(issuer)}
-		require.Equal(t, want, [2]string{authAPIPath(issuer), cp.AuthAPIBase()}, issuer)
+		require.Equal(t, want, [2]string{authAPIPath(issuer), authPrefix(issuer)}, issuer)
 	}
 }
 
@@ -179,6 +178,7 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 		require.Nil(t, cp.UserAuthenticator())
 		require.Nil(t, cp.AuthHandler())
 		require.Empty(t, cp.AuthRoutes())
+		require.Empty(t, cp.AuthAPIBase())
 		_, err := cp.ResolveAPIKey(ctx, APIKeyPrefix+"_st_key_secret")
 		require.ErrorIs(t, err, ErrNoControlPlane)
 		_, err = cp.ResolveServiceJWT(ctx, "a.b.c")

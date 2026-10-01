@@ -149,20 +149,15 @@ func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant
 		return nil, err
 	}
 	var out []MerchantTeamInvite
-	page := iam.PageRequest{Limit: iam.MaxPageLimit}
-	for {
-		batch, err := c.client.ListInvitations(ctx, group, page)
+	for inv, err := range iam.All(func(p iam.PageRequest) (iam.ListPage[iam.Invitation], error) {
+		return c.client.ListInvitations(ctx, group, p)
+	}) {
 		if err != nil {
 			return nil, err
 		}
-		for _, inv := range batch.Items {
-			out = append(out, teamInvite(inv))
-		}
-		if batch.Next == "" {
-			return out, nil
-		}
-		page.Cursor = batch.Next
+		out = append(out, teamInvite(inv))
 	}
+	return out, nil
 }
 
 func teamInvite(inv iam.Invitation) MerchantTeamInvite {
@@ -244,34 +239,29 @@ func (c *ControlPlane) teamMember(ctx context.Context, mid merchant.ID, targetUs
 // team is the merchant group's users keyed by id, display fields hydrated.
 func (c *ControlPlane) team(ctx context.Context, group iam.GroupRef) (map[string]MerchantTeamMember, error) {
 	out := map[string]MerchantTeamMember{}
-	q := iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, Page: iam.PageRequest{Limit: min(iam.MaxPageLimit, iam.MaxBatch)}}
-	for {
-		batch, err := c.client.ListGroupMembers(ctx, group, q)
+	var ids []string
+	for m, err := range iam.All(func(p iam.PageRequest) (iam.ListPage[iam.GroupMember], error) {
+		return c.client.ListGroupMembers(ctx, group, iam.MemberQuery{Kinds: []iam.SubjectKind{iam.SubjectKindUser}, Page: p})
+	}) {
 		if err != nil {
 			return nil, err
 		}
-		ids := make([]string, len(batch.Items))
-		for i, m := range batch.Items {
-			ids[i] = m.Subject.ID
-		}
-		// The staff roster shows teammates' contact details: the privileged
-		// user view, not the public one members carry.
-		users, err := c.client.Users(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range batch.Items {
-			member := MerchantTeamMember{UserID: m.Subject.ID, Role: m.Role.Name()}
-			if u, ok := users[m.Subject.ID]; ok {
-				member.Email, member.Username = text(u.Email), u.Username
-			}
-			out[m.Subject.ID] = member
-		}
-		if batch.Next == "" {
-			return out, nil
-		}
-		q.Page.Cursor = batch.Next
+		out[m.Subject.ID] = MerchantTeamMember{UserID: m.Subject.ID, Role: m.Role.Name()}
+		ids = append(ids, m.Subject.ID)
 	}
+	// The staff roster shows teammates' contact details: the privileged user
+	// view, not the public one members carry.
+	users, err := c.client.Users(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for id, u := range users {
+		if member, ok := out[id]; ok {
+			member.Email, member.Username = text(u.Email), u.Username
+			out[id] = member
+		}
+	}
+	return out, nil
 }
 
 // lastOwner maps AuthKit's last-owner refusal onto the team's corrective error.

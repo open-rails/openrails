@@ -28,7 +28,8 @@ import (
 // The root owner always needs a second factor, so a control plane where none
 // can be enrolled refuses to start (AuthKit #419): no totp.key beside the
 // signing keys and no sender. A deployment allowed a disposable signing key
-// gets a disposable TOTP key too.
+// gets a TOTP key too, which AuthKit writes beside it so restarts keep
+// enrollments.
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
@@ -82,7 +83,9 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	require.NoError(t, err, "totp.key beside the signing keys")
 	require.Contains(t, methods(cp), "totp")
 
-	cp, err = attach(hostconfig.AuthConfig{AllowEphemeralSigningKey: true, KeysPath: t.TempDir()})
+	dev := t.TempDir()
+	cp, err = attach(hostconfig.AuthConfig{AllowEphemeralSigningKey: true, KeysPath: dev})
 	require.NoError(t, err, "a disposable TOTP key beside a disposable signing key")
 	require.Contains(t, methods(cp), "totp")
+	require.FileExists(t, filepath.Join(dev, "totp.key"))
 }

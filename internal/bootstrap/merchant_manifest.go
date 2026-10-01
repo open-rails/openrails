@@ -2,8 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -19,7 +17,6 @@ import (
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/authkit/keys"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -199,8 +196,8 @@ type StaticJWKConfig struct {
 	Y   string `yaml:"y,omitempty" koanf:"y"`
 }
 
-func (j StaticJWKConfig) authkitJWK() keys.JWK {
-	return keys.JWK{
+func (j StaticJWKConfig) authkitJWK() iam.JWK {
+	return iam.JWK{
 		Kty: j.Kty, Use: j.Use, Kid: j.Kid, Alg: j.Alg,
 		N: j.N, E: j.E, Crv: j.Crv, X: j.X, Y: j.Y,
 	}
@@ -489,30 +486,18 @@ func sortedMerchantKeys(in map[string]MerchantConfig) []string {
 	return keys
 }
 
-func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) ([]iam.RemoteApplicationKey, error) {
+// remoteApplicationStaticPublicKeys passes the manifest's static JWKs to
+// AuthKit, which validates them at registration.
+func remoteApplicationStaticPublicKeys(app *RemoteApplicationConfig) []iam.RemoteApplicationKey {
 	if app == nil || len(app.JWKS.Keys) == 0 {
-		return nil, nil
+		return nil
 	}
 	out := make([]iam.RemoteApplicationKey, 0, len(app.JWKS.Keys))
 	for _, raw := range app.JWKS.Keys {
 		jwk := raw.authkitJWK()
-		kid := strings.TrimSpace(jwk.Kid)
-		pubs, err := keys.PublicKeys(keys.JWKS{Keys: []keys.JWK{jwk}})
-		if err != nil {
-			return nil, fmt.Errorf("key %q: %w", kid, err)
-		}
-		for _, pub := range pubs {
-			der, err := x509.MarshalPKIXPublicKey(pub)
-			if err != nil {
-				return nil, fmt.Errorf("key %q: marshal public key: %w", kid, err)
-			}
-			out = append(out, iam.RemoteApplicationKey{
-				KID:          kid,
-				PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})),
-			})
-		}
+		out = append(out, iam.RemoteApplicationKey{JWK: &jwk})
 	}
-	return out, nil
+	return out
 }
 
 // configureMerchantRemoteApplication registers or updates the merchant's
@@ -545,11 +530,7 @@ func manifestRemoteApplication(app *RemoteApplicationConfig) (iam.RemoteApplicat
 	mode := iam.RemoteApplicationModeJWKS
 	publicKeys := app.PublicKeys
 	if len(app.JWKS.Keys) > 0 {
-		keys, err := remoteApplicationStaticPublicKeys(app)
-		if err != nil {
-			return iam.RemoteApplication{}, err
-		}
-		publicKeys = keys
+		publicKeys = remoteApplicationStaticPublicKeys(app)
 	}
 	if len(publicKeys) > 0 {
 		mode = iam.RemoteApplicationModeStatic

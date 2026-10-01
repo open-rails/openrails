@@ -2,13 +2,9 @@ package controlplane
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -236,28 +232,6 @@ func inlineKeySource(auth *hostconfig.AuthConfig) (keys.Source, error) {
 	return ks, nil
 }
 
-// twoFactor is the second-factor policy. The root owner always needs MFA, so
-// AuthKit refuses to start without an enrollable factor: a TOTP key at
-// <keys_path>/totp.key, or an email or SMS sender. A deployment allowed a
-// disposable signing key also gets a disposable TOTP key when totp.key is
-// absent; its authenticator enrollments last one process.
-func twoFactor(auth *hostconfig.AuthConfig) authkit.TwoFactorConfig {
-	if !auth.AllowEphemeralSigningKey {
-		return authkit.TwoFactorConfig{}
-	}
-	dir := strings.TrimSpace(auth.KeysPath)
-	if dir == "" {
-		dir = "/vault/auth" // AuthKit's default Keys.Path
-	}
-	if _, err := os.Stat(filepath.Join(dir, "totp.key")); !errors.Is(err, fs.ErrNotExist) {
-		return authkit.TwoFactorConfig{}
-	}
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	log.Warn("controlplane: no totp.key; authenticator enrollments use a disposable key (auth.allow_ephemeral_signing_key)")
-	return authkit.TwoFactorConfig{TOTPSecretKey: key}
-}
-
 // usernames maps the site naming policy onto AuthKit's username rule.
 func usernames(p merchant.NamingPolicy) authkit.UsernameConfig {
 	u := authkit.UsernameConfig{Renames: p.Enabled, RenameInterval: p.RenameInterval}
@@ -290,7 +264,6 @@ func authConfig(auth *hostconfig.AuthConfig, options options, naming merchant.Na
 		},
 		Frontend:     options.frontend,
 		Registration: registration(options, auth),
-		TwoFactor:    twoFactor(auth),
 		Username:     usernames(naming),
 		APIKeys:      authkit.APIKeysConfig{Prefix: APIKeyPrefix},
 		Roles:        Roles,
