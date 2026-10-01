@@ -37,7 +37,7 @@ func (s *CheckoutSessionService) guardCardAttempt(ctx context.Context, user *Use
 	if !ok || id.IsZero() {
 		return nil
 	}
-	wait, blocked, err := s.cardFailures.Blocked(ctx, id.UUID(), abuse.CustomerSubject(user.ID))
+	wait, blocked, err := s.cardFailures.Blocked(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP))
 	if err != nil {
 		return fmt.Errorf("card attempt ledger: %w", err)
 	}
@@ -47,7 +47,8 @@ func (s *CheckoutSessionService) guardCardAttempt(ctx context.Context, user *Use
 	return nil
 }
 
-// noteCardAttempt counts a declined card against the customer and merchant.
+// noteCardAttempt counts a declined card against the customer, their client
+// address and the merchant.
 func (s *CheckoutSessionService) noteCardAttempt(ctx context.Context, user *UserIdentity, resp *CheckoutSessionResponse, err error) {
 	if s == nil || s.cardFailures == nil || user == nil || !CardAttemptFailed(resp, err) {
 		return
@@ -56,7 +57,7 @@ func (s *CheckoutSessionService) noteCardAttempt(ctx context.Context, user *User
 	if !ok || id.IsZero() {
 		return
 	}
-	if rerr := s.cardFailures.Record(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.MerchantSubject); rerr != nil {
+	if rerr := s.cardFailures.Record(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP), abuse.MerchantSubject); rerr != nil {
 		log.WithError(rerr).Error("record card attempt failure")
 	}
 }

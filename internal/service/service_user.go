@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/google/uuid"
@@ -193,10 +194,19 @@ func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIden
 	if verifiedEmail := strings.TrimSpace(customer.VerifiedEmail); verifiedEmail != "" {
 		email = &verifiedEmail
 	}
+	clientIP := ""
+	if raw := strings.TrimSpace(customer.ClientIP); raw != "" {
+		addr, err := netip.ParseAddr(raw)
+		if err != nil || addr.Zone() != "" || addr.IsUnspecified() {
+			return nil, fmt.Errorf("%w: customer.client_ip must be the customer's IP address", checkout.ErrCheckoutSessionValidation)
+		}
+		clientIP = addr.Unmap().String()
+	}
 	return &checkout.UserIdentity{
 		ID:       customerID.String(),
 		Email:    email,
 		Username: strings.TrimSpace(customer.Username),
+		ClientIP: clientIP,
 	}, nil
 }
 

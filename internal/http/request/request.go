@@ -369,6 +369,7 @@ func (r *Request) GetUser() *checkout.UserIdentity {
 			ID:       uc.UserID,
 			Username: uc.Username,
 			Roles:    uc.Roles,
+			ClientIP: r.ClientIP(),
 		}
 		if uc.EmailVerified && uc.Email != "" {
 			email := uc.Email
@@ -383,6 +384,9 @@ func (r *Request) GetUser() *checkout.UserIdentity {
 	}
 
 	if ui, ok := user.(*checkout.UserIdentity); ok {
+		if ui.ClientIP == "" {
+			ui.ClientIP = r.ClientIP()
+		}
 		return ui
 	}
 

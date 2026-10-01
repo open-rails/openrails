@@ -15,6 +15,8 @@ type UserIdentity struct {
 	Email    *string
 	Username string
 	Roles    []string
+	// ClientIP is the customer's client address; empty when unknown.
+	ClientIP string
 }
 
 // customerIDFromUser derives the payable merchant subject id from the verified

@@ -92,6 +92,11 @@ type CheckoutCustomerIdentity struct {
 	ID            string `json:"id"`
 	VerifiedEmail string `json:"verified_email"`
 	Username      string `json:"username"`
+	// ClientIP is the address the customer's request came from, as the host
+	// resolved it behind its trusted proxies. Checkouts and card saves count
+	// declined cards against it, as the customer HTTP routes do; without it a
+	// host's card testers are counted per customer only.
+	ClientIP string `json:"client_ip,omitempty"`
 }
 
 // CreateCheckoutSessionRequest creates a purchase for a merchant-owned customer.
