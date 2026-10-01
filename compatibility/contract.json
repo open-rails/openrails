@@ -5856,7 +5856,7 @@
     "internal/migrate/postgres/owned_tables.go": "797f34742e003f6a96bf6c3ef08df83a47cd607da220d544296e39a1d39d35ad",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
-    "internal/migrate/postgres/unique_scope_exemptions.go": "8891a0cdffb892a5ec42f4b3433dcdb50781c36d5132d2546eadda2cf46fad94",
+    "internal/migrate/postgres/unique_scope_exemptions.go": "3c163fc64beacb258f300c5d89f5bc6ac9f394ecb1b773de825cde5f39c1e0e1",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/initial_membership_new_card.go": "84f53897b2b8d869ec0832aebd4dcf4891e5ab46caeac4f6e229a88ac8d67f4c",
     "internal/modules/checkout/session_service.go": "e4bc099fa864a6e5f8e48ec556001f4acf548a4202bbb8ca3dd0eba2c3521760",
