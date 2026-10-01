@@ -3,14 +3,14 @@ import {
   mutationOptions,
   type QueryClient,
 } from "@tanstack/react-query"
-import { getTokens } from "./api/client"
+import { selectedMerchant } from "./api/client"
 import { queryKeys } from "./queries"
 import * as invoiceAPI from "./api/invoice-endpoints"
 import type { InvoiceFilters, InvoiceProfile } from "./api/invoice-types"
 
 export const invoiceKeys = {
   root: () =>
-    ["merchant", getTokens()?.merchant ?? "unselected", "invoices"] as const,
+    ["merchant", selectedMerchant() ?? "unselected", "invoices"] as const,
   detail: (id: string) => [...invoiceKeys.root(), id] as const,
   profile: (customerId: string) =>
     [...queryKeys.customer(customerId), "invoice-profile"] as const,

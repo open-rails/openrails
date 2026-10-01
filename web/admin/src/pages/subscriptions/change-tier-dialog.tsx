@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Rail, SubscriptionStatus } from "@/lib/api/types"
-import { ApiError, getTokens } from "@/lib/api/client"
+import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { formatDate, formatNativeAmount } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -49,7 +49,7 @@ interface ChangeTierDialogProps {
 export function ChangeTierDialog(props: ChangeTierDialogProps) {
   return (
     <ChangeTierForm
-      key={`${getTokens()?.merchant ?? ""}:${props.subscriptionId}`}
+      key={`${selectedMerchant() ?? ""}:${props.subscriptionId}`}
       {...props}
     />
   )

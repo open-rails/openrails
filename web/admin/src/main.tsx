@@ -7,8 +7,9 @@ import "./index.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { AppLayout } from "@/layouts/app-layout"
-import { AuthProvider } from "@/lib/auth"
+import { loadBootstrap } from "@/lib/api/client"
 import { queryClient } from "@/lib/query-client"
+import { ConsoleSession, createConsoleSession } from "@/lib/session"
 const routeLoading = (
   <div role="status" className="p-6 text-sm text-muted-foreground">
     Loading…
@@ -190,15 +191,32 @@ const router = createBrowserRouter(
   { basename: "/admin" }
 )
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <RouterProvider router={router} />
-          <Toaster />
-        </AuthProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
-  </StrictMode>
+const root = createRoot(document.getElementById("root")!)
+loadBootstrap().then(
+  (config) => {
+    const session = createConsoleSession(config)
+    root.render(
+      <StrictMode>
+        <ThemeProvider>
+          <QueryClientProvider client={queryClient}>
+            <ConsoleSession client={session}>
+              <RouterProvider router={router} />
+              <Toaster />
+            </ConsoleSession>
+          </QueryClientProvider>
+        </ThemeProvider>
+      </StrictMode>
+    )
+  },
+  (error: unknown) =>
+    root.render(
+      <div className="flex min-h-svh items-center justify-center p-6 text-center">
+        <div>
+          <p className="font-medium">Admin console failed to start</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+        </div>
+      </div>
+    )
 )

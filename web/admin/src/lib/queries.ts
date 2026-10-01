@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 
-import { getTokens, type ItemsEnvelope } from "@/lib/api/client"
+import { selectedMerchant, type ItemsEnvelope } from "@/lib/api/client"
 import {
   getCatalogRevision,
   getCustomerPaymentMethods,
@@ -85,7 +85,7 @@ export async function collectCatalogPages<Page extends ItemsEnvelope<unknown>>(
 type MerchantRoot = readonly ["merchant", string]
 
 const currentMerchantRoot = (): MerchantRoot =>
-  ["merchant", getTokens()?.merchant ?? "unselected"] as const
+  ["merchant", selectedMerchant() ?? "unselected"] as const
 
 // One vocabulary of merchant-scoped keys, bound to a root that is either read
 // live or pinned once. Nothing below reaches for the selected merchant itself.

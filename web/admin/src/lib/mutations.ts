@@ -1,4 +1,4 @@
-import { getTokens } from "@/lib/api/client"
+import { selectedMerchant } from "@/lib/api/client"
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
 import {
@@ -786,7 +786,7 @@ export const adminMutations = {
     })
   },
   savePaymentProvider: (queryClient: QueryClient) => {
-    const merchant = getTokens()?.merchant
+    const merchant = selectedMerchant()
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.settings(), "payment-providers", "save"],
@@ -799,7 +799,7 @@ export const adminMutations = {
         rail: string
         provider: UpsertProviderRequest
       }) => {
-        if (getTokens()?.merchant !== merchant) throw new Error("Merchant changed; reopen this provider form before saving")
+        if (selectedMerchant() !== merchant) throw new Error("Merchant changed; reopen this provider form before saving")
         return putPaymentProvider(rail, provider)
       },
       onSuccess: invalidateExactOnSuccess(queryClient, [
