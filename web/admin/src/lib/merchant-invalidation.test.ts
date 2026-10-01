@@ -7,6 +7,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { setSelectedMerchant } from "@/lib/api/client"
 import {
   putCustomerUsageRateOverride,
   putUsageMeter,
@@ -34,11 +35,7 @@ const memoryStorage = (): Storage => {
   }
 }
 
-const selectMerchant = (merchant: string) =>
-  sessionStorage.setItem(
-    "openrails.admin.tokens",
-    JSON.stringify({ access_token: "token", merchant })
-  )
+const selectMerchant = (merchant: string) => setSelectedMerchant(merchant)
 
 // A request the test holds open, so the merchant can change mid-flight.
 const deferred = <T>() => {

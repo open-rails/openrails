@@ -30,8 +30,8 @@ const trails: [string, { label: string; to?: string }[]][] = [
 ]
 
 export function AppLayout() {
-  const { ready, bootError, me } = useAuth()
-  const { pathname, hash } = useLocation()
+  const { ready, signedIn } = useAuth()
+  const { pathname } = useLocation()
 
   if (!ready) {
     return (
@@ -40,24 +40,7 @@ export function AppLayout() {
       </div>
     )
   }
-  if (bootError) {
-    return (
-      <div className="flex min-h-svh items-center justify-center p-6 text-center">
-        <div>
-          <p className="font-medium">Admin console failed to start</p>
-          <p className="mt-1 text-sm text-muted-foreground">{bootError}</p>
-        </div>
-      </div>
-    )
-  }
-  if (!me) {
-    // Provider callbacks may land at the console root. Carry the recovery
-    // fragment only until LoginPage consumes it and replaces browser history.
-    const recovery =
-      new URLSearchParams(hash.slice(1)).get("error") ===
-      "account_recovery_required"
-    return <Navigate to={`/login${recovery ? hash : ""}`} replace />
-  }
+  if (!signedIn) return <Navigate to="/login" replace />
 
   const trail =
     trails.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? []

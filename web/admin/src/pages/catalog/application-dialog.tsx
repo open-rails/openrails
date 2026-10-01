@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ApiError, getTokens } from "@/lib/api/client"
+import { ApiError, selectedMerchant } from "@/lib/api/client"
 import {
   getCatalogRevision,
   type CatalogApplicationReceipt,
@@ -37,11 +37,11 @@ export function CatalogApplicationDialog() {
   const apply = useMutation(adminMutations.applyCatalog(useQueryClient()))
 
   const start = async () => {
-    const selectedMerchant = getTokens()?.merchant
+    const merchant = selectedMerchant()
     setLoading(true)
     try {
       const { revision, writes_allowed } = await getCatalogRevision()
-      if (getTokens()?.merchant !== selectedMerchant) {
+      if (selectedMerchant() !== merchant) {
         setMessage(
           "The selected merchant changed. Load its catalog revision before preparing an application."
         )
@@ -53,7 +53,7 @@ export function CatalogApplicationDialog() {
         )
         return
       }
-      setDraftMerchant(selectedMerchant)
+      setDraftMerchant(merchant)
       setDocument(
         JSON.stringify(
           {
@@ -100,7 +100,7 @@ export function CatalogApplicationDialog() {
   }
 
   const run = async () => {
-    if (getTokens()?.merchant !== draftMerchant) {
+    if (selectedMerchant() !== draftMerchant) {
       setMessage(
         "This draft belongs to another selected merchant. Return to that merchant before applying it."
       )

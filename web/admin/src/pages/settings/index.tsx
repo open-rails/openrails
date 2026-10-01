@@ -49,7 +49,7 @@ import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { ProviderPublicationAttempts } from "@/lib/provider-publication"
-import { ApiError, getTokens } from "@/lib/api/client"
+import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import { NotificationsTab } from "./notifications"
 import { ApiKeysTab } from "./api-keys"
@@ -454,7 +454,7 @@ function ProvidersTab() {
               Configure the payment rails this merchant can use.
             </p>
           </div>
-          <ProviderDialog key={getTokens()?.merchant ?? ""} providerDefinitions={providerDefinitions} />
+          <ProviderDialog key={selectedMerchant() ?? ""} providerDefinitions={providerDefinitions} />
         </div>
         {!data?.data?.length ? (
           <p className="py-2 text-sm text-muted-foreground">
@@ -594,7 +594,7 @@ function ProviderRow({
         {!provider.archived && (
           <div className="flex justify-end gap-2">
             <RotateCredentialsDialog
-              key={`${getTokens()?.merchant ?? ""}:${provider.id}`}
+              key={`${selectedMerchant() ?? ""}:${provider.id}`}
               provider={provider}
               credentialKeys={
                 providerDefinitions.find((d) => d.rail === provider.rail)
@@ -663,7 +663,7 @@ export function RotateCredentialsDialog({
   credentialKeys: string[]
 }) {
   const [open, setOpen] = React.useState(false)
-  const [merchant] = React.useState(() => getTokens()?.merchant ?? "")
+  const [merchant] = React.useState(() => selectedMerchant() ?? "")
   const attempts = React.useRef(new ProviderPublicationAttempts())
   const reviewedRevision = React.useRef(0)
   const queryClient = useQueryClient()
@@ -680,7 +680,7 @@ export function RotateCredentialsDialog({
         const request = await attempts.current.prepare(merchant, provider.rail, reviewedRevision.current, {
           account_id: provider.account_id, credentials: supplied,
         })
-        if ((getTokens()?.merchant ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
+        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
         await saveProvider.mutateAsync({ rail: provider.rail, provider: request })
         attempts.current.complete(request.operation_id)
         form.reset()
@@ -867,7 +867,7 @@ function ProviderDialog({
   providerDefinitions: PaymentProviderDefinition[]
 }) {
   const [open, setOpen] = React.useState(false)
-  const [merchant] = React.useState(() => getTokens()?.merchant ?? "")
+  const [merchant] = React.useState(() => selectedMerchant() ?? "")
   const attempts = React.useRef(new ProviderPublicationAttempts())
   const queryClient = useQueryClient()
   const saveProvider = useMutation(
@@ -888,7 +888,7 @@ function ProviderDialog({
           account_id: value.accountID.trim(),
           ...(Object.keys(credentials).length ? { credentials } : {}),
         })
-        if ((getTokens()?.merchant ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
+        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
         await saveProvider.mutateAsync({ rail: value.rail, provider: request })
         attempts.current.complete(request.operation_id)
         form.reset()

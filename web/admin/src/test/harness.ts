@@ -13,7 +13,13 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
 import { vi } from "vitest"
 
-import { loadBootstrap, setTokens } from "@/lib/api/client"
+import { createAuthClient, type AuthClient } from "@openrails/auth-ui/client"
+
+import {
+  bindSession,
+  loadBootstrap,
+  setSelectedMerchant,
+} from "@/lib/api/client"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import { queryKeys } from "@/lib/queries"
 
@@ -83,13 +89,31 @@ export async function server(routes: Record<string, Reply> = {}) {
     })
   )
   await loadBootstrap()
+  session = createAuthClient({ baseUrl: BOOTSTRAP.auth_base_url, sessionHint: false })
+  bindSession(session)
+  await signIn("console-test")
   return requests
 }
 
+// session is the signed-in operator's auth-ui client the api client uses.
+export let session: AuthClient
+
+// accessToken is an unsigned access token for sub: auth-ui reads its claims,
+// the stubbed server reads nothing.
+export const accessToken = (sub: string, authTime = Math.floor(Date.now() / 1000)) => {
+  const part = (value: object) => btoa(JSON.stringify(value)).replaceAll("=", "").replaceAll("+", "-").replaceAll("/", "_")
+  return `${part({ alg: "none", typ: "access+jwt" })}.${part({ sub, auth_time: authTime, exp: authTime + 3600 })}.`
+}
+
+export const signIn = (sub: string) =>
+  session.completeSignIn(async () => ({
+    status: "complete",
+    token_set: { access_token: accessToken(sub), token_type: "Bearer", expires_in: 3600 },
+  }))
+
 export const calls = (requests: Recorded[]) =>
   requests.map((request) => `${request.method} ${request.path}`)
-export const selectMerchant = (merchant: string) =>
-  setTokens({ access_token: "console-test", merchant })
+export const selectMerchant = (merchant: string) => setSelectedMerchant(merchant)
 export const client = (queries: DefaultOptions["queries"] = {}) =>
   new QueryClient({
     defaultOptions: {

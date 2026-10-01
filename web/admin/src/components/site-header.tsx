@@ -33,7 +33,6 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth"
-import { authMutations } from "@/lib/auth-mutations"
 
 export interface Crumb {
   label: string
@@ -85,7 +84,7 @@ export function SiteHeader({ trail }: { trail: Crumb[] }) {
 
 function UserMenu() {
   const { me, logout } = useAuth()
-  const signOut = useMutation(authMutations.logout(logout))
+  const signOut = useMutation({ mutationKey: ["auth", "logout"], mutationFn: logout })
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   if (!me) return null

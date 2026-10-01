@@ -21,13 +21,9 @@ products:
   await applyCatalog(raw)
   expect(fetcher).toHaveBeenCalledWith(
     "/v1/merchant/catalog/applications",
-    expect.objectContaining({
-      method: "POST",
-      body: raw,
-      headers: expect.objectContaining({
-        "Content-Type": "application/yaml",
-        "X-OpenRails-Merchant": "merchant-one",
-      }),
-    })
+    expect.objectContaining({ method: "POST", body: raw })
   )
+  const headers = new Headers((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].headers)
+  expect(headers.get("Content-Type")).toBe("application/yaml")
+  expect(headers.get("X-OpenRails-Merchant")).toBe("merchant-one")
 })

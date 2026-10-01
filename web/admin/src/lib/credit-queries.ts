@@ -3,7 +3,7 @@ import {
   queryOptions,
   type QueryClient,
 } from "@tanstack/react-query"
-import { getTokens } from "@/lib/api/client"
+import { selectedMerchant } from "@/lib/api/client"
 import {
   createCreditGrant,
   listCreditGrants,
@@ -16,7 +16,7 @@ export const creditCustomerKey = (merchant: string, customer: string) =>
   ["merchant", merchant, "customers", customer] as const
 
 function assertMerchant(merchant: string) {
-  if (!merchant || getTokens()?.merchant !== merchant)
+  if (!merchant || selectedMerchant() !== merchant)
     throw new Error(
       "The selected merchant changed. Reload this customer's credits."
     )

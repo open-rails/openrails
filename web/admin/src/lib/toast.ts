@@ -7,6 +7,10 @@ import { ApiError } from "@/lib/api/client"
 // permissions — the UI gates on its answers rather than duplicating RBAC).
 export function toastApiError(err: unknown, action: string) {
   if (err instanceof ApiError) {
+    if (err.stepUpRequired) {
+      toast.error(`${action}: confirm it's you to continue`)
+      return
+    }
     if (err.isPermissionDenied) {
       toast.error(`${action}: your role lacks permission`, {
         description: err.message,

@@ -136,14 +136,15 @@ SPA bootstraps from `GET /admin/config.json`:
 - `api_base_url` — the merchant API base: `/v1` standalone, typically
   `/billing/v1` embedded.
 
-**Login** is a real human login against AuthKit: the SPA reads
-`{auth_base_url}/capabilities` and offers password login
-(`POST {auth_base_url}/password/login`) plus one button per login-capable OIDC
-provider; the OIDC redirect returns tokens in a URL fragment (configure
-AuthKit's `Frontend.OIDCReturnPath` to land inside `/admin/`). Tokens are held
-in `sessionStorage`; a 401 triggers one refresh (`POST {auth_base_url}/token`),
-then the login page. Who can log in and what they may do is the merchant team
-roster + fixed roles (`owner`/`support`/`viewer`) — see the merchant guide.
+**Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
+whose sign-in form offers password, the deployment's login-capable OIDC providers
+(AuthKit's `/oidc/{provider}/login`), second factors, account
+recovery and backup codes. auth-ui keeps the access token in memory and the
+refresh token in `sessionStorage`, and refreshes it. Every write runs through
+auth-ui's step-up dialog: when OpenRails answers `403 step_up_required` (an owner
+operation after a stale sign-in), the dialog asks the user to confirm it's them
+and the write is retried. Who can log in and what they may do is the merchant
+team roster + fixed roles (`owner`/`support`/`viewer`) — see the merchant guide.
 
 Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 `/admin/config.json` to `localhost:3053`).
