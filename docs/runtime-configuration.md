@@ -29,7 +29,7 @@ These independent exceptions default to false:
 | `auth.allow_memory` | AuthKit rate limits per process without Redis (one replica only; AuthKit's other state is in Postgres). |
 | `auth.allow_private_network_jwks` | AuthKit private-network JWKS retrieval for local federation. |
 | `auth.allow_missing_senders` | Construct authentication without email/message delivery. |
-| `auth.allow_ephemeral_signing_key` | Generate a disposable signing key, and a disposable TOTP key, when configured key material is absent. |
+| `auth.allow_ephemeral_signing_key` | Generate a signing key and a TOTP key when configured key material is absent, written to `auth.keys_path` when it is set (which must then be writable). |
 
 The root owner always needs a second factor, so the control plane refuses to
 start unless one can be enrolled: a 16, 24 or 32-byte key at

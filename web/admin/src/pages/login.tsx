@@ -29,12 +29,12 @@ import {
 } from "@/lib/account-recovery"
 import type { PendingSignIn } from "@/lib/auth-state"
 
-function factorLabel(method: string, phoneNumber?: string | null) {
+function factorLabel(method: string, destination?: string | null) {
   switch (method) {
     case "email":
-      return "Email"
+      return destination ? `Email to ${destination}` : "Email"
     case "sms":
-      return phoneNumber ? `Text message to ${phoneNumber}` : "Text message"
+      return destination ? `Text message to ${destination}` : "Text message"
     case "totp":
       return "Authenticator app"
     default:
@@ -42,15 +42,15 @@ function factorLabel(method: string, phoneNumber?: string | null) {
   }
 }
 
-function verificationPrompt(challenge: TwoFactorChallenge) {
-  switch (challenge.method) {
+function verificationPrompt({ factor }: TwoFactorChallenge) {
+  switch (factor.method) {
     case "email":
-      return challenge.verificationID
-        ? `Enter the code sent to ${challenge.verificationID}.`
+      return factor.destination
+        ? `Enter the code sent to ${factor.destination}.`
         : "Enter the code sent to your email."
     case "sms":
-      return challenge.verificationID
-        ? `Enter the code sent to ${challenge.verificationID}.`
+      return factor.destination
+        ? `Enter the code sent to ${factor.destination}.`
         : "Enter the code sent by text message."
     case "totp":
       return "Open your authenticator app and enter the code it shows."
@@ -277,7 +277,7 @@ function LoginForm({ pending }: { pending?: PendingSignIn }) {
                     <Select
                       items={challenge.factors.map((factor) => ({
                         value: factor.id,
-                        label: factorLabel(factor.method, factor.phone_number),
+                        label: factorLabel(factor.method, factor.destination),
                       }))}
                       value={challenge.factor.id}
                       onValueChange={chooseFactor}
@@ -291,7 +291,7 @@ function LoginForm({ pending }: { pending?: PendingSignIn }) {
                       <SelectContent>
                         {challenge.factors.map((factor) => (
                           <SelectItem key={factor.id} value={factor.id}>
-                            {factorLabel(factor.method, factor.phone_number)}
+                            {factorLabel(factor.method, factor.destination)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -346,7 +346,7 @@ function LoginForm({ pending }: { pending?: PendingSignIn }) {
                 }
               >
                 {verificationMode === "backup_code"
-                  ? `Use ${factorLabel(challenge.method).toLowerCase()}`
+                  ? `Use ${factorLabel(challenge.factor.method).toLowerCase()}`
                   : "Use a backup code"}
               </Button>
               <Button

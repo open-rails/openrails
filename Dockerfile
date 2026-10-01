@@ -62,8 +62,9 @@ WORKDIR /app
 # Create non-root user
 RUN addgroup -g 1001 -S billing && \
     adduser -S -D -H -u 1001 -s /sbin/nologin -G billing billing && \
-    mkdir -p /var/lib/openrails/spool && \
-    chown -R billing:billing /var/lib/openrails
+    mkdir -p /var/lib/openrails/spool /vault/auth && \
+    chown -R billing:billing /var/lib/openrails /vault/auth && \
+    chmod 0700 /vault/auth
 
 # Copy the binary; database migrations are embedded in it.
 COPY --from=builder /app/bin/openrails /usr/local/bin/openrails

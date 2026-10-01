@@ -17,6 +17,12 @@ const recovery = () => ({
   expires_at: new Date(Date.now() + 60_000).toISOString(),
   purge_at: new Date(Date.now() + 86400_000).toISOString(),
 })
+const totp = {
+  id: "totp-1",
+  method: "totp",
+  is_default: true,
+  destination: null,
+}
 const recoveryResult = (value = recovery()) => ({
   status: "account_recovery_required",
   token_set: null,
@@ -114,8 +120,8 @@ it("waits for the normal second factor before showing recovery", async () => {
       second_factor: {
         user_id: "user",
         challenge: "challenge",
-        factor: { id: "totp-1", method: "totp" },
-        factors: [{ id: "totp-1", method: "totp" }],
+        factor: totp,
+        factors: [totp],
       },
     }),
     "/2fa/verify": () => recoveryResult(),
@@ -136,6 +142,32 @@ it("waits for the normal second factor before showing recovery", async () => {
     false
   )
   expect(getTokens()).toBeNull()
+})
+
+it("names the masked address a code went to", async () => {
+  const sms = {
+    id: "sms-1",
+    method: "sms",
+    is_default: true,
+    destination: "+1•••0142",
+  }
+  await screen({
+    "/password/login": () => ({
+      status: "second_factor_required",
+      token_set: null,
+      recovery: null,
+      second_factor: {
+        user_id: "user",
+        challenge: "challenge",
+        factor: sms,
+        factors: [sms, totp],
+      },
+    }),
+  })
+  await signIn()
+  expect(document.body.textContent).toContain(
+    "Enter the code sent to +1•••0142."
+  )
 })
 
 it("takes provider recovery from the code exchange, clears history, and does not adopt fragment tokens", async () => {

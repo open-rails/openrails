@@ -158,18 +158,15 @@ func (c *ControlPlane) OwnedMerchantGroups(ctx context.Context, userID string) (
 // memberships is every live group s holds a role in.
 func (c *ControlPlane) memberships(ctx context.Context, s iam.Subject) ([]iam.Membership, error) {
 	var out []iam.Membership
-	page := iam.PageRequest{Limit: iam.MaxPageLimit}
-	for {
-		batch, err := c.client.ListMemberships(ctx, s, page)
+	for m, err := range iam.All(func(p iam.PageRequest) (iam.ListPage[iam.Membership], error) {
+		return c.client.ListMemberships(ctx, s, p)
+	}) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, batch.Items...)
-		if batch.Next == "" {
-			return out, nil
-		}
-		page.Cursor = batch.Next
+		out = append(out, m)
 	}
+	return out, nil
 }
 
 // ResolveMerchantForGroup resolves a bound merchant by a current or former

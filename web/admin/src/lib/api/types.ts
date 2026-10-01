@@ -776,12 +776,13 @@ export interface AuthCapabilities {
   [k: string]: unknown
 }
 
+// AuthKit TwoFactorFactor: one shape for sign-in, step-up and management.
+// destination is the masked address a code goes to; null for totp.
 export interface TwoFactorFactor {
   id: string
   method: string
-  is_default?: boolean
-  phone_number?: string | null
-  email?: string | null
+  is_default: boolean
+  destination: string | null
 }
 
 // AuthKit TokenSet.

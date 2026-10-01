@@ -64,20 +64,15 @@ func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid merchant.ID)
 		return nil, err
 	}
 	var out []MerchantAPIKey
-	page := iam.PageRequest{Limit: iam.MaxPageLimit}
-	for {
-		batch, err := c.client.ListAPIKeys(ctx, group, page)
+	for k, err := range iam.All(func(p iam.PageRequest) (iam.ListPage[iam.APIKey], error) {
+		return c.client.ListAPIKeys(ctx, group, p)
+	}) {
 		if err != nil {
 			return nil, err
 		}
-		for _, k := range batch.Items {
-			out = append(out, c.merchantAPIKeyView(k))
-		}
-		if batch.Next == "" {
-			return out, nil
-		}
-		page.Cursor = batch.Next
+		out = append(out, c.merchantAPIKeyView(k))
 	}
+	return out, nil
 }
 
 // RevokeMerchantAPIKey revokes the merchant's key id as actor (a key is never

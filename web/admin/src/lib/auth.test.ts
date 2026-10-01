@@ -9,6 +9,12 @@ import { client, server, type Reply } from "@/test/harness"
 
 const membership = (slug: string) => ({ id: `id-${slug}`, slug, role: "owner" })
 const who = { id: "user-1", email: "alice@example.test" }
+const totp = {
+  id: "factor-1",
+  method: "totp",
+  is_default: true,
+  destination: null,
+}
 
 let routes: Record<string, Reply>
 beforeEach(async () => {
@@ -101,9 +107,8 @@ describe("auth state", () => {
 
 it("targets the selected second factor, and sends a recovery code without one", () => {
   const challenge: TwoFactorChallenge = {
-    challenge: "challenge-token", userID: "user-1", method: "totp",
-    factor: { id: "factor-1", method: "totp" },
-    factors: [{ id: "factor-1", method: "totp" }], expectedSession: null,
+    challenge: "challenge-token", userID: "user-1",
+    factor: totp, factors: [totp], expectedSession: null,
   }
   expect(twoFactorVerificationBody(challenge, " 123456 ", "factor")).toEqual({
     user_id: "user-1", challenge: "challenge-token", factor_id: "factor-1", code: "123456",

@@ -24,7 +24,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/authkit v1.0.2
+	github.com/open-rails/authkit v1.1.0
 	github.com/open-rails/migratekit v1.10.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.22.0

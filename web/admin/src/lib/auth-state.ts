@@ -41,8 +41,6 @@ export interface TwoFactorChallenge {
   userID: string
   factor: TwoFactorFactor
   factors: TwoFactorFactor[]
-  method: string
-  verificationID?: string
   expectedSession: ReturnType<typeof getTokens>
 }
 
@@ -68,8 +66,6 @@ export function challengeFrom(
     userID: step.user_id,
     factor: step.factor,
     factors: step.factors,
-    method: step.factor.method,
-    verificationID: step.factor.email ?? step.factor.phone_number ?? undefined,
     expectedSession,
   }
 }
