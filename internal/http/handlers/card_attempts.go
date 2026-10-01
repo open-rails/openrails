@@ -56,22 +56,27 @@ func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
 		"Too many declined card attempts. Try again later."))
 }
 
-// recordCardFailure counts one refused card attempt: against subjects in the
-// durable ledger, and against this request's captcha subjects and merchant in
-// the captcha escalation (#371). Best-effort: the response is unchanged when
+// recordCardFailure counts one card the provider refused: against subjects in
+// the durable ledger, then against this request's captcha subjects, with the
+// ledger's attack verdict (#371). Best-effort: the response is unchanged when
 // either write fails.
 func recordCardFailure(r *httprequest.Request, subjects ...string) {
 	if r == nil || r.State == nil {
 		return
 	}
 	ctx := r.Request.Context()
+	attack := false
+	if ledger, merchantID, ok := cardAttemptLedger(r); ok {
+		if err := ledger.Record(ctx, merchantID, subjects...); err != nil {
+			log.WithError(err).WithField("request_id", r.RequestID()).Error("record card attempt failure")
+		}
+		if r.State.CardAbuseGuard != nil {
+			var err error
+			if attack, err = ledger.AttackMode(ctx, merchantID); err != nil {
+				log.WithError(err).WithField("request_id", r.RequestID()).Error("card attack mode lookup")
+			}
+		}
+	}
 	id, _ := merchant.FromContext(ctx)
-	r.State.CardAbuseGuard.RecordChargeFailure(ctx, id.UUID(), middleware.SubjectKeysFromContext(ctx))
-	ledger, merchantID, ok := cardAttemptLedger(r)
-	if !ok {
-		return
-	}
-	if err := ledger.Record(ctx, merchantID, subjects...); err != nil {
-		log.WithError(err).WithField("request_id", r.RequestID()).Error("record card attempt failure")
-	}
+	r.State.CardAbuseGuard.RecordChargeFailure(ctx, id.UUID(), middleware.SubjectKeysFromContext(ctx), attack)
 }

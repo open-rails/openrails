@@ -205,22 +205,6 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			}
 			// Solved: fall through to normal counting (with the buckets just reset).
 		}
-	} else if !deps.Captcha.IsEnabled() && deps.ChallengeStore != nil && (bucket == "checkout" || bucket == "payment-methods") {
-		// Without a captcha to solve, a card-abuse block is a refusal. Ignoring
-		// it would leave card testing unthrottled beyond the plain rate limit.
-		blocked, err := cardAttackMode(r, deps.ChallengeStore)
-		for _, subject := range subjects {
-			if blocked || err != nil {
-				break
-			}
-			blocked, err = deps.ChallengeStore.IsChallenged(r.Context(), subject.Key)
-		}
-		if err != nil {
-			log.WithError(err).WithField("bucket", bucket).Warn("card-abuse block lookup failed")
-		}
-		if blocked {
-			return RateLimitDecision{Outcome: RateLimitTooMany, Bucket: bucket, SubjectKeys: keys, Headers: map[string]string{"Retry-After": "900"}}
-		}
 	}
 
 	results := make([]subjectRateLimitResult, 0, len(subjects))
