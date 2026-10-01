@@ -18,8 +18,8 @@ import (
 //     BlockAfter -> aggressive block for the remainder of the window.
 //   - a DAILY window (DailyWindow, 24h): DailyBlockAfter -> blocked for the day.
 //
-// Plus the merchant-wide cap (GlobalWindow/GlobalAttackAfter): too many
-// failures at one merchant flips that merchant into attack mode.
+// Plus the merchant-wide attack mode (GlobalWindow/GlobalAttackAfter/
+// GlobalAttackSubjects), which the durable FailureLedger decides.
 type CardAbuseConfig struct {
 	// FailWindow is the short rolling window for per-subject failed-charge counting.
 	FailWindow time.Duration
@@ -43,36 +43,44 @@ type CardAbuseConfig struct {
 	// GlobalWindow is the rolling window for merchant-wide failure counting.
 	GlobalWindow time.Duration
 	// GlobalAttackAfter: failures at one merchant within GlobalWindow that
-	// flip that merchant into attack mode (captcha on its card routes).
-	GlobalAttackAfter int64
-	// AttackTTL is how long attack mode stays on once triggered.
+	// put that merchant in attack mode, when they came from at least
+	// GlobalAttackSubjects customers and as many client addresses. A few
+	// accounts or addresses never make an attack: their own blocks contain them.
+	GlobalAttackAfter    int64
+	GlobalAttackSubjects int64
+	// AttackTTL is how long the attack captcha stays up after the last
+	// refusal seen while the merchant is under attack.
 	AttackTTL time.Duration
 }
 
 // DefaultCardAbuseConfig returns the agreed policy (#331): per (account+IP), in a
 // 15-min window 3 failures -> captcha and 6 -> block; in a 24h window 10 failures
-// -> block for the day; 100/24h at one merchant -> captcha for everyone on that
-// merchant's card routes (attack mode).
+// -> block for the day; 100/24h at one merchant from 25 customers and 25
+// addresses -> attack mode.
 func DefaultCardAbuseConfig() CardAbuseConfig {
 	return CardAbuseConfig{
-		FailWindow:        15 * time.Minute,
-		CaptchaAfter:      3,
-		BlockAfter:        6,
-		ChallengeTTL:      15 * time.Minute,
-		BlockTTL:          15 * time.Minute,
-		DailyWindow:       24 * time.Hour,
-		DailyBlockAfter:   10,
-		DailyBlockTTL:     24 * time.Hour,
-		GlobalWindow:      24 * time.Hour,
-		GlobalAttackAfter: 100,
-		AttackTTL:         time.Hour,
+		FailWindow:           15 * time.Minute,
+		CaptchaAfter:         3,
+		BlockAfter:           6,
+		ChallengeTTL:         15 * time.Minute,
+		BlockTTL:             15 * time.Minute,
+		DailyWindow:          24 * time.Hour,
+		DailyBlockAfter:      10,
+		DailyBlockTTL:        24 * time.Hour,
+		GlobalWindow:         24 * time.Hour,
+		GlobalAttackAfter:    100,
+		GlobalAttackSubjects: 25,
+		AttackTTL:            time.Hour,
 	}
 }
 
-// CardAbuseGuard records failed card attempts and escalates abusive subjects to
-// captcha (then an aggressive block), plus a per-merchant attack mode — all by
-// reusing the existing Redis windowed limiter and the captcha ChallengeStore.
-// Captcha stays dormant for normal users; only repeated FAILURES trigger it.
+// CardAbuseGuard is the captcha accelerator over the durable FailureLedger: it
+// escalates abusive subjects to a captcha, and while the ledger reports the
+// merchant under attack it puts a captcha in front of everyone on that
+// merchant's card routes. It reuses the Redis windowed limiter and the captcha
+// ChallengeStore, and is built only when a captcha is configured: without one
+// the ledger's blocks are the whole policy. Captcha stays dormant for normal
+// users; only repeated FAILURES trigger it.
 type CardAbuseGuard struct {
 	lim        *ratelimit.Limiter
 	challenges *captcha.ChallengeStore
@@ -121,10 +129,13 @@ func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, win
 // RecordChargeFailure records one failed/declined card attempt for the given
 // captcha subjects (use middleware.SubjectKeysFromContext(ctx): ["ip:x","user:y"],
 // the SAME resolved-client-IP subjects RateLimitHTTP pinned for this request —
-// #746) and escalates each subject's captcha/block state, then advances
-// merchantID's attack-mode counter. Best-effort: errors are logged, never
-// propagated, so abuse tracking can't break the (already failed) charge response.
-func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uuid.UUID, subjectKeys []string) {
+// #746) and escalates each subject's captcha/block state. attack is the
+// ledger's verdict after this refusal: it (re)opens merchantID's attack
+// captcha for AttackTTL, so the captcha lapses once refusals stop or the
+// ledger's window falls below the threshold. Best-effort: errors are logged,
+// never propagated, so abuse tracking can't break the (already failed) charge
+// response.
+func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uuid.UUID, subjectKeys []string, attack bool) {
 	if !g.enabled() {
 		return
 	}
@@ -170,20 +181,13 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 		}
 	}
 
-	if merchantID == uuid.Nil {
+	if !attack || merchantID == uuid.Nil {
 		return
 	}
 	fields := log.Fields{"merchant_id": merchantID}
-	count, err := g.countFailure(ctx, "merchant:"+merchantID.String(), "fail", g.cfg.GlobalWindow, g.cfg.GlobalAttackAfter)
-	if err != nil {
-		log.WithError(err).WithFields(fields).Warn("card-abuse: failed to record merchant charge failure")
-		return
-	}
-	if count >= g.cfg.GlobalAttackAfter {
-		if err := g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject(merchantID), g.cfg.AttackTTL); err != nil {
-			log.WithError(err).WithFields(fields).Warn("card-abuse: failed to enable attack mode")
-		} else {
-			log.WithFields(fields).WithField("failures", count).Warn("card-abuse: attack mode ENABLED — captcha required on this merchant's card routes")
-		}
+	if err := g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject(merchantID), g.cfg.AttackTTL); err != nil {
+		log.WithError(err).WithFields(fields).Warn("card-abuse: failed to enable attack mode")
+	} else {
+		log.WithFields(fields).Warn("card-abuse: attack mode — captcha required on this merchant's card routes")
 	}
 }

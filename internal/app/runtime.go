@@ -238,9 +238,9 @@ type Runtime struct {
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
 
-	// CardAbuseGuard escalates repeated card-charge failures to captcha/block
-	// and detects site-wide card-testing attacks (#371). Nil when Redis isn't
-	// configured (safe no-op).
+	// CardAbuseGuard escalates repeated card-charge failures to a captcha, and
+	// to a captcha for everyone while the ledger reports an attack (#371). Nil
+	// without Redis or a captcha (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
 	// CardFailureLedger is the PostgreSQL card-testing ledger (SEC-30),
 	// enforced on every replica.

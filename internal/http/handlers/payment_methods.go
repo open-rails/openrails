@@ -231,8 +231,10 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			r.APIError(providerErr)
 			return
 		}
-		// Every other refusal of the card counts toward card-testing blocks.
-		recordCardFailure(r, abuse.CustomerSubject(user.ID), abuse.AddressSubject(r.ClientIP()), abuse.MerchantSubject)
+		// Only a card the provider refused counts toward card-testing blocks.
+		if paymentmethods.CardRefused(err) {
+			recordCardFailure(r, abuse.CustomerSubject(user.ID), abuse.AddressSubject(r.ClientIP()), abuse.MerchantSubject)
+		}
 		var pmErr *paymentmethods.PaymentMethodError
 		if errors.As(err, &pmErr) {
 			writePaymentMethodError(r, pmErr)

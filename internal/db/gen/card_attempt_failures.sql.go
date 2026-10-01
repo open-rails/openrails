@@ -12,6 +12,44 @@ import (
 	"github.com/google/uuid"
 )
 
+const cardAttackBreadth = `-- name: CardAttackBreadth :one
+SELECT COALESCE(sum(failures) FILTER (WHERE subject = $1::text), 0)::bigint AS failures,
+       count(DISTINCT subject) FILTER (WHERE starts_with(subject, $2::text))::bigint AS customers,
+       count(DISTINCT subject) FILTER (WHERE starts_with(subject, $3::text))::bigint AS addresses
+FROM openrails.card_attempt_failures
+WHERE merchant_id = $4::uuid
+  AND bucket_at >= $5::timestamptz
+`
+
+type CardAttackBreadthParams struct {
+	MerchantSubject string
+	CustomerPrefix  string
+	AddressPrefix   string
+	MerchantID      uuid.UUID
+	Since           time.Time
+}
+
+type CardAttackBreadthRow struct {
+	Failures  int64
+	Customers int64
+	Addresses int64
+}
+
+// A merchant's card failures since a time, and how many customers and client
+// addresses they came from.
+func (q *Queries) CardAttackBreadth(ctx context.Context, arg CardAttackBreadthParams) (CardAttackBreadthRow, error) {
+	row := q.db.QueryRow(ctx, cardAttackBreadth,
+		arg.MerchantSubject,
+		arg.CustomerPrefix,
+		arg.AddressPrefix,
+		arg.MerchantID,
+		arg.Since,
+	)
+	var i CardAttackBreadthRow
+	err := row.Scan(&i.Failures, &i.Customers, &i.Addresses)
+	return i, err
+}
+
 const cardAttemptFailureCounts = `-- name: CardAttemptFailureCounts :many
 SELECT subject,
        COALESCE(sum(failures) FILTER (WHERE bucket_at >= $1::timestamptz), 0)::bigint AS burst,

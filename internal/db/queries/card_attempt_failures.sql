@@ -19,3 +19,13 @@ GROUP BY subject;
 DELETE FROM openrails.card_attempt_failures
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND bucket_at < sqlc.arg(before)::timestamptz;
+
+-- name: CardAttackBreadth :one
+-- A merchant's card failures since a time, and how many customers and client
+-- addresses they came from.
+SELECT COALESCE(sum(failures) FILTER (WHERE subject = sqlc.arg(merchant_subject)::text), 0)::bigint AS failures,
+       count(DISTINCT subject) FILTER (WHERE starts_with(subject, sqlc.arg(customer_prefix)::text))::bigint AS customers,
+       count(DISTINCT subject) FILTER (WHERE starts_with(subject, sqlc.arg(address_prefix)::text))::bigint AS addresses
+FROM openrails.card_attempt_failures
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND bucket_at >= sqlc.arg(since)::timestamptz;

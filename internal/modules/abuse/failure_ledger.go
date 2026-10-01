@@ -2,6 +2,7 @@ package abuse
 
 import (
 	"context"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -19,8 +20,11 @@ import (
 //
 // Per subject (customer, client address): BlockAfter failures in FailWindow
 // or DailyBlockAfter in DailyWindow block further card attempts. Merchant-wide
-// GlobalAttackAfter failures in GlobalWindow is attack mode: any subject with
-// a failure inside FailWindow is blocked.
+// GlobalAttackAfter failures in GlobalWindow, from at least
+// GlobalAttackSubjects customers and as many addresses, is attack mode: any
+// subject with a failure inside FailWindow is blocked. Subjects with no
+// recent failure are never blocked by it. The windows slide, so attack mode
+// ends on its own once failures age out.
 type FailureLedger struct {
 	db    *db.DB
 	clock clockwork.Clock
@@ -40,14 +44,25 @@ func NewFailureLedger(database *db.DB, clock clockwork.Clock, cfg CardAbuseConfi
 	return &FailureLedger{db: database, clock: clock, cfg: cfg}
 }
 
-// CustomerSubject and AddressSubject name the ledger's per-subject rows.
+const (
+	customerPrefix = "customer:"
+	addressPrefix  = "ip:"
+)
+
+// CustomerSubject and AddressSubject name the ledger's per-subject rows. An
+// IPv6 client is one /64, the block a single subscriber is given.
 func CustomerSubject(id string) string {
 	if parsed, err := uuid.Parse(strings.TrimSpace(id)); err == nil {
 		id = parsed.String()
 	}
-	return subject("customer:", id)
+	return subject(customerPrefix, id)
 }
-func AddressSubject(ip string) string { return subject("ip:", ip) }
+func AddressSubject(ip string) string {
+	if addr, err := netip.ParseAddr(strings.TrimSpace(ip)); err == nil && addr.Is6() && !addr.Is4In6() {
+		ip = netip.PrefixFrom(addr.WithZone(""), 64).Masked().String()
+	}
+	return subject(addressPrefix, ip)
+}
 
 func subject(prefix, v string) string {
 	v = strings.TrimSpace(v)
@@ -109,7 +124,9 @@ func (l *FailureLedger) Blocked(ctx context.Context, merchantID uuid.UUID, subje
 	attack := false
 	for _, row := range rows {
 		if row.Subject == MerchantSubject && row.Daily >= l.cfg.GlobalAttackAfter {
-			attack = true
+			if attack, err = l.AttackMode(ctx, merchantID); err != nil {
+				return 0, false, err
+			}
 		}
 	}
 	var wait time.Duration
@@ -125,4 +142,21 @@ func (l *FailureLedger) Blocked(ctx context.Context, merchantID uuid.UUID, subje
 		}
 	}
 	return wait, wait > 0, nil
+}
+
+// AttackMode reports whether the merchant is under a card-testing attack:
+// GlobalAttackAfter failures in GlobalWindow from at least
+// GlobalAttackSubjects customers and as many client addresses.
+func (l *FailureLedger) AttackMode(ctx context.Context, merchantID uuid.UUID) (bool, error) {
+	if l == nil || l.db == nil || merchantID == uuid.Nil {
+		return false, nil
+	}
+	b, err := l.db.Gen(ctx).CardAttackBreadth(ctx, gen.CardAttackBreadthParams{
+		MerchantID: merchantID, Since: l.clock.Now().UTC().Add(-l.cfg.GlobalWindow),
+		MerchantSubject: MerchantSubject, CustomerPrefix: customerPrefix, AddressPrefix: addressPrefix,
+	})
+	if err != nil {
+		return false, err
+	}
+	return b.Failures >= l.cfg.GlobalAttackAfter && b.Customers >= l.cfg.GlobalAttackSubjects && b.Addresses >= l.cfg.GlobalAttackSubjects, nil
 }

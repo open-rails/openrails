@@ -81,24 +81,33 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
   `captcha_required` (metadata carries provider, site key, bucket) until a valid token is sent in
   the `X-Captcha-Token` header. A successful solve clears the challenge and resets the
   challenged buckets' counters.
-- Card-testing attack mode (#371) is per merchant: 100 declines at a merchant in 24 hours
-  require a solve from every subject on that merchant's captcha buckets for an hour. It applies
-  where the merchant is known before authentication (the configured merchant or its `api_host`);
-  an individual solve never clears it.
+- Card-testing attack mode (#371) is per merchant and decided by the ledger below. While it
+  holds, every subject on that merchant's captcha buckets must solve a captcha; each decline
+  seen in attack mode keeps it up for another hour, so it lapses an hour after the declines stop
+  or the ledger's window drops below the threshold. It applies where the merchant is known
+  before authentication (the configured merchant or its `api_host`); an individual solve never
+  clears it. Without a captcha configured, nothing is challenged and the ledger's blocks are the
+  whole policy.
 - Clients poll `GET /v1/captcha/status` and load `/v1/captcha/client.js` — both exempt from
   limiting.
 
 ## Card-testing ledger
 
-Declined cards are counted in PostgreSQL (`openrails.card_attempt_failures`),
-so blocks hold on every replica without Redis or captcha (SEC-30). Card saves,
-checkout creation and confirmation (browser routes and the embedded or remote
-Client) check it before any provider call and answer `429`
-`card_attempts_blocked` with `Retry-After`:
+Cards the provider refused are counted in PostgreSQL
+(`openrails.card_attempt_failures`), so blocks hold on every replica without
+Redis or captcha (SEC-30). A request refused before any provider call (a
+missing field, an unconfigured PSP) is not a decline. Card saves, checkout
+creation and confirmation (browser routes and the embedded or remote Client)
+check it before any provider call and answer `429` `card_attempts_blocked`
+with `Retry-After`:
 
-- per customer and per client address: 6 declines in 15 minutes block for the
-  window; 10 in 24 hours block for the day;
-- per merchant: 100 declines in 24 hours is attack mode, where any subject with
-  a decline in the last 15 minutes is blocked and clean customers are not.
+- per customer and per client address (an IPv6 client is its /64): 6 declines
+  in 15 minutes block for the window; 10 in 24 hours block for the day;
+- per merchant: 100 declines in the last 24 hours from at least 25 customers
+  and 25 addresses is attack mode, where any subject with a decline in the
+  last 15 minutes is blocked. Customers with no recent decline are never
+  blocked by it, so a buyer can always add a card, for example to recover a
+  past-due membership. The window slides: attack mode ends as declines age
+  out.
 
 Redis, when configured, remains the captcha accelerator above.

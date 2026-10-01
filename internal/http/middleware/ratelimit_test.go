@@ -274,16 +274,17 @@ func TestCaptchaChallenges(t *testing.T) {
 		call{path: "/v1/merchant/credits/deposit", ip: ip, want: 200}.do(t, h)
 	})
 
-	// Without a captcha to solve, a card-abuse block is a refusal on card buckets.
-	t.Run("captcha disabled blocks card buckets", func(t *testing.T) {
+	// Without a captcha to solve, neither a challenged subject nor a merchant's
+	// attack flag refuses anyone here: the durable ledger blocks card attempts
+	// per subject (SEC-30), so attack mode never becomes a blanket 429.
+	t.Run("captcha disabled never refuses on a challenge", func(t *testing.T) {
+		attacked := merchant.ID(uuid.New())
 		deps := newDeps(limits, nil, nil)
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
+		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, captcha.CardAttackModeSubject(attacked.UUID()), time.Minute))
 		h := engine(deps, okHandler())
-		w := call{path: "/v1/checkout", ip: ip, want: 429}.do(t, h)
-		require.Equal(t, "900", w.Header().Get("Retry-After"))
-		call{path: "/v1/me/payment-methods", ip: ip, want: 429}.do(t, h)
-		call{method: "GET", path: "/v1/products", ip: ip, want: 200}.do(t, h)
-		call{path: "/v1/checkout", ip: "198.51.100.3", want: 200}.do(t, h)
+		call{path: "/v1/checkout", ip: ip, merchant: attacked, want: 200}.do(t, h)
+		call{path: "/v1/me/payment-methods", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
 	})
 }
 

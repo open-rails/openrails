@@ -283,11 +283,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DashboardBaseURL: alertingDashboardBaseURL(cfg),
 	})
 
-	// Card-abuse guard (#371): escalates repeated card-charge failures to
-	// captcha/block and detects site-wide card-testing attacks. Requires Redis
-	// for its windowed counters; nil (safe no-op) otherwise.
+	// Card-abuse guard (#371): the captcha accelerator over the ledger below.
+	// It needs Redis and a captcha to solve; nil (safe no-op) otherwise, and
+	// the ledger's blocks are the whole policy.
 	var cardAbuseGuard *abuse.CardAbuseGuard
-	if redisClient != nil {
+	if redisClient != nil && cfg.Captcha.IsEnabled() {
 		cardAbuseGuard = abuse.NewCardAbuseGuard(
 			ratelimit.NewLimiter(redisClient),
 			captcha.NewChallengeStore(redisClient),
