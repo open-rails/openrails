@@ -62,8 +62,9 @@ auth:
     former_names:
       mode: finite # finite | forever | immediate; omit duration for the latter two
       duration: 2160h # 90 days
-  # signing keys are loaded by AuthKit from env, /vault/auth/keys.json,
-  # or development-only generated keys under .runtime/authkit
+  # signing keys are loaded by AuthKit from env or <keys_path>/keys.json
+  # (default /vault/auth); allow_ephemeral_signing_key generates development
+  # keys.json and totp.key there
 
 encryption:
   master_key: ""    # base64 32-byte AES-256 key; host provider credentials alone do not need it

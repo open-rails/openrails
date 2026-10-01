@@ -173,7 +173,9 @@ services:
       #   1. AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
       #      AUTHKIT_PUBLIC_KEYS envs, or
       #   2. AUTHKIT_KEYS_PATH/keys.json injected by Vault/External Secrets, or
-      #   3. development-only generated keys persisted at /.runtime/authkit.
+      #   3. development keys (AUTH_ALLOW_EPHEMERAL_SIGNING_KEY): AuthKit writes
+      #      keys.json and totp.key to the openrails_auth_keys volume, so
+      #      restarts keep sessions and authenticator enrollments.
       AUTHKIT_KEYS_PATH: "${AUTHKIT_KEYS_PATH:-/vault/auth}"
       AUTHKIT_ACTIVE_KEY_ID: "${AUTHKIT_ACTIVE_KEY_ID:-}"
       AUTHKIT_ACTIVE_PRIVATE_KEY_PEM: "${AUTHKIT_ACTIVE_PRIVATE_KEY_PEM:-}"
@@ -202,8 +204,9 @@ services:
     command: ["run-server"]
     volumes:
       - openrails_spool:/var/lib/openrails/spool
-      - openrails_runtime_keys:/.runtime/authkit
-      - ${AUTHKIT_KEYS_HOST_DIR:-./.secrets/authkit}:/vault/auth:ro
+      # A writable volume by default; AUTHKIT_KEYS_HOST_DIR binds a host
+      # directory holding keys.json and totp.key instead.
+      - ${AUTHKIT_KEYS_HOST_DIR:-openrails_auth_keys}:/vault/auth
     networks:
       - local-openrails
 
@@ -251,7 +254,7 @@ volumes:
     external: true
     name: go_mod_cache_persistent
   openrails_spool:
-  openrails_runtime_keys:
+  openrails_auth_keys:
   issuer_postgres_data:
   issuer_runtime_keys:
 
