@@ -1978,8 +1978,8 @@ func (s *CheckoutSessionService) productDisplayName(ctx context.Context, product
 
 // resolveSolanaTierChange mirrors the resolution the auth-gated tier-change
 // handler does (ownership already verified by the caller): load the OLD on-chain
-// row, resolve the NEW price's canonical plan terms, decide upgrade vs downgrade
-// within the tier group, and compute the Model-B prorated first charge for an
+// row, resolve the NEW price's canonical plan terms, decide the change by
+// SolanaTierChange, and compute the Model-B prorated first charge for an
 // upgrade.
 func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, oldSub *models.Subscription, oldRow *models.SolanaSubscription, newPriceIDStr string) (*resolvedSolanaLifecycleTierChange, error) {
 	// #774: new_price_id accepts a price_key too.
@@ -2007,19 +2007,10 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 	if err != nil || oldProduct == nil {
 		return nil, fmt.Errorf("%w: current product not found", ErrCheckoutSessionValidation)
 	}
-	if oldProduct.ID == newProduct.ID {
-		return nil, fmt.Errorf("%w: already subscribed to this product", ErrCheckoutSessionValidation)
-	}
-	if oldProduct.TierGroup != nil && newProduct.TierGroup != nil &&
-		strings.TrimSpace(*oldProduct.TierGroup) != strings.TrimSpace(*newProduct.TierGroup) {
-		return nil, fmt.Errorf("%w: tier change must stay within the same tier group", ErrCheckoutSessionValidation)
-	}
-	// #820: same FX refusal as CheckoutService.TierChange.
-	if err := RequireSameCurrency(PriceAmountOf(oldPrice), PriceAmountOf(newPrice)); err != nil {
+	isUpgrade, err := SolanaTierChange(oldSub, oldProduct, newProduct, oldPrice, newPrice)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 	}
-
-	isUpgrade := newProduct.TierRank >= oldProduct.TierRank
 	out := &resolvedSolanaLifecycleTierChange{
 		newPriceID:      newPrice.ID,
 		oldRow:          oldRow,

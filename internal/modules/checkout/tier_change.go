@@ -3,6 +3,7 @@ package checkout
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 
@@ -102,6 +103,35 @@ func (e *TierChangeInFlightError) Error() string {
 	return "tier change " + e.OperationID.String() + " is unresolved; retry with its Idempotency-Key"
 }
 func (e *TierChangeInFlightError) Unwrap() error { return ErrTierChangePending }
+
+// SolanaTierChange decides an on-chain tier change, which takes effect at
+// once: a downgrade grants the new plan for the rest of the paid period with
+// no payment. So the subscription must be active, the move must stay inside
+// one declared tier group and one currency, and it is an upgrade (the prorated
+// difference is pulled in the same transaction) unless the new plan costs no
+// more per hour than the current one. Rank never makes a costlier plan free.
+func SolanaTierChange(sub *models.Subscription, current, next *models.Product, currentPrice, nextPrice *models.Price) (upgrade bool, err error) {
+	if sub == nil || sub.Status != models.StatusActive {
+		return false, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "only an active subscription can change tier on Solana"}
+	}
+	if current.ID == next.ID {
+		return false, ErrTierChangeSameProduct
+	}
+	if !sameTierGroup(current, next) {
+		return false, ErrTierChangeDifferentGroup
+	}
+	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(nextPrice)); err != nil {
+		return false, err
+	}
+	currentHours, nextHours := currentPrice.RecurringCycleHours(), nextPrice.RecurringCycleHours()
+	if currentHours == nil || nextHours == nil || *currentHours <= 0 || *nextHours <= 0 {
+		return false, ErrTierChangeCycleUnknown
+	}
+	// next/nextHours > current/currentHours, without division or overflow.
+	nextRate := new(big.Int).Mul(big.NewInt(nextPrice.Amount), big.NewInt(int64(*currentHours)))
+	currentRate := new(big.Int).Mul(big.NewInt(currentPrice.Amount), big.NewInt(int64(*nextHours)))
+	return nextRate.Cmp(currentRate) > 0, nil
+}
 
 // sameTierGroup reports whether a tier change stays inside one declared tier
 // group. A product without a group has no tiers: moving into or out of one would

@@ -3982,6 +3982,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/checkout/tier_change.go": {
+      "big": "math/big",
       "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
@@ -5738,7 +5739,7 @@
     "internal/http/handlers/service_payment_settlement.go": "2c2bcd10a5ffbbd3f403026c588477d433b04f14b30e35e765b59cc97c0921e2",
     "internal/http/handlers/solana_error.go": "d6e846041f2619e6b5f1250517fc4b6b54bcaf4c00caf4db3f7a6c320d003e42",
     "internal/http/handlers/solana_pay.go": "159a37489617aad9c8d470cc365811627e0b2dc5880df5456d2c5cd8c91c88d1",
-    "internal/http/handlers/solana_recurring.go": "0cc847e49341277ee2c45f74c14ce1d5772ce8e9aecc300498780861dccc415c",
+    "internal/http/handlers/solana_recurring.go": "8e52b62b475e2583b77692e381d80c2b24369664229b621fe8a62fd81bdcf49c",
     "internal/http/handlers/solana_supported_tokens.go": "13c601799625b3b6d45d2642752ff6d0a61fe6278b17aa84448b128127ba1e81",
     "internal/http/handlers/stripe_engine_authentication.go": "9862f395366fa0b4a846a1ef1b4d31abc3d121d434d7009b0a6153be846e0531",
     "internal/http/handlers/stripe_method_setup.go": "2ad62cd87266a4753189bdb6a7104e4c223eb7951e213a3fa2f89bb663ebcc18",
@@ -5833,7 +5834,7 @@
     "internal/migrate/postgres/unique_scope_exemptions.go": "8891a0cdffb892a5ec42f4b3433dcdb50781c36d5132d2546eadda2cf46fad94",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/initial_membership_new_card.go": "84f53897b2b8d869ec0832aebd4dcf4891e5ab46caeac4f6e229a88ac8d67f4c",
-    "internal/modules/checkout/session_service.go": "5e4751233493bcbd56e400877d58822032a377ef9c41653312a7ae3335800a0f",
+    "internal/modules/checkout/session_service.go": "e4bc099fa864a6e5f8e48ec556001f4acf548a4202bbb8ca3dd0eba2c3521760",
     "internal/modules/checkout/session_types.go": "d2a942c9d615065f5893064d5377710a501cb5504338ece953d17f69cad82387",
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
     "internal/modules/checkout/stripe_method_setup.go": "8924e7385efa3ee2ab0b9052aff26921d0bd066f8273786819ed1fe2ef113a4b",
