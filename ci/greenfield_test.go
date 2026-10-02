@@ -1,9 +1,9 @@
 //go:build greenfield && integration
 
-// Package greenfield contains the first replacement CI slice. It deliberately
+// Package ci contains the first replacement CI slice. It deliberately
 // talks only to the public embedded API: the old integration harness and
 // application tables are not part of this fixture.
-package greenfield_test
+package ci_test
 
 import (
 	"context"

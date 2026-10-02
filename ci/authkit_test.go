@@ -1,6 +1,6 @@
 //go:build greenfield && integration
 
-package greenfield_test
+package ci_test
 
 import (
 	"crypto"
@@ -277,7 +277,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok, "billing mails no deleted account")
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
+	raw, err := os.ReadFile(filepath.Join("..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)
 	manifest, err := authkit.ParseBootstrapManifestYAML(raw)
 	require.NoError(t, err)

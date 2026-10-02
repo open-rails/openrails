@@ -21,7 +21,7 @@ It covers migration replay, catalog and entitlement isolation, checkout
 idempotency, Stripe webhook convergence, provider-owned NMI subscriptions with
 dunning state, engine-owned NMI admission, and exact integer money/currency
 boundaries. The legacy engine-subscription workflow has been removed. The focused
-`ci/greenfield/subscriptions` scenarios now cover engine- and provider-owned
+`ci/subscriptions` scenarios now cover engine- and provider-owned
 Stripe/NMI lifecycles, including confirmation, renewal, dunning, cancellation,
 refunds, and crash recovery. See the [coverage map](../greenfield-coverage.md)
 for the precise scope and remaining gaps.
@@ -53,7 +53,7 @@ zero-decimal scale.
 
 ## Adding a scenario
 
-Add a small public-client contract to `ci/greenfield`. Use a deterministic local
+Add a small public-client contract to `ci/`. Use a deterministic local
 transport for provider behavior, keep each test on a fresh schema, and assert
 the durable result and the negative safety case. Do not add a new broad test
 runner or reintroduce the deleted integration-package partition.
