@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
@@ -559,7 +560,7 @@ func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.Control
 			log.WithError(err).Warn("merchant bootstrap: close advisory-lock session failed")
 		}
 	}
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, merchantManifestAdvisoryLock); err != nil {
+	if err := gen.New(conn).LockMerchantManifestBootstrap(ctx, merchantManifestAdvisoryLock); err != nil {
 		release()
 		return nil, fmt.Errorf("merchant bootstrap: acquire advisory lock: %w", err)
 	}

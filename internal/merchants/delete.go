@@ -269,11 +269,9 @@ func (s *Service) TakePurgeInventory(ctx context.Context, id merchant.ID) (Purge
 	}
 
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-			INSERT INTO openrails.maintenance_runs (merchant_id, kind, status, inventory_manifest, inventory_total_rows, finished_at)
-			VALUES ($1::uuid, 'purge_inventory', 'completed', $2::jsonb, ($2::jsonb->>'total_rows')::bigint, current_timestamp)
-			RETURNING id::text
-		`, id.String(), string(manifestJSON)).Scan(&inv.ID)
+		runID, err := gen.New(tx).RecordPurgeInventory(ctx, gen.RecordPurgeInventoryParams{MerchantID: id.UUID(), Manifest: manifestJSON})
+		inv.ID = runID.String()
+		return err
 	}); err != nil {
 		return PurgeInventory{}, fmt.Errorf("merchants: record purge inventory: %w", err)
 	}
@@ -495,27 +493,25 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		}
 		// inventory-before-purge: an inventory for the merchant's CURRENT row
 		// count. A stale one proves nothing about what is about to be destroyed.
-		var matching int
 		countsJSON, err := json.Marshal(counts)
 		if err != nil {
 			return fmt.Errorf("merchants: marshal current purge counts: %w", err)
 		}
-		if _, err := uuid.Parse(opts.InventoryID); err != nil {
+		inventoryID, err := uuid.Parse(opts.InventoryID)
+		if err != nil {
 			return &ErrPurgeInventoryStale{Slug: m.Slug, TotalRows: total}
 		}
-		if err := tx.QueryRow(ctx, `
-			SELECT count(*) FROM openrails.maintenance_runs
-			 WHERE id = $1::uuid AND merchant_id = $2::uuid AND kind='purge_inventory' AND status = 'completed'
-			   AND inventory_total_rows = $3::bigint
-			   AND inventory_manifest->'row_counts' = $4::jsonb
-		`, opts.InventoryID, id.String(), int64(total), string(countsJSON)).Scan(&matching); err != nil {
+		txq := gen.New(tx)
+		matching, err := txq.CountMatchingPurgeInventories(ctx, gen.CountMatchingPurgeInventoriesParams{
+			ID: inventoryID, MerchantID: id.UUID(), TotalRows: int64(total), RowCounts: countsJSON,
+		})
+		if err != nil {
 			return fmt.Errorf("merchants: check inventory-before-purge: %w", err)
 		}
 		if matching == 0 {
 			return &ErrPurgeInventoryStale{Slug: m.Slug, TotalRows: total}
 		}
 
-		txq := gen.New(tx)
 		if _, err := txq.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{
 			ID: runID, MerchantID: id.UUID(), Kind: DestructiveRunKindMerchantPurge,
 			Actor: actor, DryRun: false, Coverage: inventoryProof,
@@ -532,16 +528,12 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 
 		// Purge DB-backed secret store rows; the Vault-backed store is purged
 		// separately below.
-		if _, err := tx.Exec(ctx, `DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid`, id.String()); err != nil {
+		if err := txq.DeleteAllMerchantSecrets(ctx, id.UUID()); err != nil {
 			return fmt.Errorf("merchants: purge merchant secrets: %w", err)
 		}
 
 		// Tombstone the directory row.
-		if _, err := tx.Exec(ctx, `
-			UPDATE openrails.merchants
-			   SET status = 'deleted', deleted_at = current_timestamp, updated_at = current_timestamp
-			 WHERE id = $1::uuid
-		`, id.String()); err != nil {
+		if _, err := txq.SoftDeletePlatformMerchant(ctx, id.UUID()); err != nil {
 			return fmt.Errorf("merchants: tombstone merchant: %w", err)
 		}
 

@@ -164,10 +164,7 @@ func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) erro
 	if id.IsZero() {
 		return fmt.Errorf("db: cannot set %s GUC for a zero merchant id", MerchantGUC)
 	}
-	var out string
-	if err := tx.QueryRow(ctx,
-		"SELECT set_config($1, $2, TRUE)", MerchantGUC, id.String(),
-	).Scan(&out); err != nil {
+	if _, err := gen.New(tx).SetConfig(ctx, gen.SetConfigParams{Setting: MerchantGUC, Value: id.String(), IsLocal: true}); err != nil {
 		return fmt.Errorf("db: set %s GUC: %w", MerchantGUC, err)
 	}
 	return nil
@@ -192,10 +189,8 @@ func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id merchant.ID) (con
 		return ctx, nil, fmt.Errorf("db: BindMerchantTx requires a non-zero merchant id")
 	}
 
-	var got string
-	if err := tx.QueryRow(ctx,
-		"SELECT COALESCE(current_setting($1, true), '')", MerchantGUC,
-	).Scan(&got); err != nil {
+	got, err := gen.New(tx).CurrentSetting(ctx, MerchantGUC)
+	if err != nil {
 		return ctx, nil, fmt.Errorf("db: read %s before binding caller transaction: %w", MerchantGUC, err)
 	}
 	if got != "" && got != id.String() {
@@ -250,9 +245,7 @@ func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgx.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db: acquire pgx merchant connection: %w", err)
 	}
-	var out string
-	if err := conn.QueryRow(ctx,
-		"SELECT set_config($1, $2, FALSE)", MerchantGUC, l.tenantID).Scan(&out); err != nil {
+	if _, err := gen.New(conn).SetConfig(ctx, gen.SetConfigParams{Setting: MerchantGUC, Value: l.tenantID}); err != nil {
 		conn.Release()
 		return nil, fmt.Errorf("db: set %s on pgx merchant connection: %w", MerchantGUC, err)
 	}
@@ -279,8 +272,7 @@ func (l *lazyMerchantPgxConn) release() {
 	// get() re-sets the GUC before use, but never return a connection that may carry a
 	// merchant GUC to the pool: on reset failure, warn and close it so the
 	// pool destroys it instead of reusing it (#668).
-	if _, err := l.conn.Exec(context.Background(),
-		"SELECT set_config($1, '', FALSE)", MerchantGUC); err != nil {
+	if _, err := gen.New(l.conn).SetConfig(context.Background(), gen.SetConfigParams{Setting: MerchantGUC}); err != nil {
 		logrus.WithError(err).Warn("db: failed to reset merchant GUC on pgx connection release; discarding connection")
 		_ = l.conn.Conn().Close(context.Background())
 	}

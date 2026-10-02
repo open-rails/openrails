@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
@@ -67,8 +69,7 @@ func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSid
 	var current SyncCatalogSidecarsRequest
 	err = dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if opts.Insert || opts.Overwrite || opts.Prune {
-			var locked uuid.UUID
-			if err := tx.QueryRow(ctx, `SELECT id FROM billing.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&locked); err != nil {
+			if _, err := gen.New(tx).LockMerchantSettings(ctx, tid.UUID()); err != nil {
 				return err
 			}
 		}
@@ -112,8 +113,9 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 	return dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Serializes declaration merges. Re-read after acquiring the lock so partial
 		// flags cannot restore state read by an earlier, now stale plan.
-		var merchantID uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT id FROM billing.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&merchantID); err != nil {
+		q := gen.New(tx)
+		merchantID, err := q.LockMerchantSettings(ctx, tid.UUID())
+		if err != nil {
 			return err
 		}
 		current, err := readCatalogBilling(ctx, tx, merchantID)
@@ -129,12 +131,12 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		cards := next.RateCards[:0]
 		for _, card := range next.RateCards {
 			if card.ProductKey != "" {
-				var exists bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.products WHERE merchant_id=$1 AND key=$2)`, merchantID, card.ProductKey).Scan(&exists); err != nil {
-					return err
-				}
-				if !exists {
+				_, err := q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: merchantID, Key: card.ProductKey})
+				if errors.Is(err, pgx.ErrNoRows) {
 					continue
+				}
+				if err != nil {
+					return err
 				}
 			}
 			cards = append(cards, card)
@@ -150,7 +152,7 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if stored, ok := currentMeters[meter.Key]; ok && reflect.DeepEqual(stored, meter) {
 				continue
 			}
-			if err := syncMeter(ctx, tx, merchantID, meter, opts.Overwrite); err != nil {
+			if err := syncMeter(ctx, q, merchantID, meter, opts.Overwrite); err != nil {
 				return err
 			}
 		}
@@ -170,13 +172,13 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if keep && sameCatalogCards([]CatalogRateCardSpec{card}, []CatalogRateCardSpec{replacement}) {
 				continue
 			}
-			if _, err := tx.Exec(ctx, `DELETE FROM billing.catalog_rate_cards WHERE merchant_id=$1 AND id=$2 AND customer_id IS NULL`, merchantID, card.id); err != nil {
+			if err := q.DeleteDefaultCatalogRateCard(ctx, gen.DeleteDefaultCatalogRateCardParams{MerchantID: merchantID, ID: card.id}); err != nil {
 				return err
 			}
 		}
 		for _, meter := range current.Meters {
 			if !nextMeters[meter.Key] {
-				if _, err := tx.Exec(ctx, `DELETE FROM billing.catalog_meters WHERE merchant_id=$1 AND key=$2`, merchantID, meter.Key); err != nil {
+				if err := q.DeleteCatalogMeter(ctx, gen.DeleteCatalogMeterParams{MerchantID: merchantID, MeterKey: meter.Key}); err != nil {
 					return err
 				}
 			}
@@ -185,7 +187,7 @@ func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if stored, ok := currentCards[catalogCardKey(card)]; ok && sameCatalogCards([]CatalogRateCardSpec{stored}, []CatalogRateCardSpec{card}) {
 				continue
 			}
-			if err := syncRateCard(ctx, tx, merchantID, card, opts.Overwrite); err != nil {
+			if err := syncRateCard(ctx, q, merchantID, card, opts.Overwrite); err != nil {
 				return err
 			}
 		}
@@ -273,37 +275,28 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 
 func readCatalogBilling(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (SyncCatalogSidecarsRequest, error) {
 	var out SyncCatalogSidecarsRequest
-	rows, err := tx.Query(ctx, `SELECT key, COALESCE(event_type,''), COALESCE(value_property,''), COALESCE(aggregation,''), COALESCE(unit,''), group_by FROM billing.catalog_meters WHERE merchant_id=$1`, merchantID)
+	q := gen.New(tx)
+	meters, err := q.ListCatalogMeters(ctx, merchantID)
 	if err != nil {
 		return out, err
 	}
-	for rows.Next() {
-		var meter CatalogMeterSpec
-		if err := rows.Scan(&meter.Key, &meter.EventType, &meter.ValueProperty, &meter.Aggregation, &meter.Unit, &meter.GroupBy); err != nil {
-			rows.Close()
+	for _, m := range meters {
+		meter := CatalogMeterSpec{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit}
+		if err := json.Unmarshal(m.GroupBy, &meter.GroupBy); err != nil {
 			return out, err
 		}
 		out.Meters = append(out.Meters, meter)
 	}
-	err = rows.Err()
-	rows.Close()
+	cards, err := q.ListDefaultCatalogRateCards(ctx, merchantID)
 	if err != nil {
 		return out, err
 	}
-	rows, err = tx.Query(ctx, `SELECT rc.id, rc.created_at, COALESCE(p.key,''), rc.ordinal, COALESCE(rc.meter_key,''), rc.payment_term, rc.filter, rc.allowance, rc.price FROM billing.catalog_rate_cards rc LEFT JOIN billing.products p ON p.merchant_id=rc.merchant_id AND p.id=rc.product_id WHERE rc.merchant_id=$1 AND rc.customer_id IS NULL`, merchantID)
-	if err != nil {
-		return out, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var card CatalogRateCardSpec
-		if err := rows.Scan(&card.id, &card.createdAt, &card.ProductKey, &card.Ordinal, &card.MeterKey, &card.PaymentTerm, &card.Filter, &card.Allowance, &card.Price); err != nil {
+	for _, c := range cards {
+		card := CatalogRateCardSpec{id: c.ID, createdAt: c.CreatedAt, ProductKey: c.ProductKey, Ordinal: int(c.Ordinal), MeterKey: c.MeterKey, PaymentTerm: c.PaymentTerm, Allowance: c.Allowance, Price: c.Price}
+		if err := json.Unmarshal(c.Filter, &card.Filter); err != nil {
 			return out, err
 		}
 		out.RateCards = append(out.RateCards, card)
-	}
-	if err := rows.Err(); err != nil {
-		return out, err
 	}
 	err = normalizeCatalogBilling(&out)
 	return out, err
@@ -453,29 +446,25 @@ func sameCatalogCards(a, b []CatalogRateCardSpec) bool {
 	return bytes.Equal(left, right)
 }
 
-func syncMeter(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter CatalogMeterSpec, overwrite bool) error {
+func syncMeter(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, meter CatalogMeterSpec, overwrite bool) error {
 	groupBy, err := json.Marshal(meter.GroupBy)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `
-INSERT INTO billing.catalog_meters (merchant_id,key,event_type,value_property,aggregation,unit,group_by)
-VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7::jsonb)
-ON CONFLICT (merchant_id,key) DO UPDATE SET event_type=EXCLUDED.event_type,
- value_property=EXCLUDED.value_property,aggregation=EXCLUDED.aggregation,
- unit=EXCLUDED.unit,group_by=EXCLUDED.group_by,updated_at=now() WHERE $8`,
-		merchantID, meter.Key, meter.EventType, meter.ValueProperty, meter.Aggregation, meter.Unit, string(groupBy), overwrite)
-	return err
+	return q.SyncCatalogMeter(ctx, gen.SyncCatalogMeterParams{
+		MerchantID: merchantID, MeterKey: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty,
+		Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: groupBy, Overwrite: overwrite,
+	})
 }
 
-func syncRateCard(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, spec CatalogRateCardSpec, overwrite bool) error {
+func syncRateCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, spec CatalogRateCardSpec, overwrite bool) error {
 	var productID *uuid.UUID
 	if spec.ProductKey != "" {
-		id, err := resolveProductID(ctx, tx, merchantID, spec.ProductKey)
+		product, err := q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: merchantID, Key: strings.TrimSpace(spec.ProductKey)})
 		if err != nil {
-			return err
+			return fmt.Errorf("resolve product %q: %w", spec.ProductKey, err)
 		}
-		productID = &id
+		productID = &product.ID
 	}
 	filter, err := json.Marshal(spec.Filter)
 	if err != nil {
@@ -487,20 +476,9 @@ func syncRateCard(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, spec Cat
 		id = &spec.id
 		created = &spec.createdAt
 	}
-	_, err = tx.Exec(ctx, `
-INSERT INTO billing.catalog_rate_cards
- (merchant_id,product_id,ordinal,meter_key,payment_term,filter,allowance,price,id,created_at)
-VALUES ($1,$2,$3,NULLIF($4,''),$5,$6::jsonb,NULLIF($7,'')::jsonb,$8::jsonb,COALESCE($9,gen_random_uuid()),COALESCE($10,now()))
-ON CONFLICT (merchant_id,product_id,ordinal) DO UPDATE SET meter_key=EXCLUDED.meter_key,
- payment_term=EXCLUDED.payment_term,filter=EXCLUDED.filter,allowance=EXCLUDED.allowance,
- price=EXCLUDED.price,updated_at=now() WHERE $11`, merchantID, productID, spec.Ordinal, spec.MeterKey, spec.PaymentTerm, string(filter), string(spec.Allowance), string(spec.Price), id, created, overwrite)
-	return err
-}
-
-func resolveProductID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string) (uuid.UUID, error) {
-	var id uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT id FROM billing.products WHERE merchant_id = $1 AND key = $2`, merchantID, strings.TrimSpace(key)).Scan(&id); err != nil {
-		return uuid.Nil, fmt.Errorf("resolve product %q: %w", key, err)
-	}
-	return id, nil
+	return q.SyncCatalogRateCard(ctx, gen.SyncCatalogRateCardParams{
+		MerchantID: merchantID, ProductID: productID, Ordinal: int64(spec.Ordinal), MeterKey: spec.MeterKey,
+		PaymentTerm: spec.PaymentTerm, Filter: filter, Allowance: spec.Allowance, Price: spec.Price,
+		ID: id, CreatedAt: created, Overwrite: overwrite,
+	})
 }

@@ -85,3 +85,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.merchant_id = sqlc.arg(
       WHERE rma.merchant_id = sqlc.arg(merchant_id)::uuid AND rma.merchant_id = s.merchant_id AND rma.rail = s.rail
   )
 GROUP BY s.rail;
+
+-- name: UpsertPSPRefreshWatermark :exec
+INSERT INTO openrails.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(psp_id)::uuid, 'events', sqlc.arg(watermark_at)::timestamptz)
+ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
+DO UPDATE SET watermark_at = EXCLUDED.watermark_at, updated_at = now();

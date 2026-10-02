@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -74,9 +77,10 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 		windowDays = 30
 	}
 	since := time.Now().UTC().AddDate(0, 0, -windowDays)
-	var excludeArg any
+	var excludeArg *uuid.UUID
 	if !exclude.IsZero() {
-		excludeArg = exclude.UUID()
+		id := exclude.UUID()
+		excludeArg = &id
 	}
 
 	// or#861: every aggregate below reads merchant-owned tables (payments,
@@ -87,73 +91,38 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude merchant.ID, 
 	// return AGGREGATES ONLY — counts and sums grouped by
 	// currency/rail — never a merchant-owned row.
 	out := &FleetAnalytics{WindowDays: windowDays}
-	if err := c.pool.QueryRow(ctx,
-		`SELECT total, armed, first_revenue, active_revenue
-		   FROM openrails.fleet_merchant_funnel($1::uuid, $2::timestamptz)`,
-		excludeArg, since).Scan(
-		&out.Merchants.Total, &out.Merchants.Armed,
-		&out.Merchants.FirstRevenue, &out.Merchants.ActiveRevenue,
-	); err != nil {
+	q := gen.New(c.pool)
+	funnel, err := q.FleetMerchantFunnel(ctx, gen.FleetMerchantFunnelParams{ExcludeMerchantID: excludeArg, Since: since})
+	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: merchant funnel: %w", err)
 	}
+	out.Merchants.Total, out.Merchants.Armed = funnel.Total, funnel.Armed
+	out.Merchants.FirstRevenue, out.Merchants.ActiveRevenue = funnel.FirstRevenue, funnel.ActiveRevenue
 
 	// Sale rows only: refund/chargeback mirror rows share status='completed'
 	// (with negative amounts + reversal_kind set) and must not count as sales.
-	revenueRows, err := c.pool.Query(ctx,
-		`SELECT currency, payments, settled_amount
-		   FROM openrails.fleet_revenue_by_currency($1::uuid, $2::timestamptz)`,
-		excludeArg, since)
+	revenue, err := q.FleetRevenueByCurrency(ctx, gen.FleetRevenueByCurrencyParams{ExcludeMerchantID: excludeArg, Since: since})
 	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: revenue: %w", err)
 	}
-	defer revenueRows.Close()
-	for revenueRows.Next() {
-		var r FleetCurrencyRevenue
-		if err := revenueRows.Scan(&r.Currency, &r.Payments, &r.SettledAmount); err != nil {
-			return nil, fmt.Errorf("fleet analytics: scan revenue: %w", err)
-		}
-		out.Revenue = append(out.Revenue, r)
-	}
-	if err := revenueRows.Err(); err != nil {
-		return nil, fmt.Errorf("fleet analytics: revenue rows: %w", err)
+	for _, r := range revenue {
+		out.Revenue = append(out.Revenue, FleetCurrencyRevenue{Currency: r.Currency, Payments: r.Payments, SettledAmount: r.SettledAmount})
 	}
 
-	railRows, err := c.pool.Query(ctx,
-		`SELECT rail, succeeded, failed, chargebacks
-		   FROM openrails.fleet_rail_health($1::uuid, $2::timestamptz)`,
-		excludeArg, since)
+	rails, err := q.FleetRailHealth(ctx, gen.FleetRailHealthParams{ExcludeMerchantID: excludeArg, Since: since})
 	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: rail health: %w", err)
 	}
-	defer railRows.Close()
-	for railRows.Next() {
-		var r FleetRailHealth
-		if err := railRows.Scan(&r.Rail, &r.Succeeded, &r.Failed, &r.Chargebacks); err != nil {
-			return nil, fmt.Errorf("fleet analytics: scan rail health: %w", err)
-		}
-		out.Rails = append(out.Rails, r)
-	}
-	if err := railRows.Err(); err != nil {
-		return nil, fmt.Errorf("fleet analytics: rail rows: %w", err)
+	for _, r := range rails {
+		out.Rails = append(out.Rails, FleetRailHealth{Rail: r.Rail, Succeeded: r.Succeeded, Failed: r.Failed, Chargebacks: r.Chargebacks})
 	}
 
-	mrrRows, err := c.pool.Query(ctx,
-		`SELECT currency, subscriptions, monthly_amount
-		   FROM openrails.fleet_mrr_by_currency($1::uuid)`,
-		excludeArg)
+	mrr, err := q.FleetMRRByCurrency(ctx, excludeArg)
 	if err != nil {
 		return nil, fmt.Errorf("fleet analytics: mrr: %w", err)
 	}
-	defer mrrRows.Close()
-	for mrrRows.Next() {
-		var r FleetMRR
-		if err := mrrRows.Scan(&r.Currency, &r.Subscriptions, &r.MonthlyAmount); err != nil {
-			return nil, fmt.Errorf("fleet analytics: scan mrr: %w", err)
-		}
-		out.MRR = append(out.MRR, r)
-	}
-	if err := mrrRows.Err(); err != nil {
-		return nil, fmt.Errorf("fleet analytics: mrr rows: %w", err)
+	for _, r := range mrr {
+		out.MRR = append(out.MRR, FleetMRR{Currency: r.Currency, Subscriptions: r.Subscriptions, MonthlyAmount: r.MonthlyAmount})
 	}
 	return out, nil
 }

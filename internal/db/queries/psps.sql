@@ -179,3 +179,82 @@ SET pending_signer_public_key = NULL,
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(id)::uuid
   AND pending_signer_public_key = sqlc.arg(public_key)::text;
+
+-- name: MerchantHasPSPs :one
+SELECT EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid);
+
+-- name: ArchivedPSPKeyExists :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.psps
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lower(key) = lower(sqlc.arg(key)::text)
+      AND environment = sqlc.arg(environment)::text AND archived = true
+);
+
+-- name: GetActivePSPByKey :one
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lower(key) = lower(sqlc.arg(key)::text)
+  AND environment = sqlc.arg(environment)::text AND archived = false
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: ListActivePSPsForRailEnvironment :many
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
+  AND environment = sqlc.arg(environment)::text AND archived = false
+ORDER BY created_at DESC, id DESC;
+
+-- name: ListActivePSPsForEnvironment :many
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND environment = sqlc.arg(environment)::text AND archived = false
+ORDER BY rail ASC, created_at DESC, id DESC;
+
+-- Archived included: the drain-pull leg (#699).
+-- name: GetNewestPSPForRail :one
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
+  AND environment = sqlc.arg(environment)::text
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: GetPSPIDByRailAccount :one
+SELECT id FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
+  AND account_id = sqlc.arg(account_id)::text
+LIMIT 1;
+
+-- name: GetPSPEnvironmentForRail :one
+SELECT environment FROM openrails.psps
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text;
+
+-- One lock order so concurrent archives serialize instead of deadlocking.
+-- name: LockPSPsForRailEnvironment :many
+SELECT * FROM openrails.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text
+  AND environment = sqlc.arg(environment)::text
+ORDER BY created_at, id
+FOR UPDATE;
+
+-- name: ArchivePSP :one
+UPDATE openrails.psps
+SET archived = true,
+    evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{configuration_revision}',
+        to_jsonb(COALESCE((evidence ->> 'configuration_revision')::bigint, 0) + 1)),
+    replaced_at = COALESCE(replaced_at, now()),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+RETURNING *;
+
+-- name: CountPSPOpenObligations :many
+SELECT psp.id AS psp_id,
+       ((SELECT count(*) FROM openrails.subscriptions sub
+          WHERE sub.merchant_id = psp.merchant_id AND sub.psp_id = psp.id
+            AND sub.status IN ('active', 'pending', 'past_due') AND sub.deleted_at IS NULL)
+      + (SELECT count(*) FROM openrails.payments payment
+          WHERE payment.merchant_id = psp.merchant_id AND payment.psp_id = psp.id
+            AND payment.status = 'pending' AND payment.deleted_at IS NULL)
+      + (SELECT count(*) FROM openrails.rail_intents intent
+          WHERE intent.merchant_id = psp.merchant_id AND intent.psp_id = psp.id
+            AND intent.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify'))
+       )::bigint AS open_obligations
+FROM openrails.psps psp
+WHERE psp.merchant_id = sqlc.arg(merchant_id)::uuid AND psp.id = ANY(sqlc.arg(psp_ids)::uuid[]);

@@ -179,7 +179,9 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 	mctx := merchant.WithID(ctx, merchant.ID(mid))
 	err := w.DB.MerchantTx(mctx, func(tctx context.Context, tx pgx.Tx) error {
 		// The explicit merchant_id predicate is the scope.
-		return tx.QueryRow(tctx, `SELECT EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = $1)`, mid).Scan(&exists)
+		var err error
+		exists, err = gen.New(tx).MerchantHasPSPs(tctx, mid)
+		return err
 	})
 	return exists, err
 }
@@ -658,15 +660,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 }
 
 func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, fallback time.Time) (time.Time, error) {
-	var watermark time.Time
-	err := w.DB.Qx(ctx).QueryRow(ctx, `
-SELECT watermark_at
-  FROM openrails.rail_refresh_watermarks
- WHERE merchant_id = $1::uuid
-   AND rail = $2::text
-   AND event_domain = $3::text
-   AND psp_id = $4::uuid
-`, mid, string(provider), providerRefreshDomainEvents, pspID).Scan(&watermark)
+	watermark, err := w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, Rail: string(provider), PspID: pspID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fallback.UTC(), nil
 	}
@@ -677,16 +671,7 @@ SELECT watermark_at
 }
 
 func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark time.Time) error {
-	_, err := w.DB.Qx(ctx).Exec(ctx, `
-INSERT INTO openrails.rail_refresh_watermarks (
-    merchant_id, rail, psp_id, event_domain, watermark_at
-) VALUES ($1::uuid, $2::text, $3::uuid, $4::text, $5::timestamptz)
-ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
-DO UPDATE SET
-    watermark_at = EXCLUDED.watermark_at,
-    updated_at = now()
-`, mid, string(provider), pspID, providerRefreshDomainEvents, watermark.UTC())
-	return err
+	return w.DB.Gen(ctx).UpsertPSPRefreshWatermark(ctx, gen.UpsertPSPRefreshWatermarkParams{MerchantID: mid, Rail: string(provider), PspID: pspID, WatermarkAt: watermark.UTC()})
 }
 
 func (w *ProviderRefreshWorker) window() time.Duration {

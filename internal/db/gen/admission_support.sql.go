@@ -235,6 +235,16 @@ func (q *Queries) LockBillingPolicyName(ctx context.Context, arg LockBillingPoli
 	return name, err
 }
 
+const lockInvokerSpendLimits = `-- name: LockInvokerSpendLimits :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Serializes one payer's spend-limit document writes.
+func (q *Queries) LockInvokerSpendLimits(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockInvokerSpendLimits, lockKey)
+	return err
+}
+
 const resolveBillingPolicy = `-- name: ResolveBillingPolicy :one
 SELECT b.policy_name, p.policy
 FROM openrails.billing_policy_bindings b

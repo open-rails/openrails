@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -56,9 +59,10 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 		weeks = 12
 	}
 	since := time.Now().UTC().AddDate(0, 0, -7*(weeks-1))
-	var excludeArg any
+	var excludeArg *uuid.UUID
 	if !exclude.IsZero() {
-		excludeArg = exclude.UUID()
+		id := exclude.UUID()
+		excludeArg = &id
 	}
 
 	// or#861: the aggregates over merchant-owned tables (payments, subscriptions)
@@ -70,91 +74,52 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 	//
 	// Canonical week list from Postgres so bucket alignment can never drift
 	// from the aggregates' date_trunc semantics.
-	weekRows, err := c.pool.Query(ctx, `
-		SELECT generate_series(
-		  date_trunc('week', $1::timestamptz),
-		  date_trunc('week', now()),
-		  interval '7 days')
-	`, since)
+	q := gen.New(c.pool)
+	weekStarts, err := q.FleetWeeks(ctx, since)
 	if err != nil {
 		return nil, fmt.Errorf("fleet timeseries: weeks: %w", err)
 	}
-	defer weekRows.Close()
 	out := &FleetTimeseriesResult{Weeks: weeks}
 	index := map[time.Time]int{}
-	for weekRows.Next() {
-		var week time.Time
-		if err := weekRows.Scan(&week); err != nil {
-			return nil, fmt.Errorf("fleet timeseries: scan week: %w", err)
-		}
+	for _, week := range weekStarts {
 		week = week.UTC()
 		index[week] = len(out.Points)
 		out.Points = append(out.Points, FleetWeeklyPoint{WeekStart: week})
 	}
-	if err := weekRows.Err(); err != nil {
-		return nil, fmt.Errorf("fleet timeseries: week rows: %w", err)
+	assign := func(week time.Time, set func(point *FleetWeeklyPoint)) {
+		if i, ok := index[week.UTC()]; ok {
+			set(&out.Points[i])
+		}
 	}
 
-	fill := func(query string, assign func(point *FleetWeeklyPoint, count int64)) error {
-		rows, err := c.pool.Query(ctx, query, excludeArg, since)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var week time.Time
-			var count int64
-			if err := rows.Scan(&week, &count); err != nil {
-				return err
-			}
-			if i, ok := index[week.UTC()]; ok {
-				assign(&out.Points[i], count)
-			}
-		}
-		return rows.Err()
-	}
-
-	if err := fill(`
-		SELECT date_trunc('week', created_at), count(*)
-		  FROM openrails.merchants
-		 WHERE deleted_at IS NULL AND status = 'active'
-		   AND created_at >= date_trunc('week', $2::timestamptz)
-		   AND ($1::uuid IS NULL OR id <> $1)
-		 GROUP BY 1
-	`, func(p *FleetWeeklyPoint, n int64) { p.NewMerchants = n }); err != nil {
+	newMerchants, err := q.FleetWeeklyNewMerchants(ctx, gen.FleetWeeklyNewMerchantsParams{ExcludeMerchantID: excludeArg, Since: since})
+	if err != nil {
 		return nil, fmt.Errorf("fleet timeseries: new merchants: %w", err)
 	}
-	if err := fill(
-		`SELECT week_start, merchants
-		   FROM openrails.fleet_weekly_active_merchants($1::uuid, $2::timestamptz)`,
-		func(p *FleetWeeklyPoint, n int64) { p.ActiveMerchants = n }); err != nil {
+	for _, r := range newMerchants {
+		assign(r.WeekStart, func(p *FleetWeeklyPoint) { p.NewMerchants = r.Merchants })
+	}
+	active, err := q.FleetWeeklyActiveMerchants(ctx, gen.FleetWeeklyActiveMerchantsParams{ExcludeMerchantID: excludeArg, Since: since})
+	if err != nil {
 		return nil, fmt.Errorf("fleet timeseries: active merchants: %w", err)
 	}
-	if err := fill(
-		`SELECT week_start, cancellations
-		   FROM openrails.fleet_weekly_cancelled_subscriptions($1::uuid, $2::timestamptz)`,
-		func(p *FleetWeeklyPoint, n int64) { p.CancelledSubscriptions = n }); err != nil {
+	for _, r := range active {
+		assign(r.WeekStart, func(p *FleetWeeklyPoint) { p.ActiveMerchants = r.Merchants })
+	}
+	cancelled, err := q.FleetWeeklyCancelledSubscriptions(ctx, gen.FleetWeeklyCancelledSubscriptionsParams{ExcludeMerchantID: excludeArg, Since: since})
+	if err != nil {
 		return nil, fmt.Errorf("fleet timeseries: cancelled subscriptions: %w", err)
 	}
+	for _, r := range cancelled {
+		assign(r.WeekStart, func(p *FleetWeeklyPoint) { p.CancelledSubscriptions = r.Cancellations })
+	}
 
-	volumeRows, err := c.pool.Query(ctx,
-		`SELECT week_start, currency, payments, settled_amount
-		   FROM openrails.fleet_weekly_volume($1::uuid, $2::timestamptz)`,
-		excludeArg, since)
+	volume, err := q.FleetWeeklyVolume(ctx, gen.FleetWeeklyVolumeParams{ExcludeMerchantID: excludeArg, Since: since})
 	if err != nil {
 		return nil, fmt.Errorf("fleet timeseries: volume: %w", err)
 	}
-	defer volumeRows.Close()
-	for volumeRows.Next() {
-		var v FleetWeeklyVolume
-		if err := volumeRows.Scan(&v.WeekStart, &v.Currency, &v.Payments, &v.SettledAmount); err != nil {
-			return nil, fmt.Errorf("fleet timeseries: scan volume: %w", err)
-		}
-		v.WeekStart = v.WeekStart.UTC()
-		out.Volume = append(out.Volume, v)
-	}
-	if err := volumeRows.Err(); err != nil {
-		return nil, fmt.Errorf("fleet timeseries: volume rows: %w", err)
+	for _, v := range volume {
+		out.Volume = append(out.Volume, FleetWeeklyVolume{WeekStart: v.WeekStart.UTC(), Currency: v.Currency, Payments: v.Payments, SettledAmount: v.SettledAmount})
 	}
 	return out, nil
 }

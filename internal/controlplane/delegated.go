@@ -13,6 +13,7 @@ import (
 	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -132,7 +133,7 @@ func (c *ControlPlane) merchantForAppGroup(ctx context.Context, groupID string) 
 	if groupID == "" {
 		return merchant.ID{}, "", ErrDelegatedIssuerUnknown
 	}
-	mid, slug, err := c.merchantDirectoryRow(ctx, `permission_group_id = $1`, groupID)
+	mid, slug, err := c.merchantDirectoryRow(gen.New(c.pool).ListLiveMerchantsByGroupID(ctx, groupID))
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return merchant.ID{}, "", ErrDelegatedIssuerUnknown

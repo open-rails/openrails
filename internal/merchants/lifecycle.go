@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -190,9 +191,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest, bind func
 			return nil, err
 		}
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
-		VALUES ($1, $2, 'active', $3)`, id, slug, groupID); err != nil {
+	if err := gen.New(tx).InsertMerchant(ctx, gen.InsertMerchantParams{ID: id, Slug: slug, GroupID: groupID}); err != nil {
 		return nil, fmt.Errorf("merchants: provision %q: %w", slug, nameClaimError(err))
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -204,8 +203,8 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest, bind func
 // merchantByGroupID includes retired rows so the same group cannot silently
 // acquire a new billing identity after deletion.
 func (s *Service) merchantByGroupID(ctx context.Context, groupID string) (*Merchant, error) {
-	m, err := scanMerchant(s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
-  FROM openrails.merchants WHERE permission_group_id = $1`, groupID))
+	row, err := s.database.Gen(ctx).GetMerchantByGroupID(ctx, groupID)
+	m, err := toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
 	if err == nil && m.Status != StatusActive {
 		return nil, ErrMerchantRetired
 	}
@@ -241,15 +240,11 @@ func (s *Service) SetDisplayName(ctx context.Context, id merchant.ID, displayNam
 	if displayName == "" {
 		return nil
 	}
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE openrails.merchants
-		   SET display_name = $2, updated_at = current_timestamp
-		 WHERE id = $1::uuid AND status = 'active' AND deleted_at IS NULL
-	`, id.String(), displayName)
+	n, err := gen.New(s.pool).SetMerchantDisplayName(ctx, gen.SetMerchantDisplayNameParams{ID: id.UUID(), DisplayName: displayName})
 	if err != nil {
 		return fmt.Errorf("merchants: set display name: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return ErrMerchantNotFound
 	}
 	return nil
@@ -259,31 +254,22 @@ func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-const merchantSelectCols = `id::text, slug, status, COALESCE(permission_group_id,'')`
-
-func scanMerchant(row pgx.Row) (*Merchant, error) {
-	var (
-		t      Merchant
-		idStr  string
-		status string
-	)
-	if err := row.Scan(&idStr, &t.Slug, &status, &t.PermissionGroupID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrMerchantNotFound
-		}
-		return nil, err
+// toMerchant maps a directory row read with err; no row is ErrMerchantNotFound.
+func toMerchant(id uuid.UUID, slug, status string, groupID *string, err error) (*Merchant, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrMerchantNotFound
 	}
-	id, err := merchant.ParseID(idStr)
 	if err != nil {
 		return nil, err
 	}
-	t.ID = id
-	t.Status = MerchantStatus(status)
-	return &t, nil
+	m := &Merchant{ID: merchant.ID(id), Slug: slug, Status: MerchantStatus(status)}
+	if groupID != nil {
+		m.PermissionGroupID = *groupID
+	}
+	return m, nil
 }
 
 func (s *Service) merchantByID(ctx context.Context, id merchant.ID) (*Merchant, error) {
-	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
-		FROM openrails.merchants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
-	return scanMerchant(row)
+	row, err := s.database.Gen(ctx).GetMerchantDirectoryByID(ctx, id.UUID())
+	return toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
 }

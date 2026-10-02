@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -117,18 +118,14 @@ func (s *Service) SetHostConfig(ctx context.Context, id merchant.ID, apiHost str
 		}
 	}
 
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE openrails.merchants
-		   SET api_host = NULLIF($2, ''), updated_at = current_timestamp
-		 WHERE id = $1::uuid AND deleted_at IS NULL
-	`, id.UUID(), host)
+	n, err := gen.New(s.pool).SetMerchantAPIHost(ctx, gen.SetMerchantAPIHostParams{ID: id.UUID(), ApiHost: host})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("merchants: set host config for %s host %q: %w", id, host, ErrAPIHostTaken)
 		}
 		return fmt.Errorf("merchants: set host config: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return ErrMerchantNotFound
 	}
 	return nil
@@ -144,12 +141,7 @@ func (s *Service) GetHostConfig(ctx context.Context, id merchant.ID) (*HostConfi
 	if id.IsZero() {
 		return nil, errors.New("merchants: merchant id is required")
 	}
-	var apiHost *string
-	err := s.pool.QueryRow(ctx, `
-		SELECT api_host
-		  FROM openrails.merchants
-		 WHERE id = $1::uuid AND deleted_at IS NULL
-	`, id.UUID()).Scan(&apiHost)
+	row, err := gen.New(s.pool).GetMerchantDirectoryByID(ctx, id.UUID())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMerchantNotFound
@@ -157,8 +149,8 @@ func (s *Service) GetHostConfig(ctx context.Context, id merchant.ID) (*HostConfi
 		return nil, fmt.Errorf("merchants: get host config: %w", err)
 	}
 	cfg := &HostConfig{}
-	if apiHost != nil {
-		cfg.APIHost = *apiHost
+	if row.ApiHost != nil {
+		cfg.APIHost = *row.ApiHost
 	}
 	return cfg, nil
 }

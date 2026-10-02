@@ -231,6 +231,26 @@ func (q *Queries) AppendReconciliationFindingNotes(ctx context.Context, arg Appe
 	return result.RowsAffected(), nil
 }
 
+const autoResolveFindingBySubject = `-- name: AutoResolveFindingBySubject :exec
+UPDATE openrails.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND finding_type = $2::text
+  AND subject_key = $3::text
+  AND status IN ('reconcile_required', 'requires_review')
+`
+
+type AutoResolveFindingBySubjectParams struct {
+	MerchantID  uuid.UUID
+	FindingType string
+	SubjectKey  string
+}
+
+func (q *Queries) AutoResolveFindingBySubject(ctx context.Context, arg AutoResolveFindingBySubjectParams) error {
+	_, err := q.db.Exec(ctx, autoResolveFindingBySubject, arg.MerchantID, arg.FindingType, arg.SubjectKey)
+	return err
+}
+
 const autoResolveRecoveredStuckIntentFindings = `-- name: AutoResolveRecoveredStuckIntentFindings :execrows
 UPDATE openrails.reconciliation_findings f
 SET status = 'fixed',
@@ -266,6 +286,24 @@ func (q *Queries) AutoResolveRecoveredStuckIntentFindings(ctx context.Context, a
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const autoResolveReviewFindingsByType = `-- name: AutoResolveReviewFindingsByType :exec
+UPDATE openrails.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND finding_type = ANY($2::text[])
+  AND status = 'requires_review'
+`
+
+type AutoResolveReviewFindingsByTypeParams struct {
+	MerchantID   uuid.UUID
+	FindingTypes []string
+}
+
+func (q *Queries) AutoResolveReviewFindingsByType(ctx context.Context, arg AutoResolveReviewFindingsByTypeParams) error {
+	_, err := q.db.Exec(ctx, autoResolveReviewFindingsByType, arg.MerchantID, arg.FindingTypes)
+	return err
 }
 
 const autoResolveVanishedReconciliationFindings = `-- name: AutoResolveVanishedReconciliationFindings :execrows
@@ -599,6 +637,21 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		&i.RunClass,
 	)
 	return i, err
+}
+
+const deleteNMIBulkCheckpoint = `-- name: DeleteNMIBulkCheckpoint :exec
+DELETE FROM openrails.nmi_bulk_checkpoints
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+`
+
+type DeleteNMIBulkCheckpointParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) DeleteNMIBulkCheckpoint(ctx context.Context, arg DeleteNMIBulkCheckpointParams) error {
+	_, err := q.db.Exec(ctx, deleteNMIBulkCheckpoint, arg.MerchantID, arg.PspID)
+	return err
 }
 
 const dismissReconciliationFinding = `-- name: DismissReconciliationFinding :execrows
@@ -1659,6 +1712,66 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 	return items, nil
 }
 
+const listRecordedSubscriptionCharges = `-- name: ListRecordedSubscriptionCharges :many
+SELECT subscription_id, transaction_id::text AS transaction_id, 'completed'::text AS status,
+       purchased_at::timestamptz AS occurred_at, amount::bigint AS amount, currency::text AS currency,
+       ''::text AS response_code
+FROM openrails.payments
+WHERE merchant_id = $1::uuid AND subscription_id = ANY($2::uuid[])
+  AND purchased_at >= $3::timestamptz AND status = 'completed' AND deleted_at IS NULL
+UNION ALL
+SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::timestamptz, amount::bigint,
+       COALESCE(currency, '')::text, COALESCE(response_code, '')::text
+FROM openrails.payment_attempts
+WHERE merchant_id = $1::uuid AND subscription_id = ANY($2::uuid[])
+  AND attempted_at >= $3::timestamptz AND category <> 'approved' AND transaction_id IS NOT NULL
+`
+
+type ListRecordedSubscriptionChargesParams struct {
+	MerchantID      uuid.UUID
+	SubscriptionIds []uuid.UUID
+	Since           time.Time
+}
+
+type ListRecordedSubscriptionChargesRow struct {
+	SubscriptionID *uuid.UUID
+	TransactionID  string
+	Status         string
+	OccurredAt     time.Time
+	Amount         int64
+	Currency       string
+	ResponseCode   string
+}
+
+// Recorded charges (payments) and declines (attempts) a bulk pass decides from.
+func (q *Queries) ListRecordedSubscriptionCharges(ctx context.Context, arg ListRecordedSubscriptionChargesParams) ([]ListRecordedSubscriptionChargesRow, error) {
+	rows, err := q.db.Query(ctx, listRecordedSubscriptionCharges, arg.MerchantID, arg.SubscriptionIds, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecordedSubscriptionChargesRow
+	for rows.Next() {
+		var i ListRecordedSubscriptionChargesRow
+		if err := rows.Scan(
+			&i.SubscriptionID,
+			&i.TransactionID,
+			&i.Status,
+			&i.OccurredAt,
+			&i.Amount,
+			&i.Currency,
+			&i.ResponseCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStalePendingSubscriptions = `-- name: ListStalePendingSubscriptions :many
 SELECT s.id FROM openrails.subscriptions s
 WHERE s.merchant_id = $1::uuid
@@ -1703,6 +1816,43 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptionVaultRefs = `-- name: ListSubscriptionVaultRefs :many
+SELECT s.id, pm.rail_customer_ref
+FROM openrails.subscriptions s
+JOIN openrails.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = s.payment_method_id
+WHERE s.merchant_id = $1::uuid AND s.id = ANY($2::uuid[]) AND s.deleted_at IS NULL
+`
+
+type ListSubscriptionVaultRefsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+type ListSubscriptionVaultRefsRow struct {
+	ID              uuid.UUID
+	RailCustomerRef string
+}
+
+func (q *Queries) ListSubscriptionVaultRefs(ctx context.Context, arg ListSubscriptionVaultRefsParams) ([]ListSubscriptionVaultRefsRow, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionVaultRefs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSubscriptionVaultRefsRow
+	for rows.Next() {
+		var i ListSubscriptionVaultRefsRow
+		if err := rows.Scan(&i.ID, &i.RailCustomerRef); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1906,6 +2056,105 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnverifiedNMISubscriptionIDs = `-- name: ListUnverifiedNMISubscriptionIDs :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+ORDER BY current_period_ends_at NULLS FIRST
+LIMIT $2::bigint
+`
+
+type ListUnverifiedNMISubscriptionIDsParams struct {
+	MerchantID uuid.UUID
+	RowLimit   int64
+}
+
+// Callers pass a limit one above their bulk threshold.
+func (q *Queries) ListUnverifiedNMISubscriptionIDs(ctx context.Context, arg ListUnverifiedNMISubscriptionIDsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnverifiedNMISubscriptionIDs, arg.MerchantID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnverifiedSubscriptionIDsForPSP = `-- name: ListUnverifiedSubscriptionIDsForPSP :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+  AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+ORDER BY current_period_ends_at NULLS FIRST
+`
+
+type ListUnverifiedSubscriptionIDsForPSPParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) ListUnverifiedSubscriptionIDsForPSP(ctx context.Context, arg ListUnverifiedSubscriptionIDsForPSPParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnverifiedSubscriptionIDsForPSP, arg.MerchantID, arg.PspID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnverifiedSubscriptionIDsIn = `-- name: ListUnverifiedSubscriptionIDsIn :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+  AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+`
+
+type ListUnverifiedSubscriptionIDsInParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListUnverifiedSubscriptionIDsIn(ctx context.Context, arg ListUnverifiedSubscriptionIDsInParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnverifiedSubscriptionIDsIn, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2668,6 +2917,29 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 	return result.RowsAffected(), nil
 }
 
+const recordSubscriptionVerificationReads = `-- name: RecordSubscriptionVerificationReads :exec
+UPDATE openrails.subscription_verifications
+SET reads = reads + 1, last_read_at = $1::timestamptz, last_error = $2::text
+WHERE merchant_id = $3::uuid AND subscription_id = ANY($4::uuid[])
+`
+
+type RecordSubscriptionVerificationReadsParams struct {
+	ReadAt          time.Time
+	LastError       *string
+	MerchantID      uuid.UUID
+	SubscriptionIds []uuid.UUID
+}
+
+func (q *Queries) RecordSubscriptionVerificationReads(ctx context.Context, arg RecordSubscriptionVerificationReadsParams) error {
+	_, err := q.db.Exec(ctx, recordSubscriptionVerificationReads,
+		arg.ReadAt,
+		arg.LastError,
+		arg.MerchantID,
+		arg.SubscriptionIds,
+	)
+	return err
+}
+
 const resolveClearedFindings = `-- name: ResolveClearedFindings :execrows
 UPDATE openrails.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
@@ -2716,6 +2988,56 @@ func (q *Queries) ResolveStandingFinding(ctx context.Context, arg ResolveStandin
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const setNMIBulkCheckpointPage = `-- name: SetNMIBulkCheckpointPage :exec
+UPDATE openrails.nmi_bulk_checkpoints SET next_page = $1::bigint
+WHERE merchant_id = $2::uuid AND psp_id = $3::uuid
+`
+
+type SetNMIBulkCheckpointPageParams struct {
+	NextPage   int64
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) SetNMIBulkCheckpointPage(ctx context.Context, arg SetNMIBulkCheckpointPageParams) error {
+	_, err := q.db.Exec(ctx, setNMIBulkCheckpointPage, arg.NextPage, arg.MerchantID, arg.PspID)
+	return err
+}
+
+const startNMIBulkCheckpoint = `-- name: StartNMIBulkCheckpoint :one
+INSERT INTO openrails.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
+VALUES ($1::uuid, $2::uuid, $3::timestamptz,
+        $4::timestamptz, 1, $4::timestamptz)
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET merchant_id = EXCLUDED.merchant_id
+RETURNING since, until, next_page
+`
+
+type StartNMIBulkCheckpointParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Since      time.Time
+	Until      time.Time
+}
+
+type StartNMIBulkCheckpointRow struct {
+	Since    time.Time
+	Until    time.Time
+	NextPage int32
+}
+
+// Resumes an interrupted bulk read, or starts one.
+func (q *Queries) StartNMIBulkCheckpoint(ctx context.Context, arg StartNMIBulkCheckpointParams) (StartNMIBulkCheckpointRow, error) {
+	row := q.db.QueryRow(ctx, startNMIBulkCheckpoint,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Since,
+		arg.Until,
+	)
+	var i StartNMIBulkCheckpointRow
+	err := row.Scan(&i.Since, &i.Until, &i.NextPage)
+	return i, err
 }
 
 const subscriptionHasCompletedPayment = `-- name: SubscriptionHasCompletedPayment :one

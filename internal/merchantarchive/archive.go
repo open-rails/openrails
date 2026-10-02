@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -84,11 +85,12 @@ func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer)
 		if err := preflight(ctx, tx, id); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, "SELECT openrails.check_billing_restore_ledger($1)", id.UUID()); err != nil {
+		q := gen.New(tx)
+		if err := q.CheckBillingRestoreLedger(ctx, id.UUID()); err != nil {
 			return err
 		}
-		var catalogRevision int64
-		if err := tx.QueryRow(ctx, "SELECT catalog_revision FROM openrails.merchants WHERE id=$1", id.UUID()).Scan(&catalogRevision); err != nil {
+		catalogRevision, err := q.GetCatalogRevision(ctx, id.UUID())
+		if err != nil {
 			return err
 		}
 		w, err := archivewire.NewWriter(out, id.String(), catalogRevision)
@@ -159,6 +161,7 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 		if err := checkSchema(ctx, tx); err != nil {
 			return err
 		}
+		q := gen.New(tx)
 		var previousDigest *string
 		var previousRows *int64
 		var restoredCatalogRevision int64
@@ -167,14 +170,19 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 				return &Error{Code: "merchant_mismatch"}
 			}
 			restoredCatalogRevision = h.CatalogRevision
-			if _, err := tx.Exec(ctx, "SELECT set_config('app.catalog_batch',$1,true)", id.String()); err != nil {
+			if err := q.SetCatalogBatchMerchant(ctx, id.String()); err != nil {
 				return err
 			}
-			var receipt string
-			if err := tx.QueryRow(ctx, "SELECT openrails.begin_billing_restore($1)::text", id.UUID()).Scan(&receipt); err != nil {
+			receipt, err := q.BeginBillingRestore(ctx, id.UUID())
+			if err != nil {
 				return err
 			}
-			return tx.QueryRow(ctx, "SELECT summary->>'digest',(summary->>'rows')::bigint FROM openrails.maintenance_runs WHERE merchant_id=$1 AND id=$2::uuid", id.UUID(), receipt).Scan(&previousDigest, &previousRows)
+			previous, err := q.GetBillingRestoreReceipt(ctx, gen.GetBillingRestoreReceiptParams{MerchantID: id.UUID(), ID: receipt})
+			if err != nil {
+				return err
+			}
+			previousDigest, previousRows = previous.Digest, previous.Rows
+			return nil
 		}, func(p contract.Profile, values []*string) error {
 			if previousDigest != nil {
 				return nil
@@ -203,11 +211,11 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 			}
 			return nil
 		}
-		if _, err := tx.Exec(ctx, "UPDATE openrails.merchants SET catalog_revision=$2 WHERE id=$1", id.UUID(), restoredCatalogRevision); err != nil {
+		if err := q.SetCatalogRevision(ctx, gen.SetCatalogRevisionParams{MerchantID: id.UUID(), Revision: restoredCatalogRevision}); err != nil {
 			return err
 		}
-		var invalidReceipts bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM openrails.catalog_applications WHERE merchant_id=$1 AND applied_revision>$2)", id.UUID(), restoredCatalogRevision).Scan(&invalidReceipts); err != nil {
+		invalidReceipts, err := q.CatalogApplicationsAfterRevisionExist(ctx, gen.CatalogApplicationsAfterRevisionExistParams{MerchantID: id.UUID(), Revision: restoredCatalogRevision})
+		if err != nil {
 			return err
 		}
 		if invalidReceipts {
@@ -216,8 +224,7 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 		if err := validateReferences(ctx, tx, id); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, "SELECT openrails.finish_billing_restore($1,$2,$3)", id.UUID(), info.Digest, info.Rows)
-		return err
+		return q.FinishBillingRestore(ctx, gen.FinishBillingRestoreParams{MerchantID: id.UUID(), Digest: info.Digest, Rows: info.Rows})
 	})
 	if err != nil {
 		return Result{}, classify(err)
@@ -226,14 +233,15 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 }
 
 func scope(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.merchant_id',$1,true)", id.String()); err != nil {
+	q := gen.New(tx)
+	if _, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: db.MerchantGUC, Value: id.String(), IsLocal: true}); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, "SET LOCAL TIME ZONE 'UTC'; SET LOCAL DateStyle TO 'ISO, YMD'; SET LOCAL IntervalStyle TO 'iso_8601'; SET LOCAL extra_float_digits TO 3"); err != nil {
 		return err
 	}
-	var active bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM openrails.merchants WHERE id=$1 AND status='active' AND deleted_at IS NULL)", id.UUID()).Scan(&active); err != nil {
+	active, err := q.LiveMerchantExists(ctx, id.UUID())
+	if err != nil {
 		return err
 	}
 	if !active {

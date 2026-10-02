@@ -302,6 +302,25 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 	return result.RowsAffected(), nil
 }
 
+const customerHasVaultedPaymentMethod = `-- name: CustomerHasVaultedPaymentMethod :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.payment_methods
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND parked_at IS NULL
+)
+`
+
+type CustomerHasVaultedPaymentMethodParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) CustomerHasVaultedPaymentMethod(ctx context.Context, arg CustomerHasVaultedPaymentMethodParams) (bool, error) {
+	row := q.db.QueryRow(ctx, customerHasVaultedPaymentMethod, arg.MerchantID, arg.CustomerID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const deletePaymentMethod = `-- name: DeletePaymentMethod :execrows
 DELETE FROM openrails.payment_methods WHERE payment_methods.merchant_id = $2::uuid AND id = $1
 `
@@ -500,6 +519,69 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, arg GetPaymentMethod
 		&i.AccountUpdaterCheckedAt,
 		&i.IsDefault,
 	)
+	return i, err
+}
+
+const getPaymentMethodByPSPRailRefs = `-- name: GetPaymentMethodByPSPRailRefs :one
+SELECT id, customer_id FROM openrails.payment_methods
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND rail = $3::text
+  AND rail_customer_ref = $4::text AND rail_method_ref = $5::text
+`
+
+type GetPaymentMethodByPSPRailRefsParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	Rail            string
+	RailCustomerRef string
+	RailMethodRef   string
+}
+
+type GetPaymentMethodByPSPRailRefsRow struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) GetPaymentMethodByPSPRailRefs(ctx context.Context, arg GetPaymentMethodByPSPRailRefsParams) (GetPaymentMethodByPSPRailRefsRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentMethodByPSPRailRefs,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Rail,
+		arg.RailCustomerRef,
+		arg.RailMethodRef,
+	)
+	var i GetPaymentMethodByPSPRailRefsRow
+	err := row.Scan(&i.ID, &i.CustomerID)
+	return i, err
+}
+
+const getPaymentMethodByPSPRefs = `-- name: GetPaymentMethodByPSPRefs :one
+SELECT id, customer_id, rail FROM openrails.payment_methods
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
+  AND rail_customer_ref = $3::text AND rail_method_ref = $4::text
+`
+
+type GetPaymentMethodByPSPRefsParams struct {
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	RailCustomerRef string
+	RailMethodRef   string
+}
+
+type GetPaymentMethodByPSPRefsRow struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Rail       string
+}
+
+func (q *Queries) GetPaymentMethodByPSPRefs(ctx context.Context, arg GetPaymentMethodByPSPRefsParams) (GetPaymentMethodByPSPRefsRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentMethodByPSPRefs,
+		arg.MerchantID,
+		arg.PspID,
+		arg.RailCustomerRef,
+		arg.RailMethodRef,
+	)
+	var i GetPaymentMethodByPSPRefsRow
+	err := row.Scan(&i.ID, &i.CustomerID, &i.Rail)
 	return i, err
 }
 

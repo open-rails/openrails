@@ -137,6 +137,53 @@ func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg In
 	return err
 }
 
+const listCustomerBalanceCurrencies = `-- name: ListCustomerBalanceCurrencies :many
+SELECT currency::text AS currency
+FROM (
+    SELECT currency FROM openrails.ledger_accounts
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+      AND account_type = 'customer_balance'
+    UNION
+    SELECT currency FROM openrails.money_settings
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+    UNION
+    SELECT currency FROM openrails.invoice_items
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+      AND invoice_id IS NULL AND status = 'pending'
+    UNION
+    SELECT currency FROM openrails.invoices
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+      AND status IN ('open', 'past_due') AND amount_due > 0
+) currencies
+ORDER BY currency
+`
+
+type ListCustomerBalanceCurrenciesParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// Every currency a payer holds a balance, settings, pending items or an open invoice in.
+func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCustomerBalanceCurrenciesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listCustomerBalanceCurrencies, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var currency string
+		if err := rows.Scan(&currency); err != nil {
+			return nil, err
+		}
+		items = append(items, currency)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
 SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2

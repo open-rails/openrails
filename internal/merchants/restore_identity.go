@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -48,13 +49,8 @@ func (s *Service) restoreIdentity(ctx context.Context, id merchant.ID, slug, gro
 	// provisions; the name guard refuses another merchant's former name. Never
 	// UPDATE on conflict: a UUID is not permission to replace another binding,
 	// resurrect a retired row, or rename an existing destination.
-	var inserted string
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
-		VALUES ($1::uuid, $2, 'active', NULLIF($3, ''))
-		ON CONFLICT DO NOTHING
-		RETURNING id::text
-	`, id.String(), slug, groupID).Scan(&inserted)
+	q := gen.New(s.pool)
+	_, err := q.InsertRestoredMerchant(ctx, gen.InsertRestoredMerchantParams{ID: id.UUID(), Slug: slug, GroupID: groupID})
 	if isUniqueViolation(err) {
 		return nil, false, ErrMerchantRestoreConflict
 	}
@@ -62,10 +58,8 @@ func (s *Service) restoreIdentity(ctx context.Context, id merchant.ID, slug, gro
 		return nil, false, fmt.Errorf("merchants: create restore destination: %w", err)
 	}
 	created := err == nil
-	m, err := scanMerchant(s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
-		FROM openrails.merchants
-		WHERE id = $1::uuid AND deleted_at IS NULL AND retired_at IS NULL
-	`, id.String()))
+	row, err := q.GetUnretiredLiveMerchant(ctx, id.UUID())
+	m, err := toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
 	if errors.Is(err, ErrMerchantNotFound) {
 		return nil, false, ErrMerchantRestoreConflict
 	}

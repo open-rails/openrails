@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -128,14 +129,9 @@ func SubjectHasVaultedPaymentMethod(ctx context.Context, a *app.App, vaultMercha
 	}
 	var vaulted bool
 	err = cp.Pool().MerchantTx(ctx, vaultMerchant, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				  FROM openrails.payment_methods pm
-				 WHERE pm.merchant_id = $1::uuid
-				   AND pm.customer_id = $2::uuid
-				   AND pm.parked_at IS NULL)
-		`, vaultMerchant.String(), subjectID).Scan(&vaulted)
+		var err error
+		vaulted, err = gen.New(tx).CustomerHasVaultedPaymentMethod(ctx, gen.CustomerHasVaultedPaymentMethodParams{MerchantID: vaultMerchant.UUID(), CustomerID: subjectID})
+		return err
 	})
 	return vaulted, err
 }

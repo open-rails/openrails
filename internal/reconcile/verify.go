@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -370,13 +371,7 @@ func (v *Verifier) verifyBatch(ctx context.Context, mid merchant.ID, ids []uuid.
 // loadUnverified loads the rows of ids that are still unverified and read
 // from a provider (engine rows are resolved by the collection engine).
 func loadUnverified(ctx context.Context, database *db.DB, mid merchant.ID, ids []uuid.UUID) ([]*models.Subscription, error) {
-	rows, err := database.Qx(ctx).Query(ctx, `SELECT id FROM openrails.subscriptions
-		WHERE merchant_id = $1 AND id = ANY($2) AND status = 'unverified' AND deleted_at IS NULL
-		  AND collection_policy <> 'engine' AND rail_subscription_id <> ''`, mid.UUID(), ids)
-	if err != nil {
-		return nil, fmt.Errorf("verify: list unverified: %w", err)
-	}
-	live, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	live, err := database.Gen(ctx).ListUnverifiedSubscriptionIDsIn(ctx, gen.ListUnverifiedSubscriptionIDsInParams{MerchantID: mid.UUID(), Ids: ids})
 	if err != nil {
 		return nil, fmt.Errorf("verify: list unverified: %w", err)
 	}
@@ -403,9 +398,9 @@ func recordReads(ctx context.Context, database *db.DB, mid merchant.ID, subs []*
 		m := readErr.Error()
 		msg = &m
 	}
-	if _, err := database.Qx(ctx).Exec(ctx, `UPDATE openrails.subscription_verifications
-		SET reads = reads + 1, last_read_at = $3, last_error = $4
-		WHERE merchant_id = $1 AND subscription_id = ANY($2)`, mid.UUID(), ids, now, msg); err != nil {
+	if err := database.Gen(ctx).RecordSubscriptionVerificationReads(ctx, gen.RecordSubscriptionVerificationReadsParams{
+		MerchantID: mid.UUID(), SubscriptionIds: ids, ReadAt: now, LastError: msg,
+	}); err != nil {
 		log.WithContext(ctx).WithError(err).Warn("verify: could not record the reads")
 	}
 }
@@ -426,15 +421,11 @@ func forPSP(subs []*models.Subscription, psp uuid.UUID) []*models.Subscription {
 // merchant-scoped connection.
 func (v *Verifier) Pass(ctx context.Context, mid merchant.ID) error {
 	v.init()
-	var ids []uuid.UUID
-	rows, err := v.DB.Qx(ctx).Query(ctx, `SELECT id FROM openrails.subscriptions
-		WHERE merchant_id = $1 AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
-		  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
-		ORDER BY current_period_ends_at NULLS FIRST`, mid.UUID())
+	// One past the threshold is enough to choose the bulk read.
+	ids, err := v.DB.Gen(ctx).ListUnverifiedNMISubscriptionIDs(ctx, gen.ListUnverifiedNMISubscriptionIDsParams{
+		MerchantID: mid.UUID(), RowLimit: int64(v.BulkThreshold) + 1,
+	})
 	if err != nil {
-		return fmt.Errorf("verify pass: list unverified: %w", err)
-	}
-	if ids, err = pgx.CollectRows(rows, pgx.RowTo[uuid.UUID]); err != nil {
 		return fmt.Errorf("verify pass: list unverified: %w", err)
 	}
 	if len(ids) > v.BulkThreshold {

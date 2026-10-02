@@ -12,6 +12,23 @@ import (
 	"github.com/google/uuid"
 )
 
+const deletePayerRateCard = `-- name: DeletePayerRateCard :exec
+DELETE FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND meter_key = $3::text
+`
+
+type DeletePayerRateCardParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	MeterKey   string
+}
+
+func (q *Queries) DeletePayerRateCard(ctx context.Context, arg DeletePayerRateCardParams) error {
+	_, err := q.db.Exec(ctx, deletePayerRateCard, arg.MerchantID, arg.CustomerID, arg.MeterKey)
+	return err
+}
+
 const listPayerRateCards = `-- name: ListPayerRateCards :many
 
 SELECT meter_key, product_id, allowance, price, created_at, updated_at

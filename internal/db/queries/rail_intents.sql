@@ -809,3 +809,97 @@ SELECT pg_try_advisory_lock(hashtextextended('openrails.provider_refresh:' || sq
 
 -- name: UnlockProviderRefresh :exec
 SELECT pg_advisory_unlock(hashtextextended('openrails.provider_refresh:' || sqlc.arg(merchant_id)::uuid::text, 0));
+
+-- Succeeded-intent slimming (PruneSucceeded). Qualified receipts/enrollments,
+-- cutover tombstones and collections keep their payload and evidence.
+-- name: PruneSucceededRailIntentPayload :exec
+UPDATE openrails.rail_intents
+SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
+
+-- name: PruneSucceededRailIntentEvidence :exec
+UPDATE openrails.rail_intents
+SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt'
+        THEN COALESCE(sqlc.narg(evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence -> 'qualified_receipt')
+        ELSE sqlc.narg(evidence)::jsonb END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
+
+-- name: PruneSucceededRailIntent :exec
+UPDATE openrails.rail_intents
+SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END,
+    result_evidence = CASE WHEN result_evidence ? 'qualified_receipt'
+        THEN COALESCE(sqlc.narg(evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence -> 'qualified_receipt')
+        ELSE sqlc.narg(evidence)::jsonb END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
+
+-- name: PruneTerminalRailIntentPayload :exec
+UPDATE openrails.rail_intents
+SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'failed_terminal'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment');
+
+-- name: RecordRailIntentProgress :exec
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || sqlc.arg(progress)::jsonb, updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
+
+-- Write-once: a present key is never overwritten.
+-- name: RecordRailIntentProgressIfAbsent :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object(sqlc.arg(key)::text, sqlc.arg(value)::jsonb),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? sqlc.arg(key)::text)
+  AND (sqlc.arg(key)::text <> 'initial_submitted'
+       OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'));
+
+-- name: RailIntentClaimHeld :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.rail_intents
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+      AND status = sqlc.arg(status)::text AND attempts = sqlc.arg(attempts)::int
+      AND claimed_until > sqlc.arg(held_until)::timestamptz
+);
+
+-- name: GetLatestRailIntentIDForSubscription :one
+SELECT id FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(intent_type)::text
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- Only before the schedule delete was submitted.
+-- name: AbandonNMIEngineTakeover :execrows
+UPDATE openrails.rail_intents
+SET status = 'failed_terminal', last_failure_reason = 'abandoned before any NMI change',
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || sqlc.arg(evidence)::jsonb,
+    claimed_until = NULL, updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = 'nmi_engine_takeover' AND status IN ('pending', 'failed_retryable')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'delete_submitted');
+
+-- name: ListNMIEngineTakeoverCandidates :many
+SELECT s.id, s.current_period_ends_at
+FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail = 'nmi' AND s.collection_policy = 'nmi_schedule'
+  AND s.status = 'active' AND s.deleted_at IS NULL AND s.rail_subscription_id <> ''
+  AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
+  AND s.current_period_ends_at > sqlc.arg(ends_after)::timestamptz
+  AND (sqlc.narg(price_id)::uuid IS NULL OR s.price_id = sqlc.narg(price_id)::uuid)
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.rail_intents i
+      WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+        AND i.status NOT IN ('succeeded', 'failed_terminal', 'superseded', 'expired'))
+ORDER BY s.current_period_ends_at, s.id
+LIMIT sqlc.arg(row_limit)::bigint;

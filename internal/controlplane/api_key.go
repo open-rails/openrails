@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/db/gen"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -117,7 +118,7 @@ func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (
 	if groupID == "" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	mid, slug, err := c.merchantDirectoryRow(ctx, `permission_group_id = $1`, groupID)
+	mid, slug, err := c.merchantDirectoryRow(gen.New(c.pool).ListLiveMerchantsByGroupID(ctx, groupID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
@@ -137,58 +138,25 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mi
 	if groupID == "" || mid.IsZero() {
 		return ErrServiceCredentialMerchantUnresolved
 	}
-	var owner *string
-	var status string
-	err := c.pool.QueryRow(ctx, `
-		SELECT permission_group_id, status
-		  FROM openrails.merchants
-		 WHERE id = $1 AND deleted_at IS NULL
-		 LIMIT 1
-	`, mid.UUID()).Scan(&owner, &status)
+	row, err := gen.New(c.pool).GetMerchantDirectoryByID(ctx, mid.UUID())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrServiceCredentialMerchantUnresolved
 		}
 		return err
 	}
-	if status != "active" || owner == nil || strings.TrimSpace(*owner) != groupID {
+	if row.Status != "active" || row.PermissionGroupID == nil || strings.TrimSpace(*row.PermissionGroupID) != groupID {
 		return ErrServiceCredentialScopeDenied
 	}
 	return nil
 }
 
-// merchantDirectoryRow runs one openrails.merchants directory lookup with the
-// given WHERE predicate (which must reference exactly one $1 argument). It
+// merchantDirectoryRow resolves one live directory lookup (LIMIT 2). It
 // returns pgx.ErrNoRows untouched so callers can decide whether a fallback
-// applies. If the predicate matches multiple active merchants, the caller must
+// applies. If the lookup matches multiple active merchants, the caller must
 // name a merchant explicitly and authorize it with AuthorizeMerchant.
-func (c *ControlPlane) merchantDirectoryRow(ctx context.Context, where, arg string) (merchant.ID, string, error) {
-	rows, err := c.pool.Query(ctx, `
-		SELECT id::text, slug, status
-		  FROM openrails.merchants
-		 WHERE `+where+`
-		   AND deleted_at IS NULL
-		 LIMIT 2
-	`, arg)
+func (c *ControlPlane) merchantDirectoryRow(matches []gen.OpenrailsMerchant, err error) (merchant.ID, string, error) {
 	if err != nil {
-		return merchant.ID{}, "", err
-	}
-	defer rows.Close()
-
-	type row struct {
-		idStr  string
-		slug   string
-		status string
-	}
-	var matches []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.idStr, &r.slug, &r.status); err != nil {
-			return merchant.ID{}, "", err
-		}
-		matches = append(matches, r)
-	}
-	if err := rows.Err(); err != nil {
 		return merchant.ID{}, "", err
 	}
 	if len(matches) == 0 {
@@ -197,14 +165,8 @@ func (c *ControlPlane) merchantDirectoryRow(ctx context.Context, where, arg stri
 	if len(matches) > 1 {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	idStr, slug, status := matches[0].idStr, matches[0].slug, matches[0].status
-	if status != "active" {
+	if matches[0].Status != "active" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-
-	mid, err := merchant.ParseID(idStr)
-	if err != nil {
-		return merchant.ID{}, "", err
-	}
-	return mid, slug, nil
+	return merchant.ID(matches[0].ID), matches[0].Slug, nil
 }

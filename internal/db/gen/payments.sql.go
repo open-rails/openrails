@@ -493,6 +493,27 @@ func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, arg GetLa
 	return i, err
 }
 
+const getLatestPaidPaymentIDForSubscription = `-- name: GetLatestPaidPaymentIDForSubscription :one
+SELECT id FROM openrails.payments
+WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
+  AND status = 'completed' AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0
+ORDER BY purchased_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestPaidPaymentIDForSubscriptionParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// The newest positive completed sale on a subscription.
+func (q *Queries) GetLatestPaidPaymentIDForSubscription(ctx context.Context, arg GetLatestPaidPaymentIDForSubscriptionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestPaidPaymentIDForSubscription, arg.MerchantID, arg.SubscriptionID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getPaymentByID = `-- name: GetPaymentByID :one
 SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM openrails.payments WHERE payments.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL
@@ -1291,6 +1312,15 @@ func (q *Queries) ListRefundsForPayment(ctx context.Context, arg ListRefundsForP
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAdminRefund = `-- name: LockAdminRefund :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+func (q *Queries) LockAdminRefund(ctx context.Context, lockKey int64) error {
+	_, err := q.db.Exec(ctx, lockAdminRefund, lockKey)
+	return err
 }
 
 const lockPaymentForRefund = `-- name: LockPaymentForRefund :one

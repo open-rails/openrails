@@ -7,6 +7,7 @@ package ci_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -187,6 +188,49 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ID, read.ID)
 	require.Equal(t, first.DisplayName, read.DisplayName)
+}
+
+// A catalog application's meters and rate cards land in the runtime's own schema.
+func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
+	f := newFixture(t)
+	_, client := f.runtime(t, "metered-"+uuid.NewString()[:8])
+	key := "metered-" + uuid.NewString()[:8]
+	apply := func(unitAmount string) {
+		revision, err := client.Catalog.Revision(t.Context())
+		require.NoError(t, err)
+		params, err := openrails.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+application_id: gf-%[1]s-%[3]s
+expected_revision: %[2]d
+meters:
+- key: %[1]s-runtime
+  event_type: droplet.usage
+  value_property: $.seconds
+  aggregation: sum
+products:
+- key: %[1]s
+  display_name: Metered
+  rate_cards:
+  - meter: %[1]s-runtime
+    price:
+      model: per_unit
+      currency: usd
+      per_unit:
+        unit_amount: "%[3]s"
+`, key, revision.Revision, unitAmount)))
+		require.NoError(t, err)
+		_, err = client.Catalog.Apply(t.Context(), params)
+		require.NoError(t, err)
+	}
+	apply("10")
+	apply("20") // overwrites the stored card in place
+
+	meter, err := client.GetUsageMeter(t.Context(), key+"-runtime")
+	require.NoError(t, err)
+	require.Equal(t, "droplet.usage", meter.EventType)
+	require.NotNil(t, meter.DefaultRateCard)
+	require.Equal(t, key, meter.DefaultRateCard.ProductKey)
+	require.NotNil(t, meter.DefaultRateCard.Price.PerUnit)
+	require.EqualValues(t, 20, meter.DefaultRateCard.Price.PerUnit.UnitAmount)
 }
 
 func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {

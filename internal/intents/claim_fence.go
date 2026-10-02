@@ -60,10 +60,10 @@ func (s *Store) RequireClaim(ctx context.Context, id uuid.UUID, now time.Time) e
 	if err != nil {
 		return err
 	}
-	var held bool
-	if err := s.db.Qx(ctx).QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM openrails.rail_intents
-		WHERE merchant_id = $1 AND id = $2 AND status = $3 AND attempts = $4 AND claimed_until > $5)`,
-		mid.UUID(), id, c.status, c.attempts, now.UTC().Add(ProviderCallHold)).Scan(&held); err != nil {
+	held, err := s.db.Gen(ctx).RailIntentClaimHeld(ctx, gen.RailIntentClaimHeldParams{
+		MerchantID: mid.UUID(), ID: id, Status: c.status, Attempts: c.attempts, HeldUntil: now.UTC().Add(ProviderCallHold),
+	})
+	if err != nil {
 		return err
 	}
 	if !held {

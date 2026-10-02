@@ -196,3 +196,27 @@ func (q *Queries) StampWebhookPull(ctx context.Context, arg StampWebhookPullPara
 	_, err := q.db.Exec(ctx, stampWebhookPull, arg.MerchantID, arg.Rail, arg.At)
 	return err
 }
+
+const upsertPSPRefreshWatermark = `-- name: UpsertPSPRefreshWatermark :exec
+INSERT INTO openrails.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
+VALUES ($1::uuid, $2::text, $3::uuid, 'events', $4::timestamptz)
+ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
+DO UPDATE SET watermark_at = EXCLUDED.watermark_at, updated_at = now()
+`
+
+type UpsertPSPRefreshWatermarkParams struct {
+	MerchantID  uuid.UUID
+	Rail        string
+	PspID       uuid.UUID
+	WatermarkAt time.Time
+}
+
+func (q *Queries) UpsertPSPRefreshWatermark(ctx context.Context, arg UpsertPSPRefreshWatermarkParams) error {
+	_, err := q.db.Exec(ctx, upsertPSPRefreshWatermark,
+		arg.MerchantID,
+		arg.Rail,
+		arg.PspID,
+		arg.WatermarkAt,
+	)
+	return err
+}

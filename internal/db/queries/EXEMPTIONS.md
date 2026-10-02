@@ -82,9 +82,13 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 ## AUDIT_ALLOWLIST.txt
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
-`custodians`, `merchant_webhooks`. Row counts follow the merchant's own
-configuration, not customer activity, so listing them whole does not scale with
-records on file.
+`custodians`, `merchant_webhooks`, `catalog_meters`, default `catalog_rate_cards`,
+`merchant_secrets`. Row counts follow the merchant's own configuration, not
+customer activity, so listing them whole does not scale with records on file.
+
+**PERMANENT — one row per merchant.** `merchant_api_host_claims` is keyed by
+`merchant_id` alone, so `DeleteProvenMerchantAPIHostClaim`'s residual
+`api_host`/`token` filter is a compare-and-delete guard on a single row.
 
 **PERMANENT — capped by a caller-supplied list.**
 `SnapshotPaymentCards` is capped

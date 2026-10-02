@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -259,23 +258,15 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 	for _, s := range subs {
 		ids = append(ids, s.ID)
 	}
-	rows, err := database.Qx(ctx).Query(ctx, `SELECT s.id, pm.rail_customer_ref FROM openrails.subscriptions s
-		JOIN openrails.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = s.payment_method_id
-		WHERE s.merchant_id = $1 AND s.id = ANY($2) AND s.deleted_at IS NULL`, mid.UUID(), ids)
+	rows, err := database.Gen(ctx).ListSubscriptionVaultRefs(ctx, gen.ListSubscriptionVaultRefsParams{MerchantID: mid.UUID(), Ids: ids})
 	if err != nil {
 		return nil, fmt.Errorf("verify: load vaults: %w", err)
 	}
-	defer rows.Close()
 	out := map[uuid.UUID]string{}
-	for rows.Next() {
-		var id uuid.UUID
-		var vault string
-		if err := rows.Scan(&id, &vault); err != nil {
-			return nil, err
-		}
-		out[id] = strings.TrimSpace(vault)
+	for _, row := range rows {
+		out[row.ID] = strings.TrimSpace(row.RailCustomerRef)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Bulk resolves every unverified row of the merchant's NMI account from one
@@ -438,16 +429,9 @@ func readRoster(ctx context.Context, client *nmi.NMIClient) ([]nmi.V5Subscriptio
 }
 
 func listUnverifiedNMI(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID) ([]*models.Subscription, error) {
-	rows, err := database.Qx(ctx).Query(ctx, `SELECT id FROM openrails.subscriptions
-		WHERE merchant_id = $1 AND psp_id = $2 AND status = 'unverified' AND deleted_at IS NULL
-		  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
-		ORDER BY current_period_ends_at NULLS FIRST`, mid.UUID(), psp)
+	ids, err := database.Gen(ctx).ListUnverifiedSubscriptionIDsForPSP(ctx, gen.ListUnverifiedSubscriptionIDsForPSPParams{MerchantID: mid.UUID(), PspID: psp})
 	if err != nil {
 		return nil, fmt.Errorf("verify: list unverified nmi rows: %w", err)
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
-	if err != nil {
-		return nil, err
 	}
 	return loadUnverified(ctx, database, mid, ids)
 }
@@ -461,36 +445,24 @@ func recordedCharges(ctx context.Context, database *db.DB, mid merchant.ID, subs
 		ids = append(ids, s.ID)
 		rail[s.ID] = s.RailSubscriptionID
 	}
-	rows, err := database.Qx(ctx).Query(ctx, `SELECT subscription_id, transaction_id, 'completed', purchased_at, amount, currency, ''
-		FROM openrails.payments
-		WHERE merchant_id = $1 AND subscription_id = ANY($2) AND purchased_at >= $3 AND status = 'completed' AND deleted_at IS NULL
-		UNION ALL
-		SELECT subscription_id, transaction_id, 'failed', attempted_at, amount, COALESCE(currency, ''), COALESCE(response_code, '')
-		FROM openrails.payment_attempts
-		WHERE merchant_id = $1 AND subscription_id = ANY($2) AND attempted_at >= $3 AND category <> 'approved' AND transaction_id IS NOT NULL`, mid.UUID(), ids, since)
+	rows, err := database.Gen(ctx).ListRecordedSubscriptionCharges(ctx, gen.ListRecordedSubscriptionChargesParams{MerchantID: mid.UUID(), SubscriptionIds: ids, Since: since})
 	if err != nil {
 		return nil, fmt.Errorf("verify: load recorded charges: %w", err)
 	}
-	defer rows.Close()
 	out := map[uuid.UUID][]RemoteTransaction{}
-	for rows.Next() {
-		var (
-			sub                         uuid.UUID
-			txn, status, currency, code string
-			at                          time.Time
-			micros                      int64
-		)
-		if err := rows.Scan(&sub, &txn, &status, &at, &micros, &currency, &code); err != nil {
-			return nil, err
+	for _, row := range rows {
+		if row.SubscriptionID == nil {
+			continue
 		}
-		t := RemoteTransaction{TransactionID: txn, SubscriptionID: rail[sub], Type: TransactionTypeSale, Success: status == "completed",
-			AmountCents: micros / 10_000, Currency: currency, OccurredAt: at.UTC()}
+		sub := *row.SubscriptionID
+		t := RemoteTransaction{TransactionID: row.TransactionID, SubscriptionID: rail[sub], Type: TransactionTypeSale, Success: row.Status == "completed",
+			AmountCents: row.Amount / 10_000, Currency: row.Currency, OccurredAt: row.OccurredAt.UTC()}
 		if !t.Success {
-			t.Type, t.DeclineCode = TransactionTypeDecline, code
+			t.Type, t.DeclineCode = TransactionTypeDecline, row.ResponseCode
 		}
 		out[sub] = append(out[sub], t)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 type bulkCheckpoint struct {
@@ -500,25 +472,19 @@ type bulkCheckpoint struct {
 
 // loadCheckpoint resumes an interrupted bulk read, or starts a new one.
 func loadCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID, since, until time.Time) (bulkCheckpoint, error) {
-	cp := bulkCheckpoint{since: since, until: until, next: 1}
-	err := database.Qx(ctx).QueryRow(ctx, `INSERT INTO openrails.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
-		VALUES ($1, $2, $3, $4, 1, $4)
-		ON CONFLICT (merchant_id, psp_id) DO UPDATE SET merchant_id = EXCLUDED.merchant_id
-		RETURNING since, until, next_page`, mid.UUID(), psp, since, until).Scan(&cp.since, &cp.until, &cp.next)
+	row, err := database.Gen(ctx).StartNMIBulkCheckpoint(ctx, gen.StartNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp, Since: since, Until: until})
 	if err != nil {
-		return cp, fmt.Errorf("verify: bulk checkpoint: %w", err)
+		return bulkCheckpoint{since: since, until: until, next: 1}, fmt.Errorf("verify: bulk checkpoint: %w", err)
 	}
-	return cp, nil
+	return bulkCheckpoint{since: row.Since, until: row.Until, next: int(row.NextPage)}, nil
 }
 
 func saveCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID, next int) error {
-	_, err := database.Qx(ctx).Exec(ctx, `UPDATE openrails.nmi_bulk_checkpoints SET next_page = $3 WHERE merchant_id = $1 AND psp_id = $2`, mid.UUID(), psp, next)
-	return err
+	return database.Gen(ctx).SetNMIBulkCheckpointPage(ctx, gen.SetNMIBulkCheckpointPageParams{MerchantID: mid.UUID(), PspID: psp, NextPage: int64(next)})
 }
 
 func clearCheckpoint(ctx context.Context, database *db.DB, mid merchant.ID, psp uuid.UUID) error {
-	_, err := database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.nmi_bulk_checkpoints WHERE merchant_id = $1 AND psp_id = $2`, mid.UUID(), psp)
-	return err
+	return database.Gen(ctx).DeleteNMIBulkCheckpoint(ctx, gen.DeleteNMIBulkCheckpointParams{MerchantID: mid.UUID(), PspID: psp})
 }
 
 func minTime(a, b time.Time) time.Time {
