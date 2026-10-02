@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +15,12 @@ import (
 	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 )
+
+// Token2022ProgramID owns Token-2022 mints (PYUSD, USDG). Legacy SPL mints are
+// owned by token.ProgramID; a mint's owner decides its token accounts'
+// addresses and the program its transfers call.
+var Token2022ProgramID = solanago.MustPublicKeyFromBase58("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
 
 // TransferRequest describes a Solana transfer to build.
 type TransferRequest struct {
@@ -30,25 +35,51 @@ type TransferRequest struct {
 	Memo string
 }
 
-// TransferResponse contains a base64-encoded transaction payload.
+// TransferResponse contains a base64-encoded transaction payload and the last
+// block height at which it can still land.
 type TransferResponse struct {
-	TransactionBase64 string
+	TransactionBase64    string
+	LastValidBlockHeight uint64
 }
 
-// VerifyTransferRequest describes the expected values for verifying a transfer.
-type VerifyTransferRequest struct {
-	Signature         string
-	ExpectedAmount    uint64
-	ExpectedRecipient string
-	ExpectedTokenMint string
-	ExpectedPayer     string
-	ExpectedReference string
-	// ExpectedMemoLocalID, when non-nil, is checked against the #713 purchase
-	// memo on the transaction under ExpectedMemoPolicy: mismatch always fails;
-	// absence fails only when we built the transaction ourselves.
-	ExpectedMemoLocalID uuid.UUID
-	ExpectedMemoPolicy  PurchaseMemoPolicy
+// ObserveTransferRequest names the reference, recipient and mint a landed
+// transaction is read against.
+type ObserveTransferRequest struct {
+	Signature string
+	Recipient string
+	TokenMint string
+	Reference string
+	// MemoLocalID, when set, is checked against the #713 purchase memo under
+	// MemoPolicy: a mismatch always makes the transaction foreign; absence
+	// does only when we built the transaction ourselves.
+	MemoLocalID uuid.UUID
+	MemoPolicy  PurchaseMemoPolicy
+	// Commitment the transaction must reach before it is read (default finalized).
+	Commitment rpc.CommitmentType
 }
+
+// TransferObservation is what one landed transaction paid the recipient,
+// read from the recipient's balance changes, so split transfers, transfers
+// made inside another program and Token-2022 all count. Amount is the net
+// base units of the mint received by the recipient wallet or any token
+// account it owns. Other reports value it received in anything else.
+type TransferObservation struct {
+	Amount   uint64
+	Other    bool
+	Payer    string
+	LandedAt *time.Time
+}
+
+var (
+	// ErrForeignTransfer: the transaction does not belong to the reference (the
+	// reference key is absent or the purchase memo names another record).
+	ErrForeignTransfer = errors.New("solana: transaction does not belong to this reference")
+	// ErrUnreadableTransfer: the transaction landed but cannot be read; reading
+	// it again gives the same answer.
+	ErrUnreadableTransfer = errors.New("solana: landed transaction cannot be read")
+	// ErrFailedOnChain: the transaction landed with an error and moved nothing.
+	ErrFailedOnChain = errors.New("solana: transaction failed on-chain")
+)
 
 // BuildTransferTransaction constructs a transfer transaction and returns its base64 encoding.
 func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRequest) (*TransferResponse, error) {
@@ -63,41 +94,68 @@ func (c *RPCClient) BuildTransferTransaction(ctx context.Context, req TransferRe
 	if req.Amount == 0 {
 		return nil, fmt.Errorf("amount is required")
 	}
-
-	blockhash, err := c.GetLatestBlockhash(ctx)
+	var mint *MintInfo
+	if !isNativeSOLSymbol(req.TokenSymbol) {
+		mintKey, err := solanago.PublicKeyFromBase58(strings.TrimSpace(req.TokenMint))
+		if err != nil {
+			return nil, fmt.Errorf("invalid token mint address: %w", err)
+		}
+		if mint, err = c.GetMintInfo(ctx, mintKey); err != nil {
+			return nil, err
+		}
+	}
+	blockhash, err := c.LatestBlockhash(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blockhash: %w", err)
 	}
-
-	instructions, err := buildTransferInstructions(req, fromWallet, toWallet)
+	instructions, err := buildTransferInstructions(req, fromWallet, toWallet, mint)
 	if err != nil {
 		return nil, err
 	}
-
-	transaction, err := solanago.NewTransaction(
-		instructions,
-		blockhash,
-		solanago.TransactionPayer(fromWallet),
-	)
+	transaction, err := solanago.NewTransaction(instructions, blockhash.Hash, solanago.TransactionPayer(fromWallet))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transaction: %w", err)
 	}
-
 	txBytes, err := transaction.MarshalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize transaction: %w", err)
 	}
-
 	return &TransferResponse{
-		TransactionBase64: base64.StdEncoding.EncodeToString(txBytes),
+		TransactionBase64:    base64.StdEncoding.EncodeToString(txBytes),
+		LastValidBlockHeight: blockhash.LastValidBlockHeight,
 	}, nil
 }
 
+// MintInfo is what a transfer needs from its mint account.
+type MintInfo struct {
+	Mint     solanago.PublicKey
+	Program  solanago.PublicKey
+	Decimals uint8
+	// Fee is the Token-2022 transfer fee in force now; nil when the mint has none.
+	Fee *TransferFee
+	// Hook is the Token-2022 transfer hook program; zero when none.
+	Hook solanago.PublicKey
+}
+
+// GrossFor is what a payer must send so the recipient receives net, and the fee.
+func (m *MintInfo) GrossFor(net uint64) (uint64, uint64, error) {
+	if m == nil || m.Fee == nil {
+		return net, 0, nil
+	}
+	return m.Fee.GrossFor(net)
+}
+
+// AssociatedTokenAddress derives owner's token account for mint under the
+// mint's owning token program.
+func AssociatedTokenAddress(owner, mint, program solanago.PublicKey) (solanago.PublicKey, error) {
+	addr, _, err := solanago.FindProgramAddress([][]byte{owner[:], program[:], mint[:]}, solanago.SPLAssociatedTokenAccountProgramID)
+	return addr, err
+}
+
 // buildTransferInstructions assembles the one-off purchase instruction list:
-// optional #713 SPL Memo FIRST, then the SOL/SPL transfer (Solana Pay orders
-// the memo immediately before the transfer), with the Solana Pay reference
-// meta appended to the transfer.
-func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanago.PublicKey) ([]solanago.Instruction, error) {
+// optional #713 SPL Memo FIRST, then the SOL or TransferChecked transfer under
+// the mint's own token program, with the Solana Pay reference appended.
+func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanago.PublicKey, mint *MintInfo) ([]solanago.Instruction, error) {
 	var referencePub *solanago.PublicKey
 	if ref := strings.TrimSpace(req.Reference); ref != "" {
 		refKey, err := solanago.PublicKeyFromBase58(ref)
@@ -106,504 +164,290 @@ func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanag
 		}
 		referencePub = &refKey
 	}
-
 	var instructions []solanago.Instruction
 	if m := strings.TrimSpace(req.Memo); m != "" {
 		instructions = append(instructions, NewMemoInstruction(m))
 	}
-	if isNativeSOLSymbol(req.TokenSymbol) {
-		transfer := system.NewTransferInstruction(
-			req.Amount,
-			fromWallet,
-			toWallet,
-		)
+	if mint == nil {
+		transfer := system.NewTransferInstruction(req.Amount, fromWallet, toWallet)
 		if referencePub != nil {
 			transfer.AccountMetaSlice = append(transfer.AccountMetaSlice, solanago.Meta(*referencePub))
 		}
-		instructions = append(instructions, transfer.Build())
-	} else {
-		if strings.TrimSpace(req.TokenMint) == "" {
-			return nil, fmt.Errorf("token mint is required")
-		}
-		tokenMint, err := solanago.PublicKeyFromBase58(req.TokenMint)
-		if err != nil {
-			return nil, fmt.Errorf("invalid token mint address: %w", err)
-		}
-
-		fromTokenAccount, _, err := solanago.FindAssociatedTokenAddress(fromWallet, tokenMint)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find from token account: %w", err)
-		}
-		toTokenAccount, _, err := solanago.FindAssociatedTokenAddress(toWallet, tokenMint)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find to token account: %w", err)
-		}
-
-		transfer := token.NewTransferInstruction(
-			req.Amount,
-			fromTokenAccount,
-			toTokenAccount,
-			fromWallet,
-			[]solanago.PublicKey{},
-		)
-		if referencePub != nil {
-			transfer.Accounts = append(transfer.Accounts, solanago.Meta(*referencePub))
-		}
-		instructions = append(instructions, transfer.Build())
+		return append(instructions, transfer.Build()), nil
 	}
-	return instructions, nil
-}
-
-// VerifyTransfer confirms the transaction and validates that it matches expected values.
-func (c *RPCClient) VerifyTransfer(ctx context.Context, req VerifyTransferRequest) error {
-	if req.ExpectedAmount == 0 {
-		return fmt.Errorf("expected amount must be greater than 0")
-	}
-	expectedRecipient := strings.TrimSpace(req.ExpectedRecipient)
-	if expectedRecipient == "" {
-		return fmt.Errorf("expected recipient is required")
-	}
-	expectedReference := strings.TrimSpace(req.ExpectedReference)
-	if expectedReference == "" {
-		return fmt.Errorf("expected reference is required")
-	}
-
-	txResult, err := c.fetchConfirmedTransaction(ctx, req.Signature)
+	from, err := AssociatedTokenAddress(fromWallet, mint.Mint, mint.Program)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to find from token account: %w", err)
 	}
-	reference := expectedReference
-	if err := validateTransactionContent(txResult, req.ExpectedAmount, expectedRecipient, req.ExpectedTokenMint, req.ExpectedPayer, &reference, req.ExpectedMemoLocalID, req.ExpectedMemoPolicy); err != nil {
-		return fmt.Errorf("transaction content validation failed: %w", err)
+	to, err := AssociatedTokenAddress(toWallet, mint.Mint, mint.Program)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find to token account: %w", err)
 	}
-
-	log.WithFields(log.Fields{
-		"slot": txResult.Slot,
-		"fee":  txResult.Meta.Fee,
-	}).Info("Transaction verified on-chain")
-
-	return nil
+	// The recipient must receive the quoted amount: under a transfer fee the
+	// payer sends the gross, and the fee is asserted on-chain.
+	var transfer solanago.Instruction
+	if mint.Fee != nil {
+		gross, fee, err := mint.GrossFor(req.Amount)
+		if err != nil {
+			return nil, err
+		}
+		transfer = transferCheckedWithFee(mint.Program, from, mint.Mint, to, fromWallet, gross, mint.Decimals, fee)
+	} else {
+		built := token.NewTransferCheckedInstruction(req.Amount, mint.Decimals, from, mint.Mint, to, fromWallet, nil).Build()
+		data, err := built.Data()
+		if err != nil {
+			return nil, err
+		}
+		transfer = solanago.NewInstruction(mint.Program, built.Accounts(), data)
+	}
+	accounts := transfer.Accounts()
+	if referencePub != nil {
+		accounts = append(accounts, solanago.Meta(*referencePub))
+	}
+	data, err := transfer.Data()
+	if err != nil {
+		return nil, err
+	}
+	return append(instructions, solanago.NewInstruction(mint.Program, accounts, data)), nil
 }
 
-func (c *RPCClient) fetchConfirmedTransaction(ctx context.Context, signature string) (*rpc.GetTransactionResult, error) {
+// GetMintInfo reads a mint's owning token program and decimals.
+func (c *RPCClient) GetMintInfo(ctx context.Context, mint solanago.PublicKey) (*MintInfo, error) {
+	owner, data, err := c.fallback.GetAccountOwnerAndData(ctx, mint)
+	if err != nil {
+		return nil, fmt.Errorf("solana: read mint %s: %w", mint, err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrMintAccountNotFound, mint)
+	}
+	if !owner.Equals(token.ProgramID) && !owner.Equals(Token2022ProgramID) {
+		return nil, fmt.Errorf("solana: mint %s is owned by %s, not a token program", mint, owner)
+	}
+	decimals, err := DecodeMintDecimals(data)
+	if err != nil {
+		return nil, err
+	}
+	d, err := mintDecimals(decimals)
+	if err != nil {
+		return nil, fmt.Errorf("solana: mint %s: %w", mint, err)
+	}
+	info := &MintInfo{Mint: mint, Program: owner, Decimals: d}
+	if owner.Equals(Token2022ProgramID) {
+		epoch, err := c.fallback.GetEpoch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("solana: read epoch: %w", err)
+		}
+		if info.Fee, info.Hook, err = mintExtensions(data, epoch); err != nil {
+			return nil, fmt.Errorf("solana: mint %s: %w", mint, err)
+		}
+	}
+	return info, nil
+}
+
+// mintDecimals narrows a decoded decimals value to the u8 a TransferChecked
+// instruction carries, refusing anything outside it.
+func mintDecimals(decimals int) (uint8, error) {
+	if decimals < 0 || decimals > math.MaxUint8 {
+		return 0, fmt.Errorf("mint decimals %d outside 0..%d", decimals, math.MaxUint8)
+	}
+	return uint8(decimals), nil
+}
+
+// ObserveTransfer reads a landed transaction at the requested commitment
+// (finalized by default) and reports what it paid the recipient. Whether that
+// settles anything is the caller's decision.
+func (c *RPCClient) ObserveTransfer(ctx context.Context, req ObserveTransferRequest) (*TransferObservation, error) {
+	recipient := strings.TrimSpace(req.Recipient)
+	reference := strings.TrimSpace(req.Reference)
+	if recipient == "" || reference == "" {
+		return nil, fmt.Errorf("recipient and reference are required")
+	}
+	commitment := req.Commitment
+	if commitment == "" {
+		commitment = rpc.CommitmentFinalized
+	}
+	txResult, err := c.fetchLandedTransaction(ctx, req.Signature, commitment)
+	if err != nil {
+		return nil, err
+	}
+	out, err := observeTransactionContent(txResult, recipient, strings.TrimSpace(req.TokenMint), reference, req.MemoLocalID, req.MemoPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if txResult.BlockTime != nil {
+		t := txResult.BlockTime.Time().UTC()
+		out.LandedAt = &t
+	}
+	return out, nil
+}
+
+func (c *RPCClient) fetchLandedTransaction(ctx context.Context, signature string, commitment rpc.CommitmentType) (*rpc.GetTransactionResult, error) {
 	sig, err := solanago.SignatureFromBase58(signature)
 	if err != nil {
-		return nil, fmt.Errorf("invalid signature format: %w", err)
+		return nil, fmt.Errorf("%w: invalid signature: %v", ErrUnreadableTransfer, err)
 	}
-
-	if err = c.ConfirmTransaction(ctx, sig, rpc.CommitmentConfirmed); err != nil {
+	if err = c.ConfirmTransaction(ctx, sig, commitment); err != nil {
 		return nil, fmt.Errorf("transaction confirmation failed: %w", err)
 	}
-
-	txResult, err := c.GetTransactionWithRetry(ctx, sig, 5, 1*time.Second)
+	var txResult *rpc.GetTransactionResult
+	for attempt := 0; attempt < 5; attempt++ {
+		txResult, err = c.fallback.GetTransactionAt(ctx, sig, commitment)
+		if err == nil && txResult != nil || err != nil && !isNotFoundError(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
-
-	if txResult.Meta == nil {
-		return nil, fmt.Errorf("transaction metadata not available")
+	if txResult == nil || txResult.Meta == nil {
+		return nil, fmt.Errorf("transaction %s not yet readable", signature)
 	}
-
 	if txResult.Meta.Err != nil {
-		return nil, fmt.Errorf("transaction failed on-chain: %v", txResult.Meta.Err)
+		return nil, fmt.Errorf("%w: %v", ErrFailedOnChain, txResult.Meta.Err)
 	}
-
 	return txResult, nil
 }
 
-// GetConfirmedBlockTime returns the on-chain block time of a transaction (#651) —
-// its truthful settlement time. Returns (nil, nil) when the node reports no block
-// time. Used to stamp a recorded payment with when it actually landed on-chain
-// rather than when the poller happened to observe it.
-func (c *RPCClient) GetConfirmedBlockTime(ctx context.Context, signature string) (*time.Time, error) {
-	sig, err := solanago.SignatureFromBase58(strings.TrimSpace(signature))
-	if err != nil {
-		return nil, fmt.Errorf("invalid signature format: %w", err)
-	}
-	txResult, err := c.GetTransactionWithRetry(ctx, sig, 5, 1*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %w", err)
-	}
-	if txResult == nil || txResult.BlockTime == nil {
-		return nil, nil
-	}
-	t := txResult.BlockTime.Time().UTC()
-	return &t, nil
-}
-
-func validateTransactionContent(txResult *rpc.GetTransactionResult, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy PurchaseMemoPolicy) error {
+func observeTransactionContent(txResult *rpc.GetTransactionResult, recipient, tokenMint, reference string, memoLocalID uuid.UUID, memoPolicy PurchaseMemoPolicy) (*TransferObservation, error) {
 	if txResult.Transaction == nil {
-		return fmt.Errorf("transaction data not available")
+		return nil, fmt.Errorf("%w: transaction data not available", ErrUnreadableTransfer)
 	}
-
 	tx, err := txResult.Transaction.GetTransaction()
 	if err != nil {
-		return fmt.Errorf("failed to decode transaction: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrUnreadableTransfer, err)
 	}
-
-	// #713: a present purchase memo must name our record. Whether ABSENCE is
-	// allowed depends on who built the transaction (or#893, PurchaseMemoPolicy).
-	if err := VerifyPurchaseMemo(tx, expectedMemoLocalID, memoPolicy); err != nil {
-		return err
+	if err := VerifyPurchaseMemo(tx, memoLocalID, memoPolicy); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrForeignTransfer, err)
 	}
-
-	if expectedPayer != "" {
-		payerPub, err := solanago.PublicKeyFromBase58(expectedPayer)
-		if err != nil {
-			return fmt.Errorf("invalid expected payer: %w", err)
-		}
-		if len(tx.Message.AccountKeys) == 0 || !tx.Message.AccountKeys[0].Equals(payerPub) {
-			return fmt.Errorf("transaction fee payer does not match expected wallet")
-		}
-	}
-
-	if expectedReference != nil && *expectedReference != "" {
-		referencePub, err := solanago.PublicKeyFromBase58(*expectedReference)
-		if err != nil {
-			return fmt.Errorf("invalid reference key: %w", err)
-		}
-		if !messageContainsKey(tx.Message, referencePub, txResult.Meta.LoadedAddresses) {
-			return fmt.Errorf("reference key not included in transaction")
-		}
-	}
-
-	recipientCandidates := make(map[string]struct{})
-	recipientCandidates[expectedRecipient] = struct{}{}
-	if derived, err := deriveRecipientTokenAccount(expectedRecipient, expectedTokenMint); err == nil && derived != "" {
-		recipientCandidates[derived] = struct{}{}
-	}
-
-	match, err := findTransferMatch(tx, txResult, recipientCandidates, expectedTokenMint, expectedAmount, expectedPayer)
+	referencePub, err := solanago.PublicKeyFromBase58(reference)
 	if err != nil {
-		return err
-	}
-	if match == nil {
-		return fmt.Errorf("no qualifying transfer found for recipient %s", expectedRecipient)
-	}
-
-	if err := verifyBalanceChanges(txResult, match.accountIndex, match.destination.String(), expectedAmount); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func deriveRecipientTokenAccount(recipient string, tokenMint string) (string, error) {
-	if strings.TrimSpace(tokenMint) == "" {
-		return "", nil
+		return nil, fmt.Errorf("invalid reference key: %w", err)
 	}
 	recipientPub, err := solanago.PublicKeyFromBase58(recipient)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("invalid recipient: %w", err)
 	}
-	mintPub, err := solanago.PublicKeyFromBase58(tokenMint)
+	keys := accountKeys(tx, txResult.Meta.LoadedAddresses)
+	if !containsKey(keys, referencePub) {
+		return nil, fmt.Errorf("%w: reference key not included in transaction", ErrForeignTransfer)
+	}
+	out := &TransferObservation{}
+	if len(keys) > 0 {
+		out.Payer = keys[0].String()
+	}
+	native := isNativeSOLMint(tokenMint)
+
+	var expected, other int64
+	for i, key := range keys {
+		if !key.Equals(recipientPub) || i >= len(txResult.Meta.PreBalances) || i >= len(txResult.Meta.PostBalances) {
+			continue
+		}
+		delta, err := signedDelta(txResult.Meta.PostBalances[i], txResult.Meta.PreBalances[i])
+		if err != nil {
+			return nil, err
+		}
+		if native {
+			expected += delta
+		} else if delta > 0 {
+			other += delta
+		}
+	}
+	deltas, err := recipientTokenDeltas(txResult, keys, recipientPub)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	ata, _, err := solanago.FindAssociatedTokenAddress(recipientPub, mintPub)
-	if err != nil {
-		return "", err
+	for mint, delta := range deltas {
+		if !native && mint == tokenMint {
+			expected += delta
+		} else if delta > 0 {
+			other += delta
+		}
 	}
-	return ata.String(), nil
+	if expected > 0 {
+		out.Amount = uint64(expected)
+	}
+	out.Other = other > 0
+	return out, nil
 }
 
-type transferMatch struct {
-	program      string
-	amount       uint64
-	source       solanago.PublicKey
-	destination  solanago.PublicKey
-	mint         string
-	accountIndex int
-}
-
-func findTransferMatch(tx *solanago.Transaction, txResult *rpc.GetTransactionResult, recipientCandidates map[string]struct{}, expectedTokenMint string, expectedAmount uint64, expectedPayer string) (*transferMatch, error) {
-	if len(recipientCandidates) == 0 {
-		return nil, errors.New("no recipient candidates provided")
+// recipientTokenDeltas sums, per mint, the balance change of every token
+// account the recipient owns (or that is the recipient) in the transaction.
+func recipientTokenDeltas(txResult *rpc.GetTransactionResult, keys []solanago.PublicKey, recipient solanago.PublicKey) (map[string]int64, error) {
+	type account struct {
+		mint      string
+		pre, post uint64
 	}
-
-	candidateKeys := make(map[string]solanago.PublicKey, len(recipientCandidates))
-	for addr := range recipientCandidates {
-		pub, err := solanago.PublicKeyFromBase58(addr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid recipient candidate %s: %w", addr, err)
-		}
-		candidateKeys[addr] = pub
-	}
-
-	var bestMatch *transferMatch
-	expectedMintNorm := normalizeMint(expectedTokenMint)
-
-	for _, inst := range tx.Message.Instructions {
-		programID, err := tx.ResolveProgramIDIndex(inst.ProgramIDIndex)
-		if err != nil {
-			continue
-		}
-		accounts, err := inst.ResolveInstructionAccounts(&tx.Message)
-		if err != nil {
-			continue
-		}
-
-		switch {
-		case programID.Equals(system.ProgramID):
-			if !isNativeSOLMint(expectedMintNorm) {
+	accounts := map[uint16]*account{}
+	collect := func(balances []rpc.TokenBalance, post bool) error {
+		for _, b := range balances {
+			owned := b.Owner != nil && b.Owner.Equals(recipient) || int(b.AccountIndex) < len(keys) && keys[b.AccountIndex].Equals(recipient)
+			if !owned {
 				continue
 			}
-			sysInstr, err := system.DecodeInstruction(accounts, inst.Data)
+			if b.UiTokenAmount == nil {
+				return fmt.Errorf("%w: token amount missing", ErrUnreadableTransfer)
+			}
+			amount, err := strconv.ParseUint(b.UiTokenAmount.Amount, 10, 64)
 			if err != nil {
-				continue
+				return fmt.Errorf("%w: token amount %q", ErrUnreadableTransfer, b.UiTokenAmount.Amount)
 			}
-			transfer, ok := sysInstr.Impl.(*system.Transfer)
-			if !ok {
-				continue
+			a := accounts[b.AccountIndex]
+			if a == nil {
+				a = &account{mint: b.Mint.String()}
+				accounts[b.AccountIndex] = a
 			}
-			match := evaluateSystemTransfer(transfer, accountIndexFromInstruction(inst, 1), candidateKeys, expectedAmount, expectedPayer)
-			if match != nil {
-				bestMatch = pickBetterMatch(bestMatch, match)
+			if post {
+				a.post = amount
+			} else {
+				a.pre = amount
 			}
-		case programID.Equals(token.ProgramID):
-			tokenInstr, err := token.DecodeInstruction(accounts, inst.Data)
-			if err != nil {
-				continue
-			}
-			switch dec := tokenInstr.Impl.(type) {
-			case *token.Transfer:
-				match := evaluateTokenTransfer(txResult, accounts, dec.Amount, accountIndexFromInstruction(inst, 1), candidateKeys, expectedMintNorm, expectedAmount, expectedPayer)
-				if match != nil {
-					bestMatch = pickBetterMatch(bestMatch, match)
-				}
-			case *token.TransferChecked:
-				match := evaluateTokenTransferChecked(txResult, accounts, dec.Amount, accountIndexFromInstruction(inst, 2), candidateKeys, expectedMintNorm, expectedAmount, expectedPayer)
-				if match != nil {
-					bestMatch = pickBetterMatch(bestMatch, match)
-				}
-			}
-		default:
-			continue
 		}
-	}
-
-	return bestMatch, nil
-}
-
-func evaluateSystemTransfer(dec *system.Transfer, accountIdx int, candidates map[string]solanago.PublicKey, expectedAmount uint64, expectedPayer string) *transferMatch {
-	if dec == nil || dec.Lamports == nil {
 		return nil
 	}
-	if accountIdx < 0 {
-		return nil
+	if err := collect(txResult.Meta.PreTokenBalances, false); err != nil {
+		return nil, err
 	}
-
-	sourceMeta := dec.GetFundingAccount()
-	destMeta := dec.GetRecipientAccount()
-
-	if sourceMeta == nil || destMeta == nil {
-		return nil
+	if err := collect(txResult.Meta.PostTokenBalances, true); err != nil {
+		return nil, err
 	}
-	if expectedPayer != "" && sourceMeta.PublicKey.String() != expectedPayer {
-		return nil
-	}
-	if _, ok := candidates[destMeta.PublicKey.String()]; !ok {
-		return nil
-	}
-	if *dec.Lamports < expectedAmount {
-		return nil
-	}
-
-	return &transferMatch{
-		program:      "system",
-		amount:       *dec.Lamports,
-		source:       sourceMeta.PublicKey,
-		destination:  destMeta.PublicKey,
-		mint:         "",
-		accountIndex: accountIdx,
-	}
-}
-
-func evaluateTokenTransfer(txResult *rpc.GetTransactionResult, accounts []*solanago.AccountMeta, amountPtr *uint64, accountIdx int, candidates map[string]solanago.PublicKey, expectedMint string, expectedAmount uint64, expectedPayer string) *transferMatch {
-	if amountPtr == nil || accountIdx < 0 {
-		return nil
-	}
-	if len(accounts) < 3 {
-		return nil
-	}
-	dest := accounts[1].PublicKey
-	if _, ok := candidates[dest.String()]; !ok {
-		return nil
-	}
-	if expectedPayer != "" && accounts[2].PublicKey.String() != expectedPayer {
-		return nil
-	}
-	mint := mintForAccount(txResult, accountIdx)
-	if !mintMatches(expectedMint, mint) {
-		return nil
-	}
-	if *amountPtr < expectedAmount {
-		return nil
-	}
-	return &transferMatch{
-		program:      "token",
-		amount:       *amountPtr,
-		source:       accounts[0].PublicKey,
-		destination:  dest,
-		mint:         mint,
-		accountIndex: accountIdx,
-	}
-}
-
-func evaluateTokenTransferChecked(txResult *rpc.GetTransactionResult, accounts []*solanago.AccountMeta, amountPtr *uint64, accountIdx int, candidates map[string]solanago.PublicKey, expectedMint string, expectedAmount uint64, expectedPayer string) *transferMatch {
-	if amountPtr == nil || accountIdx < 0 {
-		return nil
-	}
-	if len(accounts) < 4 {
-		return nil
-	}
-	dest := accounts[2].PublicKey
-	if _, ok := candidates[dest.String()]; !ok {
-		return nil
-	}
-	if expectedPayer != "" && accounts[3].PublicKey.String() != expectedPayer {
-		return nil
-	}
-	mint := accounts[1].PublicKey.String()
-	if !mintMatches(expectedMint, mint) {
-		return nil
-	}
-	if *amountPtr < expectedAmount {
-		return nil
-	}
-	return &transferMatch{
-		program:      "token",
-		amount:       *amountPtr,
-		source:       accounts[0].PublicKey,
-		destination:  dest,
-		mint:         mint,
-		accountIndex: accountIdx,
-	}
-}
-
-func pickBetterMatch(current, candidate *transferMatch) *transferMatch {
-	if candidate == nil {
-		return current
-	}
-	if current == nil {
-		return candidate
-	}
-	if candidate.amount > current.amount {
-		return candidate
-	}
-	return current
-}
-
-func accountIndexFromInstruction(inst solanago.CompiledInstruction, accountPosition int) int {
-	if accountPosition >= len(inst.Accounts) {
-		return -1
-	}
-	return int(inst.Accounts[accountPosition])
-}
-
-func mintForAccount(txResult *rpc.GetTransactionResult, accountIndex int) string {
-	for i := range txResult.Meta.PostTokenBalances {
-		if int(txResult.Meta.PostTokenBalances[i].AccountIndex) == accountIndex {
-			return txResult.Meta.PostTokenBalances[i].Mint.String()
+	out := map[string]int64{}
+	for _, a := range accounts {
+		delta, err := signedDelta(a.post, a.pre)
+		if err != nil {
+			return nil, err
 		}
+		out[a.mint] += delta
 	}
-	return ""
+	return out, nil
 }
 
-// Base58 is case-sensitive: mints compare exactly.
-func normalizeMint(m string) string {
-	return strings.TrimSpace(m)
+func signedDelta(post, pre uint64) (int64, error) {
+	if post > math.MaxInt64 || pre > math.MaxInt64 {
+		return 0, fmt.Errorf("%w: balance exceeds range", ErrUnreadableTransfer)
+	}
+	return int64(post) - int64(pre), nil
 }
 
-func mintMatches(expected, actual string) bool {
-	exp, act := normalizeMint(expected), normalizeMint(actual)
-	if isNativeSOLMint(exp) {
-		return act == wrappedSOLMint
-	}
-	return act != "" && exp == act
+// accountKeys is the transaction's full account list in index order: static
+// keys, then loaded writable, then loaded read-only (v0 lookup tables).
+func accountKeys(tx *solanago.Transaction, loaded rpc.LoadedAddresses) []solanago.PublicKey {
+	keys := append([]solanago.PublicKey{}, tx.Message.AccountKeys...)
+	keys = append(keys, loaded.Writable...)
+	return append(keys, loaded.ReadOnly...)
 }
 
-func messageContainsKey(msg solanago.Message, key solanago.PublicKey, loaded rpc.LoadedAddresses) bool {
-	for _, k := range msg.AccountKeys {
-		if k.Equals(key) {
-			return true
-		}
-	}
-	for _, k := range loaded.Writable {
-		if k.Equals(key) {
-			return true
-		}
-	}
-	for _, k := range loaded.ReadOnly {
+func containsKey(keys []solanago.PublicKey, key solanago.PublicKey) bool {
+	for _, k := range keys {
 		if k.Equals(key) {
 			return true
 		}
 	}
 	return false
-}
-
-func verifyBalanceChanges(txResult *rpc.GetTransactionResult, accountIndex int, account string, expectedAmount uint64) error {
-	if accountIndex < len(txResult.Meta.PostBalances) && accountIndex < len(txResult.Meta.PreBalances) {
-		post := txResult.Meta.PostBalances[accountIndex]
-		pre := txResult.Meta.PreBalances[accountIndex]
-		if post >= pre {
-			delta := post - pre
-			if delta >= expectedAmount {
-				return nil
-			}
-		}
-	}
-
-	postToken, preToken, err := tokenBalanceDelta(txResult, accountIndex)
-	if err != nil {
-		return fmt.Errorf("unable to confirm balance change for account %s: %w", account, err)
-	}
-	if postToken < preToken {
-		return fmt.Errorf("token balance decreased for account %s", account)
-	}
-	if postToken-preToken < expectedAmount {
-		return fmt.Errorf("token transfer amount insufficient: expected >= %d, observed %d", expectedAmount, postToken-preToken)
-	}
-	return nil
-}
-
-func tokenBalanceDelta(txResult *rpc.GetTransactionResult, accountIndex int) (uint64, uint64, error) {
-	var (
-		postAmount uint64
-		preAmount  uint64
-		found      bool
-	)
-	for _, post := range txResult.Meta.PostTokenBalances {
-		if int(post.AccountIndex) == accountIndex {
-			if post.UiTokenAmount == nil {
-				return 0, 0, fmt.Errorf("post token amount missing")
-			}
-			amt, err := strconv.ParseUint(post.UiTokenAmount.Amount, 10, 64)
-			if err != nil {
-				return 0, 0, err
-			}
-			postAmount = amt
-			found = true
-			break
-		}
-	}
-	if !found {
-		return 0, 0, fmt.Errorf("token balance not found")
-	}
-	for _, pre := range txResult.Meta.PreTokenBalances {
-		if int(pre.AccountIndex) == accountIndex {
-			if pre.UiTokenAmount == nil {
-				return 0, 0, fmt.Errorf("pre token amount missing")
-			}
-			amt, err := strconv.ParseUint(pre.UiTokenAmount.Amount, 10, 64)
-			if err != nil {
-				return 0, 0, err
-			}
-			preAmount = amt
-			break
-		}
-	}
-	return postAmount, preAmount, nil
 }
 
 const wrappedSOLMint = "So11111111111111111111111111111111111111112"

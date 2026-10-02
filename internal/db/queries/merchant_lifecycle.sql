@@ -69,6 +69,18 @@ SELECT count(*) FROM openrails.nmi_history_months WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsNMIHistoryMonths :exec
 DELETE FROM openrails.nmi_history_months WHERE merchant_id = $1;
 
+-- name: CountMerchantRowsSolanaPayReceipts :one
+SELECT count(*) FROM openrails.solana_pay_receipts WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsSolanaPayReceipts :exec
+DELETE FROM openrails.solana_pay_receipts WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsSolanaPayReferences :one
+SELECT count(*) FROM openrails.solana_pay_references WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsSolanaPayReferences :exec
+DELETE FROM openrails.solana_pay_references WHERE merchant_id = $1;
+
 
 
 -- name: CountMerchantRowsNotificationQueue :one

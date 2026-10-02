@@ -648,6 +648,43 @@ at signup; legacy-imported subscriptions whose NMI `orderid` predates
 OpenRails won't match the per-subscription probe — the Event Refresh lane's
 watermarked backfill catches their provider events.
 
+## Solana Pay settlement (#1086)
+
+Solana Pay state is in PostgreSQL. A checkout attempt has one reference in
+`openrails.solana_pay_references` (`pending` → `confirmed` | `expired`). Every
+replica's poller claims due references with `SKIP LOCKED` and walks each
+reference's whole finalized signature history, oldest first, resuming from a
+stored cursor, so no number of transactions naming a reference can hide a
+payment. Each new signature goes to one settlement transaction under the
+reference's row lock and is recorded once in `openrails.solana_pay_receipts`;
+a transfer to one recipient in one mint is credited or reviewed at most once
+across all references.
+
+- The amount is the recipient's balance change in the quoted mint, including
+  Token-2022 mints, split transfers, transfers made inside another program and
+  any token account the recipient owns. Only finalized transactions credit; a
+  page confirm waits up to 60 s, then answers `processing` and the poller
+  credits it.
+- A Token-2022 transfer fee is priced in at quote time: the request asks for
+  the gross that delivers the quoted amount, and a built transaction asserts
+  the fee on-chain. A fee raised after the quote leaves the merchant short and
+  is recorded as `underpaid`. Mints with a transfer hook are refused for
+  transaction requests.
+- The first transfer of at least the quoted amount that lands by quote expiry
+  + 30 min is credited; an excess is credited and flagged `overpaid`.
+- Anything else is recorded with `disposition = 'review'` and a
+  `billing_ledger_repair_required` alert (`solana_pay_<reason>`):
+  `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
+  `unreadable`, `settle_failed`. Nothing is refunded automatically, and
+  underpayments are not added together. A transfer that already settled another
+  checkout is recorded as `duplicate`.
+- Unresolved reviews and pending references refuse the billing archive. After
+  refunding, close a review with `openrails solana-pay resolve --merchant …
+  --signature … --resolution …` (embedded: `operator.ResolveSolanaPayReview`).
+- A paid or expired reference stays watched for 7 days so later transfers are
+  recorded; the GC job then deletes it. Credited, review and duplicate
+  receipts are kept.
+
 ## Background worker schedule
 
 Everything runs by itself under River once `run-server` (or `run-worker`) is
@@ -658,7 +695,7 @@ up. "start" = RunOnStart.
 | Provider-intent executor | 1 min + start |
 | Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
 | Notification email sweep | 10 min |
-| Convergence sweep (+ start) · arrears delinquency evaluation | 15 min |
+| Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Plan-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |

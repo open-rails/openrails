@@ -2,13 +2,16 @@ package captcha
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
+	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -116,4 +119,75 @@ func TestChallengeStore(t *testing.T) {
 	require.NotContains(t, s.challenged, "stale")
 	require.LessOrEqual(t, len(s.challenged), maxMemoryEntries)
 	require.WithinDuration(t, time.Now().Add(15*time.Minute), s.challenged["user:new"], time.Minute, "ttl <= 0 defaults to 15m")
+}
+
+// sharedRedis is the one Redis every pod sees, served in process through a
+// go-redis hook: SET, EXISTS and DEL on a map, or refusal while down.
+type sharedRedis struct {
+	mu   sync.Mutex
+	keys map[string]bool
+	down bool
+}
+
+func (r *sharedRedis) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (r *sharedRedis) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (r *sharedRedis) ProcessHook(redis.ProcessHook) redis.ProcessHook {
+	return func(_ context.Context, cmd redis.Cmder) error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.down {
+			err := errors.New("redis unavailable")
+			cmd.SetErr(err)
+			return err
+		}
+		args := cmd.Args()
+		key, _ := args[1].(string)
+		switch c := cmd.(type) {
+		case *redis.StatusCmd:
+			r.keys[key] = true
+			c.SetVal("OK")
+		case *redis.IntCmd:
+			n := int64(0)
+			if r.keys[key] {
+				n = 1
+			}
+			if cmd.Name() == "del" {
+				delete(r.keys, key)
+			}
+			c.SetVal(n)
+		}
+		return nil
+	}
+}
+
+func (r *sharedRedis) client() *redis.Client {
+	c := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	c.AddHook(r)
+	return c
+}
+
+// A challenge lives in Redis, so a solve on one pod clears it on every pod;
+// memory holds a challenge only while Redis cannot be written.
+func TestChallengeSolvedOnAnotherPod(t *testing.T) {
+	ctx := context.Background()
+	shared := &sharedRedis{keys: map[string]bool{}}
+	a, b := NewChallengeStore(shared.client()), NewChallengeStore(shared.client())
+
+	require.NoError(t, a.MarkChallenged(ctx, "user:u1", time.Minute))
+	on, err := b.IsChallenged(ctx, "user:u1")
+	require.NoError(t, err)
+	require.True(t, on, "every pod sees the challenge")
+	require.NoError(t, b.ClearChallenged(ctx, "user:u1"))
+	on, err = a.IsChallenged(ctx, "user:u1")
+	require.NoError(t, err)
+	require.False(t, on, "solved on b, cleared on a")
+
+	shared.down = true
+	require.NoError(t, a.MarkChallenged(ctx, "user:u2", time.Minute))
+	on, _ = a.IsChallenged(ctx, "user:u2")
+	require.True(t, on, "a keeps the challenge it could not write")
+	on, _ = b.IsChallenged(ctx, "user:u2")
+	require.False(t, on)
 }

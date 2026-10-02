@@ -375,6 +375,27 @@ func (c *RPCFallbackClient) GetAccountData(ctx context.Context, address solanago
 	return data, err
 }
 
+// GetAccountOwnerAndData returns an account's owning program and data; nil
+// data when the account does not exist.
+func (c *RPCFallbackClient) GetAccountOwnerAndData(ctx context.Context, address solanago.PublicKey) (solanago.PublicKey, []byte, error) {
+	var owner solanago.PublicKey
+	var data []byte
+	err := c.withFallback(ctx, "GetAccountInfo", func(client *rpc.Client) error {
+		ai, err := client.GetAccountInfoWithOpts(ctx, address, &rpc.GetAccountInfoOpts{Commitment: rpc.CommitmentConfirmed})
+		if err != nil {
+			if errors.Is(err, rpc.ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		if ai != nil && ai.Value != nil {
+			owner, data = ai.Value.Owner, ai.Value.Data.GetBinary()
+		}
+		return nil
+	})
+	return owner, data, err
+}
+
 // minContextSlotReadAttempts / minContextSlotReadBackoff bound the slot-gated
 // read retry. A node that lags the requested minContextSlot returns an error;
 // we retry the whole fallback chain (a different node may already be caught up)
@@ -541,6 +562,20 @@ func (c *RPCFallbackClient) LatestBlockhash(ctx context.Context) (RecentBlockhas
 	return out, err
 }
 
+// GetEpoch returns the cluster's current epoch at confirmed commitment.
+func (c *RPCFallbackClient) GetEpoch(ctx context.Context) (uint64, error) {
+	var epoch uint64
+	err := c.withFallback(ctx, "GetEpochInfo", func(client *rpc.Client) error {
+		info, err := client.GetEpochInfo(ctx, rpc.CommitmentConfirmed)
+		if err != nil {
+			return err
+		}
+		epoch = info.Epoch
+		return nil
+	})
+	return epoch, err
+}
+
 // GetBlockHeight returns the cluster's current block height at the given
 // commitment, with automatic failover.
 func (c *RPCFallbackClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
@@ -601,13 +636,22 @@ func (c *RPCFallbackClient) SendTransaction(ctx context.Context, tx *solanago.Tr
 	return sig, err
 }
 
-// GetTransaction retrieves transaction details with automatic failover.
+// GetTransaction retrieves transaction details at confirmed commitment with
+// automatic failover.
 func (c *RPCFallbackClient) GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error) {
+	return c.GetTransactionAt(ctx, signature, rpc.CommitmentConfirmed)
+}
+
+// GetTransactionAt retrieves a transaction at commitment. Versioned (v0)
+// transactions are requested explicitly; without it the node refuses them.
+func (c *RPCFallbackClient) GetTransactionAt(ctx context.Context, signature solanago.Signature, commitment rpc.CommitmentType) (*rpc.GetTransactionResult, error) {
 	var result *rpc.GetTransactionResult
+	version := uint64(0)
 	err := c.withFallback(ctx, "GetTransaction", func(client *rpc.Client) error {
 		resp, err := client.GetTransaction(ctx, signature, &rpc.GetTransactionOpts{
-			Commitment: rpc.CommitmentConfirmed,
-			Encoding:   solanago.EncodingBase64,
+			Commitment:                     commitment,
+			Encoding:                       solanago.EncodingBase64,
+			MaxSupportedTransactionVersion: &version,
 		})
 		if err != nil {
 			return err

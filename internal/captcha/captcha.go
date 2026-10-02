@@ -63,7 +63,8 @@ type siteVerifyVerifier struct {
 	verifyURLOverride string
 }
 
-// ChallengeStore tracks challenged subjects with Redis and in-memory fallback.
+// ChallengeStore tracks challenged subjects in Redis, falling back to this
+// process's memory only while Redis cannot be written. One per process.
 // Subjects are rate-limit identities such as "ip:203.0.113.1" or "user:abc".
 type ChallengeStore struct {
 	rdb        *redis.Client
@@ -215,10 +216,14 @@ func (s *ChallengeStore) set(ctx context.Context, redisKey, memoryKey string, me
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
+	// Memory is only the fallback for a Redis write that failed: a marker
+	// kept in memory as well would outlive a solve on another pod.
 	if s.rdb != nil {
-		if err := s.rdb.Set(ctx, redisKey, "1", ttl).Err(); err != nil {
-			log.WithError(err).Warn("captcha redis set failed; using in-memory store")
+		err := s.rdb.Set(ctx, redisKey, "1", ttl).Err()
+		if err == nil {
+			return nil
 		}
+		log.WithError(err).Warn("captcha redis set failed; using in-memory store")
 	}
 	now := time.Now()
 	s.mu.Lock()

@@ -3,6 +3,7 @@ package solana
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"testing"
@@ -42,20 +43,37 @@ func TestPurchaseMemoWireAndParse(t *testing.T) {
 	require.Empty(t, ix.Accounts())
 }
 
-// Solana Pay ordering: the memo precedes the transfer, for SOL and SPL.
+// Solana Pay ordering: the memo precedes the transfer, for SOL and SPL; an SPL
+// transfer is a TransferChecked under the mint's own token program, into the
+// token accounts that program derives.
 func TestTransferInstructionsPutMemoFirst(t *testing.T) {
 	from, to := solanago.NewWallet().PublicKey(), solanago.NewWallet().PublicKey()
+	mint := solanago.NewWallet().PublicKey()
 	memo := PurchaseMemo(uuid.New())
-	for symbol, program := range map[string]solanago.PublicKey{"SOL": system.ProgramID, "USDC": solanago.TokenProgramID} {
-		req := TransferRequest{TokenSymbol: symbol, TokenMint: solanago.NewWallet().PublicKey().String(), Amount: 5, Memo: memo}
-		ixs, err := buildTransferInstructions(req, from, to)
+	for _, c := range []struct {
+		symbol  string
+		mint    *MintInfo
+		program solanago.PublicKey
+	}{
+		{"SOL", nil, system.ProgramID},
+		{"USDC", &MintInfo{Mint: mint, Program: solanago.TokenProgramID, Decimals: 6}, solanago.TokenProgramID},
+		{"PYUSD", &MintInfo{Mint: mint, Program: Token2022ProgramID, Decimals: 6}, Token2022ProgramID},
+	} {
+		req := TransferRequest{TokenSymbol: c.symbol, TokenMint: mint.String(), Amount: 5, Memo: memo}
+		ixs, err := buildTransferInstructions(req, from, to, c.mint)
 		require.NoError(t, err)
 		require.Len(t, ixs, 2)
 		require.Equal(t, solanago.MemoProgramID, ixs[0].ProgramID())
-		require.Equal(t, program, ixs[1].ProgramID())
+		require.Equal(t, c.program, ixs[1].ProgramID(), c.symbol)
+		if c.mint != nil {
+			dest, err := AssociatedTokenAddress(to, mint, c.program)
+			require.NoError(t, err)
+			require.Equal(t, dest, ixs[1].Accounts()[2].PublicKey, "%s pays the recipient's account under its program", c.symbol)
+			require.Equal(t, mint, ixs[1].Accounts()[1].PublicKey)
+		}
 
 		req.Memo = ""
-		ixs, err = buildTransferInstructions(req, from, to)
+		ixs, err = buildTransferInstructions(req, from, to, c.mint)
 		require.NoError(t, err)
 		require.Len(t, ixs, 1)
 	}
@@ -444,4 +462,99 @@ func TestValidateAddressAndSignature(t *testing.T) {
 	}
 	require.ErrorIs(t, ValidateAddress(""), ErrInvalidAddress)
 	require.ErrorIs(t, ValidateSignature(""), ErrInvalidSignature)
+}
+
+// A TransferChecked carries the mint's decimals as one byte; a value outside
+// it is refused, never truncated.
+func TestMintDecimalsFitOneByte(t *testing.T) {
+	for _, ok := range []int{0, 6, 9, 255} {
+		d, err := mintDecimals(ok)
+		require.NoError(t, err)
+		require.Equal(t, uint8(ok), d)
+	}
+	for _, bad := range []int{-1, 256, 1 << 20} {
+		_, err := mintDecimals(bad)
+		require.ErrorContains(t, err, "outside 0..255", bad)
+	}
+}
+
+func token2022Mint(t *testing.T, fee *[2]TransferFee, hook solanago.PublicKey) []byte {
+	t.Helper()
+	data := make([]byte, token2022AccountTypeOffset+1)
+	data[44], data[45] = 6, 1
+	data[token2022AccountTypeOffset] = token2022AccountTypeMint
+	tlv := func(typ uint16, value []byte) {
+		head := make([]byte, 4)
+		binary.LittleEndian.PutUint16(head, typ)
+		binary.LittleEndian.PutUint16(head[2:], uint16(len(value)))
+		data = append(append(data, head...), value...)
+	}
+	if fee != nil {
+		v := make([]byte, transferFeeConfigLen)
+		for i, f := range fee {
+			off := 72 + 18*i
+			binary.LittleEndian.PutUint64(v[off:], f.Epoch)
+			binary.LittleEndian.PutUint64(v[off+8:], f.MaximumFee)
+			binary.LittleEndian.PutUint16(v[off+16:], f.BasisPts)
+		}
+		tlv(extensionTransferFeeConfig, v)
+	}
+	if !hook.IsZero() {
+		tlv(extensionTransferHook, append(make([]byte, 32), hook[:]...))
+	}
+	return data
+}
+
+// A Token-2022 transfer fee is read at the current epoch; the payer sends the
+// smallest gross that delivers the quoted net, and a transfer hook is seen.
+func TestToken2022FeeAndHook(t *testing.T) {
+	fees := [2]TransferFee{{Epoch: 0, MaximumFee: 1_000_000, BasisPts: 100}, {Epoch: 10, MaximumFee: 5, BasisPts: 200}}
+	fee, hook, err := mintExtensions(token2022Mint(t, &fees, solanago.PublicKey{}), 9)
+	require.NoError(t, err)
+	require.Equal(t, fees[0], *fee, "the older fee until its successor's epoch")
+	require.True(t, hook.IsZero())
+	fee, _, err = mintExtensions(token2022Mint(t, &fees, solanago.PublicKey{}), 10)
+	require.NoError(t, err)
+	require.Equal(t, fees[1], *fee)
+
+	onePercent := TransferFee{MaximumFee: 1_000_000, BasisPts: 100}
+	for net, want := range map[uint64][2]uint64{100: {102, 2}, 5_000_000: {5_050_506, 50_506}, 1: {2, 1}} {
+		gross, f, err := onePercent.GrossFor(net)
+		require.NoError(t, err)
+		require.Equal(t, want, [2]uint64{gross, f}, net)
+		require.GreaterOrEqual(t, gross-onePercent.For(gross), net)
+		require.Less(t, gross-1-onePercent.For(gross-1), net, "the smallest gross")
+	}
+	capped := TransferFee{MaximumFee: 5, BasisPts: 200}
+	gross, f, err := capped.GrossFor(1_000_000)
+	require.NoError(t, err)
+	require.Equal(t, [2]uint64{1_000_005, 5}, [2]uint64{gross, f}, "the fee is capped at its maximum")
+
+	program := solanago.NewWallet().PublicKey()
+	_, hook, err = mintExtensions(token2022Mint(t, nil, program), 0)
+	require.NoError(t, err)
+	require.Equal(t, program, hook)
+
+	legacy, hook, err := mintExtensions(make([]byte, MintAccountSize), 0)
+	require.NoError(t, err)
+	require.Nil(t, legacy)
+	require.True(t, hook.IsZero())
+	_, _, err = mintExtensions(append(token2022Mint(t, nil, solanago.PublicKey{}), 1, 0, 200, 0), 0)
+	require.ErrorContains(t, err, "overruns")
+}
+
+// Under a transfer fee the built transaction sends the gross with the fee
+// asserted on-chain (TransferCheckedWithFee).
+func TestTransferWithFeeAssertsTheFee(t *testing.T) {
+	from, to, mint := solanago.NewWallet().PublicKey(), solanago.NewWallet().PublicKey(), solanago.NewWallet().PublicKey()
+	info := &MintInfo{Mint: mint, Program: Token2022ProgramID, Decimals: 6, Fee: &TransferFee{MaximumFee: 1_000_000, BasisPts: 100}}
+	ixs, err := buildTransferInstructions(TransferRequest{TokenSymbol: "PYUSD", TokenMint: mint.String(), Amount: 100}, from, to, info)
+	require.NoError(t, err)
+	require.Equal(t, Token2022ProgramID, ixs[0].ProgramID())
+	data, err := ixs[0].Data()
+	require.NoError(t, err)
+	require.Equal(t, []byte{26, 1}, data[:2])
+	require.Equal(t, uint64(102), binary.LittleEndian.Uint64(data[2:]), "gross")
+	require.Equal(t, byte(6), data[10])
+	require.Equal(t, uint64(2), binary.LittleEndian.Uint64(data[11:]), "asserted fee")
 }

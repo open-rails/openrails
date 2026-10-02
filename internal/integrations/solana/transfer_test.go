@@ -9,7 +9,6 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/programs/token"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +21,7 @@ func transferChain(t *testing.T, tx *solanago.Transaction, meta map[string]any) 
 	_, url := newRPCStub(t, func(method string, _ int, _ []json.RawMessage) any {
 		switch method {
 		case "getSignatureStatuses":
-			return signatureStatus("confirmed", nil)
+			return signatureStatus("finalized", nil)
 		case "getTransaction":
 			return map[string]any{
 				"slot": 7, "blockTime": 1_700_000_000,
@@ -46,155 +45,130 @@ func keyIndex(t *testing.T, tx *solanago.Transaction, key solanago.PublicKey) in
 	return -1
 }
 
-func tokenBalance(idx int, mint solanago.PublicKey, amount uint64) map[string]any {
-	return map[string]any{"accountIndex": idx, "mint": mint.String(), "uiTokenAmount": map[string]any{"amount": strconv.FormatUint(amount, 10), "decimals": 6}}
+func tokenBalance(idx int, mint, owner, program solanago.PublicKey, amount uint64) map[string]any {
+	return map[string]any{"accountIndex": idx, "mint": mint.String(), "owner": owner.String(), "programId": program.String(),
+		"uiTokenAmount": map[string]any{"amount": strconv.FormatUint(amount, 10), "decimals": 6}}
 }
 
-// Money truth for a one-off purchase: amount (at least), mint, recipient,
-// fee payer, reference, memo and the observed balance delta must all agree.
-func TestVerifyTransferMatchesAmountMintRecipientAndMemo(t *testing.T) {
+// An observation is the recipient's balance change in the expected asset,
+// however it was moved: one instruction, several, inside another program, via
+// Token-2022, or into any token account the recipient owns. Value in another
+// asset is reported as Other. The reference and memo decide whether the
+// transaction belongs to the reference at all.
+func TestObserveTransferReportsWhatTheRecipientReceived(t *testing.T) {
 	payer := solanago.NewWallet().PublicKey()
 	recipient := solanago.NewWallet().PublicKey()
 	reference := solanago.NewWallet().PublicKey()
 	mint := solanago.NewWallet().PublicKey()
+	otherMint := solanago.NewWallet().PublicKey()
+	stray := solanago.NewWallet().PublicKey() // a token account the recipient owns, not its ATA
 	localID := uuid.New()
+	stamp := PurchaseMemo(localID)
 	const want = uint64(10_000_000)
 
-	type tc struct {
+	type credit struct {
+		account solanago.PublicKey // token account credited, or the recipient wallet for lamports
+		mint    solanago.PublicKey // zero = lamports
+		program solanago.PublicKey
+		owner   solanago.PublicKey
+		amount  uint64
+	}
+	ata := func(m, program solanago.PublicKey) solanago.PublicKey {
+		a, err := AssociatedTokenAddress(recipient, m, program)
+		require.NoError(t, err)
+		return a
+	}
+	lamports := func(n uint64) credit { return credit{account: recipient, amount: n} }
+	tokens := func(account, m, program solanago.PublicKey, n uint64) credit {
+		return credit{account: account, mint: m, program: program, owner: recipient, amount: n}
+	}
+	for _, c := range []struct {
 		name     string
-		symbol   string // "SOL" or an SPL symbol
-		sent     uint64
-		credited uint64
-		creditIn solanago.PublicKey // SPL: mint recorded in token balances
-		noRef    bool
+		credits  []credit
+		mint     string
 		memo     string
-		checked  *solanago.PublicKey // SPL: TransferChecked naming this mint (into the expected ATA)
+		optional bool
+		noRef    bool
 		metaErr  any
-		req      func(*VerifyTransferRequest)
-		wantErr  string
-	}
-	stamp := PurchaseMemo(localID)
-	otherMint := solanago.NewWallet().PublicKey()
-	// Paying straight into the token account skips ATA derivation, so only the mint check decides.
-	recipientATA, _, err := solanago.FindAssociatedTokenAddress(recipient, mint)
-	require.NoError(t, err)
-	intoATA := func(expectedMint string) func(*VerifyTransferRequest) {
-		return func(r *VerifyTransferRequest) {
-			r.ExpectedRecipient, r.ExpectedTokenMint = recipientATA.String(), expectedMint
-		}
-	}
-	swapCase := func(s string) string {
-		out := []rune(s)
-		for i, r := range out {
-			switch {
-			case r >= 'a' && r <= 'z':
-				out[i] = r - 'a' + 'A'
-			case r >= 'A' && r <= 'Z':
-				out[i] = r - 'A' + 'a'
-			}
-		}
-		return string(out)
-	}
-	cases := []tc{
-		{name: "SOL exact", symbol: "SOL", sent: want, credited: want, memo: stamp},
-		{name: "SOL overpay accepted", symbol: "SOL", sent: want + 1, credited: want + 1, memo: stamp},
-		{name: "SOL underpay", symbol: "SOL", sent: want - 1, credited: want - 1, memo: stamp, wantErr: "no qualifying transfer"},
-		{name: "SOL instruction without balance movement", symbol: "SOL", sent: want, credited: want / 2, memo: stamp, wantErr: "unable to confirm balance change"},
-		{name: "SOL wrong recipient", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedRecipient = payer.String() }, wantErr: "no qualifying transfer"},
-		{name: "SOL wrong fee payer", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedPayer = recipient.String() }, wantErr: "fee payer does not match"},
-		{name: "SOL reference absent", symbol: "SOL", sent: want, credited: want, memo: stamp, noRef: true, wantErr: "reference key not included"},
-		{name: "SOL when SPL mint expected", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
-		{name: "wrapped SOL mint accepts native SOL", symbol: "SOL", sent: want, credited: want, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = wrappedSOLMint }},
-		{name: "failed on chain", symbol: "SOL", sent: want, credited: want, memo: stamp, metaErr: map[string]any{"InstructionError": []any{0, "Custom"}}, wantErr: "failed on-chain"},
-		{name: "memo for another record", symbol: "SOL", sent: want, credited: want, memo: PurchaseMemo(uuid.New()), wantErr: "purchase memo mismatch"},
-		{name: "wallet dropped memo, optional", symbol: "SOL", sent: want, credited: want, req: func(r *VerifyTransferRequest) { r.ExpectedMemoPolicy = MemoPresenceOptional }},
-		{name: "we built it, memo missing", symbol: "SOL", sent: want, credited: want, wantErr: "purchase memo missing"},
-		{name: "SPL exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }},
-		{name: "SPL other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
-		{name: "SPL short credit", symbol: "USDC", sent: want, credited: want - 1, creditIn: mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "token transfer amount insufficient"},
-		{name: "SPL when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, wantErr: "no qualifying transfer"},
-		{name: "SPL into token account", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(mint.String())},
-		{name: "SPL mint differing only in case", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(swapCase(mint.String())), wantErr: "no qualifying transfer"},
-		{name: "SPL into token account when native SOL expected", symbol: "USDC", sent: want, credited: want, creditIn: mint, memo: stamp, req: intoATA(""), wantErr: "no qualifying transfer"},
-		{name: "SPL checked exact", symbol: "USDC", sent: want, credited: want, creditIn: mint, checked: &mint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }},
-		{name: "SPL checked other mint", symbol: "USDC", sent: want, credited: want, creditIn: otherMint, checked: &otherMint, memo: stamp, req: func(r *VerifyTransferRequest) { r.ExpectedTokenMint = mint.String() }, wantErr: "no qualifying transfer"},
-	}
-	for _, c := range cases {
+		got      uint64
+		other    bool
+		wantErr  error
+	}{
+		{name: "SOL exact", credits: []credit{lamports(want)}, memo: stamp, got: want},
+		{name: "SOL over", credits: []credit{lamports(want + 1)}, memo: stamp, got: want + 1},
+		{name: "SOL under", credits: []credit{lamports(want - 1)}, memo: stamp, got: want - 1},
+		{name: "wrapped SOL mint is native SOL", credits: []credit{lamports(want)}, mint: wrappedSOLMint, memo: stamp, got: want},
+		{name: "nothing to the recipient", memo: stamp},
+		{name: "SOL when a token is expected", credits: []credit{lamports(want)}, mint: mint.String(), memo: stamp, other: true},
+		{name: "legacy SPL", credits: []credit{tokens(ata(mint, solanago.TokenProgramID), mint, solanago.TokenProgramID, want)}, mint: mint.String(), memo: stamp, got: want},
+		{name: "Token-2022", credits: []credit{tokens(ata(mint, Token2022ProgramID), mint, Token2022ProgramID, want)}, mint: mint.String(), memo: stamp, got: want},
+		{name: "split across two accounts", credits: []credit{tokens(ata(mint, solanago.TokenProgramID), mint, solanago.TokenProgramID, want/2), tokens(stray, mint, solanago.TokenProgramID, want/2)}, mint: mint.String(), memo: stamp, got: want},
+		{name: "into a non-ATA account the recipient owns", credits: []credit{tokens(stray, mint, solanago.TokenProgramID, want)}, mint: mint.String(), memo: stamp, got: want},
+		{name: "wrong mint", credits: []credit{tokens(ata(otherMint, solanago.TokenProgramID), otherMint, solanago.TokenProgramID, want)}, mint: mint.String(), memo: stamp, other: true},
+		{name: "token to someone else", credits: []credit{{account: stray, mint: mint, program: solanago.TokenProgramID, owner: payer, amount: want}}, mint: mint.String(), memo: stamp},
+		{name: "reference absent", credits: []credit{lamports(want)}, memo: stamp, noRef: true, wantErr: ErrForeignTransfer},
+		{name: "memo for another record", credits: []credit{lamports(want)}, memo: PurchaseMemo(uuid.New()), wantErr: ErrForeignTransfer},
+		{name: "we built it, memo missing", credits: []credit{lamports(want)}, wantErr: ErrForeignTransfer},
+		{name: "wallet dropped memo", credits: []credit{lamports(want)}, optional: true, got: want},
+		{name: "failed on chain", credits: []credit{lamports(want)}, memo: stamp, metaErr: map[string]any{"InstructionError": []any{0, "Custom"}}, wantErr: ErrFailedOnChain},
+	} {
 		t.Run(c.name, func(t *testing.T) {
-			tr := TransferRequest{FromWallet: payer.String(), ToWallet: recipient.String(), TokenSymbol: c.symbol, TokenMint: mint.String(), Amount: c.sent, Reference: reference.String(), Memo: c.memo}
-			if c.noRef {
-				tr.Reference = ""
+			// The only instruction names the reference and moves nothing
+			// itself: the credit is whatever the balances say, as for a
+			// payment made inside another program.
+			ixs := []solanago.Instruction{}
+			if c.memo != "" {
+				ixs = append(ixs, NewMemoInstruction(c.memo))
 			}
-			ixs, err := buildTransferInstructions(tr, payer, recipient)
-			require.NoError(t, err)
-			if c.checked != nil {
-				src, _, _ := solanago.FindAssociatedTokenAddress(payer, mint)
-				dst, _, _ := solanago.FindAssociatedTokenAddress(recipient, mint)
-				b := token.NewTransferCheckedInstruction(c.sent, 6, src, *c.checked, dst, payer, nil)
-				b.Accounts = append(b.Accounts, solanago.Meta(reference))
-				ixs[len(ixs)-1] = b.Build()
+			accounts := []*solanago.AccountMeta{solanago.Meta(payer).SIGNER().WRITE(), solanago.Meta(recipient)}
+			if !c.noRef {
+				accounts = append(accounts, solanago.Meta(reference))
 			}
+			for _, cr := range c.credits {
+				accounts = append(accounts, solanago.Meta(cr.account).WRITE())
+			}
+			ixs = append(ixs, solanago.NewInstruction(solanago.NewWallet().PublicKey(), accounts, []byte{1}))
 			tx, err := solanago.NewTransaction(ixs, solanago.Hash{}, solanago.TransactionPayer(payer))
 			require.NoError(t, err)
 
 			n := len(tx.Message.AccountKeys)
 			pre, post := make([]uint64, n), make([]uint64, n)
-			meta := map[string]any{"err": c.metaErr, "fee": 5000, "preBalances": pre, "postBalances": post, "preTokenBalances": []any{}, "postTokenBalances": []any{}}
-			if c.symbol == "SOL" {
-				pre[0], post[0] = 1_000_000_000, 1_000_000_000-c.credited
-				post[keyIndex(t, tx, recipient)] = c.credited
-			} else {
-				ata, _, err := solanago.FindAssociatedTokenAddress(recipient, mint)
-				require.NoError(t, err)
-				idx := keyIndex(t, tx, ata)
-				meta["preTokenBalances"] = []any{tokenBalance(idx, c.creditIn, 100)}
-				meta["postTokenBalances"] = []any{tokenBalance(idx, c.creditIn, 100+c.credited)}
+			var preTokens, postTokens []any
+			for _, cr := range c.credits {
+				idx := keyIndex(t, tx, cr.account)
+				if cr.mint.IsZero() {
+					post[idx] += cr.amount
+					continue
+				}
+				preTokens = append(preTokens, tokenBalance(idx, cr.mint, cr.owner, cr.program, 100))
+				postTokens = append(postTokens, tokenBalance(idx, cr.mint, cr.owner, cr.program, 100+cr.amount))
 			}
-
-			req := VerifyTransferRequest{
-				Signature:           solanago.Signature{7}.String(),
-				ExpectedAmount:      want,
-				ExpectedRecipient:   recipient.String(),
-				ExpectedPayer:       payer.String(),
-				ExpectedReference:   reference.String(),
-				ExpectedMemoLocalID: localID,
-				ExpectedMemoPolicy:  MemoRequired,
+			meta := map[string]any{"err": c.metaErr, "fee": 5000, "preBalances": pre, "postBalances": post, "preTokenBalances": preTokens, "postTokenBalances": postTokens}
+			policy := MemoRequired
+			if c.optional {
+				policy = MemoPresenceOptional
 			}
-			if c.req != nil {
-				c.req(&req)
+			got, err := transferChain(t, tx, meta).ObserveTransfer(context.Background(), ObserveTransferRequest{
+				Signature: solanago.Signature{7}.String(), Recipient: recipient.String(), TokenMint: c.mint, Reference: reference.String(),
+				MemoLocalID: localID, MemoPolicy: policy,
+			})
+			if c.wantErr != nil {
+				require.ErrorIs(t, err, c.wantErr)
+				return
 			}
-			err = transferChain(t, tx, meta).VerifyTransfer(context.Background(), req)
-			if c.wantErr == "" {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, c.wantErr)
-			}
+			require.NoError(t, err)
+			require.Equal(t, c.got, got.Amount)
+			require.Equal(t, c.other, got.Other)
+			require.Equal(t, payer.String(), got.Payer)
+			require.Equal(t, time.Unix(1_700_000_000, 0).UTC(), *got.LandedAt, "#651: landed at the chain's block time")
 		})
 	}
 }
 
-func TestVerifyTransferRefusesIncompleteExpectations(t *testing.T) {
+func TestObserveTransferRequiresRecipientAndReference(t *testing.T) {
 	c := &RPCClient{}
-	base := VerifyTransferRequest{Signature: "x", ExpectedAmount: 1, ExpectedRecipient: solanago.SystemProgramID.String(), ExpectedReference: solanago.SystemProgramID.String()}
-	for want, mutate := range map[string]func(*VerifyTransferRequest){
-		"expected amount must be greater than 0": func(r *VerifyTransferRequest) { r.ExpectedAmount = 0 },
-		"expected recipient is required":         func(r *VerifyTransferRequest) { r.ExpectedRecipient = " " },
-		"expected reference is required":         func(r *VerifyTransferRequest) { r.ExpectedReference = "" },
-	} {
-		req := base
-		mutate(&req)
-		require.ErrorContains(t, c.VerifyTransfer(context.Background(), req), want)
-	}
-}
-
-// #651: a payment is stamped with its on-chain block time, not observation time.
-func TestGetConfirmedBlockTimeIsChainTime(t *testing.T) {
-	payer := solanago.NewWallet().PublicKey()
-	ixs, err := buildTransferInstructions(TransferRequest{TokenSymbol: "SOL", Amount: 1}, payer, solanago.NewWallet().PublicKey())
-	require.NoError(t, err)
-	tx, err := solanago.NewTransaction(ixs, solanago.Hash{}, solanago.TransactionPayer(payer))
-	require.NoError(t, err)
-	got, err := transferChain(t, tx, map[string]any{"err": nil}).GetConfirmedBlockTime(context.Background(), solanago.Signature{7}.String())
-	require.NoError(t, err)
-	require.Equal(t, time.Unix(1_700_000_000, 0).UTC(), *got)
+	_, err := c.ObserveTransfer(context.Background(), ObserveTransferRequest{Signature: "x", Reference: solanago.SystemProgramID.String()})
+	require.ErrorContains(t, err, "recipient and reference are required")
+	_, err = c.ObserveTransfer(context.Background(), ObserveTransferRequest{Signature: "x", Recipient: solanago.SystemProgramID.String()})
+	require.ErrorContains(t, err, "recipient and reference are required")
 }

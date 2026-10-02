@@ -3,10 +3,11 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/http/router"
 	"io/fs"
 	"net/http"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/http/router"
 
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -229,7 +230,7 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		authenticator:          deps.Authenticator,
 		delegatedAuthenticator: deps.DelegatedAuthenticator,
 		controlPlane:           deps.ControlPlane,
-		captchaStore:           captcha.NewChallengeStore(deps.Redis),
+		captchaStore:           deps.Runtime.CaptchaStore,
 		adminLimiter:           middleware.NewAdminOperationLimiter(deps.Redis),
 		consoleAssets:          deps.ConsoleAssets,
 		browserTierRoutes:      middleware.NewBrowserTierRoutes(),
