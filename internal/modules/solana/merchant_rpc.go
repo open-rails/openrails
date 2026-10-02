@@ -157,3 +157,13 @@ func (r *MerchantChainReader) WatchTransaction(ctx context.Context, sig solanago
 	}
 	return client.WatchTransaction(ctx, sig, commitment, terminal)
 }
+
+// MintInfo reads a mint's token program, decimals and Token-2022 transfer fee
+// and hook as they stand now (these can change; never cache them).
+func (r *MerchantChainReader) MintInfo(ctx context.Context, mint solanago.PublicKey) (*solanarpc.MintInfo, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetMintInfo(ctx, mint)
+}

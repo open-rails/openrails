@@ -394,6 +394,15 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 	return coverage, nil
 }
 
+// ErrPaymentTransactionTaken: the provider transaction id is already recorded
+// for a different purchase, so it cannot settle this one.
+var ErrPaymentTransactionTaken = errors.New("payment transaction belongs to another purchase")
+
+type paymentTransactionTaken string
+
+func (e paymentTransactionTaken) Error() string        { return string(e) }
+func (e paymentTransactionTaken) Is(target error) bool { return target == ErrPaymentTransactionTaken }
+
 func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	if req != nil && req.CheckoutSessionID != uuid.Nil {
 		return s.registerSessionPurchase(ctx, req)
@@ -497,25 +506,25 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}
 		if existingPayment.CustomerID.String() != req.UserID {
-			return nil, fmt.Errorf("payment transaction belongs to a different user")
+			return nil, paymentTransactionTaken("payment transaction belongs to a different user")
 		}
 		if existingPayment.PriceID != req.PriceID {
-			return nil, fmt.Errorf("payment transaction belongs to a different price")
+			return nil, paymentTransactionTaken("payment transaction belongs to a different price")
 		}
 		if (existingPayment.SubscriptionID == nil) != (req.SubscriptionID == nil) {
-			return nil, fmt.Errorf("payment transaction subscription linkage mismatch")
+			return nil, paymentTransactionTaken("payment transaction subscription linkage mismatch")
 		}
 		if existingPayment.SubscriptionID != nil && *existingPayment.SubscriptionID != *req.SubscriptionID {
-			return nil, fmt.Errorf("payment transaction belongs to a different subscription")
+			return nil, paymentTransactionTaken("payment transaction belongs to a different subscription")
 		}
 		if !payments.PaymentStatusCompleted(existingPayment.Status) {
-			return nil, fmt.Errorf("payment transaction is not completed")
+			return nil, paymentTransactionTaken("payment transaction is not completed")
 		}
 		if amount > 0 && existingPayment.Amount != amount {
-			return nil, fmt.Errorf("payment transaction amount mismatch")
+			return nil, paymentTransactionTaken("payment transaction amount mismatch")
 		}
 		if currency != "" && !strings.EqualFold(strings.TrimSpace(existingPayment.Currency), currency) {
-			return nil, fmt.Errorf("payment transaction currency mismatch")
+			return nil, paymentTransactionTaken("payment transaction currency mismatch")
 		}
 
 		if acceptedPaymentID != uuid.Nil {

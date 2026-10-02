@@ -286,11 +286,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// Card-abuse guard (#371): the captcha accelerator over the ledger below.
 	// It needs Redis and a captcha to solve; nil (safe no-op) otherwise, and
 	// the ledger's blocks are the whole policy.
+	captchaStore := captcha.NewChallengeStore(redisClient)
 	var cardAbuseGuard *abuse.CardAbuseGuard
 	if redisClient != nil && cfg.Captcha.IsEnabled() {
 		cardAbuseGuard = abuse.NewCardAbuseGuard(
 			ratelimit.NewLimiter(redisClient),
-			captcha.NewChallengeStore(redisClient),
+			captchaStore,
 			abuse.DefaultCardAbuseConfig(),
 		)
 	}
@@ -347,6 +348,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
 		CardAbuseGuard:         cardAbuseGuard,
+		CaptchaStore:           captchaStore,
 		CardFailureLedger:      cardFailureLedger,
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
@@ -391,9 +393,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
 	if serviceInstances.SolanaPayService != nil {
 		serviceInstances.SolanaPayService.SetMintDecimals(runtime.SolanaMintDecimals)
+		serviceInstances.SolanaPayService.SetMintInfo(solanaRPCResolver.ChainReader())
 	}
 	if serviceInstances.CheckoutSessionService != nil {
 		serviceInstances.CheckoutSessionService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+		serviceInstances.CheckoutSessionService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
 	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
@@ -736,7 +740,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, redisClient, cfg, railConfigs, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
+	solanaPayService := solanamodule.NewSolanaPayService(database, cfg, railConfigs, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
 	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, nil, cfg, priceService, fxProvider, clock)
 	solanaTransactionService.SetMerchantRPC(solanaRPCResolver)
 
@@ -896,17 +900,9 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	webhookDispatcher.CheckoutSessionService = checkoutSessionService
 	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 
-	// Create SolanaPayPoller (depends on checkoutService for RegisterPurchase)
-	solanaPayPoller := solanamodule.NewSolanaPayPoller(
-		database,
-		redisClient,
-		cfg,
-		solanaPayService,
-		solanaTransactionService,
-		&solanaPurchaseRegistrarAdapter{service: checkoutService},
-		purchaseService,
-		checkoutSessionService,
-	)
+	// The poller settles through the checkout session service, the one
+	// crediting path for Solana Pay purchases.
+	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, checkoutSessionService, clock)
 
 	return &servicesInstances{
 		SubscriptionService:          subscriptionService,

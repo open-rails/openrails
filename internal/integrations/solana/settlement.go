@@ -2,6 +2,7 @@ package solana
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -49,4 +50,41 @@ func TokenCredited(txResult *rpc.GetTransactionResult, tx *solanago.Transaction,
 		return 0, fmt.Errorf("token balance decreased for account %s", account)
 	}
 	return post - pre, nil
+}
+
+// tokenBalanceDelta is the post and pre token balance of the account at
+// accountIndex; a missing pre balance is zero.
+func tokenBalanceDelta(txResult *rpc.GetTransactionResult, accountIndex int) (uint64, uint64, error) {
+	var post, pre uint64
+	found := false
+	for _, b := range txResult.Meta.PostTokenBalances {
+		if int(b.AccountIndex) == accountIndex {
+			if b.UiTokenAmount == nil {
+				return 0, 0, fmt.Errorf("post token amount missing")
+			}
+			amt, err := strconv.ParseUint(b.UiTokenAmount.Amount, 10, 64)
+			if err != nil {
+				return 0, 0, err
+			}
+			post, found = amt, true
+			break
+		}
+	}
+	if !found {
+		return 0, 0, fmt.Errorf("token balance not found")
+	}
+	for _, b := range txResult.Meta.PreTokenBalances {
+		if int(b.AccountIndex) == accountIndex {
+			if b.UiTokenAmount == nil {
+				return 0, 0, fmt.Errorf("pre token amount missing")
+			}
+			amt, err := strconv.ParseUint(b.UiTokenAmount.Amount, 10, 64)
+			if err != nil {
+				return 0, 0, err
+			}
+			pre = amt
+			break
+		}
+	}
+	return post, pre, nil
 }

@@ -61,8 +61,10 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	var captchaCfg *config.CaptchaConfig
 	var rdb *redis.Client
 	var resolver *iputil.TrustedProxies
+	var store *captcha.ChallengeStore
 	if rt != nil {
 		rdb = rt.RedisClient
+		store = rt.CaptchaStore
 		resolver = rt.TrustedProxies
 		if rt.Config != nil {
 			rateLimits = rt.Config.RateLimits
@@ -72,7 +74,7 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	for i := range mux.Entries {
 		mux.Entries[i].Browser = true
 	}
-	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver)
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, store, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		canonical := entry.Path
 		if selfPrefix != "" {

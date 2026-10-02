@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/open-rails/openrails/internal/captcha"
+
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/jackc/pgx/v5"
@@ -242,6 +244,9 @@ type Runtime struct {
 	// to a captcha for everyone while the ledger reports an attack (#371). Nil
 	// without Redis or a captcha (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
+	// CaptchaStore is the process's one captcha challenge store, shared by the
+	// card-abuse guard and every HTTP surface so a solve clears it everywhere.
+	CaptchaStore *captcha.ChallengeStore
 	// CardFailureLedger is the PostgreSQL card-testing ledger (SEC-30),
 	// enforced on every replica.
 	CardFailureLedger *abuse.FailureLedger

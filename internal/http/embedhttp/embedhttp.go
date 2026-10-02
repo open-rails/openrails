@@ -137,7 +137,7 @@ func FromApp(a *app.App) *Assembler {
 		Runtime:                   a.Runtime,
 		AdminChecker:              checker,
 		ServiceCredentialResolver: resolver,
-		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
+		CaptchaStore:              a.Runtime.CaptchaStore,
 		RDB:                       a.RedisClient,
 		AdminLimiter:              middleware.NewAdminOperationLimiter(a.RedisClient),
 		HostResolve:               hostResolve,

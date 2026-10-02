@@ -47,6 +47,8 @@ var excludedTables = map[string]string{
 	"nmi_bulk_checkpoints":            "transient read progress",
 	"nmi_history_months":              "decline analytics re-read from NMI, kept 25 months",
 	"nmi_history_reads":               "read progress: the destination backfills its own",
+	"solana_pay_references":           "transient Solana Pay watch state; pending references refuse the archive",
+	"solana_pay_receipts":             "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -77,6 +79,8 @@ var excludedColumns = map[string]string{
 	"nmi_bulk_checkpoints":            "merchant_id psp_id since until next_page started_at",
 	"nmi_history_months":              "merchant_id psp_id month kind category reason authorizations",
 	"nmi_history_reads":               "merchant_id psp_id read_at",
+	"solana_pay_references":           "merchant_id reference checkout_session_id kind status settle_until watch_until next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
+	"solana_pay_receipts":             "merchant_id reference signature checkout_session_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"product_archive_operations":      "merchant_id id idempotency_key request_sha256 product_id purchase_action purchased_since reason created_at",
 	"reconciliation_findings":         "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class",
 	"account_updater_batches":         "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
@@ -227,6 +231,10 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		// A request still running under a live claim has an outcome the archive
 		// would miss; settled, failed and lapsed claims are not moved (#1099).
 		{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},
+		// Money awaiting a transfer, or received and not yet refunded or
+		// resolved, stays with the deployment that watches the chain (#1086).
+		{"solana_pay_references", "status='pending'"},
+		{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
 		{"rail_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
 		{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
 		{"invoices", "collection_intent_id IS NOT NULL"},

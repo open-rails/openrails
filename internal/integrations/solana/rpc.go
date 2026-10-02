@@ -166,7 +166,7 @@ func (c *RPCClient) ConfirmTransaction(ctx context.Context, signature solanago.S
 		return fmt.Errorf("transaction confirmation for %s: %w", signature.String(), err)
 	}
 	if outcome.Err != nil {
-		return fmt.Errorf("transaction failed: %v", outcome.Err)
+		return fmt.Errorf("%w: %v", ErrFailedOnChain, outcome.Err)
 	}
 	return nil
 }
@@ -180,6 +180,11 @@ func (c *RPCClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, erro
 // (lastValidBlockHeight) a transaction built on it must be watched against.
 func (c *RPCClient) LatestBlockhash(ctx context.Context) (RecentBlockhash, error) {
 	return c.fallback.LatestBlockhash(ctx)
+}
+
+// GetBlockHeight returns the cluster's current block height at commitment.
+func (c *RPCClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	return c.fallback.GetBlockHeight(ctx, commitment)
 }
 
 // GetMinimumBalanceForRentExemption returns the minimum balance needed for rent exemption
@@ -225,13 +230,58 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 // cursor: before != "" continues the newest-first walk strictly below that
 // signature (#714 wallet-scan pagination). limit caps the page (RPC max 1000).
 func (c *RPCClient) GetSignaturesForAddressPage(ctx context.Context, address string, before string, limit int) ([]SignatureInfo, error) {
+	return c.signaturesForAddress(ctx, address, before, "", limit, rpc.CommitmentFinalized)
+}
+
+// SignaturesKnown reports whether the node answering has each signature in its
+// history: an empty page below a cursor proves nothing from a node that does
+// not know the cursor.
+func (c *RPCClient) SignaturesKnown(ctx context.Context, signatures ...string) (bool, error) {
+	sigs := make([]solanago.Signature, 0, len(signatures))
+	for _, s := range signatures {
+		sig, err := solanago.SignatureFromBase58(s)
+		if err != nil {
+			return false, fmt.Errorf("invalid signature %q: %w", s, err)
+		}
+		sigs = append(sigs, sig)
+	}
+	st, err := c.fallback.GetSignatureStatuses(ctx, true, sigs...)
+	if err != nil {
+		return false, err
+	}
+	if st == nil || len(st.Value) != len(sigs) {
+		return false, nil
+	}
+	// A node whose finalized history lags can still report a cursor it only
+	// holds at confirmed; only a finalized status proves the history below it.
+	for _, v := range st.Value {
+		if v == nil || v.ConfirmationStatus != rpc.ConfirmationStatusFinalized {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// ConfirmedSignatures lists up to limit signatures naming address at confirmed
+// commitment, newest first, strictly older than before (empty = newest).
+func (c *RPCClient) ConfirmedSignatures(ctx context.Context, address, before string, limit int) ([]SignatureInfo, error) {
+	return c.signaturesForAddress(ctx, address, before, "", limit, rpc.CommitmentConfirmed)
+}
+
+// SignaturesBetween lists finalized signatures naming address, newest first,
+// strictly older than before and strictly newer than until (either may be empty).
+func (c *RPCClient) SignaturesBetween(ctx context.Context, address, before, until string, limit int) ([]SignatureInfo, error) {
+	return c.signaturesForAddress(ctx, address, before, until, limit, rpc.CommitmentFinalized)
+}
+
+func (c *RPCClient) signaturesForAddress(ctx context.Context, address, before, until string, limit int, commitment rpc.CommitmentType) ([]SignatureInfo, error) {
 	pubkey, err := solanago.PublicKeyFromBase58(strings.TrimSpace(address))
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
 	opts := &rpc.GetSignaturesForAddressOpts{
-		Commitment: rpc.CommitmentFinalized,
+		Commitment: commitment,
 	}
 	if limit > 0 {
 		limitVal := limit
@@ -243,6 +293,13 @@ func (c *RPCClient) GetSignaturesForAddressPage(ctx context.Context, address str
 			return nil, fmt.Errorf("invalid before cursor: %w", err)
 		}
 		opts.Before = sig
+	}
+	if until = strings.TrimSpace(until); until != "" {
+		sig, err := solanago.SignatureFromBase58(until)
+		if err != nil {
+			return nil, fmt.Errorf("invalid until cursor: %w", err)
+		}
+		opts.Until = sig
 	}
 
 	resp, err := c.fallback.GetSignaturesForAddressWithOpts(ctx, pubkey, opts)

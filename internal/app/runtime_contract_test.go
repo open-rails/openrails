@@ -45,6 +45,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.SolanaCrankArgs{}.Kind():               {time.Hour, false},
 		riverjobs.SolanaGasAlertArgs{}.Kind():            {6 * time.Hour, false},
 		riverjobs.SolanaReconcileArgs{}.Kind():           {6 * time.Hour, false},
+		riverjobs.SolanaPayGCArgs{}.Kind():               {15 * time.Minute, false},
 		riverjobs.CreditExpiryArgs{}.Kind():              {time.Hour, false},
 		riverjobs.AdmissionDenialFlushArgs{}.Kind():      {5 * time.Minute, false},
 		riverjobs.CatalogReconciliationPullArgs{}.Kind(): {time.Hour, false},

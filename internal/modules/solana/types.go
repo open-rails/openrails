@@ -31,6 +31,8 @@ type TransactionBuildResponse struct {
 	TokenSymbol       string
 	ExpiresAt         time.Time
 	Instructions      string
+	// LastValidBlockHeight: past it the transaction can never land.
+	LastValidBlockHeight uint64
 }
 
 type PaymentTransactionBuildRequest struct {

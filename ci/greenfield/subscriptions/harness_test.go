@@ -157,6 +157,8 @@ type world struct {
 	// selfService mounts the full customer self-service API (tier changes
 	// included) instead of billing management.
 	selfService bool
+	// mount adjusts the mounted HTTP surface before start.
+	mount func(*embed.HTTPConfig)
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
@@ -287,9 +289,13 @@ func (w *world) start() {
 	if w.selfService {
 		scope = embed.CustomerSelfService
 	}
+	httpConfig := &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
+	if w.mount != nil {
+		w.mount(httpConfig)
+	}
 	rt, err := embed.New(t.Context(), embed.Options{
 		Auth:            identity,
-		HTTP:            &embed.HTTPConfig{MerchantAdmin: true, MerchantAPI: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}},
+		HTTP:            httpConfig,
 		Merchant:        &embed.MerchantDeclaration{Slug: w.slug, Config: embed.MerchantConfig{DisplayName: w.slug, PSPs: psps}},
 		Config:          cfg,
 		PGXPool:         pool,

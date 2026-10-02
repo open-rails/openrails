@@ -192,6 +192,28 @@ func (q *Queries) CountMerchantRowsRebillCycles(ctx context.Context, merchantID 
 	return count, err
 }
 
+const countMerchantRowsSolanaPayReceipts = `-- name: CountMerchantRowsSolanaPayReceipts :one
+SELECT count(*) FROM openrails.solana_pay_receipts WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsSolanaPayReceipts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsSolanaPayReceipts, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsSolanaPayReferences = `-- name: CountMerchantRowsSolanaPayReferences :one
+SELECT count(*) FROM openrails.solana_pay_references WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsSolanaPayReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsSolanaPayReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsSubscriptions = `-- name: CountMerchantRowsSubscriptions :one
 SELECT count(*) FROM openrails.subscriptions WHERE merchant_id = $1
 `
@@ -344,6 +366,24 @@ DELETE FROM openrails.rebill_cycles WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsRebillCycles(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsRebillCycles, merchantID)
+	return err
+}
+
+const purgeMerchantRowsSolanaPayReceipts = `-- name: PurgeMerchantRowsSolanaPayReceipts :exec
+DELETE FROM openrails.solana_pay_receipts WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsSolanaPayReceipts(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsSolanaPayReceipts, merchantID)
+	return err
+}
+
+const purgeMerchantRowsSolanaPayReferences = `-- name: PurgeMerchantRowsSolanaPayReferences :exec
+DELETE FROM openrails.solana_pay_references WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsSolanaPayReferences(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsSolanaPayReferences, merchantID)
 	return err
 }
 

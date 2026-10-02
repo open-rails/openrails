@@ -2,10 +2,12 @@ package solana
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	chainrpc "github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
@@ -163,12 +165,13 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 	}).Info("Built Solana payment transaction from checkout quote")
 
 	return &TransactionBuildResponse{
-		TransactionBase64: txResp.TransactionBase64,
-		Amount:            req.Amount,
-		TokenAmount:       req.TokenAmount,
-		TokenSymbol:       req.TokenSymbol,
-		ExpiresAt:         expiresAt,
-		Instructions:      fmt.Sprintf("Sign this transaction to pay %s using %s", moneyutil.FormatAmount(req.Amount, req.Currency), req.TokenSymbol),
+		TransactionBase64:    txResp.TransactionBase64,
+		Amount:               req.Amount,
+		TokenAmount:          req.TokenAmount,
+		TokenSymbol:          req.TokenSymbol,
+		ExpiresAt:            expiresAt,
+		Instructions:         PaymentInstructions(req.Amount, req.Currency, req.TokenSymbol),
+		LastValidBlockHeight: txResp.LastValidBlockHeight,
 	}, nil
 }
 
@@ -176,57 +179,84 @@ func isNativeTokenSymbol(symbol string) bool {
 	return strings.EqualFold(strings.TrimSpace(symbol), "SOL")
 }
 
-// VerifyTransactionWithContent verifies a transaction against expected
-// recipient, amount, and reference. expectedMemoLocalID (uuid.Nil = skip)
-// additionally checks the #713 purchase memo under memoPolicy: a present memo
-// must always match; absence fails only when OpenRails built the transaction
-// (or#893 — see solana.PurchaseMemoPolicy).
-//
-// xs-007 row 35: there is deliberately no "processed after the quote expired"
-// refusal here. A transfer that LANDED on-chain moved the buyer's money; the
-// quote's expiry governs whether the offer is still presented, never whether
-// settled money counts. Refusing a late landing left the buyer paid and
-// unserved. What is verified is the content: recipient, mint, the exact token
-// amount that was quoted and signed, reference and memo.
-func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanarpc.PurchaseMemoPolicy) error {
-	rpc := s.rpcClient(ctx)
-	if rpc == nil {
-		return fmt.Errorf("solana rpc client unavailable")
-	}
-	if expectedAmount == 0 {
-		return fmt.Errorf("expected amount must be greater than 0")
-	}
-	if strings.TrimSpace(expectedRecipient) == "" {
-		return fmt.Errorf("expected recipient is required")
-	}
-
-	reference := ""
-	if expectedReference != nil {
-		reference = strings.TrimSpace(*expectedReference)
-	}
-	if reference == "" {
-		return fmt.Errorf("expected reference is required")
-	}
-
-	return rpc.VerifyTransfer(ctx, solanarpc.VerifyTransferRequest{
-		Signature:           strings.TrimSpace(signature),
-		ExpectedAmount:      expectedAmount,
-		ExpectedRecipient:   strings.TrimSpace(expectedRecipient),
-		ExpectedTokenMint:   strings.TrimSpace(expectedTokenMint),
-		ExpectedPayer:       strings.TrimSpace(expectedPayer),
-		ExpectedReference:   reference,
-		ExpectedMemoLocalID: expectedMemoLocalID,
-		ExpectedMemoPolicy:  memoPolicy,
-	})
-}
-
-// TransactionBlockTime returns the on-chain block time of a confirmed signature
-// (#651), or nil when the RPC reports none — the truthful settlement time used to
-// stamp the recorded Solana payment instead of poller-observation time.
-func (s *SolanaTransactionService) TransactionBlockTime(ctx context.Context, signature string) (*time.Time, error) {
+// ObserveTransfer reads what a landed transaction paid the recipient for a
+// reference. A transfer that landed moved the buyer's money whatever the
+// quote clock says (xs-007 row 35); what it settles is the ledger's decision.
+func (s *SolanaTransactionService) ObserveTransfer(ctx context.Context, req solanarpc.ObserveTransferRequest) (*solanarpc.TransferObservation, error) {
 	rpc := s.rpcClient(ctx)
 	if rpc == nil {
 		return nil, fmt.Errorf("solana rpc client unavailable")
 	}
-	return rpc.GetConfirmedBlockTime(ctx, signature)
+	return rpc.ObserveTransfer(ctx, req)
+}
+
+// BlockHeight is the cluster's confirmed block height: a built transaction can
+// land only while it is at most the blockhash's last valid height.
+func (s *SolanaTransactionService) BlockHeight(ctx context.Context) (uint64, error) {
+	rpc := s.rpcClient(ctx)
+	if rpc == nil {
+		return 0, fmt.Errorf("solana rpc client unavailable")
+	}
+	return rpc.GetBlockHeight(ctx, chainrpc.CommitmentConfirmed)
+}
+
+// referenceCheckLimit and referenceCheckTimeout bound the rebuild check.
+const (
+	referenceCheckLimit   = 2 * signaturePage
+	referenceCheckTimeout = 10 * time.Second
+)
+
+// ErrReferenceUndetermined: whether a transfer landed could not be settled
+// within the check's bounds; the caller must not offer a new transaction.
+var ErrReferenceUndetermined = errors.New("solana: could not determine whether a transfer landed on the reference")
+
+// ReferenceHasOurTransfer reports whether a transaction built for this
+// checkout (its memo) and paying the recipient has landed on the reference at
+// confirmed commitment. Failed, foreign and unreadable transactions do not
+// count, so they cannot stop the buyer from retrying. The check is bounded in
+// signatures read and time; past either bound it answers
+// ErrReferenceUndetermined.
+func (s *SolanaTransactionService) ReferenceHasOurTransfer(ctx context.Context, reference, recipient, mint string, sessionID uuid.UUID) (bool, error) {
+	rpc := s.rpcClient(ctx)
+	if rpc == nil {
+		return false, fmt.Errorf("solana rpc client unavailable")
+	}
+	ctx, cancel := context.WithTimeout(ctx, referenceCheckTimeout)
+	defer cancel()
+	read := 0
+	for before := ""; ; {
+		sigs, err := rpc.ConfirmedSignatures(ctx, reference, before, signaturePage)
+		if err != nil {
+			return false, errors.Join(ErrReferenceUndetermined, err)
+		}
+		for _, sig := range sigs {
+			if read++; read > referenceCheckLimit {
+				return false, ErrReferenceUndetermined
+			}
+			if sig.HasError {
+				continue
+			}
+			obs, err := rpc.ObserveTransfer(ctx, solanarpc.ObserveTransferRequest{
+				Signature: sig.Signature, Recipient: recipient, TokenMint: mint, Reference: reference,
+				MemoLocalID: sessionID, MemoPolicy: solanarpc.MemoRequired, Commitment: chainrpc.CommitmentConfirmed,
+			})
+			switch {
+			case errors.Is(err, solanarpc.ErrForeignTransfer), errors.Is(err, solanarpc.ErrFailedOnChain), errors.Is(err, solanarpc.ErrUnreadableTransfer):
+				continue
+			case err != nil:
+				return false, errors.Join(ErrReferenceUndetermined, err)
+			case obs.Amount > 0 || obs.Other:
+				return true, nil
+			}
+		}
+		if len(sigs) < signaturePage {
+			return false, nil
+		}
+		before = sigs[len(sigs)-1].Signature
+	}
+}
+
+// PaymentInstructions is the wallet message for a one-off payment.
+func PaymentInstructions(amount int64, currency, tokenSymbol string) string {
+	return fmt.Sprintf("Sign this transaction to pay %s using %s", moneyutil.FormatAmount(amount, currency), tokenSymbol)
 }

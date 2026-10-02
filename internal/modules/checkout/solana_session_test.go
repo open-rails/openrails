@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -129,11 +129,14 @@ type noopSolanaTransactions struct{}
 func (noopSolanaTransactions) BuildPaymentTransactionFromQuote(context.Context, *solanamodule.PaymentTransactionBuildRequest) (*solanamodule.TransactionBuildResponse, error) {
 	return nil, errors.New("unexpected build")
 }
-func (noopSolanaTransactions) VerifyTransactionWithContent(context.Context, string, uint64, string, string, string, *string, uuid.UUID, solanaint.PurchaseMemoPolicy) error {
-	return errors.New("unexpected verify")
+func (noopSolanaTransactions) ObserveTransfer(context.Context, solanaint.ObserveTransferRequest) (*solanaint.TransferObservation, error) {
+	return nil, errors.New("unexpected observe")
 }
-func (noopSolanaTransactions) TransactionBlockTime(context.Context, string) (*time.Time, error) {
-	return nil, errors.New("unexpected block time read")
+func (noopSolanaTransactions) BlockHeight(context.Context) (uint64, error) {
+	return 0, errors.New("unexpected block height")
+}
+func (noopSolanaTransactions) ReferenceHasOurTransfer(context.Context, string, string, string, uuid.UUID) (bool, error) {
+	return false, errors.New("unexpected signature read")
 }
 
 // Build and confirm use only the persisted quote; a session missing any part
@@ -190,42 +193,6 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 	}
 }
 
-type landedSolanaTransactions struct {
-	noopSolanaTransactions
-	landedAt time.Time
-}
-
-func (landedSolanaTransactions) VerifyTransactionWithContent(context.Context, string, uint64, string, string, string, *string, uuid.UUID, solanaint.PurchaseMemoPolicy) error {
-	return nil
-}
-func (l landedSolanaTransactions) TransactionBlockTime(context.Context, string) (*time.Time, error) {
-	return &l.landedAt, nil
-}
-
-// A verified transfer landing past its quote's late window settles at a stale
-// price: confirm refuses it before anything is claimed or granted, exactly as
-// the poller does.
-func TestSolanaConfirmRefusesStaleQuote(t *testing.T) {
-	expires := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		landed time.Time
-		stale  bool
-	}{
-		{expires.Add(solanaint.LateSettlementWindow + time.Second), true},
-		{expires.Add(solanaint.LateSettlementWindow), false},
-	} {
-		ref := solanaReference
-		session := &models.CheckoutSession{
-			ID: uuid.New(), CustomerID: uuid.New(), PriceID: new(uuid.New()), Amount: new(int64(10_000)), Currency: new("USD"), Reference: &ref, ExpiresAt: &expires,
-			RailState: map[string]any{"token_symbol": "USDC", "token_mint": devnetUSDCMint, "token_amount": "100000000", "recipient": recipientWallet, "flow": "transaction_request"},
-		}
-		svc := &CheckoutSessionService{rails: solanaRails(), solanaTransactionService: landedSolanaTransactions{landedAt: tc.landed}, checkoutService: &capturingExecutor{}}
-		_, err := svc.confirmSolanaSession(context.Background(), session, &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: "sig"}}, &UserIdentity{ID: session.CustomerID.String()})
-		require.Error(t, err)
-		require.Equal(t, tc.stale, errors.Is(err, ErrCheckoutSessionExpired), "%v", err)
-	}
-}
-
 func TestSolanaLifecycleState(t *testing.T) {
 	subID, newPrice := uuid.New(), uuid.New()
 	cancel := (&CheckoutSessionService{}).buildLifecycleState(&solanaLifecycleState{mode: models.CheckoutSessionModeSolanaCancel, subscriptionID: subID, productName: "Pro"})
@@ -252,4 +219,23 @@ func TestPollerConfirmContextPinsSessionPSP(t *testing.T) {
 	require.Equal(t, psp, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{PspID: psp})))
 	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), nil)))
 	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{})))
+}
+
+// A settlement error is retried only when another attempt can get past it —
+// however deeply it is wrapped; anything else is recorded for review.
+func TestTransientSettleError(t *testing.T) {
+	pg := func(code string) error { return &pgconn.PgError{Code: code} }
+	for err, transient := range map[error]bool{
+		pg("40001"): true, pg("40P01"): true, pg("55P03"): true, pg("23505"): true, pg("57014"): true, pg("08006"): true,
+		fmt.Errorf("settle: %w", pg("55P03")):                         true,
+		errors.Join(errors.New("rollback"), pg("40001")):              true,
+		fmt.Errorf("deep: %w", fmt.Errorf("x: %w", pg("23505"))):      true,
+		context.DeadlineExceeded:                                      true,
+		pg("23514"):                                                   false,
+		pg("22P02"):                                                   false,
+		errors.New("payment transaction belongs to a different user"): false,
+		ErrPaymentTransactionTaken:                                    false,
+	} {
+		require.Equal(t, transient, transientSettleError(err), "%v", err)
+	}
 }

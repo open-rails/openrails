@@ -1419,6 +1419,46 @@ type OpenrailsRepriceBatch struct {
 	SubscriptionsBlocked int32
 }
 
+// #1086: every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive.
+type OpenrailsSolanaPayReceipt struct {
+	MerchantID        uuid.UUID
+	Reference         string
+	Signature         string
+	CheckoutSessionID uuid.UUID
+	Disposition       string
+	ReviewReason      *string
+	Recipient         string
+	TokenMint         string
+	ExpectedAmount    int64
+	ReceivedAmount    int64
+	Payer             *string
+	LandedAt          *time.Time
+	PaymentID         *uuid.UUID
+	ResolvedAt        *time.Time
+	Resolution        *string
+	CreatedAt         time.Time
+}
+
+// #1086: one Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then openrails.solana_pay_gc deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land.
+type OpenrailsSolanaPayReference struct {
+	MerchantID        uuid.UUID
+	Reference         string
+	CheckoutSessionID uuid.UUID
+	Kind              string
+	Status            string
+	SettleUntil       time.Time
+	WatchUntil        time.Time
+	NextPollAt        time.Time
+	Signature         *string
+	SeenUntil         *string
+	ScanStack         []string
+	ScanBelow         *string
+	BuiltTransaction  *string
+	BuiltValidHeight  *int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type OpenrailsSolanaSubscription struct {
 	ID                       uuid.UUID
 	MerchantID               uuid.UUID
