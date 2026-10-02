@@ -1,9 +1,8 @@
 packages:
   - '.'
 
-# Transitive security bumps. Every one was checked against the .trivyignore
-# procedure (compare registry .dist.attestations for pinned vs fixed) before
-# being applied: none is a provenance downgrade, and ip-address 10.2.0 ->
+# Transitive security bumps. Every one was checked (compare registry
+# .dist.attestations for pinned vs fixed) before being applied: none is a provenance downgrade, and ip-address 10.2.0 ->
 # 10.3.1 actually GAINS attestation. Drop an entry once the direct dependency
 # that drags it in (shadcn, eslint) ships the fixed range itself.
 overrides:

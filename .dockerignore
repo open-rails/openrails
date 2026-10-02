@@ -65,8 +65,8 @@ temp/
 # Secret mounts
 .secrets/
 
-# Node modules (if any frontend assets)
-node_modules/
+# Node modules (the image installs its own)
+**/node_modules/
 npm-debug.log*
 
 # Go specific

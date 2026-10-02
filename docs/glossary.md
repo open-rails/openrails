@@ -45,7 +45,7 @@ to concrete code (enum, table, or manifest key).
 |---|---|
 | Credential backend (`secret_backend`) | `snapshot`: externally owned, in-memory credentials; `db`: encrypted managed credentials; `vault`: exact published Vault references. Credential read/write capability and external configuration HTTP publication are independent. Merchant metadata always lives in PostgreSQL. |
 | Deployment shape | Only how the process/routes are hosted: **embedded** (a Go host runs `embed.Runtime` and mounts `/billing/v1/*`), **standalone** (`openrails run-server` serves `/v1/*`), **OpenRails-SaaS** (one hosted standalone engine, one merchant binding per tenant client). Every shape selects credential custody independently; application code uses the same `*openrails.Client` in all three. |
-| `provider_write_mode` | How much OpenRails may do against providers: `full` (normal) / `limited` (no system-initiated writes) / `readonly` (no writes). Unset defaults to `readonly` — fail closed. |
+| `provider_write_mode` | How much OpenRails may do against providers: `full` (normal) / `limited` (no system-initiated writes) / `readonly` (no writes). Required: boot refuses it unset. |
 | `test_mode` | Credential posture: `sandbox` or `live`, two explicit states. Sandbox attaches credential guarantees (live Stripe keys refuse boot, NMI accounts probed, CCBill sandbox URL, Solana devnet). Independent of environment — production can legitimately run sandbox rails. |
 
 ## Reconciliation

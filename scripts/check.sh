@@ -26,22 +26,19 @@ checks() {
   # Package tests are guards, contracts and focused regressions; database and
   # provider behavior is covered by the greenfield suite in End-to-end.
   go test -vet=all -race -count=1 -cover ./...
-  bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
+  # The builds above embedded only web/admin/dist/.gitkeep; now the console.
+  bash scripts/build-admin-console.sh
   pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2
-  test -n "$(ls -A cmd/openrails/consoleassets/dist 2>/dev/null)" || {
-    echo "console: dist/ is empty — the embed gate would prove nothing" >&2
+  test -f web/admin/dist/index.html || {
+    echo "console: web/admin/dist/index.html missing — the embed gate would prove nothing" >&2
     exit 1
   }
-  go build -tags console_assets -o /dev/null ./cmd/openrails
-  go vet -tags console_assets ./cmd/openrails/consoleassets
-  stray="$(grep -rlE '^//go:build .*console_assets' --include='*.go' . |
-    grep -v '^\./cmd/openrails/consoleassets/' || true)"
-  if [[ -n "$stray" ]]; then
-    echo "console_assets-conditional source outside cmd/openrails/consoleassets:" >&2
-    echo "$stray" >&2
+  git diff --quiet -- web/admin/dist || {
+    echo "console: the build removed web/admin/dist/.gitkeep; go build without a console build would fail" >&2
     exit 1
-  fi
+  }
+  go build -o /dev/null ./cmd/openrails
 }
 
 e2e() {

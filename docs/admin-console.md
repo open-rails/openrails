@@ -15,9 +15,8 @@ Two independent requirements, both needed (#740/#754):
 
 1. **Assets in the binary.** The engine ships no frontend bytes — `go:embed`
    cannot cross module boundaries, so whoever builds the binary owns the embed
-   and hands the engine an `fs.FS` rooted at `index.html`. `dist` is never
-   committed; Node/pnpm is a build-time dependency only, and only for builds
-   that opt in.
+   and hands the engine an `fs.FS` rooted at `index.html`. Built `dist` is
+   never committed; Node/pnpm is a build-time dependency only.
 2. **Config.** `admin_console.enabled: true`.
 
 | assets | `admin_console.enabled` | result |
@@ -26,7 +25,6 @@ Two independent requirements, both needed (#740/#754):
 | yes | false | not mounted — `/admin/*` 404s |
 | no | false (default) | silently absent — `/admin/*` 404s |
 | no | true | **loud boot error** naming the build step |
-| dist missing at a `go:embed` build | — | **loud compile error** (`pattern all:dist: no matching files found`) |
 
 ```yaml
 admin_console:
@@ -40,18 +38,17 @@ Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_AUTH_BASE_URL`,
 `enabled` unset (and/or build without assets — plain `go build ./...` links
 zero frontend bytes and never needs Node).
 
-**Standalone binary.** Assets live behind the `console_assets` build tag in the
-binary-boundary package `cmd/openrails/consoleassets` (untagged builds compile
-a `FS() = nil` stub):
+**Standalone binary.** `web/admin/embed.go` go:embeds `web/admin/dist`, where
+Vite builds. Only `dist/.gitkeep` is committed, so `go build ./...` needs no
+Node and yields a console-less binary:
 
 ```sh
-task admin-build           # scripts/build-admin-console.sh -> cmd/openrails/consoleassets/dist (gitignored)
-task build-console-binary  # admin-build + go build -tags console_assets ./cmd/openrails
+task admin-build           # build web/admin/dist (gitignored)
+task build-console-binary  # admin-build + go build ./cmd/openrails
 ```
 
-The Dockerfile is multi-stage: a Node stage builds the SPA, the Go stage embeds
-it with the tag — the published image always carries the console, still
-config-gated at runtime.
+Release archives and Docker images always carry the console (still
+config-gated at runtime): goreleaser and the Dockerfile build `web/admin` first.
 
 **Embedded hosts.** The host repo owns a tiny embed package over a
 **gitignored** dist its build pipeline produces:
@@ -92,9 +89,9 @@ that mount billing under their own mux serve the console themselves by mounting
 
 Fail-loud behaviors, verified: enabled without assets refuses boot
 (`admin_console.enabled is set but no console assets were provided: …`);
-forgetting to build dist before a tagged/host `go:embed` build is a compile
-error; mounting `adminconsole.Handler` with no build answers every request 503
-naming the build step. Opt-out is doing nothing.
+a host `go:embed` of a missing dist is a compile error; mounting
+`adminconsole.Handler` with no build answers every request 503 naming the
+build step. Opt-out is doing nothing.
 
 ### Security posture
 

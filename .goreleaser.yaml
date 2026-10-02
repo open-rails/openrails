@@ -1,0 +1,75 @@
+# Release build, run by .github/workflows/release.yaml on a v* tag.
+# Dry run: goreleaser release --snapshot --clean --skip=publish,sign
+version: 2
+
+project_name: openrails
+
+before:
+  hooks:
+    # web/admin/embed.go go:embeds the console build into every binary.
+    - bash scripts/build-admin-console.sh
+    - bash scripts/pack-billing-ui.sh {{ .Version }} build/billing-ui
+
+builds:
+  - id: openrails
+    main: ./cmd/openrails
+    binary: openrails
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/open-rails/openrails/internal/buildinfo.version=v{{ .Version }}
+      - -X github.com/open-rails/openrails/internal/buildinfo.commit={{ .FullCommit }}
+      - -X github.com/open-rails/openrails/internal/buildinfo.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: build/billing-ui/*.tgz
+
+sboms:
+  - artifacts: archive
+
+release:
+  prerelease: auto
+  extra_files:
+    - glob: build/billing-ui/*.tgz
+  footer: |
+    **Docker:** `docker.io/openrails/openrails:{{ .Tag }}` · `ghcr.io/open-rails/openrails:{{ .Tag }}`
+    **Go:** `go get github.com/open-rails/openrails@{{ .Tag }}`
+    **Verify:** `gh attestation verify <file> --repo open-rails/openrails`
+
+# Entries are PR titles (squash merges); conventional prefixes pick the group.
+changelog:
+  use: github
+  format: "{{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}"
+  groups:
+    - title: Features
+      regexp: '^(feat|feature)(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^(fix|security)(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^(chore|test|tests|docs|ci|build|style)(\(.+\))??!?:'
+      - '^Merge (pull request|branch)'

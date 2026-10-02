@@ -85,9 +85,8 @@ type Config struct {
 	//   - "full":     normal operation
 	//   - "limited":  no system-initiated provider writes
 	//   - "readonly": no provider writes
-	// Unset defaults to "readonly" — FAIL CLOSED (Paul 2026-07-02): no provider
-	// write (cancellation, deletion, charge) executes until the operator
-	// explicitly sets full or limited. Omission is a supported read-only default.
+	// Required: embed.New (and so run-server) refuses it unset (#1063). Readers
+	// of an unset value still fail closed to "readonly" (Paul 2026-07-02).
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
 
 	// TestMode selects sandbox or live provider credentials. It never relaxes
@@ -122,7 +121,7 @@ type Config struct {
 
 	// AdminConsole gates the merchant admin console SPA served at /admin/
 	// (#740). Default OFF. Enabling it requires console assets in the binary
-	// (#754: `-tags console_assets` / embed.WithAdminConsole) — enabled
+	// (#754: `task admin-build` / embed.Options.ConsoleAssets) — enabled
 	// without assets refuses boot. Env: ADMIN_CONSOLE_ENABLED,
 	// ADMIN_CONSOLE_AUTH_BASE_URL, ADMIN_CONSOLE_API_BASE_URL.
 	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`

@@ -1293,6 +1293,9 @@
       "func (o *QueryOptions[T]) TotalPages() int",
       "func (q QueryOptions[T]) Any() QueryOptions[any]",
       "type QueryOptions[T any] struct {\n\tPage       int    `form:\"page\" json:\"page\"`\n\tSortBy     string `form:\"sort_by\" json:\"sort_by\"`\n\tPageSize   int    `form:\"page_size\" json:\"page_size\"`\n\tLimit      int    `form:\"limit\" json:\"limit\"`\n\tOffset     int    `form:\"offset\" json:\"offset\"`\n\tTotalItems int64  `form:\"total_items\" json:\"total_items\"`\n\tAll        bool   `form:\"all\" json:\"all\"`\n\tFilters    T      `form:\",inline\"`\n}"
+    ],
+    "web/admin": [
+      "func FS() fs.FS"
     ]
   },
   "wire_types": {
@@ -5633,6 +5636,10 @@
     },
     "tier_change.go": {
       "time": "time"
+    },
+    "web/admin/embed.go": {
+      "embed": "embed",
+      "fs": "io/fs"
     }
   },
   "boundary_sources_sha256": {
@@ -5783,7 +5790,7 @@
     "internal/http/routes/routes.go": "882fe7e18dcf05231c06515b5224a5e5b0f9851835079061799218ee5c244066",
     "internal/http/routes/self.go": "dd8d42f75dce7dbde1b505b8e3b92a32a00556fa84a1aad3d057f412f1e8eb4b",
     "internal/http/routes_admin.go": "464d56a21d2710e87da9024a314f9294a6671373bd089e1e7d2b81efed32a179",
-    "internal/http/routes_admin_console.go": "63d442e8743bdc3f2260f0f4f5ab3efb5e93a0e33baa2154f691ae728d660ea9",
+    "internal/http/routes_admin_console.go": "f18a9a33d2295fd73808dde5020a1848ea2543be7d5a9bc609106a19c4bbf67f",
     "internal/http/routes_controlplane.go": "5113ef74e938e5a641faf423b88668ce1223cb53f431c5f2e8363f784135659d",
     "internal/http/routes_merchants.go": "0229e3228f50d7b6214f3e1cf8cec05046caf18dde879c2d6724a29c1dfa96ea",
     "internal/http/routes_platform.go": "342d3927eacfa12c8c8d1b8a7876c151e4815cdc30698d6baaf8685f5746e848",

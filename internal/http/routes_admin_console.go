@@ -19,9 +19,8 @@ func (s *Server) registerAdminConsoleRoutes(mux router.Registrar) error {
 	}
 	if !adminconsole.Present(s.consoleAssets) {
 		return fmt.Errorf("admin_console.enabled is set but no console assets were provided: " +
-			"build the SPA (scripts/build-admin-console.sh; in-repo `task admin-build`) and rebuild " +
-			"with `-tags console_assets`, or pass the built assets via embed.WithAdminConsole — " +
-			"or unset admin_console.enabled")
+			"build the SPA (in-repo `task admin-build`, then go build; hosts: scripts/build-admin-console.sh) " +
+			"and pass the built assets via embed.Options.ConsoleAssets — or unset admin_console.enabled")
 	}
 	cfg := adminconsole.Config{
 		AuthBaseURL:            s.cfg.AdminConsole.AuthBaseURL,

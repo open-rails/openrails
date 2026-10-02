@@ -1,14 +1,23 @@
+import fs from "fs"
 import path from "path"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 
-// Served by the Go binary at /admin/. Build via scripts/build-admin-console.sh
-// (in-repo: `task admin-build`), which overrides --outDir; dist is NEVER
-// committed (#754) — whoever builds the binary go:embeds it.
+// Served by the Go binary at /admin/: web/admin/embed.go go:embeds dist/
+// (`task admin-build`). Only dist/.gitkeep is committed (#754) so the Go
+// package compiles without a build; emptyOutDir deletes it, so restore it.
+const keepGoEmbedPlaceholder: Plugin = {
+  name: "keep-go-embed-placeholder",
+  apply: "build",
+  writeBundle({ dir }) {
+    if (dir) fs.writeFileSync(path.join(dir, ".gitkeep"), "")
+  },
+}
+
 export default defineConfig({
   base: "/admin/",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), keepGoEmbedPlaceholder],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
