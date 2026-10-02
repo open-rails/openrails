@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 // Package ci contains the first replacement CI slice. It deliberately
 // talks only to the public embedded API: the old integration harness and
@@ -31,16 +31,16 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
 	if dsn == "" {
-		t.Fatal("OPENRAILS_GREENFIELD_DSN must point at a disposable PostgreSQL database")
+		t.Fatal("OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
 	}
 
 	pool, err := pgxpool.New(t.Context(), dsn)
 	require.NoError(t, err)
 	require.NoError(t, pool.Ping(t.Context()))
 
-	f := &fixture{pool: pool, schema: "greenfield_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}
+	f := &fixture{pool: pool, schema: "e2e_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -73,10 +73,10 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 		providerWriteMode = config.ProviderWriteModeFull
 		stripeTransport = transport
 		psps = map[string]embed.PSPConfig{"stripe": {"stripe": {
-			AccountID: "acct_greenfield",
+			AccountID: "acct_e2e",
 			Secrets: map[string]string{
-				"secret_key":             "sk_test_greenfield",
-				"webhook_signing_secret": "whsec_greenfield",
+				"secret_key":             "sk_test_e2e",
+				"webhook_signing_secret": "whsec_e2e",
 			},
 		}}}
 	}
@@ -86,7 +86,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 			AllowCatalogUpdates: true,
 			ProviderWriteMode:   providerWriteMode,
 			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:       []string{"https://greenfield.test"},
+			ReturnOrigins:       []string{"https://e2e.test"},
 		},
 		Merchant: &embed.MerchantDeclaration{
 			Slug:   slug,
@@ -105,7 +105,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 
 func (f *fixture) dsn(t *testing.T) string {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
 	return dsn
 }
 
@@ -260,8 +260,8 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 		OfferKind:      openrails.OfferPermanent,
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "checkout-" + uuid.NewString(),
-		SuccessURL:     "https://greenfield.test/success",
-		CancelURL:      "https://greenfield.test/cancel",
+		SuccessURL:     "https://e2e.test/success",
+		CancelURL:      "https://e2e.test/cancel",
 	}
 	first, err := client.CreateCheckoutSession(t.Context(), request)
 	require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "the provider sees one request across an identical replay")
 
 	changed := request
-	changed.SuccessURL = "https://greenfield.test/changed"
+	changed.SuccessURL = "https://e2e.test/changed"
 	_, err = client.CreateCheckoutSession(t.Context(), changed)
 	require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "conflicting replay must not contact Stripe")

@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -25,8 +25,8 @@ import (
 func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	f := newFixture(t)
 	fake := &stripeCheckoutFake{t: t}
-	const secret = "whsec_greenfield_security"
-	const account = "acct_greenfield_security"
+	const secret = "whsec_e2e_security"
+	const account = "acct_e2e_security"
 	slug := "security-" + uuid.NewString()[:8]
 	runtime, err := embed.New(t.Context(), embed.Options{
 		Config: &config.Config{
@@ -40,7 +40,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 			DisplayName: slug,
 			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 				AccountID: account,
-				Secrets:   map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": secret},
+				Secrets:   map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": secret},
 			}}},
 		}},
 		HTTP:            &embed.HTTPConfig{},
@@ -93,11 +93,11 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	refund, err := json.Marshal(map[string]any{
 		"id": "evt_security_refunded", "type": "charge.refunded", "created": now.Add(time.Second).Unix(),
 		"data": map[string]any{"object": map[string]any{
-			"object": "charge", "id": "ch_greenfield_webhook", "payment_intent": "pi_greenfield_webhook",
+			"object": "charge", "id": "ch_e2e_webhook", "payment_intent": "pi_e2e_webhook",
 			"amount": 100, "amount_refunded": 100, "refunded": true, "currency": "usd",
 			"refunds": map[string]any{"object": "list", "data": []map[string]any{{
-				"object": "refund", "id": "re_greenfield_security", "amount": 100, "currency": "usd", "status": "succeeded",
-				"charge": "ch_greenfield_webhook", "payment_intent": "pi_greenfield_webhook",
+				"object": "refund", "id": "re_e2e_security", "amount": 100, "currency": "usd", "status": "succeeded",
+				"charge": "ch_e2e_webhook", "payment_intent": "pi_e2e_webhook",
 			}}},
 		}},
 	})

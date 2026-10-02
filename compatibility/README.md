@@ -6,5 +6,5 @@ are intentional.
 
 The former multi-deployment workflow matrix and integration-test runner were
 removed with the legacy CI system. Database/provider behavior is now qualified
-by the focused greenfield contracts in `ci/`; live provider
+by the focused e2e contracts in `ci/`; live provider
 qualification is performed explicitly outside the merge gate.

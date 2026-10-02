@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -41,7 +41,7 @@ import (
 // engine clock and HTTP server. A hard crash cuts the replica's database
 // link at once, so nothing it was doing afterwards is recorded.
 
-const replicaHeader = "X-Greenfield-Replica"
+const replicaHeader = "X-E2E-Replica"
 
 // Three fleets at a time bounds connections (CI's PostgreSQL allows 300).
 var fleetSlots = make(chan struct{}, 3)
@@ -146,7 +146,7 @@ func (e *replicaEnv) connect(w *world) (*pgxpool.Pool, string, http.RoundTripper
 	require.NoError(t, err)
 	u, err := url.Parse(w.dsn)
 	require.NoError(t, err)
-	require.Contains(t, []string{"postgres", "postgresql"}, u.Scheme, "OPENRAILS_GREENFIELD_DSN must be a postgres:// URL for replica links")
+	require.Contains(t, []string{"postgres", "postgresql"}, u.Scheme, "OPENRAILS_E2E_DSN must be a postgres:// URL for replica links")
 	u.Host = e.proxy.addr()
 	tag := func(next http.RoundTripper) http.RoundTripper {
 		return replicaTransport{name: e.name, next: next, latency: &e.f.latency}

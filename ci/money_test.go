@@ -1,4 +1,4 @@
-//go:build greenfield
+//go:build e2e
 
 package ci_test
 

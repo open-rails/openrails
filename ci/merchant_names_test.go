@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -35,7 +35,7 @@ func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) 
 			TestMode:          config.CredentialPostureSandbox,
 			ProviderWriteMode: config.ProviderWriteModeReadOnly,
 			DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:     []string{"https://greenfield.test"},
+			ReturnOrigins:     []string{"https://e2e.test"},
 		},
 		PGXPool: f.pool,
 		River:   embed.RiverManagedByOpenRails(f.schema),
@@ -57,7 +57,7 @@ func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) 
 func newUser(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
 	t.Helper()
 	username := "u" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: username + "@greenfield.test", Username: username})
+	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: username + "@e2e.test", Username: username})
 	require.NoError(t, err)
 	token, err := cp.Core().MintAccessToken(t.Context(), u.ID, iam.AccessTokenOptions{})
 	require.NoError(t, err)

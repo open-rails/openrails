@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -98,7 +98,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	status, out = b.call(http.MethodPost, "/checkout", "tc-"+uuid.NewString(), map[string]any{
 		"mode": "solana_tier_change", "subscription_id": sub, "new_price_id": price("vip"),
 		"payment":     map[string]any{"rail": "solana", "psp_id": shop.option.PSPID},
-		"success_url": "https://greenfield.test/return", "cancel_url": "https://greenfield.test/return?canceled=1",
+		"success_url": "https://e2e.test/return", "cancel_url": "https://e2e.test/return?canceled=1",
 	})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	require.Contains(t, fmt.Sprint(out), "tier group")

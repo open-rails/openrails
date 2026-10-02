@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -84,7 +84,7 @@ func TestRebillFailureSpikeAlerts(t *testing.T) {
 	w.converge()
 	spikes := w.findings("life.payments.rebill_failure_spike")
 	require.Len(t, spikes, 1, "one PSP and owner")
-	require.Equal(t, "psp:greenfield-nmi:owner:engine", spikes[0].subject)
+	require.Equal(t, "psp:e2e-nmi:owner:engine", spikes[0].subject)
 	require.Equal(t, "high", spikes[0].severity)
 	require.Contains(t, spikes[0].action, "80.0%")
 	require.Empty(t, w.findings("life.payments.new_card_decline_spike"))
@@ -123,7 +123,7 @@ func TestPaymentHealthAlerts(t *testing.T) {
 	w.converge()
 	spikes := w.findings("life.payments.new_card_decline_spike")
 	require.Len(t, spikes, 1)
-	require.Equal(t, "psp:greenfield-nmi:owner:engine", spikes[0].subject)
+	require.Equal(t, "psp:e2e-nmi:owner:engine", spikes[0].subject)
 	require.Contains(t, spikes[0].action, "41.7%")
 	require.Empty(t, w.findings("life.payments.system_errors"), "no system errors yet")
 
@@ -202,7 +202,7 @@ func TestWebhookSilenceAlerts(t *testing.T) {
 	w.converge()
 	silent := w.findings("life.webhooks.silent")
 	require.Len(t, silent, 1)
-	require.Equal(t, "psp:greenfield-nmi", silent[0].subject)
+	require.Equal(t, "psp:e2e-nmi", silent[0].subject)
 	require.Equal(t, "high", silent[0].severity)
 	require.Contains(t, silent[0].action, "pulls found 4")
 

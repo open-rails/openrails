@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -65,7 +65,7 @@ func (c *customer) buyWith(rail, method string, price *openrails.Price, kind ope
 	_, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), openrails.CreateCheckoutSessionRequest{
 		OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID,
 		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
-		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.NoError(c.w.t, err)
 	c.w.settle()
@@ -307,7 +307,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		slug := "live-" + uuid.NewString()[:8]
 		rt, err := embed.New(t.Context(), embed.Options{
 			Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: map[string]embed.PSPConfig{
-				"stripe": {"stripe": {AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_greenfield", "webhook_signing_secret": "whsec_live"}}},
+				"stripe": {"stripe": {AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}},
 			}}},
 			Config: &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, AllowCatalogUpdates: true,
 				DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}},
@@ -327,7 +327,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		_, err = client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 			Customer: openrails.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
 			OfferKind: openrails.OfferPermanent, PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
-			SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 		})
 		require.Error(t, err, "a live key is disarmed in a sandbox deployment")
 		recorder.mu.Lock()

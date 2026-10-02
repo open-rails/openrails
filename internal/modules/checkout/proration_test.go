@@ -28,7 +28,7 @@ func quoteLeft(old, new PriceAmount, period, left time.Duration, newCycle int) (
 
 // #1067: credit is measured against the old plan's own period at sub-second
 // precision, whatever the new cadence, and rounds once, up to a whole rail
-// minor unit (customer-favoured). Cadence rows that greenfield also drives
+// minor unit (customer-favoured). Cadence rows that e2e also drives
 // through a real NMI sale are kept only where they pin rounding edges.
 func TestModelBUpgradeQuote(t *testing.T) {
 	const h = time.Hour

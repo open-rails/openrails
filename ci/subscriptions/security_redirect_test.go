@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -30,14 +30,14 @@ func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	}
 	for _, tp := range []topology{embedded, remote} {
 		for _, bad := range [][2]string{
-			{"https://evil.test/return", "https://greenfield.test/return"},
-			{"https://greenfield.test/return", "https://greenfield.test.evil.test/return"},
-			{"https://evil.test/https://greenfield.test/return", "https://greenfield.test/return"},
-			{"http://greenfield.test/return", "https://greenfield.test/return"},
-			{"https://greenfield.test:8443/return", "https://greenfield.test/return"},
+			{"https://evil.test/return", "https://e2e.test/return"},
+			{"https://e2e.test/return", "https://e2e.test.evil.test/return"},
+			{"https://evil.test/https://e2e.test/return", "https://e2e.test/return"},
+			{"http://e2e.test/return", "https://e2e.test/return"},
+			{"https://e2e.test:8443/return", "https://e2e.test/return"},
 		} {
 			require.Error(t, create(tp, bad[0], bad[1]), "%s %v", tp, bad)
 		}
-		require.NoError(t, create(tp, "https://greenfield.test/return", "https://greenfield.test/return?canceled=1"), tp)
+		require.NoError(t, create(tp, "https://e2e.test/return", "https://e2e.test/return?canceled=1"), tp)
 	}
 }

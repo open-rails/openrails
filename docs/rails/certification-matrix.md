@@ -6,13 +6,13 @@ real PSP qualification.
 
 | Evidence | Scope | Required gate |
 |---|---|---|
-| Greenfield NMI | Provider-owned import and engine/provider subscription lifecycle | Required PR contract |
-| Greenfield Stripe | Hosted checkout, signed webhooks, and engine/provider subscription lifecycle | Required PR contract |
+| E2E NMI | Provider-owned import and engine/provider subscription lifecycle | Required PR contract |
+| E2E Stripe | Hosted checkout, signed webhooks, and engine/provider subscription lifecycle | Required PR contract |
 | Live NMI/Stripe/CCBill/Solana | Real provider or chain behavior | Explicit operator qualification outside merge CI |
 
 A sandbox or live provider result qualifies only the exact operation exercised.
 It must name the account posture, request shape, response evidence, and date.
-The greenfield suite remains the source of deterministic regression coverage;
+The e2e suite remains the source of deterministic regression coverage;
 provider qualification remains a separate operational activity.
 
 ## Statuses
@@ -52,7 +52,7 @@ The dated CCBill manual cancellation result covers only the wire operation
 probed at that date. Recheck current adapters before relying on any listed
 capability; engine-owned subscription behavior has evolved since this snapshot.
 Current deterministic coverage is listed above and in
-[greenfield-ci.md](../greenfield-ci.md).
+[e2e-ci.md](../e2e-ci.md).
 
 ### Checkout and enrollment
 

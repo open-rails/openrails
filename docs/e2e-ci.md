@@ -26,16 +26,16 @@ Adversarial cases (IDOR, merchant isolation, webhook forgery, double-spend
 races, revocation, credential class, provider configuration) are indexed in
 [security tests](security-tests.md).
 
-See the [feature coverage map](greenfield-coverage.md) for what these tests do
+See the [feature coverage map](e2e-coverage.md) for what these tests do
 and do not establish. Test count is not a percentage of functionality covered.
 
 Run the exact CI command against a disposable PostgreSQL database and Redis
 (the card-attack captcha test needs Redis):
 
 ```sh
-OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
-OPENRAILS_GREENFIELD_REDIS_ADDR=127.0.0.1:6379 \
-  bash scripts/greenfield.sh
+OPENRAILS_E2E_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
+OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
+  bash scripts/e2e.sh
 ```
 
 The runner selects both packages with race detection and no test-result cache,

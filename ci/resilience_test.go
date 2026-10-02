@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -34,7 +34,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-const transitKey = "greenfield-solana"
+const transitKey = "e2e-solana"
 
 // heldNMI answers NMI's sandbox posture probe only after release: a provider
 // that is slow or down while the runtime starts.
@@ -70,11 +70,11 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *embed.Runtime
 		t.Cleanup(func() { _ = rdb.Close() })
 	}
 	psps := map[string]embed.PSPConfig{
-		"stripe": {"stripe": {AccountID: "acct_greenfield", Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": "whsec_greenfield"}}},
+		"stripe": {"stripe": {AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}},
 		"solana": {"solana": {Signer: &embed.PSPSignerConfig{Mode: "vault_transit", Key: transitKey}}},
 	}
 	if b.nmi != nil {
-		psps["nmi"] = embed.PSPConfig{"nmi": {AccountID: "greenfield-nmi", Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": "whsec_nmi"}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}}
+		psps["nmi"] = embed.PSPConfig{"nmi": {AccountID: "e2e-nmi", Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": "whsec_nmi"}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}}
 	}
 	start := time.Now()
 	rt, err := embed.New(t.Context(), embed.Options{
@@ -83,7 +83,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *embed.Runtime
 			AllowCatalogUpdates: true,
 			ProviderWriteMode:   config.ProviderWriteModeFull,
 			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:       []string{"https://greenfield.test"},
+			ReturnOrigins:       []string{"https://e2e.test"},
 			Vault:               &config.VaultConfig{Enabled: true, Address: b.vault.URL(), Token: b.vault.Token},
 			ProviderSandbox:     &config.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"},
 		},
@@ -128,7 +128,7 @@ func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (openrails
 
 func sign(t *testing.T, rt *embed.Runtime) ([]byte, error) {
 	t.Helper()
-	return app.HostGraph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("greenfield"))
+	return app.HostGraph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
 // solanaCheckoutStatus attempts a Solana checkout for a new one-time or
@@ -152,8 +152,8 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 		OfferKind:      kind,
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "solana", TokenSymbol: "USDC", Flow: "transfer_request"},
 		IdempotencyKey: "sol-" + uuid.NewString(),
-		SuccessURL:     "https://greenfield.test/success",
-		CancelURL:      "https://greenfield.test/cancel",
+		SuccessURL:     "https://e2e.test/success",
+		CancelURL:      "https://e2e.test/cancel",
 	})
 	var status *openrails.StatusError
 	if err == nil {
@@ -181,8 +181,8 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 		OfferKind:      openrails.OfferPermanent,
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "checkout-" + uuid.NewString(),
-		SuccessURL:     "https://greenfield.test/success",
-		CancelURL:      "https://greenfield.test/cancel",
+		SuccessURL:     "https://e2e.test/success",
+		CancelURL:      "https://e2e.test/cancel",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "stripe", session.RailData["rail"])
@@ -195,7 +195,7 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
-	fake := vaultfake.New("greenfield-root")
+	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	fake.SetUp(false)
 	nmi := heldNMI{release: make(chan struct{})}
@@ -241,7 +241,7 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
-	fake := vaultfake.New("greenfield-root")
+	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	slug := "restart-" + uuid.NewString()[:8]
 	want := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
@@ -280,7 +280,7 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
-	fake := vaultfake.New("greenfield-root")
+	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	slug := "rotate-" + uuid.NewString()[:8]
 	boot := func() (*embed.Runtime, *openrails.Client) {

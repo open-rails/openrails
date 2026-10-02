@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -225,7 +225,7 @@ func newDataLinkWorld(t *testing.T, dl *dataLinkFake) *world {
 	})
 	w.declare = func(psps map[string]embed.PSPConfig) {
 		account := psps["ccbill"]["ccbill"]
-		account.Secrets = map[string]string{"salt": "greenfield-ccbill-salt", "datalink_username": "greenfield-datalink", "datalink_password": "greenfield-datalink-password"}
+		account.Secrets = map[string]string{"salt": "e2e-ccbill-salt", "datalink_username": "e2e-datalink", "datalink_password": "e2e-datalink-password"}
 		psps["ccbill"]["ccbill"] = account
 	}
 	w.start()
@@ -251,10 +251,10 @@ func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 	dl.list(m.railSub, ccbillDate(w.clock.Now().Add(2*day)), "")
 
 	// Surveyed but never armed: the pass is advisory and changes nothing.
-	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'greenfield'`))
+	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
 	require.NoError(t, err)
 	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, updated_by, reason)
-		SELECT id, true, 'greenfield', 'survey' FROM openrails.merchants WHERE slug = $1`), w.slug)
+		SELECT id, true, 'e2e', 'survey' FROM openrails.merchants WHERE slug = $1`), w.slug)
 	require.NoError(t, err)
 	w.pull()
 	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "an advisory pass reactivates nothing")

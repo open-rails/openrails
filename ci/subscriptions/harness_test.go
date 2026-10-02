@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -38,13 +38,13 @@ import (
 )
 
 const (
-	issuer      = "https://greenfield.test"
+	issuer      = "https://e2e.test"
 	mountPrefix = "/billing"
-	stripeAcct  = "acct_greenfield"
-	nmiAcct     = "greenfield-nmi"
+	stripeAcct  = "acct_e2e"
+	nmiAcct     = "e2e-nmi"
 	ccbillAcct  = "945280-0000"
-	whsecStripe = "whsec_greenfield"
-	whsecNMI    = "nmi_webhook_greenfield"
+	whsecStripe = "whsec_e2e"
+	whsecNMI    = "nmi_webhook_e2e"
 	monthHours  = 720
 )
 
@@ -180,10 +180,10 @@ type world struct {
 }
 
 func dsn(t testing.TB) string {
-	if v := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN")); v != "" {
 		return v
 	}
-	t.Fatal("OPENRAILS_GREENFIELD_DSN must point at a disposable PostgreSQL database")
+	t.Fatal("OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
 	return ""
 }
 
@@ -215,7 +215,7 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 		clock:  clock,
 		stripe: newStripeFake(),
 		nmi:    newNMIFake(clock.Now),
-		auth:   &verifier{secret: []byte("greenfield-subscriptions-" + uuid.NewString())},
+		auth:   &verifier{secret: []byte("e2e-subscriptions-" + uuid.NewString())},
 	}
 	w.auth.slug = w.slug
 	if len(configure) > 0 {
@@ -271,15 +271,15 @@ func (w *world) start() {
 		DB:                  &config.DBConfig{URL: dbURL, Schema: w.schema},
 		// The test server's loopback peer is the site's reverse proxy.
 		TrustedProxies: []string{"127.0.0.1/32"},
-		ReturnOrigins:  []string{"https://greenfield.test"},
+		ReturnOrigins:  []string{"https://e2e.test"},
 	}
 	if w.cfg != nil {
 		w.cfg(cfg)
 	}
 	psps := map[string]embed.PSPConfig{
-		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": whsecStripe}}},
-		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}},
-		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "greenfield-ccbill-salt"}}},
+		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}}},
+		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}},
+		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}}},
 	}
 	if w.declare != nil {
 		w.declare(psps)
@@ -524,10 +524,10 @@ func (w *world) armDestructive() {
 	q := func(sql string) string {
 		return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
 	}
-	_, err := w.pool.Exec(ctx, q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'greenfield'`))
+	_, err := w.pool.Exec(ctx, q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
 	require.NoError(w.t, err)
 	_, err = w.pool.Exec(ctx, q(`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
-		SELECT id, true, now(), 'greenfield', 'reviewed' FROM openrails.merchants WHERE slug = $1
+		SELECT id, true, now(), 'e2e', 'reviewed' FROM openrails.merchants WHERE slug = $1
 		ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true`), w.slug)
 	require.NoError(w.t, err)
 }
@@ -661,7 +661,7 @@ func (c *customer) saveCard(rail string, card card) string {
 		return confirmed["payment_method_id"].(string)
 	case "nmi":
 		token := c.w.nmi.Tokenize(card)
-		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": c.w.psp["nmi"], "payment_token": token, "name_on_card": "Greenfield Payer"}))
+		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": c.w.psp["nmi"], "payment_token": token, "name_on_card": "E2E Payer"}))
 		return saved["id"].(string)
 	}
 	c.w.t.Fatalf("unknown rail %s", rail)
@@ -692,7 +692,7 @@ func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method st
 	session, err := c.w.client[tp].CreateCheckoutSession(c.w.t.Context(), openrails.CreateCheckoutSessionRequest{
 		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
 		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
-		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)
 	quote := unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))

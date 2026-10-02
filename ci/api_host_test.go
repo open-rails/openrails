@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -107,7 +107,7 @@ func (s *txtServer) serve() {
 // control, the deployment's own hosts are never claimable, and a proven host
 // stays with its merchant.
 func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
-	const shared, console = "api.greenfield.test", "console.greenfield.test"
+	const shared, console = "api.e2e.test", "console.e2e.test"
 	f := newFixture(t)
 	ctx := t.Context()
 	require.NoError(t, standalonedb.ApplyAuthKit(ctx, f.pool))
@@ -120,7 +120,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 			PublicBillingBaseURL: "https://" + shared,
 			DashboardBaseURL:     "https://" + console,
 			DB:                   &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:        []string{"https://greenfield.test"},
+			ReturnOrigins:        []string{"https://e2e.test"},
 		},
 		PGXPool:     f.pool,
 		River:       embed.RiverManagedByOpenRails(f.schema),
@@ -195,7 +195,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 		require.Contains(t, w.Body.String(), code)
 	}
 
-	const domain = "shop.victim.greenfield.test"
+	const domain = "shop.victim.e2e.test"
 	record := "_openrails-challenge." + domain
 
 	// A squatter's claim routes nothing and cannot be proven.
@@ -236,7 +236,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	refused(claim(squatter, domain), http.StatusConflict, "api_host_taken")
 
 	// The deployment's own hosts and bare addresses are never claimable.
-	for _, host := range []string{shared, "API.Greenfield.Test:443", console, "127.0.0.1"} {
+	for _, host := range []string{shared, "API.E2E.Test:443", console, "127.0.0.1"} {
 		refused(claim(squatter, host), http.StatusBadRequest, "api_host_reserved")
 	}
 	refused(claim(squatter, "203.0.113.7"), http.StatusBadRequest, "invalid_api_host")
@@ -250,12 +250,12 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 		return on(shared, s.session, http.MethodPost, "/v1/merchant/configuration/applications", s.slug,
 			map[string]any{"application_id": uuid.NewString(), "expected_revision": state["revision"], "api_host": host})
 	}
-	refused(apply(squatter, "shop.squatter.greenfield.test"), http.StatusConflict, "api_host_requires_proof")
+	refused(apply(squatter, "shop.squatter.e2e.test"), http.StatusConflict, "api_host_requires_proof")
 	refused(apply(squatter, domain), http.StatusConflict, "api_host_requires_proof")
 	require.Equal(t, http.StatusOK, apply(victim, domain).Code, "restating the proven host")
 
 	// Control: the squatter proves a domain it does control.
-	const own = "shop.squatter.greenfield.test"
+	const own = "shop.squatter.e2e.test"
 	w = claim(squatter, own)
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 	dns.publish("_openrails-challenge."+own, decode(w).Claim.DNSRecord.Value)

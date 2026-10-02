@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -79,7 +79,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, http.StatusUnauthorized, findings(viewerKey["secret"].(string)), "a revoked key authenticates nothing")
 
-	w = call(t, handler, session, http.MethodPost, "/v1/merchant/team/invites", shop, map[string]string{"email": uniqueName("nobody") + "@greenfield.test", "role": "viewer"})
+	w = call(t, handler, session, http.MethodPost, "/v1/merchant/team/invites", shop, map[string]string{"email": uniqueName("nobody") + "@e2e.test", "role": "viewer"})
 	require.Equal(t, http.StatusConflict, w.Code, "self-hosted registration is closed: %s", w.Body.String())
 
 	_, err = cp.Core().RevokeAccountSessions(ctx, iam.UserActor(owner.ID), owner.ID)
@@ -95,7 +95,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 func newAccount(t *testing.T, cp *controlplane.ControlPlane) authtest.User {
 	t.Helper()
 	name := "a" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	email := name + "@greenfield.test"
+	email := name + "@e2e.test"
 	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: email, Username: name, Password: authtest.Password, EmailVerified: true})
 	require.NoError(t, err)
 	return authtest.User{User: u, Email: email, Password: authtest.Password}
@@ -111,7 +111,7 @@ func TestMerchantIssuerIsTrustedWithinItsGroup(t *testing.T) {
 	require.NoError(t, err)
 	signer, err := keys.SignerFromKey("merchant-key", key)
 	require.NoError(t, err)
-	issuer := "https://" + strings.ReplaceAll(f.schema, "_", "-") + ".merchant.greenfield.test"
+	issuer := "https://" + strings.ReplaceAll(f.schema, "_", "-") + ".merchant.e2e.test"
 	merchantAuth, _ := authtest.New(t, authtest.WithConfig(func(c *authkit.Config) { c.Token.Issuer = issuer }),
 		authtest.WithDeps(func(d *authkit.Deps) {
 			d.Postgres = f.pool
@@ -199,7 +199,7 @@ merchants:
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, send("Bearer "+own, "").Code, "the application acting as itself")
 
-	stranger, _ := authtest.New(t, authtest.WithConfig(func(c *authkit.Config) { c.Token.Issuer = "https://stranger.greenfield.test" }),
+	stranger, _ := authtest.New(t, authtest.WithConfig(func(c *authkit.Config) { c.Token.Issuer = "https://stranger.e2e.test" }),
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
 	foreign, _, err := stranger.MintServiceJWT(t.Context(), iam.ServiceJWT{Subject: "sync", Audiences: []string{"openrails"}, Permissions: []string{permissions.MerchantRepairAlertsRead}})
 	require.NoError(t, err)

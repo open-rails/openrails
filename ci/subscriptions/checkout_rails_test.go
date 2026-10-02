@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -69,7 +69,7 @@ func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) 
 			previous(cfg)
 		}
 		cfg.ProviderSandbox = &config.ProviderSandboxConfig{SolanaRPCURL: fake.URL()}
-		cfg.PublicBillingBaseURL = "https://greenfield.test" + mountPrefix
+		cfg.PublicBillingBaseURL = "https://e2e.test" + mountPrefix
 	}
 	w.declare = func(psps map[string]embed.PSPConfig) {
 		psps["solana"] = embed.PSPConfig{"solana": {
@@ -114,7 +114,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	require.Equal(t, "solana_pay", solana.Driver)
 	require.Equal(t, map[string]string{"token_symbol": "DUSD", "token_name": "Dev USD", "network": "devnet"}, solana.PublicConfig)
 	require.Equal(t, "collect_js", monthly["nmi"].Driver, "NMI enrolls in the page: %+v", monthly["nmi"])
-	require.Equal(t, "greenfield-tokenization", monthly["nmi"].PublicConfig["tokenization_key"])
+	require.Equal(t, "e2e-tokenization", monthly["nmi"].PublicConfig["tokenization_key"])
 	require.Contains(t, monthly, "stripe", "Stripe stays routable")
 	require.Empty(t, monthly["stripe"].Driver, "no publishable key: the browser cannot enroll a Stripe subscription")
 	require.NotContains(t, monthly, "ccbill", "CCBill never enrolls a new subscription")
@@ -134,12 +134,12 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: priceID(t, w, key+"-monthly"),
 		IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: solana.Selector, PSPID: solana.PSPID, TokenSymbol: solana.PublicConfig["token_symbol"]},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "subscription", session.Mode)
 	require.Equal(t, "requires_action", session.Status)
-	require.True(t, strings.HasPrefix(fmt.Sprint(session.RailData["solana_pay_url"]), "solana:https://greenfield.test/billing/v1/"), "%+v", session.RailData)
+	require.True(t, strings.HasPrefix(fmt.Sprint(session.RailData["solana_pay_url"]), "solana:https://e2e.test/billing/v1/"), "%+v", session.RailData)
 }
 
 func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
@@ -187,10 +187,10 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 
 	buyer := w.newCustomer()
 	_, err = w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id, VerifiedEmail: "buyer@greenfield.test"}, PriceID: priceID(t, w, key+"-monthly"),
+		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id, VerifiedEmail: "buyer@e2e.test"}, PriceID: priceID(t, w, key+"-monthly"),
 		IdempotencyKey: "ccbill-" + uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Greenfield Payer", Zip: "10001", Country: "US"},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "E2E Payer", Zip: "10001", Country: "US"},
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.Error(t, err, "a named CCBill PSP still cannot enroll")
 	require.True(t, errors.Is(err, openrails.ErrInvalid), "%v", err)

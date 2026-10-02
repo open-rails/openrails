@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Runs ./ci/... : each package's test binary is built once, then its
-# top-level tests run in OPENRAILS_GREENFIELD_SHARDS concurrent processes
+# top-level tests run in OPENRAILS_E2E_SHARDS concurrent processes
 # (round-robin by name) against the same disposable database. Every test
 # creates its own schema, so shards never share state.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-: "${OPENRAILS_GREENFIELD_DSN:?Set OPENRAILS_GREENFIELD_DSN to a disposable PostgreSQL database}"
-shards="${OPENRAILS_GREENFIELD_SHARDS:-1}"
-timeout="${OPENRAILS_GREENFIELD_TIMEOUT:-8m}"
-tags='greenfield,integration'
+: "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL database}"
+shards="${OPENRAILS_E2E_SHARDS:-1}"
+timeout="${OPENRAILS_E2E_TIMEOUT:-8m}"
+tags='e2e,integration'
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 

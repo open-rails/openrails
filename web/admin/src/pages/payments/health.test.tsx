@@ -1,6 +1,6 @@
 // Payments → Health (#1117): the queries the page sends, how it shapes the
 // answers and where each tile and cell leads. The fixtures are the metrics and
-// list responses of the #1116 greenfield scenario (a new card declined for its
+// list responses of the #1116 e2e scenario (a new card declined for its
 // CVV then approved; a renewal declined twice and collected on the second
 // retry), captured with each query that produced them.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"

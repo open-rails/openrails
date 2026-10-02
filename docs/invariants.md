@@ -5,7 +5,7 @@ preserves design requirements and historical audit findings. Except where
 explicitly refreshed, its test names, enforcement labels, commands, and source
 line numbers describe the earlier audit; they are not current regression
 evidence. Deleted tests confer no coverage. Use the
-[focused coverage map](greenfield-coverage.md) for the maintained scenarios and
+[focused coverage map](e2e-coverage.md) for the maintained scenarios and
 remaining gaps. Database and application constraints must be assessed separately
 from whether a surviving test exercises them.
 
@@ -56,7 +56,7 @@ millicents. Cents and decimal major units exist only at rail boundaries.
 | MONEY-4 | Micros→cents is exact-or-error on the exact path; the ceil path never under-charges. | `moneyutil.go:60-72` | APP | `internal/shared/moneyutil/money_test.go` `TestRailConversions` |
 | MONEY-5 | The single internal→rail converter is `moneyutil.NativeToRailMinor` (ceil) / `NativeToRailMinorExact` (errors on a sub-minor remainder); both error on an unregistered currency. Callers cannot guess a scale — there is no currency-blind converter left to call. | `internal/shared/moneyutil/currency.go` | **S** — the alternatives are deleted, not deprecated | `grep -rn "MicrosToCents" --include=*.go` → no hits; `go test ./internal/shared/moneyutil` |
 | MONEY-6 | Decimal strings parse via exact rational (`big.Rat`), half-away-from-zero, with an int64-overflow error. | `moneyutil.go:28-41,112-141` | APP | `internal/shared/moneyutil/money_test.go` `TestParseDecimalToCents` pins rounding, MinInt64 and overflow; `internal/modules/webhooks/nmi_test.go` `TestNMITransactionAmountCents` covers the provider path |
-| MONEY-7 | Provider-boundary money coverage is partial. The focused contract pins exact parsing and currency conversion; it does not enumerate or pin every provider wire call site. | `ci/money_test.go` | **T** for the cases asserted | `go test -tags greenfield ./ci -run TestExactIntegerMoneyBoundaries` covers rounding, overflow, unknown currencies, USD sub-cent rejection, and JPY scaling. The former AST boundary registry was removed with the legacy suite. Provider request formatting, call-site completeness, and Solana Pay formatter coverage remain separate gaps; see GAP-15. |
+| MONEY-7 | Provider-boundary money coverage is partial. The focused contract pins exact parsing and currency conversion; it does not enumerate or pin every provider wire call site. | `ci/money_test.go` | **T** for the cases asserted | `go test -tags e2e ./ci -run TestExactIntegerMoneyBoundaries` covers rounding, overflow, unknown currencies, USD sub-cent rejection, and JPY scaling. The former AST boundary registry was removed with the legacy suite. Provider request formatting, call-site completeness, and Solana Pay formatter coverage remain separate gaps; see GAP-15. |
 | MONEY-8 | `ledger_transfers.amount > 0`; `allow_debit_negative_up_to >= 0`. | `ledger_transfers_amount_positive`, `ledger_transfers_debit_floor_nonnegative` | **DB** | `SELECT count(*) FROM billing.ledger_transfers WHERE amount<=0;` → 0 |
 | MONEY-9 | `payments.amount` deliberately has **no** non-negative CHECK — refunds are negative rows. | `0001_schema.up.sql` | **convention** | The former migration-text guard (`TestAmountValueChecks`) was removed with the legacy suite; nothing automated forbids adding one. `SELECT conname FROM pg_constraint WHERE conrelid='billing.payments'::regclass AND contype='c';` must list no amount CHECK. |
 | MONEY-10 | Amount CHECKs hold across prices, grants, invoices, invoice items/payments, usage events, credit limits, rating watermarks. | `0001_schema.up.sql` (the `*_amount_*` CHECKs) | **DB** | `SELECT conname FROM pg_constraint WHERE contype='c' AND connamespace='billing'::regnamespace;` |
@@ -95,7 +95,7 @@ operation. OpenRails does not install RLS policies or rely on login flags.
 | TEN-6 | Session merchant state remains transaction-local or bound to a released request connection for explicit GUC predicates and stored functions. It does not filter arbitrary SQL. | `MerchantTx`, `WithMerchantConn` | connection lifecycle tests |
 | TEN-7 | A connection whose merchant-state reset fails is closed rather than reused. | `lazyMerchantPgxConn.release` | connection lifecycle tests |
 | TEN-8 | Initialization and runtime can share one owning application pool; tenant correctness is independent of superuser/BYPASSRLS flags. | runtime construction and SQL scope | owner and normal-login journeys |
-| TEN-9 | Libraries create no database accounts, roles or grants. The role that applies the migrations owns OpenRails' objects and is the role it runs as. | `embed.ApplyMigrations`, `openrails migrate up` | greenfield fixtures migrate and run on one pool |
+| TEN-9 | Libraries create no database accounts, roles or grants. The role that applies the migrations owns OpenRails' objects and is the role it runs as. | `embed.ApplyMigrations`, `openrails migrate up` | e2e fixtures migrate and run on one pool |
 | TEN-10 | Platform directory and worker-discovery scans are explicit; tenant work runs under each authorized merchant's scope. | `GenDirectory`, worker fan-out | destructive ceiling and worker integration tests |
 | TEN-11 | Webhooks resolve the merchant and verify the signature with that merchant's secret before applying evidence. | webhook handlers | signed webhook and provider-collision tests |
 | TEN-12 | Core schema has no foreign keys to AuthKit and does not own host River tables. | portability guards | `TestPortabilityInvariant` |
@@ -359,7 +359,7 @@ go test ./internal/http/handlers -run TestStripeRelatedObjectURLIsAlwaysAPath   
 go test ./internal/integrations/stripeapi                             # IDEM-8/FC-11 (choke point + readonly + version pin)
 go test ./internal/http/middleware -run TestEnabledCaptchaAlwaysHasVerifier           # FC-13
 go test ./internal/intents  -run TestGateExecution                    # IDEM-9 (origin + nil mode)
-go test -tags greenfield ./ci -run TestExactIntegerMoneyBoundaries # MONEY-7 (conversion cases only)
+go test -tags e2e ./ci -run TestExactIntegerMoneyBoundaries # MONEY-7 (conversion cases only)
 go test ./internal/integrations/nmi -run 'TestStalledGateway|TestPerRequestDeadline'  # NMI ctx + deadlines (or#866)
 go test .                   -run 'TestRootPackageStaysLight|TestCorePackagesStayFrameworkNeutral'
 ```

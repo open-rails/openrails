@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -161,7 +161,7 @@ func TestDefaultPaymentMethodConcurrentFirstSaves(t *testing.T) {
 			for range 2 {
 				switch rail {
 				case "nmi":
-					requests = append(requests, request{"/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "Greenfield Payer"}})
+					requests = append(requests, request{"/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "E2E Payer"}})
 				case "stripe":
 					setup := c.must(http.MethodPost, "/payment-methods/stripe-setup", "setup-"+uuid.NewString(), map[string]any{"psp_id": w.psp["stripe"], "consent": true})
 					w.stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), visa)

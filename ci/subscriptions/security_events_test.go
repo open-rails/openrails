@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -71,7 +71,7 @@ func TestSecurityNMIChargebackRevokesOneTimePurchase(t *testing.T) {
 	require.True(t, c.entitled("content:pass"))
 	notice := func() obj {
 		return nmiEvent("chargeback.batch.complete", obj{"batch": obj{"count": 1, "total_amount": "4.99"}, "count": 1, "chargebacks": []obj{{
-			"id": "cb-" + paid[0].ID.String()[:8], "date": w.clock.Now().UTC().Format("2006-01-02"), "customer_name": "Greenfield Payer",
+			"id": "cb-" + paid[0].ID.String()[:8], "date": w.clock.Now().UTC().Format("2006-01-02"), "customer_name": "E2E Payer",
 			"cc_number": "4xxxxxxxxxxx5100", "amount": "4.99", "reason_code": "10", "reason": "Fraud",
 		}}})
 	}
@@ -184,7 +184,7 @@ func TestSecurityCCBillPeriodEndsAreBounded(t *testing.T) {
 		m := importCCBill(t, w)
 		w.deliverCCBill("UserReactivation", map[string]string{
 			"subscriptionId": m.railSub, "transactionId": ccbillNumericID(), "price": "$9.99(USD) for 30 days then $9.99(USD) recurring every 30 days",
-			"email": "payer@greenfield.test", "nextRenewalDate": ccbillDate(w.clock.Now().Add(365 * day)),
+			"email": "payer@e2e.test", "nextRenewalDate": ccbillDate(w.clock.Now().Add(365 * day)),
 		})
 		for _, view := range []topology{embedded, remote} {
 			sub := w.subscription(view, m.sub)

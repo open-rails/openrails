@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -97,7 +97,7 @@ func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.Publ
 	session, err := s.w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: b.id}, PriceID: s.price, IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: s.option.Selector, PSPID: s.option.PSPID, TokenSymbol: "DUSD", Wallet: wallet.String()},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	got := unwrap(b.must(http.MethodGet, "/checkout/"+session.ID, "", nil))

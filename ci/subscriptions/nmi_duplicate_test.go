@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -143,7 +143,7 @@ func TestNMICardSaveDuplicateRefused(t *testing.T) {
 	w.nmi.SetDuplicateWindow(nmiDupWindow)
 	w.nmi.AddRecentCharge(visa, "0.00")
 	before := len(w.nmi.Vaults())
-	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "Greenfield Payer"})
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "E2E Payer"})
 	require.Equal(t, http.StatusConflict, status, "%v", body)
 	require.Equal(t, openrails.CodePaymentDuplicateRefused, errorCode(body), "%v", body)
 	after := len(w.nmi.Vaults())

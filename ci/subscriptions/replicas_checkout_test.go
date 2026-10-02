@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -40,7 +40,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 				return openrails.CreateCheckoutSessionRequest{
 					OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: key, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
-					SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
 

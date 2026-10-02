@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -46,7 +46,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 					TestMode:          config.CredentialPostureSandbox,
 					ProviderWriteMode: config.ProviderWriteModeReadOnly,
 					DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-					ReturnOrigins:     []string{"https://greenfield.test"},
+					ReturnOrigins:     []string{"https://e2e.test"},
 				},
 				PGXPool: f.pool,
 				River:   embed.RiverManagedByOpenRails(f.schema),
@@ -65,12 +65,12 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			core := cp.Core()
 			account := func(verified bool) iam.User {
 				id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-				u, err := core.CreateUser(ctx, iam.NewUser{Email: "team-" + id + "@greenfield.test", Username: "team_" + id, EmailVerified: verified})
+				u, err := core.CreateUser(ctx, iam.NewUser{Email: "team-" + id + "@e2e.test", Username: "team_" + id, EmailVerified: verified})
 				require.NoError(t, err)
 				return u
 			}
 			id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-			email := "owner-" + id + "@greenfield.test"
+			email := "owner-" + id + "@e2e.test"
 			owner, err := core.CreateUser(ctx, iam.NewUser{Email: email, Username: "owner_" + id, Password: authtest.Password, EmailVerified: true})
 			require.NoError(t, err)
 			_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
@@ -123,7 +123,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				return false
 			}
 
-			unknown := shape(invite("team-" + uuid.NewString()[:12] + "@greenfield.test"))
+			unknown := shape(invite("team-" + uuid.NewString()[:12] + "@e2e.test"))
 			for what, u := range map[string]iam.User{"unverified": account(false), "deleted": account(true)} {
 				if what == "deleted" {
 					results, err := core.DeleteUsers(ctx, iam.SystemActor(), []string{u.ID})
