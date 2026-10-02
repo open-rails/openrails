@@ -1,6 +1,6 @@
 //go:build greenfield
 
-package greenfield_test
+package ci_test
 
 import (
 	"encoding/json"

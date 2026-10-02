@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs ./ci/greenfield/... : each package's test binary is built once, then its
+# Runs ./ci/... : each package's test binary is built once, then its
 # top-level tests run in OPENRAILS_GREENFIELD_SHARDS concurrent processes
 # (round-robin by name) against the same disposable database. Every test
 # creates its own schema, so shards never share state.
@@ -13,7 +13,7 @@ tags='greenfield,integration'
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 
-mapfile -t packages < <(go list -tags="$tags" ./ci/greenfield/...)
+mapfile -t packages < <(go list -tags="$tags" ./ci/...)
 for pkg in "${packages[@]}"; do
   go test -c -race -vet=all -tags="$tags" -o "$out/$(basename "$pkg").test" "$pkg"
 done

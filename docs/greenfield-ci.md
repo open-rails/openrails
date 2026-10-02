@@ -4,10 +4,10 @@ The focused suite runs two packages. Ordinary
 unit/static/security checks run separately. The old broad integration runner,
 browser harness, scheduled backstop and devnet workflows have been removed.
 
-`ci/greenfield` tests migration replay, catalog/merchant isolation, product
+`ci/` tests migration replay, catalog/merchant isolation, product
 provisioning, hosted checkout idempotency, signed webhook replay, exact integer
 money, browser-safe JSON and recovery of the rescue worker itself after a crash.
-`ci/greenfield/subscriptions` exercises:
+`ci/subscriptions` exercises:
 
 - NMI and Stripe engine-owned confirmation and renewals;
 - provider-owned schedules and a distinct NMI/OpenRails-dunning hybrid;

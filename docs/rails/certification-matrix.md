@@ -1,7 +1,7 @@
 # Rail certification matrix
 
 The required merge gate uses deterministic provider transports in the focused
-`ci/greenfield` contracts. It does not claim that a fake provider response is a
+`ci/` contracts. It does not claim that a fake provider response is a
 real PSP qualification.
 
 | Evidence | Scope | Required gate |

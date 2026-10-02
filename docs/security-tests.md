@@ -3,7 +3,7 @@
 Each important attack on an embedded, multi-replica OpenRails is a permanent
 test in the required `End-to-end` job (`scripts/greenfield.sh`): real
 PostgreSQL, fake NMI/Stripe transports, mounted HTTP routes, and the embedded
-and remote Client. Tests live in `ci/greenfield/subscriptions/security_*_test.go`
+and remote Client. Tests live in `ci/subscriptions/security_*_test.go`
 unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 
 | Threat | Test | Control |
@@ -19,10 +19,10 @@ unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 | Two upgrades of one membership racing on two replicas (SEC-26) | `TestSecurityConcurrentUpgradesChargeOnce` | One unresolved tier change per subscription, including engine upgrades (unique index) |
 | Tier change into or out of an ungrouped product (SEC-26) | `TestSecurityTierChangeStaysInGroup` | Both products must share a declared tier group |
 | Refunded stacked pass or revoked future grant restored by convergence (SEC-25) | `TestSecurityRevokedAccessStaysRevoked` | Retracting a window terminates its grant |
-| Replayed completion after a full refund grants again (SEC-25) | `ci/greenfield/security_test.go` `TestSecurityRefundedPurchaseIsNotRegranted` | A purchase projects access once |
-| Stolen owner or staff token with a stale sign-in grants permanent access, refunds, mints credit, imports billing or edits the catalog through any route that serves the operation (`/v1`, `/v2`, import, catalog, merchant API) | `TestSecurityStaleSignInReachesNoOwnerOperation`; `ci/greenfield/step_up_test.go` `TestSecurityOwnerOperationsNeedRecentSignIn` | Per operation: every `merchant:` permission but reads needs a recent sign-in from the auth provider (`permissions.RequiresRecentSignIn`), 403 `step_up_required` |
+| Replayed completion after a full refund grants again (SEC-25) | `ci/security_test.go` `TestSecurityRefundedPurchaseIsNotRegranted` | A purchase projects access once |
+| Stolen owner or staff token with a stale sign-in grants permanent access, refunds, mints credit, imports billing or edits the catalog through any route that serves the operation (`/v1`, `/v2`, import, catalog, merchant API) | `TestSecurityStaleSignInReachesNoOwnerOperation`; `ci/step_up_test.go` `TestSecurityOwnerOperationsNeedRecentSignIn` | Per operation: every `merchant:` permission but reads needs a recent sign-in from the auth provider (`permissions.RequiresRecentSignIn`), 403 `step_up_required` |
 | Support member grants access with no end | `TestSecurityStaleSignInReachesNoOwnerOperation` | A manual grant with no end also needs `merchant:access:grant-permanent` |
-| Support member or support API key mints prepaid credit or opens an unsecured credit line | `ci/greenfield/credit_authority_test.go` `TestSecuritySupportCannotMintCredit` | The machine deposit and the credit-limit write need owner-level `merchant:credits:grant` |
+| Support member or support API key mints prepaid credit or opens an unsecured credit line | `ci/credit_authority_test.go` `TestSecuritySupportCannotMintCredit` | The machine deposit and the credit-limit write need owner-level `merchant:credits:grant` |
 | Automation or unknown-class customer credential starts a card charge (SEC-27) | `TestSecurityAutomationCredentialCannotCharge` | Upgrade and saved-card checkout require the customer's interactive session |
 | `findings:resolve` retargets a recommendation at another payment or subscription (SEC-28) | `TestSecurityFindingOverrideCannotRetarget` | Overrides cannot change the ids a recommendation names |
 | Browser-chosen cheaper price, archived price, negative price or duration, tampered confirm fields | `TestSecurityCheckoutTermsAreServerSide` | Catalog-derived terms; DB amount and duration checks |
@@ -37,7 +37,7 @@ unless noted. Fixes are tracked as SEC items in the OpenRails tracker.
 | Another customer pre-claims a predictable tier-change idempotency key (SEC-33) | `TestSecurityTierChangeKeysAreCustomerScoped` | Tier-change keys are scoped to the customer |
 | Probing another customer's payment-method or subscription ids (SEC-33) | `TestSecurityForeignIDsLookMissing` | A foreign id answers exactly like a missing one |
 | Enumerating provider accounts through webhook responses (SEC-33) | `TestSecurityWebhookResponsesRevealNoAccounts` | Unknown account, missing secret and bad signature share one 401 |
-| A merchant owner claims the shared API host, or a domain it does not control, as its `api_host` | `ci/greenfield/api_host_test.go` `TestSecurityAPIHostNeedsProofOfControl` | An `api_host` routes only after a TXT record at `_openrails-challenge.<host>` carries the claim's token; the deployment's own hosts are reserved; a proven host stays with its merchant |
+| A merchant owner claims the shared API host, or a domain it does not control, as its `api_host` | `ci/api_host_test.go` `TestSecurityAPIHostNeedsProofOfControl` | An `api_host` routes only after a TXT record at `_openrails-challenge.<host>` carries the claim's token; the deployment's own hosts are reserved; a proven host stays with its merchant |
 | Squatting another merchant's provider account id to receive its events (SEC-33) | `TestSecurityProviderAccountClaimsNeedProof` | A merchant-API claim needs a successful credential probe; the operator declares otherwise |
 | NMI account left in test mode under live posture grants access without payment (SEC-33) | `internal/integrations/nmi` `TestLivePostureRefusesTestModeAccount` | Live posture arms NMI only on `test_mode_enabled=false` (read-only query); greenfield cannot run live posture because transport injection is refused under live by design |
 | Client-written first `X-Forwarded-For` line spoofs the CCBill source allowlist behind a proxy that appends its own line | `TestSecurityForwardedForReadsEveryLine` | Every `X-Forwarded-For` line counts, walked right to left past trusted hops |

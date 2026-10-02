@@ -109,6 +109,6 @@ both of migratekit's checks reported success.
 - `pkg/` — importable packages (api, billingauth, catalog, merchant, adminconsole, query, …)
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/`, `controlplane/`
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
-- `ci/greenfield/` — focused public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
+- `ci/` — focused public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
 - `scripts/` — Task-target implementations
 - `web/admin/` — admin console SPA source

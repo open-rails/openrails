@@ -1,6 +1,6 @@
 //go:build greenfield && integration
 
-package greenfield_test
+package ci_test
 
 import (
 	"context"

@@ -139,7 +139,7 @@ fence admits one sender per charge; completion re-reads the operation under the
 same locks. A pass that finds its membership already settled by another replica
 does nothing. Leases and the lost-submission settle delay (5 minutes) use each
 process's clock, so keep replicas NTP-synchronized: skew must stay well under
-the settle delay minus the 25-second provider timeout. `ci/greenfield`'s
+the settle delay minus the 25-second provider timeout. `ci/`'s
 `TestReplicas*` fleets are the proof.
 
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe

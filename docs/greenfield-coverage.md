@@ -5,7 +5,7 @@ features merely present in the implementation. It is not a line-coverage
 percentage. Ordinary unit, wire-contract, static and security checks run
 separately; the deleted legacy integration corpus is not current evidence.
 
-The focused runner must select `./ci/greenfield/...`, including the subscription
+The focused runner must select `./ci/...`, including the subscription
 package. Passing only the parent package does not qualify renewal or dunning.
 All provider traffic here is fake; no result certifies a live merchant account.
 
