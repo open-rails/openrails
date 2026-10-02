@@ -24,7 +24,7 @@ import (
 // /v1, the version AuthKit appends.
 func TestAdminConsoleFindsAuthKit(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	for issuer, want := range map[string]string{
 		"http://127.0.0.1":             "/auth/v1",
 		"http://127.0.0.1/" + f.schema: "/" + f.schema + "/v1",

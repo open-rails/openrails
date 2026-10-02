@@ -11,11 +11,11 @@ import (
 )
 
 // ApplyAuthKit migrates the control plane's AuthKit schema (the default,
-// profiles) through the privileged owner pool and grants the runtime login
-// access. OpenRails owns the River fleet, so River's tables are not AuthKit's.
-func ApplyAuthKit(ctx context.Context, owner, runtime *pgxpool.Pool) error {
+// profiles) as the role the server runs as. OpenRails owns the River fleet, so
+// River's tables are not AuthKit's.
+func ApplyAuthKit(ctx context.Context, pool *pgxpool.Pool) error {
 	cfg := authkit.Config{River: authkit.RiverConfig{HostOwned: true}}
-	if err := authkit.Migrate(ctx, owner, cfg, authkit.MigrateOptions{RuntimePool: runtime}); err != nil {
+	if err := authkit.Migrate(ctx, pool, cfg, authkit.MigrateOptions{}); err != nil {
 		return fmt.Errorf("standalone AuthKit migrations: %w", err)
 	}
 	return nil

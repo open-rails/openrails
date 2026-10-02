@@ -70,12 +70,14 @@ placeholders, not customer or repository names.
   mirrored to Stripe Features (`lookup_key` = the string).
 
 ## Schema / DB
-- App schema is `openrails` (configurable via execution-time SQL rewrite). There is NO row-level
+- SQL is authored in the canonical `openrails` schema; the default runtime schema is `billing`
+  (`config.DefaultSchema`), applied by execution-time rewrite. The role that runs migrations owns
+  every object and is the role OpenRails runs as (no grants, no runtime role). There is NO row-level
   security: tenant isolation is the explicit `merchant_id` (or `psp_id`) predicate on every tenant
   query, plus composite foreign keys. The `app.merchant_id` GUC MerchantTx sets only serves stored
   functions and queries that call `current_merchant_id()`; it filters nothing on its own.
-- Migrations are squashed to a single baseline (`migrations/postgres/0001_*`); new migrations start
-  at 002. Greenfield — no numbered history to preserve.
+- One baseline, `internal/migrate/postgres/0001_schema.up.sql`; new migrations start at 0002.
+  Pre-launch, existing databases are wiped rather than upgraded.
 
 ## Layer altitude (#688)
 - A layer earns its existence by doing work at its own altitude. Modules talk to sqlc `gen` directly;

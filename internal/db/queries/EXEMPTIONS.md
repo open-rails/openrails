@@ -1,13 +1,12 @@
 # SQL gate exemptions
 
-Three gates run in CI (`task sqlc-check`), on top of `sqlc vet`'s `db-prepare`
+Two gates run in CI (`task sqlc-check`), on top of `sqlc vet`'s `db-prepare`
 correctness check:
 
 | gate | what it proves | allowlist |
 |---|---|---|
 | `internal/db/sqlaudit` | query scope, declared bounds and index availability | `AUDIT_ALLOWLIST.txt` |
 | `scripts/sql-lint.sh` | no hand-written SQL outside `internal/db/gen` | `LINT_ALLOWLIST.txt` |
-| `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` + inline `squawk-ignore` |
 
 Every allowlist entry is classified **PERMANENT** (bounded by design) or
 **DEBT** (a real bug, kept only so the gate could be switched on), carries a
@@ -176,82 +175,10 @@ applicable proofs.
 **DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
 Nothing about them requires raw SQL.
 
-## .squawk.toml
+## Library schema initialization
 
-`assume_in_transaction` is set because migratekit's `applyOne()` does
-`BeginTx` / `Exec(whole file)` / `Commit`, and `scripts/sqlc-vet-db.sh` mirrors
-that with `psql -1`. Those are the only two apply paths — there is no
-non-transactional one — which is why migrations use `SET LOCAL` for their
-timeouts rather than `SET`.
-
-`0001` is the only path excluded, and the only one that ever should be. It is
-the squashed baseline (or#893): it creates the schema from nothing, so every
-lock-safety rule is vacuous against it — no existing table to lock, no client
-to break, no row to scan. **Nothing else is excluded by path.** Any migration
-after it edits a live schema and must pass the gate, or carry an inline
-`-- squawk-ignore <rule>` written at the statement with its reason on the lines
-above it, so the rest of the file stays linted and the reason sits where the
-next person edits.
-
-### The two rules this migrator cannot satisfy
-
-`require-concurrent-index-creation` and `require-concurrent-index-deletion` are
-in `excluded_rules`. They are not judgement calls — they are unsatisfiable here,
-verified both ways:
-
-```
-BEGIN; CREATE INDEX CONCURRENTLY …;
-  ERROR:  CREATE INDEX CONCURRENTLY cannot run inside a transaction block
-BEGIN; DROP INDEX CONCURRENTLY …;
-  ERROR:  DROP INDEX CONCURRENTLY cannot run inside a transaction block
-```
-
-and squawk, run with `assume_in_transaction`, fires
-`ban-concurrent-index-creation-in-transaction` on the very edit the rule asks
-for. Between them the pair accounted for 52 of the gate's 96 original findings.
-Excluding a rule that cannot apply is honest; excluding a *file* from a rule
-that does apply is not, which is the distinction `excluded_paths` above holds
-to.
-
-The alternative is a non-transactional migration mode — per-file
-`-- migratekit:no-transaction`, applied statement-by-statement outside a
-transaction, with every such file responsible for its own idempotency (an
-interrupted `CREATE INDEX CONCURRENTLY` leaves an INVALID index behind and must
-be re-runnable). That is a change to migratekit, not to this repo, plus a
-matching change to `sqlc-vet-db.sh`, plus a review of what "half-applied
-migration" means for the ledger. Roughly two days, and it buys nothing until
-the schema is large enough that a non-concurrent index build actually blocks
-production writes. Deliberately not started.
-
-### The inline exemptions
-
-or#893 squashed the migration chain into `0001`, and every inline
-`-- squawk-ignore` lived in a file that squash deleted. Those exemptions were
-records of what one-time rename/backfill/hard-cut migrations actually did; the
-baseline states the result instead. The invariants they protected survive as
-constraints, indexes and COMMENTs on the objects themselves.
-
-Because the baseline is the only file and the only excluded path, squawk has
-nothing to check and exits non-zero on the empty glob. `scripts/migration-lint.sh`
-DERIVES that case — up-migrations minus excluded paths — and passes early only
-when the remainder is genuinely zero; the moment a `0002` exists the run happens
-and every guard applies. The baseline is excluded rather than linted because
-squawk cannot see that a table was created by the same file: it reports 102
-issues on a from-nothing schema, all of them `ADD CONSTRAINT … PRIMARY KEY` and
-friends against tables three statements old.
-
-A new migration that genuinely needs one of these must add the constraint
-`NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction
-each. That is the only shape that actually reduces lock time here.
-
-### Library schema initialization and standalone identity access
-
-`internal/migrate/migrator.go` issues schema DDL and coordinates the billing and
-managed River migrations. `internal/migrate/runtime_access.go` validates the
-supplied runtime connection, takes the shared provisioning lock, and grants the
-exact billing privileges plus named managed River tables and sequences to that
-login. Configured schemas and the runtime role are identifiers; this dynamic
-initialization SQL is outside sqlc's runtime query catalog. The standalone
-AuthKit initializer delegates identity migration and access to AuthKit's API
-and contains no raw SQL. Embedded billing never installs AuthKit grants or
-initializes a host-owned River fleet.
+`internal/migrate/migrator.go` applies the embedded migrations through migratekit
+and creates the managed River schema. The configured schema is an identifier, so
+this initialization SQL is outside sqlc's runtime query catalog. The standalone
+AuthKit initializer delegates to AuthKit's migration API and contains no raw
+SQL. Embedded billing never initializes a host-owned River fleet.

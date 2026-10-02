@@ -110,7 +110,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	const shared, console = "api.greenfield.test", "console.greenfield.test"
 	f := newFixture(t)
 	ctx := t.Context()
-	require.NoError(t, standalonedb.ApplyAuthKit(ctx, f.pool, f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(ctx, f.pool))
 	dns := newTXTServer(t)
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{

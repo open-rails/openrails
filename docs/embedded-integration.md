@@ -96,19 +96,12 @@ to boot unless you declare posture explicitly (#745):
 | `AllowCatalogUpdates` | false | Enables ordinary product, price, catalog and metering writes and their routes, independently of provider credentials. Trusted local operator application remains available when false. |
 | `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
 
-#### Database ownership and optional separate runtime credentials
+#### Database ownership
 
-The simple setup uses one application login and pool. That login creates and
-owns the library's objects during `ApplyMigrations`, then uses them at runtime.
-Ownership already supplies access; no self-grants or library-specific roles are
-required. AuthKit and a host-owned River client may share that same pool.
-
-If your deployment separates migration and runtime credentials, pass the
-existing runtime pool as `MigrationOptions{RuntimePool: appPool}` when initializing
-through the migration pool. OpenRails grants its exact runtime table, column,
-function and migration-ledger privileges to that pool's user. Managed River
-objects are included; host-owned River access remains the host's responsibility.
-The CLI exposes this optional provisioning as `--runtime-database-url`.
+Use one application login and pool. That login creates and owns the library's
+objects during `ApplyMigrations`, then uses them at runtime. Ownership supplies
+access; OpenRails creates no roles and issues no grants. AuthKit and a
+host-owned River client may share that same pool.
 
 Merchant isolation uses verified application scope, explicit SQL predicates and
 composite relationships. PostgreSQL RLS and username flags are not part of the
@@ -223,8 +216,8 @@ import (
 )
 
 ownership := embed.RiverFromHost()
-// The host migrates and grants access to its River schema separately.
-if err := embed.ApplyMigrations(ctx, adminPool, embed.MigrationOptions{River: ownership, RuntimePool: appPool}); err != nil {
+// The host migrates its River schema separately.
+if err := embed.ApplyMigrations(ctx, pool, embed.MigrationOptions{River: ownership}); err != nil {
     return err
 }
 rt, err := embed.New(ctx, embed.Options{Config: cfg, PGXPool: pool, River: ownership})

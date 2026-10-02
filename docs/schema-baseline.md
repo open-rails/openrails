@@ -1,14 +1,14 @@
 # Fresh pre-v1 schema baseline
 
-OpenRails installs one baseline, `0001_schema.up.sql`. AuthKit and River retain
-independent schemas and migration ownership. Runtime billing defaults to
-`billing`; its source SQL remains authored in canonical `openrails` and is
-rewritten to the configured namespace. Managed River defaults to `public`,
-with only its named runtime tables and sequences granted directly to the host
-login when `MigrationOptions.RuntimePool` is provided. Initialization without
-that pool applies DDL only; libraries never create runtime roles. The owner has declared all pre-v1
-OpenRails data disposable: this release targets fresh databases, with no legacy
-upgrade or backfill path. Published tags remain immutable.
+OpenRails installs one baseline, `internal/migrate/postgres/0001_schema.up.sql`.
+AuthKit and River retain independent schemas and migration ownership. Runtime
+billing defaults to `billing`; its source SQL remains authored in canonical
+`openrails` and is rewritten to the configured namespace. Managed River defaults
+to `public`. The role that applies the migrations owns every object and is the
+role OpenRails runs as; libraries create no roles and issue no grants. The owner
+has declared all pre-v1 OpenRails data disposable: this release targets fresh
+databases, with no legacy upgrade or backfill path. A database built by an
+earlier chain must be wiped. Published tags remain immutable.
 
 Customer identity is `(merchant_id, id)`, where `id` is the stable subject UUID.
 The same person can hold separate balances, payment methods, subscriptions and
@@ -32,13 +32,10 @@ Catalog application receipts, merchant authoring revisions and price retirement
 history also belong to this baseline. Receipt identity is permanent and immutable;
 billing archive version 2 preserves receipts and revisions with the catalog.
 Authored-write triggers serialize catalog changes with merchant revision checks,
-and restore occupancy includes the receipt ledger. Runtime grants allow receipt
-reads/inserts without allowing receipt updates/deletes. These additions do not
-provide an upgrade path for an earlier pre-v1 database or relabel its ledger.
+and restore occupancy includes the receipt ledger. Immutability triggers allow
+receipt reads/inserts without allowing receipt updates/deletes.
 
 Apply the baseline to a new database or explicitly disposable task-owned schema.
-Do not relabel an old migration ledger as current. Normal startup migration
-verification remains in place to reject mismatched artifacts. Tests use the
-actual migrator, PostgreSQL 18 and the enforcing application role; schema checks
-cover customer keys, operational relationships and deliberate immutable-history
-exceptions, alongside shared-subject HTTP and embedded workflows.
+Do not relabel an old migration ledger as current. migratekit's strict
+integrity refuses an applied migration whose content changed unless the schema
+still equals a fresh build of it. Tests use the actual migrator and PostgreSQL 18.

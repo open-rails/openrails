@@ -74,5 +74,5 @@ LIMIT 50;
 "
 
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  psql -U admin -d openrails_db -v ON_ERROR_STOP=1 \
+  psql -U "${DB_USERNAME:-app}" -d openrails_db -v ON_ERROR_STOP=1 \
   -v e2e_run_id="$E2E_RUN_ID" -v e2e_user_id="$E2E_USER_ID" <<<"$SQL"

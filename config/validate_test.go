@@ -42,8 +42,6 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		"quiescence sub-second":  {func(c *Config) { c.ProviderBillingQuiescenceInterval = "500ms" }, "at least one second"},
 		"quiescence fractional":  {func(c *Config) { c.ProviderBillingQuiescenceInterval = "1500ms" }, "whole seconds"},
 		"reconcile typo":         {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
-		"default db user":        {func(c *Config) { c.DB.Username = " admin " }, "default database credentials"},
-		"default db password":    {func(c *Config) { c.DB.Password = "admin_password" }, "default database credentials"},
 		"db missing":             {func(c *Config) { c.DB = nil }, "database configuration is required"},
 		"db url undeterminable":  {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
 		"db schema injection":    {func(c *Config) { c.DB.Schema = "bill;drop" }, "not a valid Postgres identifier"},

@@ -16,21 +16,18 @@ var migrationSchemaName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 // MigrationOptions selects the billing namespace and River ownership. Use the
 // same Schema and River values in the runtime configuration and Options.River.
-// The zero value creates billing tables in billing and manages River in public,
-// without provisioning access for a runtime login.
+// The zero value creates billing tables in billing and manages River in public.
 type MigrationOptions struct {
 	Schema string
 	River  RiverOwnership
-	// RuntimePool identifies the host login to receive direct runtime access.
-	// Omit it to apply schema migrations only. The host owns its credentials.
-	RuntimePool *pgxpool.Pool
 }
 
-// ApplyMigrations initializes OpenRails-owned database objects using a privileged
-// pool. Hosts never import migration files or construct a River migrator. With
-// RiverFromHost, River migration and access policy remain entirely host-owned.
-// RiverFromHost(nil) is sufficient here; only New needs the live client binder.
-// AuthKit is initialized separately through its own embedded migration API.
+// ApplyMigrations creates OpenRails' database objects through the host's pool.
+// That pool's role owns them, so the same role runs OpenRails with no grants.
+// Hosts never import migration files or construct a River migrator. With
+// RiverFromHost, River migration remains host-owned; RiverFromHost(nil) is
+// sufficient here, only New needs the live client binder. AuthKit is
+// initialized separately through its own migration API.
 func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOptions) error {
 	if pool == nil {
 		return fmt.Errorf("openrails embed: postgres pool is required")
@@ -43,7 +40,7 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOpti
 	if err != nil {
 		return err
 	}
-	return migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema, HostRiver: opts.River.host, RuntimePool: opts.RuntimePool})
+	return migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema, HostRiver: opts.River.host})
 }
 
 func validateMigrationSchema(schema string) (string, error) {

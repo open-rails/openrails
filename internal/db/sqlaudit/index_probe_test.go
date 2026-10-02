@@ -26,8 +26,7 @@ func TestIndexAvailabilityProbeRejectsMissingPredicateIndex(t *testing.T) {
 	_, err = conn.Exec(ctx, `BEGIN;
 		CREATE TABLE openrails.audit_index_probe (id bigint PRIMARY KEY, merchant_id uuid, needle text);
 		CREATE INDEX ON openrails.audit_index_probe(id) WHERE true;
-		CREATE INDEX ON openrails.audit_index_probe(id) WHERE id IS NOT NULL;
-		GRANT SELECT ON openrails.audit_index_probe TO openrails_app;`)
+		CREATE INDEX ON openrails.audit_index_probe(id) WHERE id IS NOT NULL;`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +40,7 @@ func TestIndexAvailabilityProbeRejectsMissingPredicateIndex(t *testing.T) {
 		if indexed {
 			// A one-row table makes a normal sequential scan cheaper. That cost
 			// choice must not conceal the useful index from an availability probe.
-			if _, err := conn.Exec(ctx, `RESET ROLE;
-				CREATE INDEX ON openrails.audit_index_probe(needle);
+			if _, err := conn.Exec(ctx, `CREATE INDEX ON openrails.audit_index_probe(needle);
 				INSERT INTO openrails.audit_index_probe(id,needle) VALUES(1,'present');
 				ANALYZE openrails.audit_index_probe;`); err != nil {
 				t.Fatal(err)

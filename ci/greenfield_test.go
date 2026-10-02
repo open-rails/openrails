@@ -52,9 +52,8 @@ func newFixture(t *testing.T) *fixture {
 	// constructed.
 	for range 2 {
 		require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{
-			Schema:      f.schema,
-			River:       embed.RiverManagedByOpenRails(f.schema),
-			RuntimePool: pool,
+			Schema: f.schema,
+			River:  embed.RiverManagedByOpenRails(f.schema),
 		}))
 	}
 	return f

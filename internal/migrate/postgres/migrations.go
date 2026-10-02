@@ -1,8 +1,7 @@
+// Package postgresmigrations embeds OpenRails' PostgreSQL migrations.
 package postgresmigrations
 
-import (
-	"embed"
-)
+import "embed"
 
-//go:embed *.sql
+//go:embed *.up.sql
 var FS embed.FS

@@ -15,7 +15,7 @@ import (
 // read by Load.
 var composeOnlyEnvVars = map[string]bool{
 	"OPENRAILS_HOST_PORT": true, "POSTGRES_HOST_PORT": true, "GARNET_HOST_PORT": true,
-	"AUTHKIT_KEYS_HOST_DIR": true, "DB_ADMIN_PASSWORD": true,
+	"AUTHKIT_KEYS_HOST_DIR": true,
 }
 
 // or#915: .env.example must be bootable as-is. Every var routes to a real

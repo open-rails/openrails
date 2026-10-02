@@ -29,7 +29,7 @@ import (
 // mints real user tokens over the shared AuthKit schema.
 func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) controlplane.Options) *controlplane.ControlPlane {
 	t.Helper()
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	rt, err := embed.New(t.Context(), embed.Options{
 		Config: &config.Config{
 			TestMode:          config.CredentialPostureSandbox,

@@ -39,8 +39,7 @@ func (n planNode) walk(fn func(planNode)) {
 }
 
 // PrepareSession puts the connection in the state production actually runs in:
-// the unprivileged openrails_app role with the merchant GUC set, so
-// current_merchant_id() predicates plan as they run.
+// the merchant GUC set, so current_merchant_id() predicates plan as they run.
 //
 // This probes index availability, not production plan cost. Empty-table row
 // width estimates can favor a sequential EXISTS scan despite a usable index.
@@ -49,7 +48,6 @@ func (n planNode) walk(fn func(planNode)) {
 // Actual workload performance is covered by the populated query/perf harness.
 func PrepareSession(ctx context.Context, conn *pgx.Conn) error {
 	stmts := []string{
-		`SET ROLE openrails_app`,
 		`SELECT set_config('app.merchant_id', '` + AuditMerchantID + `', false)`,
 		`SET search_path = openrails, public`,
 		`SET enable_seqscan = off`,

@@ -3,10 +3,10 @@
 //
 // A ledger is a (merchant, currency) pair. Accounts belong to one ledger;
 // transfers move an amount debit->credit within one ledger and are immutable
-// (the openrails_app role is granted SELECT,INSERT only). Balances are maintained
-// on account counters, with transfers as the immutable truth. Every transfer is
-// posted (single-phase): the admission hold lives in Redis (#513), never as an
-// in-ledger pending (the two-phase apparatus was retired, migration 014).
+// (a trigger refuses UPDATE and DELETE). Balances are maintained on account
+// counters, with transfers as the immutable truth. Every transfer is posted
+// (single-phase): the admission hold lives in Redis (#513), never as an
+// in-ledger pending.
 package ledger
 
 import (

@@ -746,7 +746,7 @@
       "type MerchantConfig = boot.MerchantConfig",
       "type MerchantDeclaration struct {\n\tSlug   string\n\tConfig MerchantConfig\n\tPSPs   []PSPDeclaration\n\n\tMetadataApplication *openrails.MerchantConfigurationApplyParams\n}",
       "type MerchantProfileConfig = boot.MerchantProfileConfig",
-      "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n\n\tRuntimePool *pgxpool.Pool\n}",
+      "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n}",
       "type Options struct {\n\tVaultClient *vaultapi.Client\n\n\tProviderCredentials []ProviderCredentialSnapshot\n\n\tAuth *billingauth.Integration\n\n\tMerchant *MerchantDeclaration\n\n\tHTTP *HTTPConfig\n\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tNMITransport http.RoundTripper\n\n\tDNSResolver *net.Resolver\n\n\tClock clockwork.Clock\n\n\tUserDirectory    openrails.UserDirectory\n\tUsernameResolver openrails.UsernameResolver\n}",
       "type PSPConfig = boot.PSPConfig",
       "type PSPDeclaration = hosttools.PSPDeclaration",
@@ -1571,13 +1571,6 @@
       "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
       "type SecretRef struct {\n\tRetired    bool   `json:\"-\"`\n\tName       string `json:\"name\"`\n\tMinVersion int    `json:\"version\"`\n\tCustody    string `json:\"custody,omitempty\"`\n}",
       "type pspEvidence struct {\n\tWebhookEndpointID    string               `json:\"webhook_endpoint_id,omitempty\"`\n\tRetiredCredentials   map[string]bool      `json:\"retired_credentials,omitempty\"`\n\tCredentialCustody    string               `json:\"credential_custody,omitempty\"`\n\tRevision             int64                `json:\"configuration_revision,omitempty\"`\n\tCredentialRefs       map[string]SecretRef `json:\"credential_refs,omitempty\"`\n\tPublicConfig         map[string]string    `json:\"public_config,omitempty\"`\n\tCredentialsValidated bool                 `json:\"credentials_validated,omitempty\"`\n\n\tCredentialVersions map[string]int `json:\"credential_versions,omitempty\"`\n}"
-    ],
-    "internal/migrate": [
-      "type AppliedMigration struct {\n\tKey            string `json:\"key\"`\n\tFilename       string `json:\"filename\"`\n\tContentSHA256  string `json:\"content_sha256\"`\n\tSemanticSHA256 string `json:\"semantic_sha256\"`\n\tStatus         string `json:\"status\"`\n\tError          string `json:\"error,omitempty\"`\n}",
-      "type EmbeddedMigration struct {\n\tKey            string `json:\"key\"`\n\tFilename       string `json:\"filename\"`\n\tContentSHA256  string `json:\"content_sha256\"`\n\tSemanticSHA256 string `json:\"semantic_sha256\"`\n}",
-      "type EmbeddedResetPlan struct {\n\tTarget       string   `json:\"target\"`\n\tSchemaExists bool     `json:\"schema_exists\"`\n\tLedgerExists bool     `json:\"ledger_exists\"`\n\tLedgerRows   []string `json:\"ledger_rows\"`\n}",
-      "type MigrationDrift struct {\n\tKind     string `json:\"kind\"`\n\tKey      string `json:\"key\"`\n\tFilename string `json:\"filename,omitempty\"`\n\tExpected string `json:\"expected,omitempty\"`\n\tActual   string `json:\"actual,omitempty\"`\n}",
-      "type PostgresStatus struct {\n\tApp      string              `json:\"app\"`\n\tSchema   string              `json:\"schema\"`\n\tExact    bool                `json:\"exact\"`\n\tEmbedded []EmbeddedMigration `json:\"embedded\"`\n\tApplied  []AppliedMigration  `json:\"applied\"`\n\tMissing  []EmbeddedMigration `json:\"missing\"`\n\tOrphaned []AppliedMigration  `json:\"orphaned\"`\n\tDrift    []MigrationDrift    `json:\"drift\"`\n}"
     ],
     "internal/modules/abuse": [
       "type WindowUsage struct {\n\tKey        string `json:\"key\"`\n\tCurrency   string `json:\"currency\"`\n\tWindow     string `json:\"window\"`\n\tUsed       int64  `json:\"used\"`\n\tLimit      int64  `json:\"limit\"`\n\tOverBudget bool   `json:\"over_budget\"`\n}"
@@ -3677,28 +3670,6 @@
       "strings": "strings",
       "url": "net/url",
       "uuid": "github.com/google/uuid"
-    },
-    "internal/migrate/reset.go": {
-      "config": "github.com/open-rails/openrails/config",
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "net": "net",
-      "postgresmigrations": "github.com/open-rails/openrails/internal/migrate/postgres",
-      "strconv": "strconv",
-      "strings": "strings",
-      "url": "net/url",
-      "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/migrate/status.go": {
-      "config": "github.com/open-rails/openrails/config",
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "migratekit": "github.com/open-rails/migratekit",
-      "postgresmigrations": "github.com/open-rails/openrails/internal/migrate/postgres",
-      "sql": "database/sql",
-      "strings": "strings"
     },
     "internal/modules/abuse/wasted_spend.go": {
       "context": "context",
@@ -5802,12 +5773,7 @@
     "internal/intents/rate_ceiling.go": "09ffa49b9d04589a53703c7982157f2d4a35ebaeb9f8c7d2a18c4e4b3d6f2d1a",
     "internal/merchanttarget/target.go": "eec1601b9945ad63c5d73866df550bcc2f53218d54708ff6e7d956ce03667820",
     "internal/migrate/postgres/0001_schema.up.sql": "480ef226b5f1bc9c30904f36e4f1dc749e014c7069d5585e9aea9b8fe540e81b",
-    "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
-    "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
-    "internal/migrate/postgres/owned_tables.go": "9436232848dfba06d4d493e0ac9312984077fedefd422d9b3bc7a4f1d92acd04",
-    "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
-    "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
-    "internal/migrate/postgres/unique_scope_exemptions.go": "9d91ef59043f89f64c0a1cd56167c9a848fe977af6cb04533ae3248dd0a3ab43",
+    "internal/migrate/postgres/migrations.go": "4f095c84f5e99b7b8383e7da326310637dd1f1dc28111818be7ab973cff2e712",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/initial_membership_new_card.go": "84f53897b2b8d869ec0832aebd4dcf4891e5ab46caeac4f6e229a88ac8d67f4c",
     "internal/modules/checkout/session_service.go": "832f14c6c3e9b40996cc0a09e14e220e9dd3134359ea7589e890141fa05b6678",

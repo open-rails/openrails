@@ -25,17 +25,17 @@ Postgres specifics worth knowing:
 - There is no row-level security. Merchant isolation is the explicit
   `merchant_id` (or `psp_id`) predicate on every tenant query, backed by
   composite foreign keys, so it does not depend on the login's flags. Run
-  MIGRATIONS as a privileged owner and the SERVER as the normal host login. The
+  migrations and the server as the same role: it owns what it creates. The
   cross-merchant directory functions (webhook routing by PSP, the hosted
   portal's merchant list) are `SECURITY DEFINER`.
 - Security defaults are independent of payment posture. Managed database secrets
   always require encryption. Local issuer/signing/sender exceptions are explicit
   Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is
   retired and refuses loading rather than silently selecting a weaker posture.
-- Migrations: `openrails migrate up --runtime-database-url "$APP_DATABASE_URL"`
-  provisions direct access for the host login and applies AuthKit, River, and OpenRails
+- Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
   migrations (`internal/migrate/postgres/`, baseline `0001_schema.up.sql`, new ones
   start at `0002`). The server validates at boot and refuses to start behind.
+  `openrails migrate status` reports the ledger against the embedded chain.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on
   `:3053`), `task docker-down` to tear down, `task docker-reset` to recreate the
   database from empty (the baseline was re-squashed prelaunch, so a database

@@ -76,7 +76,7 @@ openrails run-server --config /etc/openrails/config.yaml \
   environment rather than silently disabling the rail. Sandbox is allowed in
   every environment — credential validation, not the env string, keeps it
   honest.
-- Non-default database credentials, and an `https` `auth.issuer`.
+- An `https` `auth.issuer`.
 - **Credential custody**: explicitly select `secret_backend: snapshot`, `vault`,
   or `db`. Managed DB storage requires `ENCRYPTION_MASTER_KEY` (base64, 32-byte
   AES-256) even in sandbox. Snapshot credentials stay in process memory.

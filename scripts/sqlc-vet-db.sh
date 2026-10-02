@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # (Re)creates the throwaway database that `sqlc vet` (db-prepare rule)
 # PREPAREs every query against. Built fresh from the repo's own migrations so
-# vet always checks against exactly what migrations/ defines — never against a
+# vet always checks against exactly what they define — never against a
 # possibly-drifted dev volume.
 #
 #   SQLC_ADMIN_DATABASE_URL  admin connection used to drop/create the vet DB
@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 
 POSTGRES_HOST="${SQLC_POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_HOST_PORT:-5434}"
-ADMIN_URL="${SQLC_ADMIN_DATABASE_URL:-postgres://admin:admin_password@${POSTGRES_HOST}:${POSTGRES_PORT}/openrails_db?sslmode=disable}"
+ADMIN_URL="${SQLC_ADMIN_DATABASE_URL:-postgres://app:app_password@${POSTGRES_HOST}:${POSTGRES_PORT}/openrails_db?sslmode=disable}"
 VET_DB="${SQLC_VET_DB:-openrails_sqlc_vet}"
 
 use_compose_psql=false
@@ -50,19 +50,6 @@ psql_command() {
     fi
 }
 
-psql_file() {
-    local url="$1"
-    local file="$2"
-    shift 2
-    if [ "$use_compose_psql" = true ]; then
-        docker compose -f docker-compose.yaml exec -T postgres \
-            psql -U "$(url_user "$url")" -d "$(url_database "$url")" \
-            -v ON_ERROR_STOP=1 -q "$@" <"$file"
-    else
-        psql "$url" -v ON_ERROR_STOP=1 -q "$@" -f "$file"
-    fi
-}
-
 psql_command "$ADMIN_URL" -v ON_ERROR_STOP=1 -q \
     -c "DROP DATABASE IF EXISTS ${VET_DB}" \
     -c "CREATE DATABASE ${VET_DB}" 1>&2
@@ -75,13 +62,5 @@ VET_URL="$(printf '%s' "$ADMIN_URL" | sed -E "s|(postgres(ql)?://[^/]+/)[^?]+|\1
 # migratekit owns its tracker DDL.
 go run github.com/open-rails/migratekit/cmd/migratekit apply \
     -dsn "$VET_URL" -app openrails -schema openrails -dir internal/migrate/postgres 1>&2
-
-# The audit harness is a host: create its test login independently of migrations.
-psql_command "$VET_URL" -v ON_ERROR_STOP=1 -q -c "DO \$\$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='openrails_app') THEN
-        CREATE ROLE openrails_app LOGIN NOSUPERUSER NOBYPASSRLS;
-    END IF;
-END \$\$;" 1>&2
-psql_file "$VET_URL" internal/migrate/runtime_access.sql -v runtime_user=openrails_app 1>&2
 
 printf '%s\n' "$VET_URL"

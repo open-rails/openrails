@@ -229,7 +229,7 @@ func prepareWorld(t *testing.T, maxConns int32, configure ...func(*config.Config
 		pool.Close()
 	})
 	t.Cleanup(w.checkMoneyInvariants)
-	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{Schema: w.schema, River: embed.RiverFromHost(), RuntimePool: pool}))
+	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{Schema: w.schema, River: embed.RiverFromHost()}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, w.schema))
 	return w
 }

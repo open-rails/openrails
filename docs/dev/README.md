@@ -30,24 +30,16 @@ Local provider-development helpers (`tunnel-webhooks`, `verify-webhook-tunnel`,
 available for explicitly scoped operator work. See
 [local-webhooks.md](local-webhooks.md); these helpers are not merge gates.
 
-## Database roles in local dev
+## Database role in local dev
 
-Two roles, and the split is not cosmetic:
-
-| Role | Used by | Why |
-|---|---|---|
-| `admin` (superuser) | `openrails migrate up`, the compose bootstrap SQL, `scripts/sqlc-vet-db.sh` | DDL, `GRANT`s, role creation |
-| `app` (unprivileged) | **the server, the workers, the CLI — everything else** | the development host login; production chooses its own name |
+One role, `app` (the Compose Postgres user), runs `openrails migrate up`, the
+server, the workers and the CLI. It owns every object it creates; OpenRails
+creates no roles and issues no grants.
 
 There is no row-level security, so the login does not isolate merchants:
 every tenant query must carry its own `merchant_id` (or `psp_id`) predicate,
 backed by composite foreign keys. A query that forgets it reads across
-merchants under either role.
-
-The `openrails-app-login` one-shot Compose service creates the host's regular
-LOGIN before migrations. The migration command receives its connection through
-`--runtime-database-url`; AuthKit and OpenRails then grant their own runtime
-access directly. The libraries create no database roles or memberships.
+merchants.
 
 ## sqlc workflow
 
@@ -78,28 +70,17 @@ does not currently run that task.
 
 `internal/migrate/postgres/0001_schema.up.sql` is a single squashed baseline
 for fresh PostgreSQL 18 databases, including extensions and creator catalogs.
-Schema-shape invariants are enforced by Go tests next to the migration.
 All prerelease databases are disposable; no old-schema upgrade is supported.
-
-Use a fresh database for this pre-v1 hard cut. Do not restamp an old ledger or
-try to upgrade historical schemas; initialization verifies migration identity.
-
-Recreating one:
+A database built by an earlier chain must be wiped: `migrate up` refuses it
+(migratekit strict integrity: the applied `0001` changed and the schema is not
+a fresh build of the new one).
 
 | Database | How |
 |---|---|
 | Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
 | A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
 | A hand-rolled test pool | Provision a new disposable database. The greenfield suite creates a fresh schema per test. Never clear another library's shared ledger rows. |
-| An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then run `task db-reset-embedded DSN='…'`. It is plan-only by default and prints the exact `host:port/database` allow-list entry and confirmation token. To apply, set that entry in `OPENRAILS_RESET_TARGETS` and rerun with `CONFIRM='…'`; the schema drop and exact OpenRails/Postgres/schema ledger delete commit together. Restart the host so it re-applies the chain. |
-
-You will not have to notice this yourself: the engine REFUSES to start when the
-ledger records migrations the build no longer carries (`OrphanedMigrationsError`,
-or#901/upstream#1627), on both the standalone `migrate up` path and the embedded
-runtime-init path. Before that fence existed the symptom was not a migration
-error but a schema that silently lacked whatever the squash folded in — upstream#1627
-was an embedded host answering 500 on every billed admission for hours while
-both of migratekit's checks reported success.
+| An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then `DROP SCHEMA billing CASCADE; DELETE FROM public.migrations WHERE app = 'openrails' AND schema = 'billing';` (use the configured schema). Restart the host so it re-applies the chain. |
 
 ## Repo layout
 

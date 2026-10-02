@@ -212,12 +212,10 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
 			return "", nil
 		}
-		// DB_ADMIN_PASSWORD belongs to the privileged migration role and is a
-		// docker-compose interpolation var, never server config.
 		// VAULT_SECRETS_PATH is consumed directly by config.SecretFiles, not a
-		// vault.* field. Without these skips the strict unmarshal would refuse
-		// boot on db.admin_password / vault.secrets_path.
-		if upperKey == "DB_ADMIN_PASSWORD" || upperKey == "VAULT_SECRETS_PATH" {
+		// vault.* field. Without this skip the strict unmarshal would refuse
+		// boot on vault.secrets_path.
+		if upperKey == "VAULT_SECRETS_PATH" {
 			return "", nil
 		}
 

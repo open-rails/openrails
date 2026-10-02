@@ -1207,9 +1207,6 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
 	}
 
-	if cfg.DB != nil && (strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password") {
-		return fmt.Errorf("default database credentials are not allowed")
-	}
 	if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
 		return fmt.Errorf("rate_limits is required unless rate_limits_disabled is explicitly set for a host-owned limiter")
 	}
