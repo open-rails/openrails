@@ -7,12 +7,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 func TestEveryOwnedTableHasOneArchiveDecision(t *testing.T) {
 	owned := map[string]bool{}
-	for _, name := range postgresmigrations.OwnedTables {
+	for _, name := range ownedTables {
 		owned[name] = true
 	}
 	decided := map[string]bool{}

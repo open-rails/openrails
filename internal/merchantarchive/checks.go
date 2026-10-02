@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -116,7 +115,7 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 		known[t] = true
 	}
 	rows, err := tx.Query(ctx, `SELECT c.relname,a.attname IS NOT NULL FROM pg_class c LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
-		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND c.relkind IN ('r','p') AND c.relname=ANY($1) ORDER BY c.relname`, postgresmigrations.OwnedTables)
+		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND c.relkind IN ('r','p') AND c.relname=ANY($1) ORDER BY c.relname`, ownedTables)
 	if err != nil {
 		return err
 	}

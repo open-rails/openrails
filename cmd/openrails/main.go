@@ -109,17 +109,12 @@ func newRootCmd() *cobra.Command {
 	}
 	workerCmd.Flags().String("merchant-manifest", "", "Merchant manifest converged before starting workers (default: the conventional "+bootstrap.DefaultMerchantConfigManifestPath+" when present; an explicit path must exist)")
 
-	// migrate needs the owner role (or#888): it runs DDL and provisions direct
-	// access for the host runtime login. It opens its own handle in
-	// internal/migrate; every other command that touches merchant rows goes
-	// through openCLIDB.
+	// migrate opens its own handle; every other command that touches merchant
+	// rows goes through openCLIDB.
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Manage all database tables",
 	}
-
-	var runtimeDatabaseURL string
-	migrateCmd.PersistentFlags().StringVar(&runtimeDatabaseURL, "runtime-database-url", "", "Host runtime database connection to provision with library access")
 
 	migrateUpCmd := &cobra.Command{
 		Use:   "up",
@@ -127,7 +122,7 @@ func newRootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
-			return applyStandaloneMigrations(ctx, cfg, runtimeDatabaseURL)
+			return applyStandaloneMigrations(ctx, cfg)
 		},
 	}
 
@@ -137,7 +132,7 @@ func newRootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
-			return applyStandaloneMigrations(ctx, cfg, runtimeDatabaseURL)
+			return applyStandaloneMigrations(ctx, cfg)
 		},
 	}
 
@@ -439,23 +434,15 @@ func runWorker(cmd *cobra.Command, args []string) error {
 }
 
 // The CLI is the standalone composition root: billing and AuthKit initialize
-// independently through their owning libraries, using migration credentials.
-func applyStandaloneMigrations(ctx context.Context, cfg *config.Config, runtimeURL string) error {
+// independently through their owning libraries, as the role the server runs as.
+func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
 	pool, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
 	if err != nil {
-		return fmt.Errorf("standalone identity migration pool: %w", err)
+		return fmt.Errorf("standalone migration pool: %w", err)
 	}
 	defer pool.Close()
-	var runtime *pgxpool.Pool
-	if runtimeURL != "" {
-		runtime, err = pgxpool.New(ctx, runtimeURL)
-		if err != nil {
-			return fmt.Errorf("standalone runtime pool: %w", err)
-		}
-		defer runtime.Close()
-	}
-	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: cfg.DB.SchemaName(), RuntimePool: runtime}); err != nil {
+	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: cfg.DB.SchemaName()}); err != nil {
 		return err
 	}
-	return standalonedb.ApplyAuthKit(ctx, pool, runtime)
+	return standalonedb.ApplyAuthKit(ctx, pool)
 }

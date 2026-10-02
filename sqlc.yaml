@@ -3,7 +3,7 @@ sql:
   - engine: "postgresql"
     queries: "internal/db/queries"
     schema:
-      - "internal/migrate/postgres"
+      - "internal/migrate/postgres/0001_schema.up.sql"
       - "internal/db/schema"
     database:
       uri: "${SQLC_DATABASE_URL}"

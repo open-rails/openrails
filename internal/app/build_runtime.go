@@ -30,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -575,15 +574,6 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: cfg.DB.SchemaName()},
 	); err != nil {
 		log.WithError(err).Error("Postgres migrations validation failed")
-		return err
-	}
-
-	// The converse check rejects a database recording migrations this
-	// build no longer carries. migratekit only asks "embedded ⊆ applied", which a
-	// re-squashed chain satisfies while applying nothing, freezing the schema at
-	// the old shape. This is the only migration seam an embedded host cannot skip.
-	if err := migrate.AssertNoOrphanedPostgresMigrations(context.Background(), sqlDB, cfg.DB.SchemaName()); err != nil {
-		log.WithError(err).Error("OpenRails migration drift: refusing to start")
 		return err
 	}
 

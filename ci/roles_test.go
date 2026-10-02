@@ -26,7 +26,7 @@ import (
 // credential hands out only a role its grants cover.
 func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	rt, err := embed.New(t.Context(), embed.Options{
 		Config: &config.Config{
 			TestMode:          config.CredentialPostureSandbox,

@@ -38,9 +38,8 @@ var NeverRollbackableTables = map[string]string{
 // in substance — `maintenance_runs` and `destructive_run_before_images` — are
 // absent from the register on purpose. They are the undo's own bookkeeping
 // (status/reversed_at, restored_at), and the schema already holds the line
-// harder than a name list could: both carry COLUMN-level UPDATE grants, so
-// openrails_app cannot rewrite a run's identity or a captured image even by
-// accident. See migration 0018 and 0030.
+// harder than a name list could: guard_billing_fact_columns triggers on both
+// refuse any rewrite of a run's identity or a captured image.
 
 // rail_intents is deliberately NOT in the register even though the spec lists it
 // as Class A, and the distinction is the single most valuable thing tier 1 does:

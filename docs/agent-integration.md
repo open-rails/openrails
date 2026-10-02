@@ -42,9 +42,9 @@ Do not guess these; ask:
 Follow [embedded-integration.md](embedded-integration.md) section by section. The
 milestone order, each verifiable before the next:
 
-1. **Migrations.** Call `embed.ApplyMigrations` with a privileged pool.
+1. **Migrations.** Call `embed.ApplyMigrations` with the pool the runtime will use.
    OpenRails owns and applies its embedded billing and managed River schemas.
-   Verify: the `openrails` schema exists.
+   Verify: the `billing` schema (or the configured one) exists.
 2. **Boot.** Programmatic `config.Config` (explicit `TestMode`,
    `ProviderWriteMode`), `embed.New` with the host's pgx pool. Verify: boot succeeds;
    a missing posture field refuses to boot (that is correct behavior, not a bug).

@@ -126,7 +126,7 @@ derives the windows. `Client.ImportBilling` posts the same book over
 The ordered phases, from a production host that migrated many years of legacy
 billing data over this seam:
 
-1. **Apply migrations.** Call `embed.ApplyMigrations` with a privileged pool;
+1. **Apply migrations.** Call `embed.ApplyMigrations` with the pool the runtime will use;
    OpenRails owns and applies its billing baseline and managed River tables.
    Apply your application schemas separately, then validate the target shape
    before writing anything.

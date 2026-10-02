@@ -32,7 +32,7 @@ import (
 // enrollments.
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	attach := func(auth hostconfig.AuthConfig) (*controlplane.ControlPlane, error) {
 		t.Helper()
 		rt, err := embed.New(t.Context(), embed.Options{

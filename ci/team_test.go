@@ -32,7 +32,7 @@ import (
 // where the posture mints one), and no role.
 func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	for _, hosted := range []bool{false, true} {
 		name := "standalone"
 		if hosted {

@@ -28,7 +28,7 @@
 # up to date before merging", which forces the re-run; see or#919.
 #
 # WHAT IT DOES NOT CHECK. Duplicates WITHIN one tree are migratekit's own
-# LoadFromFS refusal (v1.4.0+), and lock-safety is scripts/migration-lint.sh.
+# LoadFromFS refusal (v1.4.0+).
 # This repo does not enforce a gapless chain (migratekit v1.4.0, no
 # CheckChain/WithStrictOrdering), so gaps are not this script's business either.
 # The one question here is the one nothing else answers: what does master hold

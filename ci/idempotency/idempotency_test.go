@@ -64,7 +64,7 @@ func newEnv(t *testing.T) *env {
 		_, _ = admin.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{e.schema}.Sanitize()+" CASCADE")
 		admin.Close()
 	})
-	require.NoError(t, embed.ApplyMigrations(t.Context(), admin, embed.MigrationOptions{Schema: e.schema, River: embed.RiverFromHost(), RuntimePool: admin}))
+	require.NoError(t, embed.ApplyMigrations(t.Context(), admin, embed.MigrationOptions{Schema: e.schema, River: embed.RiverFromHost()}))
 	e.merchant = e.newMerchant()
 	for i := range e.replicas {
 		config, err := pgxpool.ParseConfig(dsn)

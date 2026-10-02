@@ -58,7 +58,7 @@ millicents. Cents and decimal major units exist only at rail boundaries.
 | MONEY-6 | Decimal strings parse via exact rational (`big.Rat`), half-away-from-zero, with an int64-overflow error. | `moneyutil.go:28-41,112-141` | APP | `internal/shared/moneyutil/money_test.go` `TestParseDecimalToCents` pins rounding, MinInt64 and overflow; `internal/modules/webhooks/nmi_test.go` `TestNMITransactionAmountCents` covers the provider path |
 | MONEY-7 | Provider-boundary money coverage is partial. The focused contract pins exact parsing and currency conversion; it does not enumerate or pin every provider wire call site. | `ci/money_test.go` | **T** for the cases asserted | `go test -tags greenfield ./ci -run TestExactIntegerMoneyBoundaries` covers rounding, overflow, unknown currencies, USD sub-cent rejection, and JPY scaling. The former AST boundary registry was removed with the legacy suite. Provider request formatting, call-site completeness, and Solana Pay formatter coverage remain separate gaps; see GAP-15. |
 | MONEY-8 | `ledger_transfers.amount > 0`; `allow_debit_negative_up_to >= 0`. | `ledger_transfers_amount_positive`, `ledger_transfers_debit_floor_nonnegative` | **DB** | `SELECT count(*) FROM billing.ledger_transfers WHERE amount<=0;` → 0 |
-| MONEY-9 | `payments.amount` deliberately has **no** non-negative CHECK — refunds are negative rows — and a test forbids adding one. | `internal/migrate/postgres/amount_checks_test.go` (`assertNoPaymentsAmountCheck`) | **T** | `go test ./internal/migrate/postgres -run TestAmountValueChecks`. or#865: previously matched two literal constraint names in the baseline only, so the same CHECK added in a **later migration** or under Postgres' **generated** name passed silently — the two ways it would actually break. Now every migration file is scanned and the match is on the predicate as well as the name, anchored so `invoice_payments_amount_positive_chk` (a different table, legitimately positive-only) is not a false positive. Both holes proven to fail. Still static text, not a live `pg_constraint` query |
+| MONEY-9 | `payments.amount` deliberately has **no** non-negative CHECK — refunds are negative rows. | `0001_schema.up.sql` | **convention** | The former migration-text guard (`TestAmountValueChecks`) was removed with the legacy suite; nothing automated forbids adding one. `SELECT conname FROM pg_constraint WHERE conrelid='billing.payments'::regclass AND contype='c';` must list no amount CHECK. |
 | MONEY-10 | Amount CHECKs hold across prices, grants, invoices, invoice items/payments, usage events, credit limits, rating watermarks. | `0001_schema.up.sql` (the `*_amount_*` CHECKs) | **DB** | `SELECT conname FROM pg_constraint WHERE contype='c' AND connamespace='billing'::regnamespace;` |
 
 ## 2. Currency
@@ -73,7 +73,7 @@ substitute a default currency because one was not supplied.
 | CUR-3 | **FX is forbidden inside the ledger.** A transfer whose account currency differs from the transfer currency raises. | trigger `ledger_transfers_apply_counters()`, wired `trg_ledger_transfers_apply_counters` | **DB** | attempt a cross-currency transfer in psql → must raise |
 | CUR-4 | FX is not merely forbidden but absent — the `fx_liquidity` account type has no non-declaration call site. | `ledger_accounts_type_check`; `money/ledger/ledger.go:39` | **C** | `grep -rn "FXLiquidity" --include=*.go \| grep -v _test` → the declaration only, zero call sites. True by habit, not structure: `ledger.FXLiquidity` is an ordinary exported const and passing it to `ensureAccount` compiles |
 | CUR-5 | Currency **membership** comes from a Go registry with per-currency internal and rail decimals; the DB does not encode membership (it would need a migration per currency). | `internal/modules/money/currency.go:11-13,26-30` | APP | `money.ValidateCurrency` |
-| CUR-5b | Currency **shape and case** are Postgres-enforced on all 16 currency columns: upper-case `[A-Z0-9]{3,12}`. | constraint `<table>_currency_shape` | **DB** + **T** | `SELECT count(*) FROM pg_constraint WHERE conname LIKE '%_currency_shape';` → 16; `go test ./internal/migrate/postgres -run TestCurrencyColumnsCarryShapeCheck` |
+| CUR-5b | Currency **shape and case** are Postgres-enforced on all 16 currency columns: upper-case `[A-Z0-9]{3,12}`. | constraint `<table>_currency_shape` | **DB** | `SELECT count(*) FROM pg_constraint WHERE conname LIKE '%_currency_shape';` → 16 (the former `TestCurrencyColumnsCarryShapeCheck` was removed with the legacy suite) |
 | CUR-6 | **UPPER case is the canonical internal form.** Established at the two INSERT chokepoints (`paymentInsertParams` behind both payment inserts; `PriceService.Create` behind every price insert) and at each provider INGESTION boundary, with the CUR-5b CHECK as the backstop that catches anything reaching the DB by another route. Lowercase survives ONLY where a rail wire demands it, at three sites that say so: Stripe's catalog and invoice APIs, and the FX endpoint. | `moneyutil.NormalizeCurrency` (ONE definition, in the leaf so the repo chokepoints can reach it); `payments/payment_repo.go`, `catalog/price.go`; ingestion `webhooks/ccbill.go` `requireCCBillCurrency`, `reconcile/unknown_orchestration.go`; wire exceptions `catalog/stripe_catalog.go`, `subscriptions/stripe_invoice_collection.go`, `fx/exchange_api.go` `fetchRate` | APP (chokepoint) + **DB** | `SELECT DISTINCT currency FROM billing.payments;` → all upper |
 | CUR-7 | Billing surfaces require a registered currency. | `RequireBillingCurrency`, `internal/modules/money/currency.go` | APP | `grep -rn "RequireBillingCurrency"` |
 | CUR-8 | Service entry points require a REGISTERED currency — `"XYZ"` no longer passes. It is still a helper an entry point can forget to call, so total enforcement lives where it cannot be bypassed: every off-session charge is registry-validated at `ScopedCharger.Prepare`, and every internal→rail conversion refuses an unregistered currency by construction. | `internal/service/currency.go`; `money/collection.go`; `moneyutil.NativeToRailMinor*` | APP at the entry point, **S** at the charge/convert boundary | `go test ./internal/service -run TestRequireCurrencyConsultsTheRegistry`; `go test ./internal/modules/money -run RefusesUnestablishedCurrency` |
@@ -90,12 +90,12 @@ operation. OpenRails does not install RLS policies or rely on login flags.
 | TEN-1 | All tenant tables have a non-null merchant coordinate; the fresh schema has no RLS policies/flags. | migration schema guards | `TestTEN1_ExplicitScopeSchemaWithoutRLS` |
 | TEN-2 | Foreign or missing merchant scope cannot read or modify a tenant resource, including with the owning connection. | scoped SQL plus service authority checks | `TestTEN2_QueryScopeIndependentOfDatabaseRole`, `TestMerchantScopeWithoutRLS` |
 | TEN-3 | `merchants`, `worker_state`, and `destructive_action_switch` are deliberate global objects. | schema classification | `TestTEN1_ExplicitScopeSchemaWithoutRLS` |
-| TEN-4 | Merchant columns have no implicit/default tenant; cross-resource foreign keys preserve merchant identity. | schema guards and composite FKs | `go test ./internal/migrate/postgres` |
+| TEN-4 | Merchant columns have no implicit/default tenant; cross-resource foreign keys preserve merchant identity. | schema guards and composite FKs | review of `0001_schema.up.sql`; the former migration-text tests were removed |
 | TEN-5 | Tenant services require verified scope; a request body or fetched row cannot mint authority. | `merchant.Require`, route Gate, scoped repositories | public Client/HTTP adversarial tests |
 | TEN-6 | Session merchant state remains transaction-local or bound to a released request connection for explicit GUC predicates and stored functions. It does not filter arbitrary SQL. | `MerchantTx`, `WithMerchantConn` | connection lifecycle tests |
 | TEN-7 | A connection whose merchant-state reset fails is closed rather than reused. | `lazyMerchantPgxConn.release` | connection lifecycle tests |
 | TEN-8 | Initialization and runtime can share one owning application pool; tenant correctness is independent of superuser/BYPASSRLS flags. | runtime construction and SQL scope | owner and normal-login journeys |
-| TEN-9 | Libraries create no database accounts or permission-group roles. A separate runtime login may receive optional direct grants. | migration API `RuntimePool` | provisioning/owner integration tests |
+| TEN-9 | Libraries create no database accounts, roles or grants. The role that applies the migrations owns OpenRails' objects and is the role it runs as. | `embed.ApplyMigrations`, `openrails migrate up` | greenfield fixtures migrate and run on one pool |
 | TEN-10 | Platform directory and worker-discovery scans are explicit; tenant work runs under each authorized merchant's scope. | `GenDirectory`, worker fan-out | destructive ceiling and worker integration tests |
 | TEN-11 | Webhooks resolve the merchant and verify the signature with that merchant's secret before applying evidence. | webhook handlers | signed webhook and provider-collision tests |
 | TEN-12 | Core schema has no foreign keys to AuthKit and does not own host River tables. | portability guards | `TestPortabilityInvariant` |
@@ -155,7 +155,7 @@ All outbound provider mutations post a durable intent first, then execute.
 | ID-8 | Grant termination happens once; `event='grant' ⟺ supersedes_id IS NULL`. | `:1355,:1306` | **DB** |
 | ID-9 | Invoice period, invoice-item source, usage-event, and finding identities are unique per merchant. | `:1552,:1598,:2915,:2617` | **DB** |
 | ID-10 | Merchant slug unique; `api_host` unique among live merchants. | `:272,:276` | **DB** |
-| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`, except reviewed identities.** Cross-merchant uniqueness can reveal another merchant's values through conflicts. | `internal/migrate/postgres/unique_scope_exemptions.go` records the reviewed exceptions. The former migration-text and live `pg_indexes` guards were removed with the legacy suite; current index definitions need independent review. | **DB** for existing indexes; automated scope audit is a coverage gap |
+| ID-11 | **Every UNIQUE index on a merchant-owned table is scoped by `merchant_id`, except reviewed identities.** Cross-merchant uniqueness can reveal another merchant's values through conflicts. | The reviewed exceptions are listed with the ID-11 audit query below. The former migration-text and live `pg_indexes` guards were removed with the legacy suite; current index definitions need independent review. | **DB** for existing indexes; automated scope audit is a coverage gap |
 
 ## 7. Fail-closed posture
 
@@ -310,8 +310,17 @@ SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname='billing' AND c.relkind='r' AND (c.relrowsecurity OR c.relforcerowsecurity);
 
 -- ID-11 (was GAP-10): unique indexes not scoped by merchant.
--- Expect ONLY surrogate-id *_pkey rows plus the named exceptions in
--- internal/migrate/postgres/unique_scope_exemptions.go.
+-- Expect ONLY surrogate-id *_pkey rows plus these reviewed exceptions:
+--   global directory: uq_merchants_live_slug, merchant_slug_aliases_pkey (one
+--     name namespace), uq_merchants_api_host (routes unauthenticated webhooks),
+--     uq_merchants_permission_group_id (org<->merchant is 1:1),
+--     uq_destructive_action_switch_singleton (instance kill switch);
+--   keyed on a merchant-owned surrogate: uq_grants_termination,
+--     uq_subscription_reprices_one_scheduled, unique_prices_product_amount_window;
+--   globally unique by construction: solana_subscriptions_subscription_pda_key,
+--     uq_checkout_sessions_solana_signature, uq_solana_pay_receipts_transfer
+--     (on-chain), uq_psps_identity, uq_custodians_identity (one provider
+--     account belongs to one merchant).
 SELECT indexdef FROM pg_indexes WHERE schemaname='billing'
    AND indexdef LIKE '%UNIQUE%' AND indexdef NOT LIKE '%merchant_id%';
 

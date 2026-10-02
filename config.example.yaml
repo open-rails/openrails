@@ -33,7 +33,7 @@ db:
   host: localhost
   port: "5434"
   database: openrails_db
-  # The runtime login; the privileged role is for `openrails migrate up` only.
+  # One role for `openrails migrate up` and the server: it owns what it creates.
   # Merchant isolation is per-query merchant predicates, not login flags.
   username: app
   password: app_password

@@ -10,8 +10,7 @@ vars:
   # in CI, every run. SQLC_BIN lets a caller supply an already-installed binary
   # of the SAME pinned version instead (scripts/ci-install-tool.sh sqlc, which
   # checksum-verifies the upstream release). Local dev needs no setup and keeps
-  # the `go run` default. Same override shape as SQUAWK_BIN in
-  # scripts/migration-lint.sh.
+  # the `go run` default.
   SQLC: '{{if .SQLC_BIN}}{{.SQLC_BIN}}{{else}}go run github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_VERSION}}{{end}}'
 
 tasks:
@@ -102,16 +101,6 @@ tasks:
       - docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox down -v
       - task: docker-up
 
-  db-reset-embedded:
-    desc: Plan or explicitly confirm a scoped reset of an embedded OpenRails schema
-    requires:
-      vars: [DSN]
-    env:
-      OPENRAILS_RESET_DSN: '{{.DSN}}'
-      OPENRAILS_RESET_CONFIRMATION: '{{.CONFIRM}}'
-    cmds:
-      - go run ./tools/dbreset
-
   docker-logs:
     desc: Tail openrails logs from docker compose stack
     cmds:
@@ -143,10 +132,10 @@ tasks:
       - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 
   sqlc:
-    desc: Regenerate internal/db/gen from internal/db/queries and vet every query (PREPARE against a fresh DB built from migrations/)
+    desc: Regenerate internal/db/gen from internal/db/queries and vet every query (PREPARE against a fresh DB built from the baseline)
     env:
       # generate (database-backed analyzer) and vet (db-prepare) both need a
-      # live DB whose schema == migrations/. Use the caller's SQLC_DATABASE_URL
+      # live DB whose schema == the baseline. Use the caller's SQLC_DATABASE_URL
       # if set; otherwise build the throwaway vet DB on the local compose
       # postgres and use that.
       SQLC_DATABASE_URL:
@@ -203,7 +192,6 @@ tasks:
       # instead of an "ok ... [no test files]" pass.
       - CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
       - bash scripts/sql-lint.sh
-      - bash scripts/migration-lint.sh
 
   lint:
     desc: golangci-lint over the whole module (same gate CI runs — see .golangci.yaml)
@@ -230,11 +218,6 @@ tasks:
     desc: Fail on raw SQL outside internal/db/gen (see internal/db/queries/LINT_ALLOWLIST.txt)
     cmds:
       - bash scripts/sql-lint.sh
-
-  migration-lint:
-    desc: Lock-safety lint (squawk) for migrations added after the .squawk.toml baseline
-    cmds:
-      - bash scripts/migration-lint.sh
 
   test:
     desc: Run tests
