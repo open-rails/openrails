@@ -592,8 +592,6 @@ go get github.com/open-rails/openrails@<published-root-version>
 go mod tidy
 ```
 
-Historical adapter tags remain available, but new releases use only the root tag.
-
 Each adapter registers ordinary method/path routes. Route inspection sees the
 actual endpoints, and unrelated host paths retain the host's normal 404/405
 behavior. The host owns prefix, middleware and server lifecycle. Original request

@@ -1,0 +1,83 @@
+name: Release
+
+# A v* tag publishes the GitHub Release (.goreleaser.yaml): binaries, checksums,
+# SBOMs, generated notes, the @openrails/billing-ui tarball and build
+# provenance. Cut one with `gh workflow run cut-release.yaml -f bump=minor`.
+# Pull requests that change the release build run it as a snapshot.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+    paths:
+      - .goreleaser.yaml
+      - .github/workflows/release.yaml
+      - scripts/build-admin-console.sh
+      - scripts/pack-billing-ui.sh
+      - internal/buildinfo/**
+      - web/admin/embed.go
+      - web/admin/vite.config.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    name: GoReleaser
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # create the release
+      id-token: write # keyless signing of the provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the tag to be on master
+        if: github.event_name == 'push'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master || {
+            echo "::error::$GITHUB_REF_NAME is not on master"
+            exit 1
+          }
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: sdk/billing-ui/package.json
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+
+      - name: Check @openrails/billing-ui
+        working-directory: sdk/billing-ui
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm check
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.18.2
+          args: ${{ github.event_name == 'push' && 'release --clean' || 'release --snapshot --clean --skip=publish,sign' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Attest build provenance
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: List artifacts
+        run: cat dist/checksums.txt

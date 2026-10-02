@@ -15,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails/cmd/openrails/consoleassets"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
@@ -23,8 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/internal/buildinfo"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/standalonedb"
+	"github.com/open-rails/openrails/web/admin"
 )
 
 type standaloneAuthKey struct{}
@@ -45,6 +46,7 @@ func main() {
 var bootNMIProbeV5BaseURL string
 
 func newRootCmd() *cobra.Command {
+	build := buildinfo.Get()
 	rootCmd := &cobra.Command{
 		Use:   "openrails",
 		Short: "OpenRails server",
@@ -80,13 +82,15 @@ func newRootCmd() *cobra.Command {
 			cmd.SetContext(context.WithValue(ctx, standaloneAuthKey{}, cfg.Auth))
 			return nil
 		},
-		Long: "Standalone OpenRails server for payments, credits, usage, and subscriptions",
+		Long:    "Standalone OpenRails server for payments, credits, usage, and subscriptions",
+		Version: build.Version,
 	}
+	rootCmd.SetVersionTemplate(build.String() + "\n")
 
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().
-		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; omission defaults to readonly)")
+		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required to boot)")
 	rootCmd.PersistentFlags().
 		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; posture must be explicit")
 
@@ -137,10 +141,22 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print the version, commit and build date",
+		Args:  cobra.NoArgs,
+		// Needs no config file.
+		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintln(cmd.OutOrStdout(), build)
+		},
+	}
+
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newApplyCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newPruneCmd(), newConvergeCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newSolanaSignerCmd(), newNMICmd(), newSolanaPayCmd())
+	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }
 
@@ -151,6 +167,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read no-workers flag: %w", err)
 	}
 	startWorkers := !noWorkers
+	log.Info(buildinfo.Get().String())
 	config.LogStartupStatus(cfg)
 
 	// xs-007 row 40: the boot waits for the database for as long as it takes
@@ -161,11 +178,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	bootCtx, stopBoot := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopBoot()
 
-	// ConsoleAssets is nil unless this binary was built with
-	// `-tags console_assets` (#754: `task build-console-binary` / Dockerfile).
+	// ConsoleAssets is nil unless web/admin/dist was built before go build
+	// (#754: `task admin-build` / Dockerfile / goreleaser).
 	embeddedApp, err := embed.New(bootCtx, embed.Options{
 		Config:        cfg,
-		ConsoleAssets: consoleassets.FS(),
+		ConsoleAssets: admin.FS(),
 		// Standalone keeps self-provisioning (#895): OpenRails builds and runs
 		// its own River client in RunWorkers. The declaration is now explicit.
 		River: embed.RiverManagedByOpenRails(),

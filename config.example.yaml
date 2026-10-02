@@ -5,7 +5,7 @@
 # infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
 # deployment concerns.
 
-provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly to enable writes
+provider_write_mode: full # full | limited | readonly; REQUIRED: boot refuses it unset
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED: the credential posture is never inherited by omission
 
 secret_backend: snapshot # immutable host values; alternatively vault or encrypted db
@@ -144,9 +144,9 @@ captcha:
 
 
 # Merchant admin console SPA served at /admin/ (#740). Off by default.
-# Enabling requires console assets in the binary (#754): build with
-# `task build-console-binary` (= admin-build + `go build -tags console_assets`)
-# or, embedded, pass embed.WithAdminConsole. Enabled without assets = boot error.
+# Enabling requires console assets in the binary (#754): `task build` embeds
+# web/admin/dist after `task admin-build`; embedded hosts pass
+# embed.Options.ConsoleAssets. Enabled without assets = boot error.
 admin_console:
   enabled: false
   # auth_base_url: /auth/v1   # AuthKit JSON API; embedded hosts set theirs (AuthKit default /api/v1)

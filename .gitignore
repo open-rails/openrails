@@ -26,8 +26,10 @@ go.work.sum
 .gobuildcache
 .gopath
 
-# Build artifacts (dist/ also covers admin-console builds — never committed, #754)
+# Build artifacts (goreleaser, frontend builds). web/admin/dist keeps only
+# its committed placeholder (web/admin/embed.go, #754).
 dist/
+!web/admin/dist/
 build/
 bin/
 /openrails

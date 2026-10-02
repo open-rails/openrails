@@ -13,11 +13,6 @@ vars:
   # the `go run` default. Same override shape as SQUAWK_BIN in
   # scripts/migration-lint.sh.
   SQLC: '{{if .SQLC_BIN}}{{.SQLC_BIN}}{{else}}go run github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_VERSION}}{{end}}'
-  GIT_COMMIT:
-    sh: git rev-parse HEAD
-  GIT_TAG:
-    sh: git describe --tags --always --dirty
-  LDFLAGS: '-X main.Version={{.GIT_TAG}} -X main.Commit={{.GIT_COMMIT}}'
 
 tasks:
   default:
@@ -51,23 +46,22 @@ tasks:
       - bash scripts/check.sh e2e
 
   build:
-    desc: Build the binary locally
+    desc: Build the binary locally (embeds web/admin/dist when `task admin-build` has run; Go stamps the version from git)
     cmds:
       - echo "Building {{.BINARY_NAME}}..."
       - mkdir -p {{.BIN_DIR}}
-      - go build -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
+      - go build -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
 
   admin-build:
-    desc: Build the admin console SPA into cmd/openrails/consoleassets/dist (gitignored, #754). Embed it with `task build-console-binary`.
+    desc: Build the admin console SPA into web/admin/dist (gitignored, #754), which the binary go:embeds
     cmds:
-      - ./scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
+      - bash scripts/build-admin-console.sh
 
   build-console-binary:
-    desc: Build the standalone binary WITH the admin console embedded (admin-build + `go build -tags console_assets`)
-    deps: [admin-build]
+    desc: Build the standalone binary WITH the admin console embedded (admin-build + build)
     cmds:
-      - mkdir -p {{.BIN_DIR}}
-      - go build -tags console_assets -ldflags "{{.LDFLAGS}}" -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
+      - task: admin-build
+      - task: build
 
   run:
     desc: Build and run the application server

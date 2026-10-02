@@ -1,0 +1,68 @@
+name: Cut release
+
+# Tags master's head with the next version:
+#   gh workflow run cut-release.yaml -f bump=minor   (or bump=patch)
+# The tag push runs release.yaml and docker-publish.yaml. Tags pushed with
+# GITHUB_TOKEN start no workflows, so this pushes with the RELEASE_TOKEN
+# secret: a fine-grained PAT on this repository with Contents and Workflows
+# read/write.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to increment
+        type: choice
+        options: [minor, patch]
+        default: minor
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag next version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Preconditions
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/master ]]; then
+            echo "::error::Run on master, not $GITHUB_REF"
+            exit 1
+          fi
+          if [[ -z "$RELEASE_TOKEN" ]]; then
+            echo "::error::Missing the RELEASE_TOKEN secret (see this workflow's header)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Tag and push
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          released="$(git tag --points-at "$GITHUB_SHA" | grep -E '^v[0-9]' | paste -sd' ')"
+          if [[ -n "$released" ]]; then
+            echo "::error::${GITHUB_SHA::7} is already released as $released"
+            exit 1
+          fi
+          latest="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          IFS=. read -r major minor patch <<<"${latest:-v0.0.0}"
+          major="${major#v}"
+          case "$BUMP" in
+            minor) next="v${major}.$((minor + 1)).0" ;;
+            patch) next="v${major}.${minor}.$((patch + 1))" ;;
+            *) echo "::error::bump must be minor or patch" && exit 1 ;;
+          esac
+          git tag "$next" "$GITHUB_SHA"
+          git push origin "refs/tags/$next"
+          echo "Tagged \`$next\` (previous \`${latest:-none}\`) at ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"

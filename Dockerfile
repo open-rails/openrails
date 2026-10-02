@@ -1,5 +1,5 @@
-# Stage 1: admin console SPA (#754 — dist is never committed; the image build
-# owns the embed). Node is a BUILD-time dependency only.
+# Stage 1: admin console SPA into web/admin/dist, which web/admin/embed.go
+# go:embeds (#754). Node is a BUILD-time dependency only.
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console
 
 WORKDIR /web/admin
@@ -9,7 +9,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY web/admin/ ./
 # verify-deps-before-run crashes pnpm 11.0.0 ("currentPnpmfiles is not iterable")
 # and is redundant here: install just ran --frozen-lockfile in this same stage.
-RUN pnpm --config.verify-deps-before-run=false run build --outDir /out --emptyOutDir
+RUN pnpm --config.verify-deps-before-run=false run build
 
 
 # Stage 2: build
@@ -38,21 +38,29 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       go mod download && break || (echo "go mod download failed, retrying" && sleep 5); \
     done
 
-# Copy source code
+# Copy source code, then the console build into the dir go:embed reads.
 COPY . .
-# The console build lands at the binary-boundary embed package; the tagged
-# build below links it (a console-less image would just drop the tag).
-COPY --from=console /out ./cmd/openrails/consoleassets/dist
+COPY --from=console /web/admin/dist ./web/admin/dist
+
+# Release identity (internal/buildinfo); unset falls back to "dev".
+ARG VERSION=
+ARG COMMIT=
+ARG DATE=
 
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    test -f web/admin/dist/index.html && \
     mkdir -p bin && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -tags console_assets -o bin/openrails ./cmd/openrails
+    CGO_ENABLED=0 GOOS=linux go build -trimpath \
+      -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \
+      -o bin/openrails ./cmd/openrails
 
 
 # Stage 3: production
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+
+LABEL org.opencontainers.image.source="https://github.com/open-rails/openrails"
 
 # Install runtime dependencies (include wget for healthcheck)
 RUN apk --no-cache add ca-certificates tzdata wget

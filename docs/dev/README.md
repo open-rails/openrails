@@ -12,7 +12,7 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 
 | Target | What it does |
 |---|---|
-| `task build` | Build `bin/openrails` from `./cmd/openrails` |
+| `task build` | Build `bin/openrails` from `./cmd/openrails` (embeds `web/admin/dist` if built) |
 | `task run` | Build + run the server |
 | `task dev` | Hot-reload dev server (Air, `.air.toml`) |
 | `task docker-up` / `task docker-down` | Start/stop the local compose stack (openrails + Postgres + Garnet) |
@@ -21,8 +21,8 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 | `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` includes the local staleness gate |
 | `task test` | Source guardrails + unit tests (`-race`) + focused greenfield contracts (requires `OPENRAILS_GREENFIELD_DSN`) |
 | `task ci-local` | Run the same compact checks and greenfield contracts as CI |
-| `task admin-build` | Build the admin console SPA into `cmd/openrails/consoleassets/dist` (gitignored) |
-| `task build-console-binary` | Binary with the console embedded (`-tags console_assets`) |
+| `task admin-build` | Build the admin console SPA into `web/admin/dist` (gitignored) |
+| `task build-console-binary` | `admin-build` + `build`: the binary with the console embedded |
 | `task fmt` / `task clean` | `go fmt` + `goimports` / remove build artifacts |
 
 Local provider-development helpers (`tunnel-webhooks`, `verify-webhook-tunnel`,
@@ -111,4 +111,22 @@ both of migratekit's checks reported success.
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
 - `ci/` — focused public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
 - `scripts/` — Task-target implementations
-- `web/admin/` — admin console SPA source
+- `web/admin/` — admin console SPA source; `embed.go` embeds its `dist/` build
+
+## Releases
+
+```sh
+gh workflow run cut-release.yaml -f bump=minor   # or bump=patch
+```
+
+This tags master's head with the next version; the tag runs `release.yaml`
+(GoReleaser: binaries, checksums, SBOMs, generated notes, the
+`openrails-billing-ui-X.Y.Z.tgz` asset, build provenance) and
+`docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR).
+Edit the generated notes on the release page if needed. Dry run:
+`goreleaser release --snapshot --clean --skip=publish,sign`.
+
+`cut-release.yaml` pushes the tag with the `RELEASE_TOKEN` secret (a
+fine-grained PAT with Contents and Workflows read/write on this repo): tags
+pushed with `GITHUB_TOKEN` start no workflows. Pushing a `v*` tag by hand
+releases the same way.
