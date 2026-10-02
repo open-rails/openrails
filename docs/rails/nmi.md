@@ -169,7 +169,7 @@ Sandbox test card: `4111 1111 1111 1111`, expiry `10/29`. Enter it
 only into Collect.js fields. The former live E2E harness has been removed;
 browser tokenization, vault save, sales, enrollment, signed webhooks, remote
 query, and cancellation require separately scoped provider qualification.
-Sandboxes generally cannot advance time; deterministic greenfield transports
+Sandboxes generally cannot advance time; deterministic e2e transports
 prove local scheduling behavior without waiting for a provider billing period.
 
 ### Quirks worth knowing

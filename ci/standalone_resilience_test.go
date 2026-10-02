@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -33,7 +33,7 @@ func TestStandaloneBootNeverWaitsOnVaultAndFailsClosedOnKeyChange(t *testing.T) 
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
-	fake := vaultfake.New("greenfield-root")
+	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	slug := "standalone-" + uuid.NewString()[:8]
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
@@ -52,7 +52,7 @@ merchants:
 			TestMode:          config.CredentialPostureSandbox,
 			ProviderWriteMode: config.ProviderWriteModeFull,
 			DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:     []string{"https://greenfield.test"},
+			ReturnOrigins:     []string{"https://e2e.test"},
 			Vault:             &config.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token},
 			ProviderSandbox:   &config.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"},
 		}

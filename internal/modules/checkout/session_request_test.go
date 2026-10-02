@@ -198,7 +198,7 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 }
 
 // SEC-33 at the session seam: blanks are "not supplied", everything else
-// must match an allowed origin exactly (host policy itself is greenfield's).
+// must match an allowed origin exactly (host policy itself is e2e's).
 func TestValidateReturnURLs(t *testing.T) {
 	svc := &CheckoutSessionService{config: &config.Config{PublicBillingBaseURL: "https://billing.example/api"}}
 	require.NoError(t, svc.validateReturnURLs("", "  ", "https://billing.example/done"))

@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -122,7 +122,7 @@ func (p *solanaPay) checkoutIn(buyer *customer, token string) transferRequest {
 	session, err := p.w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: p.price, IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: token, Flow: "transfer_request"},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", session.Status)
@@ -391,7 +391,7 @@ func TestSolanaPayOffersOneTransactionPerAttempt(t *testing.T) {
 	session, err := p.w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: p.price, IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: "DUSD", Flow: "transaction_request"},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	wallet := solanago.NewWallet().PublicKey()
@@ -476,7 +476,7 @@ func (p *solanaPay) transactionRequest(buyer *customer, token string, wallet sol
 	session, err := p.w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: p.price, IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: token, Flow: "transaction_request"},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	return session, func() (int, string) {
@@ -818,7 +818,7 @@ func TestSolanaPayRefusesTransferHookForTransactionRequest(t *testing.T) {
 	_, err := p.w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		Customer: openrails.CheckoutCustomerIdentity{ID: p.w.newCustomer().id}, PriceID: p.price, IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: p.rail.Selector, PSPID: p.rail.PSPID, TokenSymbol: "PYUSD", Flow: "transaction_request"},
-		SuccessURL:     "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.ErrorContains(t, err, "transfer hook")
 	req := p.checkoutIn(p.w.newCustomer(), "PYUSD")

@@ -98,8 +98,8 @@ placeholders, not customer or repository names.
 - Integration tests: build tag `integration`, run against testcontainers (Postgres + Redis) or
   `OPENRAILS_TEST_DB_URL` (fallback `OPENRAILS_TEST_DB_DSN`) /
   `OPENRAILS_TEST_REDIS_ADDR`. Each package gets an isolated, self-cleaning database.
-- `ci/` is the SEPARATE end-to-end suite (build tags `greenfield,integration`; run with
-  `scripts/greenfield.sh`) that asserts behavioural contracts. A deliberate behaviour change must
+- `ci/` is the SEPARATE end-to-end suite (build tags `e2e,integration`; run with
+  `scripts/e2e.sh`) that asserts behavioural contracts. A deliberate behaviour change must
   sweep it too — `grep ci/` for the codes/constants/statuses you changed. Twice now (or#870,
   or#842) a fix updated only its own package's tests and left the suite red asserting the old
   contract. Green-in-my-package is not green.

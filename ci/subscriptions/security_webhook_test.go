@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -107,7 +107,7 @@ func TestSecurityWebhookAuthenticity(t *testing.T) {
 				if tc.target == own {
 					require.GreaterOrEqual(t, status, 400, tc.name)
 				}
-				for _, secret := range []string{own.secret, foreign.secret, "sk_test_greenfield", "greenfield-nmi-key"} {
+				for _, secret := range []string{own.secret, foreign.secret, "sk_test_e2e", "e2e-nmi-key"} {
 					require.NotContains(t, raw, secret, tc.name)
 				}
 				require.True(t, l.periodEnd().Equal(end), "%s moved the membership", tc.name)

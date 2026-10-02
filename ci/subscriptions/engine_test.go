@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -608,7 +608,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
 				IdempotencyKey: "enroll-declined", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: declined},
-				SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
 			_, confirm := c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": rail}})
@@ -640,7 +640,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
 		IdempotencyKey: "enroll-3ds", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: challenged},
-		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
 	_, confirm := c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": "stripe"}})
@@ -714,7 +714,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 			OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
 			IdempotencyKey: "enroll-dup", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
-			SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 		})
 		require.NoError(t, err)
 		c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": "nmi"}})
@@ -938,7 +938,7 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 		session, err := client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 			OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
 			IdempotencyKey: key, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
-			SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 		})
 		require.NoError(t, err)
 		return session

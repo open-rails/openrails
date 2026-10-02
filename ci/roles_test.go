@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -32,7 +32,7 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 			TestMode:          config.CredentialPostureSandbox,
 			ProviderWriteMode: config.ProviderWriteModeReadOnly,
 			DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:     []string{"https://greenfield.test"},
+			ReturnOrigins:     []string{"https://e2e.test"},
 		},
 		PGXPool: f.pool,
 		River:   embed.RiverManagedByOpenRails(f.schema),

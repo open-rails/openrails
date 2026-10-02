@@ -1,7 +1,7 @@
 # Testing
 
 OpenRails' required database and provider behavior is tested by the compact
-greenfield suite. It uses the public embedded API, one disposable PostgreSQL
+e2e suite. It uses the public embedded API, one disposable PostgreSQL
 DSN, a random schema per test, and deterministic Stripe/NMI transports. It does
 not use the former integration harness, testcontainers, browser
 automation. Ordinary lifecycle setup uses the public client and HTTP routes;
@@ -11,9 +11,9 @@ arm operator-controlled destructive-action policy.
 Run the focused suite locally:
 
 ```bash
-OPENRAILS_GREENFIELD_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
-OPENRAILS_GREENFIELD_REDIS_ADDR=127.0.0.1:6379 \
-  bash scripts/greenfield.sh
+OPENRAILS_E2E_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
+OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
+  bash scripts/e2e.sh
 ```
 
 The suite runs with `-race`, `-count=1`, one package process, and serial tests.
@@ -23,11 +23,11 @@ dunning state, engine-owned NMI admission, and exact integer money/currency
 boundaries. The legacy engine-subscription workflow has been removed. The focused
 `ci/subscriptions` scenarios now cover engine- and provider-owned
 Stripe/NMI lifecycles, including confirmation, renewal, dunning, cancellation,
-refunds, and crash recovery. See the [coverage map](../greenfield-coverage.md)
+refunds, and crash recovery. See the [coverage map](../e2e-coverage.md)
 for the precise scope and remaining gaps.
 
 The ordinary CI checks run pure unit/contract tests, source guardrails, builds,
-frontend checks, and security scans. The greenfield workflow is the only
+frontend checks, and security scans. The e2e workflow is the only
 required database/provider integration job. Live PSP or blockchain qualification
 must be invoked explicitly and is not a merge check.
 

@@ -3,7 +3,7 @@
 Docs for people hacking on OpenRails itself. Audience-facing docs (integrators,
 operators, merchants) live one level up in `docs/`.
 
-- [testing.md](testing.md) — greenfield contracts, ordinary checks, business time / test clocks
+- [testing.md](testing.md) — e2e contracts, ordinary checks, business time / test clocks
 - [local-webhooks.md](local-webhooks.md) — deterministic public webhook URLs for local dev (cloudflared)
 
 ## Task targets
@@ -19,8 +19,8 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 | `task docker-reset` | Recreate the stack from empty — deletes the Postgres volume, then re-migrates ([why you'd need this](#migrations)) |
 | `task docker-logs` | Tail the openrails container |
 | `task sqlc` / `task sqlc-check` | Regenerate + vet `internal/db/gen` (see below); `sqlc-check` includes the local staleness gate |
-| `task test` | Source guardrails + unit tests (`-race`) + focused greenfield contracts (requires `OPENRAILS_GREENFIELD_DSN`) |
-| `task ci-local` | Run the same compact checks and greenfield contracts as CI |
+| `task test` | Source guardrails + unit tests (`-race`) + focused e2e contracts (requires `OPENRAILS_E2E_DSN`) |
+| `task ci-local` | Run the same compact checks and e2e contracts as CI |
 | `task admin-build` | Build the admin console SPA into `web/admin/dist` (gitignored) |
 | `task build-console-binary` | `admin-build` + `build`: the binary with the console embedded |
 | `task fmt` / `task clean` | `go fmt` + `goimports` / remove build artifacts |
@@ -79,7 +79,7 @@ a fresh build of the new one).
 |---|---|
 | Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
 | A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
-| A hand-rolled test pool | Provision a new disposable database. The greenfield suite creates a fresh schema per test. Never clear another library's shared ledger rows. |
+| A hand-rolled test pool | Provision a new disposable database. The e2e suite creates a fresh schema per test. Never clear another library's shared ledger rows. |
 | An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then `DROP SCHEMA billing CASCADE; DELETE FROM public.migrations WHERE app = 'openrails' AND schema = 'billing';` (use the configured schema). Restart the host so it re-applies the chain. |
 
 ## Repo layout

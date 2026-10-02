@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -34,7 +34,7 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 				TestMode:          config.CredentialPostureSandbox,
 				ProviderWriteMode: config.ProviderWriteModeReadOnly,
 				DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-				ReturnOrigins:     []string{"https://greenfield.test"},
+				ReturnOrigins:     []string{"https://e2e.test"},
 				AdminConsole:      &config.AdminConsoleConfig{Enabled: true},
 			},
 			ConsoleAssets: fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}},

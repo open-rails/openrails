@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package idempotency_test
 
@@ -51,9 +51,9 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN"))
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
 	if dsn == "" {
-		t.Fatal("OPENRAILS_GREENFIELD_DSN must point at a disposable PostgreSQL database")
+		t.Fatal("OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
 	}
 	admin, err := pgxpool.New(t.Context(), dsn)
 	require.NoError(t, err)
@@ -623,7 +623,7 @@ func TestWebhookDuplicatesLeaveRenewalsAlone(t *testing.T) {
 func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	config, err := pgxpool.ParseConfig(strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_DSN")))
+	config, err := pgxpool.ParseConfig(strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN")))
 	require.NoError(t, err)
 	config.MaxConns = 1
 	pool, err := pgxpool.NewWithConfig(t.Context(), config)

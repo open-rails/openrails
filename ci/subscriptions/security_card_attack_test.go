@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -58,13 +58,13 @@ func freshAddresses() func(int) string {
 // captcha, the attacked merchant's included.
 func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	t.Parallel()
-	addr := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_REDIS_ADDR"))
+	addr := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_ADDR"))
 	if addr == "" {
-		t.Fatal("OPENRAILS_GREENFIELD_REDIS_ADDR must point at a disposable Redis")
+		t.Fatal("OPENRAILS_E2E_REDIS_ADDR must point at a disposable Redis")
 	}
 	guarded := func(cfg *config.Config) {
 		cfg.Redis = &config.RedisConfig{Addr: addr}
-		cfg.Captcha = &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "greenfield-site", SecretKey: "greenfield-secret"}
+		cfg.Captcha = &config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "e2e-site", SecretKey: "e2e-secret"}
 	}
 	attacked, bystander := newWorld(t, guarded), newWorld(t, guarded)
 	ip := freshAddresses()
@@ -97,9 +97,9 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 // make an attack.
 func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 	t.Parallel()
-	addr := strings.TrimSpace(os.Getenv("OPENRAILS_GREENFIELD_REDIS_ADDR"))
+	addr := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_ADDR"))
 	if addr == "" {
-		t.Fatal("OPENRAILS_GREENFIELD_REDIS_ADDR must point at a disposable Redis")
+		t.Fatal("OPENRAILS_E2E_REDIS_ADDR must point at a disposable Redis")
 	}
 	redisOnly := func(cfg *config.Config) { cfg.Redis = &config.RedisConfig{Addr: addr} }
 	t.Run("wave", func(t *testing.T) {

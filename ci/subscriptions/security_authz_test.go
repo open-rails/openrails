@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -51,7 +51,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			pending, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: alice.id}, Entitlement: "content:other", PriceID: other.ID,
 				IdempotencyKey: "alice-pending-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: aliceCard},
-				SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
 			charges := len(w.railLedger(rail))
@@ -153,9 +153,9 @@ func (w *world) siblingWith(scope embed.CustomerHTTPScope) *rival {
 
 func (w *world) declaredPSPs() map[string]embed.PSPConfig {
 	return map[string]embed.PSPConfig{
-		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_greenfield", "webhook_signing_secret": whsecStripe}}},
-		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "greenfield-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "greenfield-tokenization"}}},
-		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "greenfield-ccbill-salt"}}},
+		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}}},
+		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}},
+		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}}},
 	}
 }
 
@@ -196,7 +196,7 @@ func (w *world) peer(slug string, scope embed.CustomerHTTPScope, v *verifier, ps
 		Merchant:               &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps}},
 		Config: &config.Config{
 			TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, AllowCatalogUpdates: true,
-			DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://greenfield.test"},
+			DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
 		},
 		PGXPool: w.pool, River: embed.RiverFromHost(), StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock,
 	})
@@ -266,7 +266,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	_, err = r.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
 		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: e.ent, PriceID: e.price,
 		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
-		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.Error(t, err)
 	own := r.client
@@ -277,7 +277,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	_, err = own.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
 		OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
 		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
-		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.Error(t, err, "a foreign merchant's saved card is not chargeable")
 	require.NotContains(t, err.Error(), "River", "refused by ownership, not by the headless harness")

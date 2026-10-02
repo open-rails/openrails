@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -35,7 +35,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 				return openrails.CreateCheckoutSessionRequest{
 					OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
 					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
-					SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
 
@@ -96,7 +96,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 				_, err := client.CreateCheckoutSession(context.WithoutCancel(t.Context()), openrails.CreateCheckoutSessionRequest{
 					OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
-					SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				})
 				return err
 			}

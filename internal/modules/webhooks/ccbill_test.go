@@ -137,7 +137,7 @@ func TestCCBillDates(t *testing.T) {
 	require.Nil(t, capCCBillRetryAt(nil, &paidEnd))
 }
 
-// SEC-33 fail-closed branches; the bounded happy path is greenfield TestSecurityCCBillPeriodEndsAreBounded.
+// SEC-33 fail-closed branches; the bounded happy path is e2e TestSecurityCCBillPeriodEndsAreBounded.
 func TestBoundCCBillPeriodEndFailsClosed(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

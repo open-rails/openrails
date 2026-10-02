@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package ci_test
 
@@ -40,7 +40,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 				TestMode:          config.CredentialPostureSandbox,
 				ProviderWriteMode: config.ProviderWriteModeReadOnly,
 				DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-				ReturnOrigins:     []string{"https://greenfield.test"},
+				ReturnOrigins:     []string{"https://e2e.test"},
 			},
 			PGXPool: f.pool,
 			River:   embed.RiverManagedByOpenRails(f.schema),
@@ -69,7 +69,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	require.NoError(t, err)
 	keys := t.TempDir()
 	signing := hostconfig.AuthConfig{
-		ActiveKeyID:         "greenfield",
+		ActiveKeyID:         "e2e",
 		ActivePrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})),
 		KeysPath:            keys,
 	}

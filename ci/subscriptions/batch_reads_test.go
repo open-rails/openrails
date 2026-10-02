@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -139,7 +139,7 @@ func (c *customer) purchase(kind openrails.OfferKind, priceID, entitlement, meth
 	session, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), openrails.CreateCheckoutSessionRequest{
 		OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
 		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: c.w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
-		SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)
 	done := unwrap(c.must(http.MethodPost, fmt.Sprintf("/checkout/%s/confirm", session.ID), "", map[string]any{"payment": map[string]string{"rail": "stripe"}}))

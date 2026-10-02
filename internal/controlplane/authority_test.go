@@ -73,7 +73,7 @@ func TestCredentialPermissionGlob(t *testing.T) {
 }
 
 // The roles' permissions are read from the running AuthKit catalog; the
-// greenfield TestMerchantRolePermissionsInTheRunningCatalog covers them.
+// e2e TestMerchantRolePermissionsInTheRunningCatalog covers them.
 func TestMerchantRoleCatalog(t *testing.T) {
 	for _, name := range []string{" OWNER ", "viewer", "support", "creator"} {
 		role, ok := MerchantRole(name)

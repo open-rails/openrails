@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -73,7 +73,7 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
 				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
-				SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return",
+				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 			})
 			require.NoError(t, err)
 			g := w.chargeGate(rail)

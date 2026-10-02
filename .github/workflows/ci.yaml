@@ -67,32 +67,32 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
-    # The PR gate is intentionally small: the greenfield contracts are the
+    # The PR gate is intentionally small: the e2e contracts are the
     # database/provider test suite, including the adversarial security cases.
     timeout-minutes: 28
     env:
-      OPENRAILS_GREENFIELD_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
-      OPENRAILS_GREENFIELD_REDIS_ADDR: 127.0.0.1:6379
-      OPENRAILS_GREENFIELD_SHARDS: "4"
-      OPENRAILS_GREENFIELD_TIMEOUT: 20m
+      OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
+      OPENRAILS_E2E_REDIS_ADDR: 127.0.0.1:6379
+      OPENRAILS_E2E_SHARDS: "4"
+      OPENRAILS_E2E_TIMEOUT: 20m
     steps:
       # A step rather than a service: the multi-replica fleets (#1075) need
       # more than the default 100 connections, a server flag services cannot set.
       - name: Start PostgreSQL
         run: >-
-          docker run -d --name greenfield-postgres -p 5432:5432
+          docker run -d --name e2e-postgres -p 5432:5432
           --tmpfs /var/lib/postgresql:rw,size=2g
           -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
           postgres:18-alpine -c max_connections=500
       - name: Start Redis
-        run: docker run -d --name greenfield-redis -p 6379:6379 redis:7-alpine
+        run: docker run -d --name e2e-redis -p 6379:6379 redis:7-alpine
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
       - name: Wait for PostgreSQL
-        run: timeout 60 bash -c 'until docker exec greenfield-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
+        run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
       - name: Generated SQL bindings match the queries
         env:
           SQLC_ADMIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
@@ -101,8 +101,8 @@ jobs:
           export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
           "$sqlc_bin" generate
           git diff --exit-code -- internal/db/gen
-      - name: Run focused greenfield contracts
-        run: bash scripts/greenfield.sh
+      - name: Run focused e2e contracts
+        run: bash scripts/e2e.sh
 
   security:
     name: Required Security

@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -49,7 +49,7 @@ func stripeEvent(kind string, object obj) obj {
 }
 
 func nmiEvent(kind string, body obj) obj {
-	body["merchant"] = obj{"id": nmiAcct, "name": "greenfield"}
+	body["merchant"] = obj{"id": nmiAcct, "name": "e2e"}
 	return obj{"event_id": uuid.NewString(), "event_type": kind, "event_body": body}
 }
 

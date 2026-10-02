@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -144,7 +144,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 				Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
 				PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method}, Confirm: true,
-				SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", session.Status)

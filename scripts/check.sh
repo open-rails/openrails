@@ -24,7 +24,7 @@ checks() {
   bash scripts/check-embedded-auth-boundary.sh
   go build ./...
   # Package tests are guards, contracts and focused regressions; database and
-  # provider behavior is covered by the greenfield suite in End-to-end.
+  # provider behavior is covered by the e2e suite in End-to-end.
   go test -vet=all -race -count=1 -cover ./...
   # The builds above embedded only web/admin/dist/.gitkeep; now the console.
   bash scripts/build-admin-console.sh
@@ -42,8 +42,8 @@ checks() {
 }
 
 e2e() {
-  : "${OPENRAILS_GREENFIELD_DSN:?Set OPENRAILS_GREENFIELD_DSN to a disposable PostgreSQL server}"
-  bash scripts/greenfield.sh
+  : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
+  bash scripts/e2e.sh
 }
 
 case "${1:-all}" in

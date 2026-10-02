@@ -1,4 +1,4 @@
-//go:build greenfield && integration
+//go:build e2e && integration
 
 package subscriptions_test
 
@@ -65,7 +65,7 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 				_, err := r.client[tp].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
 					OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
 					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: r.psp["nmi"], Rail: "nmi"},
-					SuccessURL: "https://greenfield.test/return", CancelURL: "https://greenfield.test/return?canceled=1",
+					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 				})
 				require.Error(t, err, "%s checkout for a blocked customer", tp)
 			}
