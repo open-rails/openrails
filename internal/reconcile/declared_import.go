@@ -300,22 +300,19 @@ func ImportDeclaredSubscriptions(
 		// the new row only — existing rows' gateway_response/retry evidence is
 		// engine-owned.
 		if outcome == DeclaredImported && (len(f.Evidence) > 0 || f.DunningRetries > 0 || f.DunningLastRetryAt != nil) {
-			if _, err := database.Qx(ctx).Exec(ctx,
-				`UPDATE openrails.subscriptions SET
-					gateway_response = COALESCE($1::jsonb, gateway_response),
-					retry_attempts = GREATEST(retry_attempts, $2),
-					last_retry_at = COALESCE($3, last_retry_at)
-				 WHERE id = $4 AND merchant_id = $5`,
-				nilIfEmptyBytes(f.Evidence), f.DunningRetries, f.DunningLastRetryAt, subID, merchantID); err != nil {
+			if err := q.StampImportedSubscriptionEvidence(ctx, gen.StampImportedSubscriptionEvidenceParams{
+				ID: subID, MerchantID: merchantID, GatewayResponse: nilIfEmptyBytes(f.Evidence),
+				RetryAttempts: int64(f.DunningRetries), LastRetryAt: f.DunningLastRetryAt,
+			}); err != nil {
 				return out, fmt.Errorf("declared import: stamp evidence for %s: %w", f.SourceID, err)
 			}
 		}
 
 		// Vault linkage (dunning rebills need subscription→payment_method).
 		if f.PaymentMethodID != nil && *f.PaymentMethodID != uuid.Nil {
-			if _, err := database.Qx(ctx).Exec(ctx,
-				`UPDATE openrails.subscriptions SET payment_method_id = $1 WHERE id = $2 AND merchant_id = $3 AND payment_method_id IS NULL`,
-				*f.PaymentMethodID, subID, merchantID); err != nil {
+			if err := q.LinkImportedSubscriptionPaymentMethod(ctx, gen.LinkImportedSubscriptionPaymentMethodParams{
+				ID: subID, MerchantID: merchantID, PaymentMethodID: *f.PaymentMethodID,
+			}); err != nil {
 				return out, fmt.Errorf("declared import: link payment method for %s: %w", f.SourceID, err)
 			}
 		}
@@ -337,11 +334,9 @@ func ImportDeclaredSubscriptions(
 			if f.CancelScheduleLive && deferDelete != nil &&
 				rails.RemoteDeleteOnTerminalCancel(models.Rail(f.Rail)) {
 				if err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-					if _, err := tx.Exec(ctx,
-						`UPDATE openrails.subscriptions
-						 SET deletion_scheduled_at = $1, updated_at = $1
-						 WHERE id = $2 AND merchant_id = $3 AND deletion_scheduled_at IS NULL`,
-						asOf, subID, merchantID); err != nil {
+					if err := gen.New(tx).ScheduleImportedSubscriptionDeletion(ctx, gen.ScheduleImportedSubscriptionDeletionParams{
+						ID: subID, MerchantID: merchantID, At: asOf,
+					}); err != nil {
 						return err
 					}
 					return deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, f.Customer.String(), subID, asOf)

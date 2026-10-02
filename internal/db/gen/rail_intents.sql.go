@@ -12,6 +12,31 @@ import (
 	"github.com/google/uuid"
 )
 
+const abandonNMIEngineTakeover = `-- name: AbandonNMIEngineTakeover :execrows
+UPDATE openrails.rail_intents
+SET status = 'failed_terminal', last_failure_reason = 'abandoned before any NMI change',
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || $1::jsonb,
+    claimed_until = NULL, updated_at = now()
+WHERE id = $2::uuid AND merchant_id = $3::uuid
+  AND intent_type = 'nmi_engine_takeover' AND status IN ('pending', 'failed_retryable')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'delete_submitted')
+`
+
+type AbandonNMIEngineTakeoverParams struct {
+	Evidence   []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Only before the schedule delete was submitted.
+func (q *Queries) AbandonNMIEngineTakeover(ctx context.Context, arg AbandonNMIEngineTakeoverParams) (int64, error) {
+	result, err := q.db.Exec(ctx, abandonNMIEngineTakeover, arg.Evidence, arg.ID, arg.MerchantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const advanceRailIntentVerification = `-- name: AdvanceRailIntentVerification :execrows
 UPDATE openrails.rail_intents
 SET next_attempt_at = LEAST(next_attempt_at, $1::timestamptz), updated_at = now()
@@ -938,6 +963,27 @@ func (q *Queries) GetLatestManualRebillForPeriod(ctx context.Context, arg GetLat
 	return i, err
 }
 
+const getLatestRailIntentIDForSubscription = `-- name: GetLatestRailIntentIDForSubscription :one
+SELECT id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid AND intent_type = $2::text
+  AND subscription_id = $3::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestRailIntentIDForSubscriptionParams struct {
+	MerchantID     uuid.UUID
+	IntentType     string
+	SubscriptionID uuid.UUID
+}
+
+func (q *Queries) GetLatestRailIntentIDForSubscription(ctx context.Context, arg GetLatestRailIntentIDForSubscriptionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestRailIntentIDForSubscription, arg.MerchantID, arg.IntentType, arg.SubscriptionID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getLatestSubscriptionCollectionForPeriod = `-- name: GetLatestSubscriptionCollectionForPeriod :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid
@@ -1555,6 +1601,59 @@ func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg L
 			&i.DestructiveRunClass,
 			&i.CustodianID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNMIEngineTakeoverCandidates = `-- name: ListNMIEngineTakeoverCandidates :many
+SELECT s.id, s.current_period_ends_at
+FROM openrails.subscriptions s
+WHERE s.merchant_id = $1::uuid AND s.rail = 'nmi' AND s.collection_policy = 'nmi_schedule'
+  AND s.status = 'active' AND s.deleted_at IS NULL AND s.rail_subscription_id <> ''
+  AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
+  AND s.current_period_ends_at > $2::timestamptz
+  AND ($3::uuid IS NULL OR s.price_id = $3::uuid)
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.rail_intents i
+      WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
+        AND i.status NOT IN ('succeeded', 'failed_terminal', 'superseded', 'expired'))
+ORDER BY s.current_period_ends_at, s.id
+LIMIT $4::bigint
+`
+
+type ListNMIEngineTakeoverCandidatesParams struct {
+	MerchantID uuid.UUID
+	EndsAfter  time.Time
+	PriceID    *uuid.UUID
+	RowLimit   int64
+}
+
+type ListNMIEngineTakeoverCandidatesRow struct {
+	ID                  uuid.UUID
+	CurrentPeriodEndsAt *time.Time
+}
+
+func (q *Queries) ListNMIEngineTakeoverCandidates(ctx context.Context, arg ListNMIEngineTakeoverCandidatesParams) ([]ListNMIEngineTakeoverCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listNMIEngineTakeoverCandidates,
+		arg.MerchantID,
+		arg.EndsAfter,
+		arg.PriceID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNMIEngineTakeoverCandidatesRow
+	for rows.Next() {
+		var i ListNMIEngineTakeoverCandidatesRow
+		if err := rows.Scan(&i.ID, &i.CurrentPeriodEndsAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2444,6 +2543,169 @@ func (q *Queries) ParkRailIntent(ctx context.Context, arg ParkRailIntentParams) 
 		arg.Reason,
 		arg.MerchantID,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pruneSucceededRailIntent = `-- name: PruneSucceededRailIntent :exec
+UPDATE openrails.rail_intents
+SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END,
+    result_evidence = CASE WHEN result_evidence ? 'qualified_receipt'
+        THEN COALESCE($1::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence -> 'qualified_receipt')
+        ELSE $1::jsonb END,
+    updated_at = now()
+WHERE id = $2::uuid AND merchant_id = $3::uuid AND status = 'succeeded'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment')
+`
+
+type PruneSucceededRailIntentParams struct {
+	Evidence   []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) PruneSucceededRailIntent(ctx context.Context, arg PruneSucceededRailIntentParams) error {
+	_, err := q.db.Exec(ctx, pruneSucceededRailIntent, arg.Evidence, arg.ID, arg.MerchantID)
+	return err
+}
+
+const pruneSucceededRailIntentEvidence = `-- name: PruneSucceededRailIntentEvidence :exec
+UPDATE openrails.rail_intents
+SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt'
+        THEN COALESCE($1::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence -> 'qualified_receipt')
+        ELSE $1::jsonb END,
+    updated_at = now()
+WHERE id = $2::uuid AND merchant_id = $3::uuid AND status = 'succeeded'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment')
+`
+
+type PruneSucceededRailIntentEvidenceParams struct {
+	Evidence   []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) PruneSucceededRailIntentEvidence(ctx context.Context, arg PruneSucceededRailIntentEvidenceParams) error {
+	_, err := q.db.Exec(ctx, pruneSucceededRailIntentEvidence, arg.Evidence, arg.ID, arg.MerchantID)
+	return err
+}
+
+const pruneSucceededRailIntentPayload = `-- name: PruneSucceededRailIntentPayload :exec
+UPDATE openrails.rail_intents
+SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
+WHERE id = $1::uuid AND merchant_id = $2::uuid AND status = 'succeeded'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment')
+`
+
+type PruneSucceededRailIntentPayloadParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Succeeded-intent slimming (PruneSucceeded). Qualified receipts/enrollments,
+// cutover tombstones and collections keep their payload and evidence.
+func (q *Queries) PruneSucceededRailIntentPayload(ctx context.Context, arg PruneSucceededRailIntentPayloadParams) error {
+	_, err := q.db.Exec(ctx, pruneSucceededRailIntentPayload, arg.ID, arg.MerchantID)
+	return err
+}
+
+const pruneTerminalRailIntentPayload = `-- name: PruneTerminalRailIntentPayload :exec
+UPDATE openrails.rail_intents
+SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
+WHERE id = $1::uuid AND merchant_id = $2::uuid AND status = 'failed_terminal'
+  AND intent_type NOT IN ('nmi_provider_cutover', 'subscription_collection')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_enrollment')
+`
+
+type PruneTerminalRailIntentPayloadParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) PruneTerminalRailIntentPayload(ctx context.Context, arg PruneTerminalRailIntentPayloadParams) error {
+	_, err := q.db.Exec(ctx, pruneTerminalRailIntentPayload, arg.ID, arg.MerchantID)
+	return err
+}
+
+const railIntentClaimHeld = `-- name: RailIntentClaimHeld :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.rail_intents
+    WHERE merchant_id = $1::uuid AND id = $2::uuid
+      AND status = $3::text AND attempts = $4::int
+      AND claimed_until > $5::timestamptz
+)
+`
+
+type RailIntentClaimHeldParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Status     string
+	Attempts   int32
+	HeldUntil  time.Time
+}
+
+func (q *Queries) RailIntentClaimHeld(ctx context.Context, arg RailIntentClaimHeldParams) (bool, error) {
+	row := q.db.QueryRow(ctx, railIntentClaimHeld,
+		arg.MerchantID,
+		arg.ID,
+		arg.Status,
+		arg.Attempts,
+		arg.HeldUntil,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const recordRailIntentProgress = `-- name: RecordRailIntentProgress :exec
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || $1::jsonb, updated_at = now()
+WHERE id = $2::uuid AND merchant_id = $3::uuid
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+`
+
+type RecordRailIntentProgressParams struct {
+	Progress   []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) RecordRailIntentProgress(ctx context.Context, arg RecordRailIntentProgressParams) error {
+	_, err := q.db.Exec(ctx, recordRailIntentProgress, arg.Progress, arg.ID, arg.MerchantID)
+	return err
+}
+
+const recordRailIntentProgressIfAbsent = `-- name: RecordRailIntentProgressIfAbsent :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object($1::text, $2::jsonb),
+    updated_at = now()
+WHERE id = $3::uuid AND merchant_id = $4::uuid
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? $1::text)
+  AND ($1::text <> 'initial_submitted'
+       OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
+`
+
+type RecordRailIntentProgressIfAbsentParams struct {
+	Key        string
+	Value      []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Write-once: a present key is never overwritten.
+func (q *Queries) RecordRailIntentProgressIfAbsent(ctx context.Context, arg RecordRailIntentProgressIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordRailIntentProgressIfAbsent,
+		arg.Key,
+		arg.Value,
+		arg.ID,
+		arg.MerchantID,
 	)
 	if err != nil {
 		return 0, err

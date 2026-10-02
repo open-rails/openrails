@@ -431,3 +431,22 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
   AND deleted_at IS NULL
 ORDER BY id;
+
+-- Declared import: seed-time forensics land on the new row only.
+-- name: StampImportedSubscriptionEvidence :exec
+UPDATE openrails.subscriptions
+SET gateway_response = COALESCE(sqlc.narg(gateway_response)::jsonb, gateway_response),
+    retry_attempts = GREATEST(retry_attempts, sqlc.arg(retry_attempts)::bigint),
+    last_retry_at = COALESCE(sqlc.narg(last_retry_at)::timestamptz, last_retry_at)
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL;
+
+-- name: LinkImportedSubscriptionPaymentMethod :exec
+UPDATE openrails.subscriptions SET payment_method_id = sqlc.arg(payment_method_id)::uuid
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id IS NULL
+  AND deleted_at IS NULL;
+
+-- name: ScheduleImportedSubscriptionDeletion :exec
+UPDATE openrails.subscriptions
+SET deletion_scheduled_at = sqlc.arg(at)::timestamptz, updated_at = sqlc.arg(at)::timestamptz
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deletion_scheduled_at IS NULL
+  AND deleted_at IS NULL;

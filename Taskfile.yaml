@@ -191,7 +191,7 @@ tasks:
       # files. go-test-gate.sh now turns that (or#1013) into a hard failure
       # instead of an "ok ... [no test files]" pass.
       - CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
-      - bash scripts/sql-lint.sh
+      - bash scripts/go-test-gate.sh ./internal/db/ TestNoInlineSQL
 
   lint:
     desc: golangci-lint over the whole module (same gate CI runs — see .golangci.yaml)
@@ -215,9 +215,9 @@ tasks:
       - golangci-lint run --timeout=15m ./...
 
   sql-lint:
-    desc: Fail on raw SQL outside internal/db/gen (see internal/db/queries/LINT_ALLOWLIST.txt)
+    desc: Fail on inline SQL outside internal/db/queries (allowlist in internal/db/inlinesql_test.go)
     cmds:
-      - bash scripts/sql-lint.sh
+      - bash scripts/go-test-gate.sh ./internal/db/ TestNoInlineSQL
 
   test:
     desc: Run tests

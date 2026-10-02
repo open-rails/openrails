@@ -342,3 +342,14 @@ SELECT id FROM openrails.payments
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(payment_id)::uuid
   AND deleted_at IS NULL
 FOR UPDATE;
+
+-- The newest positive completed sale on a subscription.
+-- name: GetLatestPaidPaymentIDForSubscription :one
+SELECT id FROM openrails.payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND status = 'completed' AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0
+ORDER BY purchased_at DESC, id DESC
+LIMIT 1;
+
+-- name: LockAdminRefund :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);

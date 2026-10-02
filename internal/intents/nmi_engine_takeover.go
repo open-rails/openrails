@@ -186,9 +186,7 @@ func (h *NMIEngineTakeover) freeze(ctx context.Context, d *db.DB, sub *models.Su
 	if benefits == nil {
 		benefits = map[string]*int{}
 	}
-	var paid uuid.UUID
-	err = d.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.payments WHERE merchant_id=$1 AND subscription_id=$2 AND status='completed'
-		AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0 ORDER BY purchased_at DESC, id DESC LIMIT 1`, sub.MerchantID, sub.ID).Scan(&paid)
+	paid, err := d.Gen(ctx).GetLatestPaidPaymentIDForSubscription(ctx, gen.GetLatestPaidPaymentIDForSubscriptionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ineligible("no completed payment pays the current period")
 	}
@@ -336,13 +334,9 @@ func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req openr
 		price = &u
 	}
 	now := h.now()
-	rows, err := h.DB.Qx(ctx).Query(ctx, `SELECT s.id, s.current_period_ends_at FROM openrails.subscriptions s
-		WHERE s.merchant_id=$1 AND s.rail='nmi' AND s.collection_policy='nmi_schedule' AND s.status='active'
-		  AND s.deleted_at IS NULL AND s.rail_subscription_id<>'' AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
-		  AND s.current_period_ends_at > $2 AND ($3::uuid IS NULL OR s.price_id=$3::uuid)
-		  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=s.merchant_id AND i.subscription_id=s.id
-		      AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired'))
-		ORDER BY s.current_period_ends_at, s.id LIMIT $4`, mid.UUID(), now.Add(EngineTakeoverMargin), price, limit)
+	rows, err := h.DB.Gen(ctx).ListNMIEngineTakeoverCandidates(ctx, gen.ListNMIEngineTakeoverCandidatesParams{
+		MerchantID: mid.UUID(), EndsAfter: now.Add(EngineTakeoverMargin), PriceID: price, RowLimit: int64(limit),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -350,18 +344,9 @@ func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req openr
 		id  uuid.UUID
 		end time.Time
 	}
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.id, &c.end); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		candidates = append(candidates, c)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
+	candidates := make([]candidate, 0, len(rows))
+	for _, row := range rows {
+		candidates = append(candidates, candidate{id: row.ID, end: *row.CurrentPeriodEndsAt})
 	}
 	out := &openrails.EngineTakeoverBatchResult{Admitted: []openrails.EngineTakeover{}, Refused: []openrails.EngineTakeoverRefusal{}}
 	for _, c := range candidates {
@@ -393,9 +378,9 @@ func (h *NMIEngineTakeover) latest(ctx context.Context, id uuid.UUID) (gen.Openr
 	if err != nil {
 		return gen.OpenrailsRailIntent{}, err
 	}
-	var opID uuid.UUID
-	err = h.DB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE merchant_id=$1 AND intent_type=$2 AND subscription_id=$3
-		ORDER BY created_at DESC, id DESC LIMIT 1`, mid.UUID(), TypeNMIEngineTakeover, id).Scan(&opID)
+	opID, err := h.DB.Gen(ctx).GetLatestRailIntentIDForSubscription(ctx, gen.GetLatestRailIntentIDForSubscriptionParams{
+		MerchantID: mid.UUID(), IntentType: TypeNMIEngineTakeover, SubscriptionID: id,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return gen.OpenrailsRailIntent{}, takeoverRefusal(http.StatusNotFound, openrails.CodeEngineTakeoverNotFound, "no engine takeover for this subscription")
 	}
@@ -436,14 +421,11 @@ func (h *NMIEngineTakeover) Abandon(ctx context.Context, id uuid.UUID) (*openrai
 		return h.result(in)
 	}
 	evidence, _ := json.Marshal(engineTakeoverProgress{Abandoned: true, NotExecuted: "abandoned"})
-	tag, err := h.DB.Qx(ctx).Exec(ctx, `UPDATE openrails.rail_intents SET status='failed_terminal', last_failure_reason='abandoned before any NMI change',
-		result_evidence=coalesce(result_evidence,'{}'::jsonb) || $3::jsonb, claimed_until=NULL, updated_at=now()
-		WHERE id=$1 AND merchant_id=$2 AND intent_type='nmi_engine_takeover' AND status IN ('pending','failed_retryable')
-		  AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'delete_submitted')`, in.ID, in.MerchantID, evidence)
+	n, err := h.DB.Gen(ctx).AbandonNMIEngineTakeover(ctx, gen.AbandonNMIEngineTakeoverParams{ID: in.ID, MerchantID: in.MerchantID, Evidence: evidence})
 	if err != nil {
 		return nil, err
 	}
-	if tag.RowsAffected() != 1 {
+	if n != 1 {
 		return nil, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverInFlight, "the takeover changed state; read it again")
 	}
 	return h.Get(ctx, id)

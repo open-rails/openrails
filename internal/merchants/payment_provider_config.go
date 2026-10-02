@@ -514,53 +514,15 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 	return row, err
 }
 
-const pspRowColumns = `id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived`
-
-func scanPSPRow(row pgx.Row) (gen.OpenrailsPsp, error) {
-	var out gen.OpenrailsPsp
-	err := row.Scan(
-		&out.ID, &out.MerchantID, &out.Rail, &out.Environment, &out.AccountID,
-		&out.Key, &out.Evidence,
-		&out.FirstSeenAt, &out.LastVerifiedAt, &out.ReplacedAt, &out.CreatedAt, &out.UpdatedAt,
-		&out.Archived,
-	)
-	return out, err
-}
-
 // lockRailPSPs locks every PSP row of the merchant on (rail, environment) for
 // the transaction, so two concurrent archives cannot each see the other as the
 // remaining active account and leave the rail with none.
 func lockRailPSPs(ctx context.Context, tx pgx.Tx, id merchant.ID, rail, environment string) ([]gen.OpenrailsPsp, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT `+pspRowColumns+`
-		  FROM openrails.psps
-		 WHERE merchant_id = $1 AND rail = $2 AND environment = $3
-		 ORDER BY created_at, id
-		   FOR UPDATE`, id.UUID(), rail, environment)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []gen.OpenrailsPsp
-	for rows.Next() {
-		row, err := scanPSPRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return gen.New(tx).LockPSPsForRailEnvironment(ctx, gen.LockPSPsForRailEnvironmentParams{MerchantID: id.UUID(), Rail: rail, Environment: environment})
 }
 
 func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.UUID) (gen.OpenrailsPsp, error) {
-	return scanPSPRow(tx.QueryRow(ctx, `
-		UPDATE openrails.psps
-		   SET archived = true,
-             evidence=jsonb_set(COALESCE(evidence,'{}'::jsonb),'{configuration_revision}',to_jsonb(COALESCE((evidence->>'configuration_revision')::bigint,0)+1)),
-		       replaced_at = COALESCE(replaced_at, now()),
-		       updated_at = now()
-		 WHERE id = $1 AND merchant_id = $2
-		RETURNING `+pspRowColumns, pspID, id.UUID()))
+	return gen.New(tx).ArchivePSP(ctx, gen.ArchivePSPParams{ID: pspID, MerchantID: id.UUID()})
 }
 
 // archivePSP archives the named account inside one transaction that holds the
@@ -569,9 +531,7 @@ func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.
 func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, allowLast bool) (gen.OpenrailsPsp, error) {
 	var out gen.OpenrailsPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var environment string
-		err := tx.QueryRow(ctx, `SELECT environment FROM openrails.psps WHERE id = $1 AND merchant_id = $2 AND rail = $3`,
-			pspID, id.UUID(), rail).Scan(&environment)
+		environment, err := gen.New(tx).GetPSPEnvironmentForRail(ctx, gen.GetPSPEnvironmentForRailParams{ID: pspID, MerchantID: id.UUID(), Rail: rail})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrPaymentProviderAccountNotFound
 		}
@@ -651,45 +611,11 @@ func (s *Service) pspOpenObligations(ctx context.Context, id merchant.ID, accoun
 		return out, nil
 	}
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-			WITH target AS (SELECT unnest($1::uuid[]) AS id)
-			SELECT target.id,
-			       (
-			         SELECT count(*)::bigint
-			           FROM openrails.subscriptions sub
-			          WHERE sub.merchant_id = $2::uuid
-			            AND sub.psp_id = target.id
-			            AND sub.status IN ('active', 'pending', 'past_due')
-			       ) +
-			       (
-			         SELECT count(*)::bigint
-			           FROM openrails.payments payment
-			          WHERE payment.merchant_id = $2::uuid
-			            AND payment.psp_id = target.id
-			            AND payment.status = 'pending'
-			       ) +
-			       (
-			         SELECT count(*)::bigint
-			           FROM openrails.rail_intents intent
-			          WHERE intent.merchant_id = $2::uuid
-			            AND intent.psp_id = target.id
-			            AND intent.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
-			       ) AS open_obligations
-			  FROM target
-		`, accountIDs, id.UUID())
-		if err != nil {
-			return err
+		rows, err := gen.New(tx).CountPSPOpenObligations(ctx, gen.CountPSPOpenObligationsParams{MerchantID: id.UUID(), PspIds: accountIDs})
+		for _, row := range rows {
+			out[row.PspID] = row.OpenObligations
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var accountID uuid.UUID
-			var count int64
-			if err := rows.Scan(&accountID, &count); err != nil {
-				return err
-			}
-			out[accountID] = count
-		}
-		return rows.Err()
+		return err
 	})
 	if isUndefinedTable(err) {
 		return out, nil

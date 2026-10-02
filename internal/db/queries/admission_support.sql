@@ -122,3 +122,7 @@ WHERE merchant_id = $1 AND customer_id = $2;
 -- compose the verdict).
 SELECT * FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2;
+
+-- Serializes one payer's spend-limit document writes.
+-- name: LockInvokerSpendLimits :exec
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));

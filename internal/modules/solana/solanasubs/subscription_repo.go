@@ -343,25 +343,5 @@ func (r *SolanaSubscriptionRepo) SetStatusTx(ctx context.Context, txDB *db.DB, i
 }
 
 func (r *SolanaSubscriptionRepo) activeMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := r.db.Qx(ctx).Query(ctx, `
-		SELECT id FROM openrails.merchants
-		 WHERE status = 'active' AND deleted_at IS NULL
-		 ORDER BY id
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return ids, nil
+	return r.db.Gen(ctx).ListActiveMerchantIDs(ctx)
 }

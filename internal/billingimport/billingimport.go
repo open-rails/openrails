@@ -12,6 +12,7 @@ package billingimport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -168,14 +169,11 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 					return err
 				}
 			}
-			var id, owner uuid.UUID
-			var existingRail string
-			err = qx.QueryRow(ctx,
-				`SELECT id, customer_id, rail FROM openrails.payment_methods
-				 WHERE merchant_id = $1 AND psp_id = $2 AND rail_customer_ref = $3 AND rail_method_ref = $4`,
-				merchantID.UUID(), pmPSP, pm.RailCustomerRef, pm.RailMethodRef).
-				Scan(&id, &owner, &existingRail)
-			if err == pgx.ErrNoRows {
+			existing, err := q.GetPaymentMethodByPSPRefs(ctx, gen.GetPaymentMethodByPSPRefsParams{
+				MerchantID: merchantID.UUID(), PspID: pmPSP, RailCustomerRef: pm.RailCustomerRef, RailMethodRef: pm.RailMethodRef,
+			})
+			id, owner, existingRail := existing.ID, existing.CustomerID, existing.Rail
+			if errors.Is(err, pgx.ErrNoRows) {
 				id = uuid.New()
 				created := pm.CreatedAt.UTC()
 				if created.IsZero() {
@@ -286,12 +284,11 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				if !ok {
 					// Ref to an instrument that already exists locally (e.g. a
 					// prior import created it) — resolve from the DB once.
-					var existing, owner uuid.UUID
-					err := qx.QueryRow(ctx,
-						`SELECT id, customer_id FROM openrails.payment_methods
-						 WHERE merchant_id = $1 AND psp_id = $2 AND rail = $3 AND rail_customer_ref = $4 AND rail_method_ref = $5`,
-						merchantID.UUID(), subPSP, s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef).
-						Scan(&existing, &owner)
+					row, err := q.GetPaymentMethodByPSPRailRefs(ctx, gen.GetPaymentMethodByPSPRailRefsParams{
+						MerchantID: merchantID.UUID(), PspID: subPSP, Rail: s.PaymentMethod.Rail,
+						RailCustomerRef: s.PaymentMethod.RailCustomerRef, RailMethodRef: s.PaymentMethod.RailMethodRef,
+					})
+					existing, owner := row.ID, row.CustomerID
 					if err == nil {
 						if owner != s.Customer.UUID() {
 							return apperr.Conflictf("resolve payment method ref %s: instrument belongs to customer %s, not %s", s.SourceID, owner, s.Customer)

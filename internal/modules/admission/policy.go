@@ -394,7 +394,7 @@ func (s *InvokerSpendLimitStore) withPayerWriteTx(ctx context.Context, payer ide
 	tenantID := tid.UUID()
 	lockKey := tid.String() + ":" + payer.UUID().String()
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		if err := gen.New(tx).LockInvokerSpendLimits(ctx, lockKey); err != nil {
 			return fmt.Errorf("admission: lock invoker spend limits: %w", err)
 		}
 		txdb := s.db.NewWithPgxTx(tx)
@@ -451,7 +451,7 @@ func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.Cust
 	lockKey := tid.String() + ":" + payer.UUID().String()
 	deleted := false
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+		if err := gen.New(tx).LockInvokerSpendLimits(ctx, lockKey); err != nil {
 			return fmt.Errorf("admission: lock invoker spend limits: %w", err)
 		}
 		txdb := s.db.NewWithPgxTx(tx)

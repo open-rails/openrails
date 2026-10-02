@@ -39,6 +39,66 @@ func (q *Queries) ApprovePSPPendingSigner(ctx context.Context, arg ApprovePSPPen
 	return result.RowsAffected(), nil
 }
 
+const archivePSP = `-- name: ArchivePSP :one
+UPDATE openrails.psps
+SET archived = true,
+    evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{configuration_revision}',
+        to_jsonb(COALESCE((evidence ->> 'configuration_revision')::bigint, 0) + 1)),
+    replaced_at = COALESCE(replaced_at, now()),
+    updated_at = now()
+WHERE id = $1::uuid AND merchant_id = $2::uuid
+RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key
+`
+
+type ArchivePSPParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) ArchivePSP(ctx context.Context, arg ArchivePSPParams) (OpenrailsPsp, error) {
+	row := q.db.QueryRow(ctx, archivePSP, arg.ID, arg.MerchantID)
+	var i OpenrailsPsp
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+		&i.Key,
+		&i.Evidence,
+		&i.FirstSeenAt,
+		&i.LastVerifiedAt,
+		&i.ReplacedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Archived,
+		&i.CustodianID,
+		&i.PendingSignerPublicKey,
+	)
+	return i, err
+}
+
+const archivedPSPKeyExists = `-- name: ArchivedPSPKeyExists :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.psps
+    WHERE merchant_id = $1::uuid AND lower(key) = lower($2::text)
+      AND environment = $3::text AND archived = true
+)
+`
+
+type ArchivedPSPKeyExistsParams struct {
+	MerchantID  uuid.UUID
+	Key         string
+	Environment string
+}
+
+func (q *Queries) ArchivedPSPKeyExists(ctx context.Context, arg ArchivedPSPKeyExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, archivedPSPKeyExists, arg.MerchantID, arg.Key, arg.Environment)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const countActivePSPsForNewWork = `-- name: CountActivePSPsForNewWork :one
 SELECT count(*)::bigint FROM openrails.psps
 WHERE merchant_id = $1::uuid
@@ -58,6 +118,52 @@ func (q *Queries) CountActivePSPsForNewWork(ctx context.Context, arg CountActive
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countPSPOpenObligations = `-- name: CountPSPOpenObligations :many
+SELECT psp.id AS psp_id,
+       ((SELECT count(*) FROM openrails.subscriptions sub
+          WHERE sub.merchant_id = psp.merchant_id AND sub.psp_id = psp.id
+            AND sub.status IN ('active', 'pending', 'past_due') AND sub.deleted_at IS NULL)
+      + (SELECT count(*) FROM openrails.payments payment
+          WHERE payment.merchant_id = psp.merchant_id AND payment.psp_id = psp.id
+            AND payment.status = 'pending' AND payment.deleted_at IS NULL)
+      + (SELECT count(*) FROM openrails.rail_intents intent
+          WHERE intent.merchant_id = psp.merchant_id AND intent.psp_id = psp.id
+            AND intent.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify'))
+       )::bigint AS open_obligations
+FROM openrails.psps psp
+WHERE psp.merchant_id = $1::uuid AND psp.id = ANY($2::uuid[])
+`
+
+type CountPSPOpenObligationsParams struct {
+	MerchantID uuid.UUID
+	PspIds     []uuid.UUID
+}
+
+type CountPSPOpenObligationsRow struct {
+	PspID           uuid.UUID
+	OpenObligations int64
+}
+
+func (q *Queries) CountPSPOpenObligations(ctx context.Context, arg CountPSPOpenObligationsParams) ([]CountPSPOpenObligationsRow, error) {
+	rows, err := q.db.Query(ctx, countPSPOpenObligations, arg.MerchantID, arg.PspIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountPSPOpenObligationsRow
+	for rows.Next() {
+		var i CountPSPOpenObligationsRow
+		if err := rows.Scan(&i.PspID, &i.OpenObligations); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countPSPsForRailEnvironment = `-- name: CountPSPsForRailEnvironment :one
@@ -115,6 +221,43 @@ func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentity
 	return id, err
 }
 
+const getActivePSPByKey = `-- name: GetActivePSPByKey :one
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+WHERE merchant_id = $1::uuid AND lower(key) = lower($2::text)
+  AND environment = $3::text AND archived = false
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetActivePSPByKeyParams struct {
+	MerchantID  uuid.UUID
+	Key         string
+	Environment string
+}
+
+func (q *Queries) GetActivePSPByKey(ctx context.Context, arg GetActivePSPByKeyParams) (OpenrailsPsp, error) {
+	row := q.db.QueryRow(ctx, getActivePSPByKey, arg.MerchantID, arg.Key, arg.Environment)
+	var i OpenrailsPsp
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+		&i.Key,
+		&i.Evidence,
+		&i.FirstSeenAt,
+		&i.LastVerifiedAt,
+		&i.ReplacedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Archived,
+		&i.CustodianID,
+		&i.PendingSignerPublicKey,
+	)
+	return i, err
+}
+
 const getActivePSPForNewWork = `-- name: GetActivePSPForNewWork :one
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
 WHERE merchant_id = $1::uuid
@@ -135,6 +278,44 @@ type GetActivePSPForNewWorkParams struct {
 // work must use its recorded psp_id instead of this selector.
 func (q *Queries) GetActivePSPForNewWork(ctx context.Context, arg GetActivePSPForNewWorkParams) (OpenrailsPsp, error) {
 	row := q.db.QueryRow(ctx, getActivePSPForNewWork, arg.MerchantID, arg.Rail, arg.Environment)
+	var i OpenrailsPsp
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+		&i.Key,
+		&i.Evidence,
+		&i.FirstSeenAt,
+		&i.LastVerifiedAt,
+		&i.ReplacedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Archived,
+		&i.CustodianID,
+		&i.PendingSignerPublicKey,
+	)
+	return i, err
+}
+
+const getNewestPSPForRail = `-- name: GetNewestPSPForRail :one
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+WHERE merchant_id = $1::uuid AND rail = lower($2::text)
+  AND environment = $3::text
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetNewestPSPForRailParams struct {
+	MerchantID  uuid.UUID
+	Rail        string
+	Environment string
+}
+
+// Archived included: the drain-pull leg (#699).
+func (q *Queries) GetNewestPSPForRail(ctx context.Context, arg GetNewestPSPForRailParams) (OpenrailsPsp, error) {
+	row := q.db.QueryRow(ctx, getNewestPSPForRail, arg.MerchantID, arg.Rail, arg.Environment)
 	var i OpenrailsPsp
 	err := row.Scan(
 		&i.ID,
@@ -276,6 +457,24 @@ func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIden
 	return i, err
 }
 
+const getPSPEnvironmentForRail = `-- name: GetPSPEnvironmentForRail :one
+SELECT environment FROM openrails.psps
+WHERE id = $1::uuid AND merchant_id = $2::uuid AND rail = $3::text
+`
+
+type GetPSPEnvironmentForRailParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Rail       string
+}
+
+func (q *Queries) GetPSPEnvironmentForRail(ctx context.Context, arg GetPSPEnvironmentForRailParams) (string, error) {
+	row := q.db.QueryRow(ctx, getPSPEnvironmentForRail, arg.ID, arg.MerchantID, arg.Rail)
+	var environment string
+	err := row.Scan(&environment)
+	return environment, err
+}
+
 const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
 
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
@@ -347,6 +546,122 @@ func (q *Queries) GetPSPForQualificationUpdate(ctx context.Context, arg GetPSPFo
 		&i.PendingSignerPublicKey,
 	)
 	return i, err
+}
+
+const getPSPIDByRailAccount = `-- name: GetPSPIDByRailAccount :one
+SELECT id FROM openrails.psps
+WHERE merchant_id = $1::uuid AND rail = lower($2::text)
+  AND account_id = $3::text
+LIMIT 1
+`
+
+type GetPSPIDByRailAccountParams struct {
+	MerchantID uuid.UUID
+	Rail       string
+	AccountID  string
+}
+
+func (q *Queries) GetPSPIDByRailAccount(ctx context.Context, arg GetPSPIDByRailAccountParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getPSPIDByRailAccount, arg.MerchantID, arg.Rail, arg.AccountID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listActivePSPsForEnvironment = `-- name: ListActivePSPsForEnvironment :many
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+WHERE merchant_id = $1::uuid AND environment = $2::text AND archived = false
+ORDER BY rail ASC, created_at DESC, id DESC
+`
+
+type ListActivePSPsForEnvironmentParams struct {
+	MerchantID  uuid.UUID
+	Environment string
+}
+
+func (q *Queries) ListActivePSPsForEnvironment(ctx context.Context, arg ListActivePSPsForEnvironmentParams) ([]OpenrailsPsp, error) {
+	rows, err := q.db.Query(ctx, listActivePSPsForEnvironment, arg.MerchantID, arg.Environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPsp
+	for rows.Next() {
+		var i OpenrailsPsp
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.Key,
+			&i.Evidence,
+			&i.FirstSeenAt,
+			&i.LastVerifiedAt,
+			&i.ReplacedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Archived,
+			&i.CustodianID,
+			&i.PendingSignerPublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActivePSPsForRailEnvironment = `-- name: ListActivePSPsForRailEnvironment :many
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+WHERE merchant_id = $1::uuid AND rail = lower($2::text)
+  AND environment = $3::text AND archived = false
+ORDER BY created_at DESC, id DESC
+`
+
+type ListActivePSPsForRailEnvironmentParams struct {
+	MerchantID  uuid.UUID
+	Rail        string
+	Environment string
+}
+
+func (q *Queries) ListActivePSPsForRailEnvironment(ctx context.Context, arg ListActivePSPsForRailEnvironmentParams) ([]OpenrailsPsp, error) {
+	rows, err := q.db.Query(ctx, listActivePSPsForRailEnvironment, arg.MerchantID, arg.Rail, arg.Environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPsp
+	for rows.Next() {
+		var i OpenrailsPsp
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.Key,
+			&i.Evidence,
+			&i.FirstSeenAt,
+			&i.LastVerifiedAt,
+			&i.ReplacedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Archived,
+			&i.CustodianID,
+			&i.PendingSignerPublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLivePSPsForRail = `-- name: ListLivePSPsForRail :many
@@ -486,6 +801,68 @@ func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedM
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockPSPsForRailEnvironment = `-- name: LockPSPsForRailEnvironment :many
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+WHERE merchant_id = $1::uuid AND rail = $2::text
+  AND environment = $3::text
+ORDER BY created_at, id
+FOR UPDATE
+`
+
+type LockPSPsForRailEnvironmentParams struct {
+	MerchantID  uuid.UUID
+	Rail        string
+	Environment string
+}
+
+// One lock order so concurrent archives serialize instead of deadlocking.
+func (q *Queries) LockPSPsForRailEnvironment(ctx context.Context, arg LockPSPsForRailEnvironmentParams) ([]OpenrailsPsp, error) {
+	rows, err := q.db.Query(ctx, lockPSPsForRailEnvironment, arg.MerchantID, arg.Rail, arg.Environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPsp
+	for rows.Next() {
+		var i OpenrailsPsp
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.Key,
+			&i.Evidence,
+			&i.FirstSeenAt,
+			&i.LastVerifiedAt,
+			&i.ReplacedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Archived,
+			&i.CustodianID,
+			&i.PendingSignerPublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const merchantHasPSPs = `-- name: MerchantHasPSPs :one
+SELECT EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = $1::uuid)
+`
+
+func (q *Queries) MerchantHasPSPs(ctx context.Context, merchantID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, merchantHasPSPs, merchantID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :one

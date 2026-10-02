@@ -155,13 +155,7 @@ func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid merc
 // the invariants hold again — the check is precise, so a repaired ledger must
 // go quiet rather than leave a permanently red board.
 func (w LedgerIntegrityWorker) resolveLedgerFindings(ctx context.Context, mid merchant.ID) error {
-	_, err := w.DB.Qx(ctx).Exec(ctx, `
-		UPDATE openrails.reconciliation_findings
-		   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
-		       notified_at = NULL, notified_severity = NULL, updated_at = now()
-		 WHERE merchant_id = $1::uuid
-		   AND finding_type = ANY($2::text[])
-		   AND status = 'requires_review'`,
-		mid.UUID(), []string{FindingLedgerConservation, FindingLedgerCounterDrift})
-	return err
+	return w.DB.Gen(ctx).AutoResolveReviewFindingsByType(ctx, gen.AutoResolveReviewFindingsByTypeParams{
+		MerchantID: mid.UUID(), FindingTypes: []string{FindingLedgerConservation, FindingLedgerCounterDrift},
+	})
 }

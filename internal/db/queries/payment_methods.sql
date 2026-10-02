@@ -381,3 +381,19 @@ INSERT INTO openrails.payment_method_updates (merchant_id, payment_method_id, cu
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(payment_method_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
     sqlc.arg(source)::text, sqlc.arg(kind)::text, sqlc.arg(event_ref)::text, COALESCE(sqlc.narg(at)::timestamptz, now()))
 ON CONFLICT DO NOTHING;
+
+-- name: GetPaymentMethodByPSPRefs :one
+SELECT id, customer_id, rail FROM openrails.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
+
+-- name: GetPaymentMethodByPSPRailRefs :one
+SELECT id, customer_id FROM openrails.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail = sqlc.arg(rail)::text
+  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
+
+-- name: CustomerHasVaultedPaymentMethod :one
+SELECT EXISTS (
+    SELECT 1 FROM openrails.payment_methods
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND parked_at IS NULL
+);

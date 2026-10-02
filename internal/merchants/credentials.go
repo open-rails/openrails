@@ -405,15 +405,11 @@ func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, envir
 	}
 	archived := false
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT EXISTS (
-					SELECT 1 FROM openrails.psps
-					 WHERE merchant_id = $1::uuid
-					   AND lower(key) = lower($2)
-					   AND environment = $3
-					   AND archived = true
-				)
-			`, id.String(), strings.TrimSpace(key), environment).Scan(&archived)
+		var err error
+		archived, err = s.database.Gen(ctx).ArchivedPSPKeyExists(ctx, gen.ArchivedPSPKeyExistsParams{
+			MerchantID: id.UUID(), Key: strings.TrimSpace(key), Environment: environment,
+		})
+		return err
 	})
 	if err != nil {
 		return false, fmt.Errorf("load archived PSP by key %s/%s: %w", key, environment, err)
@@ -433,20 +429,13 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	if environment == "" {
 		return PSPScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
-	var scope pspSecretScope
-	var evidence []byte
+	var row gen.OpenrailsPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
-				  FROM openrails.psps
-				 WHERE merchant_id = $1::uuid
-				   AND lower(key) = lower($2)
-				   AND environment = $3
-				   AND archived = false
-				 ORDER BY created_at DESC, id DESC
-				 LIMIT 1
-			`, id.String(), strings.TrimSpace(key), environment).
-			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange)
+		var err error
+		row, err = s.database.Gen(ctx).GetActivePSPByKey(ctx, gen.GetActivePSPByKeyParams{
+			MerchantID: id.UUID(), Key: strings.TrimSpace(key), Environment: environment,
+		})
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil
@@ -454,8 +443,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	if err != nil {
 		return PSPScope{}, false, fmt.Errorf("load PSP by key %s/%s: %w", key, environment, err)
 	}
-	scope.applyEvidence(evidence)
-	return scope.exported(), true, nil
+	return PSPScopeFromRow(row), true, nil
 }
 
 // ActivePSPScopesForRail lists every non-archived PSP declared on
@@ -470,37 +458,18 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 	if environment == "" {
 		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
-	var out []PSPScope
+	var rows []gen.OpenrailsPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		rows, err := s.database.Qx(ctx).Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
-				  FROM openrails.psps
-				 WHERE merchant_id = $1::uuid
-				   AND rail = lower($2)
-				   AND environment = $3
-				   AND archived = false
-				 ORDER BY created_at DESC, id DESC
-			`, id.String(), rail, environment)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		out = out[:0]
-		for rows.Next() {
-			var scope pspSecretScope
-			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange); err != nil {
-				return err
-			}
-			scope.applyEvidence(evidence)
-			out = append(out, scope.exported())
-		}
-		return rows.Err()
+		var err error
+		rows, err = s.database.Gen(ctx).ListActivePSPsForRailEnvironment(ctx, gen.ListActivePSPsForRailEnvironmentParams{
+			MerchantID: id.UUID(), Rail: rail, Environment: environment,
+		})
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list PSPs %s/%s: %w", rail, environment, err)
 	}
-	return out, nil
+	return pspScopesFromRows(rows), nil
 }
 
 // activePSPScopes lists every non-archived PSP for merchant+environment in ONE
@@ -514,39 +483,18 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 	if environment == "" {
 		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
-	var out []PSPScope
+	var rows []gen.OpenrailsPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		rows, err := s.database.Qx(ctx).Query(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
-				  FROM openrails.psps
-				 WHERE merchant_id = $1::uuid
-				   AND environment = $2
-				   AND archived = false
-				 ORDER BY rail ASC, created_at DESC, id DESC
-			`, id.String(), environment)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		out = out[:0]
-		for rows.Next() {
-			var scope pspSecretScope
-			var evidence []byte
-			if err := rows.Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange); err != nil {
-				return err
-			}
-			scope.applyEvidence(evidence)
-			out = append(out, scope.exported())
-		}
-		return rows.Err()
+		var err error
+		rows, err = s.database.Gen(ctx).ListActivePSPsForEnvironment(ctx, gen.ListActivePSPsForEnvironmentParams{
+			MerchantID: id.UUID(), Environment: environment,
+		})
+		return err
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("list PSPs for %s: %w", environment, err)
 	}
-	return out, nil
+	return pspScopesFromRows(rows), nil
 }
 
 // pspSecretScopeByAccountID resolves the secret scope for a specific
@@ -557,17 +505,14 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 		return pspSecretScope{}, false, nil
 	}
 	rail = normalizeProviderSecretType(rail)
-	var scope pspSecretScope
-	var evidence []byte
+	environment := s.providerEnvironment
+	var row gen.OpenrailsPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id, COALESCE(pending_signer_public_key, '')
-				  FROM openrails.psps
-				 WHERE merchant_id = $1::uuid
-				   AND rail = lower($2)
-				   AND account_id = $3 AND environment = $4
-				 LIMIT 1
-			`, id.String(), rail, strings.TrimSpace(accountID), s.providerEnvironment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange)
+		var err error
+		row, err = s.database.Gen(ctx).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
+			MerchantID: id.UUID(), Rail: rail, AccountID: strings.TrimSpace(accountID), Environment: &environment,
+		})
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pspSecretScope{}, false, nil
@@ -575,8 +520,7 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	if err != nil {
 		return pspSecretScope{}, false, fmt.Errorf("load PSP %s/%s: %w", rail, accountID, err)
 	}
-	scope.applyEvidence(evidence)
-	return scope, true, nil
+	return pspScopeFromRow(row), true, nil
 }
 
 // pspSettings reads declared settings; public values published through the
@@ -631,18 +575,13 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 	if environment == "" {
 		return PSPScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
-	var scope pspSecretScope
-	var evidence []byte
+	var row gen.OpenrailsPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, evidence, COALESCE(key,''), custodian_id, COALESCE(pending_signer_public_key, '')
-				  FROM openrails.psps
-				 WHERE merchant_id = $1::uuid
-				   AND rail = lower($2)
-				   AND environment = $3
-				 ORDER BY created_at DESC, id DESC
-				 LIMIT 1
-			`, id.String(), rail, environment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &evidence, &scope.key, &scope.custodianID, &scope.signerChange)
+		var err error
+		row, err = s.database.Gen(ctx).GetNewestPSPForRail(ctx, gen.GetNewestPSPForRailParams{
+			MerchantID: id.UUID(), Rail: rail, Environment: environment,
+		})
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil
@@ -650,8 +589,7 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 	if err != nil {
 		return PSPScope{}, false, fmt.Errorf("load newest PSP %s/%s: %w", rail, environment, err)
 	}
-	scope.applyEvidence(evidence)
-	return scope.exported(), true, nil
+	return PSPScopeFromRow(row), true, nil
 }
 
 // PSPScopeByAccountID resolves a specific declared account by
@@ -738,13 +676,11 @@ func (s *Service) ResolvePSPID(ctx context.Context, id merchant.ID, rail, accoun
 	rail = normalizeProviderSecretType(rail)
 	var pid uuid.UUID
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `
-			SELECT id FROM openrails.psps
-			 WHERE merchant_id = $1::uuid
-			   AND rail = lower($2)
-			   AND account_id = $3
-			 LIMIT 1
-		`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&pid)
+		var err error
+		pid, err = s.database.Gen(ctx).GetPSPIDByRailAccount(ctx, gen.GetPSPIDByRailAccountParams{
+			MerchantID: id.UUID(), Rail: rail, AccountID: strings.TrimSpace(accountID),
+		})
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, false, nil
@@ -982,20 +918,15 @@ func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailP
 // openrails.merchants is a global control-plane table, so this read is
 // legitimate on the base pool.
 func (s *Service) allMerchantIDs(ctx context.Context) ([]merchant.ID, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id FROM openrails.merchants ORDER BY id`)
+	rows, err := gen.New(s.pool).ListAllMerchantIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var ids []merchant.ID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
+	ids := make([]merchant.ID, 0, len(rows))
+	for _, id := range rows {
 		ids = append(ids, merchant.ID(id))
 	}
-	return ids, rows.Err()
+	return ids, nil
 }
 
 // PutCredential stores/rotates a single per-merchant credential.
@@ -1060,6 +991,10 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 // credential references and custody included, exactly as every resolver
 // builds it.
 func PSPScopeFromRow(row gen.OpenrailsPsp) PSPScope {
+	return pspScopeFromRow(row).exported()
+}
+
+func pspScopeFromRow(row gen.OpenrailsPsp) pspSecretScope {
 	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, custodianID: row.CustodianID}
 	if row.Key != nil {
 		scope.key = *row.Key
@@ -1068,7 +1003,15 @@ func PSPScopeFromRow(row gen.OpenrailsPsp) PSPScope {
 	if row.PendingSignerPublicKey != nil {
 		scope.signerChange = *row.PendingSignerPublicKey
 	}
-	return scope.exported()
+	return scope
+}
+
+func pspScopesFromRows(rows []gen.OpenrailsPsp) []PSPScope {
+	var out []PSPScope
+	for _, row := range rows {
+		out = append(out, PSPScopeFromRow(row))
+	}
+	return out
 }
 
 // PSPScopeByID preserves the selected account across key renames and archive.
@@ -1076,11 +1019,11 @@ func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.U
 	if s == nil || s.pool == nil || id.IsZero() || pspID == uuid.Nil {
 		return PSPScope{}, false, nil
 	}
-	var scope pspSecretScope
-	var evidence []byte
+	var row gen.OpenrailsPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return s.database.Qx(ctx).QueryRow(ctx, `SELECT id,rail,environment,account_id,COALESCE(key,''),evidence,custodian_id,COALESCE(pending_signer_public_key,'') FROM openrails.psps WHERE merchant_id=$1 AND id=$2`, id.UUID(), pspID).
-			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID, &scope.signerChange)
+		var err error
+		row, err = s.database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: id.UUID(), ID: pspID})
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil
@@ -1088,6 +1031,5 @@ func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.U
 	if err != nil {
 		return PSPScope{}, false, err
 	}
-	scope.applyEvidence(evidence)
-	return scope.exported(), true, nil
+	return PSPScopeFromRow(row), true, nil
 }

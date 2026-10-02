@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
@@ -137,7 +138,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 	}
 	var prepared *adminRefundPrepared
 	err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminRefundLockKey(paymentID.String())); err != nil {
+		if err := gen.New(tx).LockAdminRefund(ctx, adminRefundLockKey(paymentID.String())); err != nil {
 			return fmt.Errorf("lock refund: %w", err)
 		}
 		txDB := db.NewWithPgxTx(tx)
@@ -279,11 +280,16 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		if !adminRefundMatchesRequest(existing, req) {
 			return nil, adminRefundCodedError(http.StatusConflict, refundCodeKeyReused, "idempotency key was already used for a different refund request")
 		}
-		var intentID uuid.UUID
-		if err := txDB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE merchant_id=$3 AND payment_id=$1 AND idempotency_key=$2`, paymentID, intents.RefundIdempotencyKey(paymentID, idempotencyKey), mid.UUID()).Scan(&intentID); err != nil {
+		intent, err := txDB.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{
+			MerchantID: mid.UUID(), IdempotencyKey: intents.RefundIdempotencyKey(paymentID, idempotencyKey),
+		})
+		if err == nil && (intent.PaymentID == nil || *intent.PaymentID != paymentID) {
+			err = pgx.ErrNoRows
+		}
+		if err != nil {
 			return nil, fmt.Errorf("load refund intent: %w", err)
 		}
-		return &adminRefundPrepared{reservationID: existing.ID, intentID: intentID}, nil
+		return &adminRefundPrepared{reservationID: existing.ID, intentID: intent.ID}, nil
 	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing refund request: %w", err)
 	}

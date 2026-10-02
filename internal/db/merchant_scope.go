@@ -56,10 +56,8 @@ func (d *DB) AssertMerchantScope(ctx context.Context, op string) error {
 	if d == nil {
 		return fmt.Errorf("db: AssertMerchantScope on nil DB")
 	}
-	var got string
-	if err := d.Qx(ctx).QueryRow(ctx,
-		"SELECT COALESCE(current_setting($1, true), '')", MerchantGUC,
-	).Scan(&got); err != nil {
+	got, err := d.Gen(ctx).CurrentSetting(ctx, MerchantGUC)
+	if err != nil {
 		return fmt.Errorf("db: %s could not read %s: %w", op, MerchantGUC, err)
 	}
 	// A merchant on the context is not required — the SESSION is what scopes the

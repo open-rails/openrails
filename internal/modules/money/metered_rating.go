@@ -110,57 +110,34 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string) ([]catalogRateCardRow, error) {
 	var out []catalogRateCardRow
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Qx(ctx).Query(ctx, `
-SELECT rc.id,
-       rc.meter_key,
-       rc.customer_id IS NOT NULL AS payer_scoped,
-       COALESCE(NULLIF(cm.event_type, ''), cm.key) AS event_type,
-       COALESCE(NULLIF(cm.value_property, ''), cm.key) AS value_property,
-       COALESCE(NULLIF(cm.aggregation, ''), 'sum') AS aggregation,
-       COALESCE(cm.group_by, '{}'::jsonb) AS group_by,
-       COALESCE(rc.filter, '{}'::jsonb) AS filter,
-       rc.allowance,
-       rc.price
-FROM openrails.catalog_rate_cards rc
-JOIN openrails.catalog_meters cm
-  ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
-WHERE rc.merchant_id = $1
-  AND rc.meter_key IS NOT NULL
-  AND (rc.customer_id IS NULL OR rc.customer_id = $3)
-  AND lower(COALESCE(rc.price ->> 'currency', $2)) = lower($2)
-  AND rc.payment_term = 'in_arrears'
-ORDER BY rc.ordinal`, merchantID, currency, payer.UUID())
+		rows, qerr := s.db.Gen(ctx).ListPayerArrearsRateCards(ctx, gen.ListPayerArrearsRateCardsParams{
+			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency,
+		})
 		if qerr != nil {
 			return qerr
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var row catalogRateCardRow
-			var groupByJSON, filterJSON, priceJSON []byte
-			var allowanceJSON []byte
-			if err := rows.Scan(&row.ID, &row.MeterKey, &row.PayerScoped, &row.EventType, &row.ValueKey, &row.Aggregation, &groupByJSON, &filterJSON, &allowanceJSON, &priceJSON); err != nil {
-				return err
-			}
-			if err := json.Unmarshal(groupByJSON, &row.GroupBy); err != nil {
+		for _, r := range rows {
+			row := catalogRateCardRow{ID: r.ID, MeterKey: r.MeterKey, PayerScoped: r.PayerScoped, EventType: r.EventType, ValueKey: r.ValueProperty, Aggregation: r.Aggregation}
+			if err := json.Unmarshal(r.GroupBy, &row.GroupBy); err != nil {
 				return fmt.Errorf("decode rate card %s group_by: %w", row.ID, err)
 			}
-			if err := json.Unmarshal(filterJSON, &row.Filter); err != nil {
+			if err := json.Unmarshal(r.Filter, &row.Filter); err != nil {
 				return fmt.Errorf("decode rate card %s filter: %w", row.ID, err)
 			}
-			if len(allowanceJSON) > 0 {
+			if len(r.Allowance) > 0 {
 				var allowance pricing.Allowance
-				if err := json.Unmarshal(allowanceJSON, &allowance); err != nil {
+				if err := json.Unmarshal(r.Allowance, &allowance); err != nil {
 					return fmt.Errorf("decode rate card %s allowance: %w", row.ID, err)
 				}
 				row.Allowance = &allowance
 			}
-			if err := json.Unmarshal(priceJSON, &row.Price); err != nil {
+			if err := json.Unmarshal(r.Price, &row.Price); err != nil {
 				return fmt.Errorf("decode rate card %s price: %w", row.ID, err)
 			}
 			row.ValueKey = propertyKey(row.ValueKey)
 			out = append(out, row)
 		}
-		return rows.Err()
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -223,49 +200,15 @@ func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uu
 	}
 	out := map[string]int64{}
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Qx(ctx).Query(ctx, `
-SELECT COALESCE(NULLIF(ue.metadata ->> $8, ''), NULLIF(ue.dimensions ->> $8, ''), '') AS dim_value,
-       COALESCE(SUM(
-           CASE WHEN $9 = 'count' THEN 1
-                ELSE COALESCE((ue.dimensions ->> $7)::bigint, (ue.metadata ->> $7)::bigint, 0)
-           END
-       ), 0)::bigint AS quantity
-FROM openrails.usage_events ue
-WHERE ue.merchant_id = $1
-  AND ue.customer_id = $2
-  AND ue.currency = $3
-  AND ue.event_type = $4
-  AND ue.pricing_authority = 'catalog'
-  AND ue.occurred_at >= $5::timestamptz
-  AND ue.occurred_at < $6::timestamptz
-  AND NOT EXISTS (
-      SELECT 1
-      FROM jsonb_to_recordset($10::jsonb)
-          AS filter_rule(property_key text, allowed_values jsonb)
-      WHERE NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(filter_rule.allowed_values) AS allowed_value(value)
-          WHERE allowed_value.value = COALESCE(
-              NULLIF(ue.metadata ->> filter_rule.property_key, ''),
-              NULLIF(ue.dimensions ->> filter_rule.property_key, ''),
-              ''
-          )
-      )
-  )
-GROUP BY dim_value`, merchantID, payer.UUID(), currency, rc.EventType, from, to, valueKey, groupProperty, agg, filterJSON)
-		if qerr != nil {
-			return qerr
+		rows, qerr := s.db.Gen(ctx).SumCatalogUsageByDimension(ctx, gen.SumCatalogUsageByDimensionParams{
+			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency, EventType: rc.EventType,
+			OccurredFrom: from, OccurredTo: to, ValueKey: valueKey, GroupProperty: groupProperty,
+			Aggregation: agg, FilterRules: filterJSON,
+		})
+		for _, row := range rows {
+			out[row.DimValue] += row.Quantity
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var dimValue string
-			var quantity int64
-			if err := rows.Scan(&dimValue, &quantity); err != nil {
-				return err
-			}
-			out[dimValue] += quantity
-		}
-		return rows.Err()
+		return qerr
 	})
 	return out, err
 }
@@ -309,47 +252,16 @@ func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uui
 
 	total := int64(0)
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Qx(ctx).Query(ctx, `
-SELECT COALESCE(NULLIF(ue.metadata ->> $8, ''), NULLIF(ue.dimensions ->> $8, ''), '') AS dim_value,
-       COALESCE(NULLIF(ue.metadata ->> $9, ''), NULLIF(ue.dimensions ->> $9, ''), '') AS resource_id,
-       COALESCE(SUM(
-           CASE WHEN $10 = 'count' THEN 1
-                ELSE COALESCE((ue.dimensions ->> $7)::bigint, (ue.metadata ->> $7)::bigint, 0)
-           END
-       ), 0)::bigint AS quantity
-FROM openrails.usage_events ue
-WHERE ue.merchant_id = $1
-  AND ue.customer_id = $2
-  AND ue.currency = $3
-  AND ue.event_type = $4
-  AND ue.pricing_authority = 'catalog'
-  AND ue.occurred_at >= $5::timestamptz
-  AND ue.occurred_at < $6::timestamptz
-  AND NOT EXISTS (
-      SELECT 1
-      FROM jsonb_to_recordset($11::jsonb)
-          AS filter_rule(property_key text, allowed_values jsonb)
-      WHERE NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(filter_rule.allowed_values) AS allowed_value(value)
-          WHERE allowed_value.value = COALESCE(
-              NULLIF(ue.metadata ->> filter_rule.property_key, ''),
-              NULLIF(ue.dimensions ->> filter_rule.property_key, ''),
-              ''
-          )
-      )
-  )
-GROUP BY dim_value, resource_id`, merchantID, payer.UUID(), currency, source.EventType, from, to, valueKey, dimensionProperty, resourceProperty, agg, filterJSON)
+		rows, qerr := s.db.Gen(ctx).SumCatalogUsageByDimensionResource(ctx, gen.SumCatalogUsageByDimensionResourceParams{
+			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency, EventType: source.EventType,
+			OccurredFrom: from, OccurredTo: to, ValueKey: valueKey, DimensionProperty: dimensionProperty,
+			ResourceProperty: resourceProperty, Aggregation: agg, FilterRules: filterJSON,
+		})
 		if qerr != nil {
 			return qerr
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var dimValue, resourceID string
-			var quantity int64
-			if err := rows.Scan(&dimValue, &resourceID, &quantity); err != nil {
-				return err
-			}
+		for _, row := range rows {
+			dimValue, resourceID, quantity := row.DimValue, row.ResourceID, row.Quantity
 			if resourceID == "" || quantity <= 0 {
 				continue
 			}
@@ -371,7 +283,7 @@ GROUP BY dim_value, resource_id`, merchantID, payer.UUID(), currency, source.Eve
 				total += cell.Included
 			}
 		}
-		return rows.Err()
+		return nil
 	})
 	return total, err
 }
@@ -537,29 +449,22 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Upsert-lock the watermark row: ON CONFLICT DO UPDATE takes the row lock
 		// and returns the current committed values, serializing concurrent sweeps.
-		var alreadyAccrued int64
-		if err := tx.QueryRow(ctx, `
-INSERT INTO openrails.metered_rating_watermarks (
-    merchant_id, customer_id, currency, source, period_from,
-    rated_through, accrued_amount, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $5, 0, $6, $6)
-ON CONFLICT (merchant_id, customer_id, currency, source, period_from)
-DO UPDATE SET updated_at = openrails.metered_rating_watermarks.updated_at
-RETURNING accrued_amount`,
-			tenantID, payerID, cur, wmSource, periodFrom.UTC(), now).Scan(&alreadyAccrued); err != nil {
+		q := gen.New(tx)
+		advance := gen.AdvanceMeteredRatingWatermarkParams{
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource,
+			PeriodFrom: periodFrom.UTC(), RatedThrough: ratedThrough.UTC(), Now: now,
+		}
+		alreadyAccrued, err := q.LockMeteredRatingWatermark(ctx, gen.LockMeteredRatingWatermarkParams{
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, Source: wmSource, PeriodFrom: periodFrom.UTC(), Now: now,
+		})
+		if err != nil {
 			return err
 		}
 		delta := ratedPrefix - alreadyAccrued
 		if delta <= 0 {
 			// Everything in this prefix is already billed; just advance rated_through.
-			_, err := tx.Exec(ctx, `
-UPDATE openrails.metered_rating_watermarks
-SET rated_through = GREATEST(rated_through, $6), updated_at = $7
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AND period_from = $5`,
-				tenantID, payerID, cur, wmSource, periodFrom.UTC(), ratedThrough.UTC(), now)
-			return err
+			return q.AdvanceMeteredRatingWatermark(ctx, advance)
 		}
-		q := gen.New(tx)
 		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
 			return err
 		}
@@ -581,11 +486,8 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AN
 		}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `
-UPDATE openrails.metered_rating_watermarks
-SET rated_through = GREATEST(rated_through, $6), accrued_amount = accrued_amount + $7, updated_at = $8
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AND period_from = $5`,
-			tenantID, payerID, cur, wmSource, periodFrom.UTC(), ratedThrough.UTC(), delta, now); err != nil {
+		advance.AccruedDelta = delta
+		if err := q.AdvanceMeteredRatingWatermark(ctx, advance); err != nil {
 			return err
 		}
 		accrued = delta

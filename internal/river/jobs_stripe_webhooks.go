@@ -244,18 +244,9 @@ func (w StripeWebhookReconcileWorker) recordEndpointFinding(
 }
 
 // resolveStripeWebhookFinding closes a standing finding once the rollover has
-// fully drained. Written as raw SQL on the merchant-scoped connection because
-// the generated resolve statements key on a finding id, not on the stable
-// (merchant, type, subject) identity this worker knows.
+// fully drained.
 func resolveStripeWebhookFinding(ctx context.Context, database *db.DB, mid merchant.ID, subject string) error {
-	_, err := database.Qx(ctx).Exec(ctx, `
-		UPDATE openrails.reconciliation_findings
-		   SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
-		       notified_at = NULL, notified_severity = NULL, updated_at = now()
-		 WHERE merchant_id = $1::uuid
-		   AND finding_type = $2
-		   AND subject_key = $3
-		   AND status IN ('reconcile_required', 'requires_review')
-	`, mid.String(), FindingStripeWebhookEndpoint, subject)
-	return err
+	return database.Gen(ctx).AutoResolveFindingBySubject(ctx, gen.AutoResolveFindingBySubjectParams{
+		MerchantID: mid.UUID(), FindingType: FindingStripeWebhookEndpoint, SubjectKey: subject,
+	})
 }

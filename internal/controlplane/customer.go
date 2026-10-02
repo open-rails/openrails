@@ -39,11 +39,11 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 		return uuid.Nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // harmless after Commit
-	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, TRUE)", db.MerchantGUC, merchantID.String()); err != nil {
+	q := gen.New(tx)
+	if _, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: db.MerchantGUC, Value: merchantID.String(), IsLocal: true}); err != nil {
 		return uuid.Nil, err
 	}
 
-	q := gen.New(tx)
 	var issuerPtr *string
 	if issuer != "" {
 		issuerPtr = &issuer

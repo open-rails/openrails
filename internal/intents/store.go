@@ -602,9 +602,6 @@ var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 //
 // Cutover tombstones retain accepted terms, step receipts and append-only account
 // continuity history even if a caller supplies a weaker handler prune policy.
-//
-// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and the
-// merchant connection apply exactly as they do for the generated queries.
 func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error {
 	if err := refuseCustodyKeys(evidence); err != nil {
 		return err
@@ -616,15 +613,11 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	if err != nil {
 		return fmt.Errorf("intents: prune succeeded intent: %w", err)
 	}
-	qx := s.db.Qx(ctx)
+	q := s.db.Gen(ctx)
 	if keepEvidence {
 		// Drop the payload only; leave result_evidence intact for the handler's
 		// post-success readers.
-		_, err := qx.Exec(ctx,
-			`UPDATE openrails.rail_intents
-			    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
-			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
-		return err
+		return q.PruneSucceededRailIntentPayload(ctx, gen.PruneSucceededRailIntentPayloadParams{ID: id, MerchantID: mid.UUID()})
 	}
 	var ev []byte
 	if slim := slimEvidence(evidence); len(slim) > 0 {
@@ -635,17 +628,9 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		ev = b
 	}
 	if keepPayload {
-		_, err := qx.Exec(ctx,
-			`UPDATE openrails.rail_intents
-			    SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
-			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
-		return err
+		return q.PruneSucceededRailIntentEvidence(ctx, gen.PruneSucceededRailIntentEvidenceParams{ID: id, MerchantID: mid.UUID(), Evidence: ev})
 	}
-	_, err = qx.Exec(ctx,
-		`UPDATE openrails.rail_intents
-		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
-		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
-	return err
+	return q.PruneSucceededRailIntent(ctx, gen.PruneSucceededRailIntentParams{ID: id, MerchantID: mid.UUID(), Evidence: ev})
 }
 
 // PruneTerminalPayload removes a short-lived credential from a terminal
@@ -655,11 +640,7 @@ func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("intents: prune terminal intent: %w", err)
 	}
-	_, err = s.db.Qx(ctx).Exec(ctx,
-		`UPDATE openrails.rail_intents
-		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
-		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
-	return err
+	return s.db.Gen(ctx).PruneTerminalRailIntentPayload(ctx, gen.PruneTerminalRailIntentPayloadParams{ID: id, MerchantID: mid.UUID()})
 }
 
 // slimEvidence keeps only pruneEvidenceKeys (when present) off a succeeded
@@ -685,9 +666,6 @@ func slimEvidence(evidence map[string]any) map[string]any {
 // intent — handlers use it to durably pin provider references (e.g. a signed
 // Solana tx signature) BEFORE the side effect is sent (#674), so a crash
 // mid-send resolves via a provider read keyed on the recorded reference.
-//
-// RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and the
-// merchant connection apply exactly as for the generated queries.
 func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
 	if _, ok := keys["initial_submitted"]; ok {
 		return errors.New("initial submission fence is write-once")
@@ -707,14 +685,7 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 	if err != nil {
 		return fmt.Errorf("intents: record progress: %w", err)
 	}
-	_, err = s.db.Qx(ctx).Exec(ctx,
-		`UPDATE openrails.rail_intents
-		    SET result_evidence = coalesce(result_evidence, '{}'::jsonb) || $2::jsonb,
-		        updated_at = now()
-		  WHERE id = $1
-		    AND merchant_id = $3
-		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`, id, b, mid.UUID())
-	return err
+	return s.db.Gen(ctx).RecordRailIntentProgress(ctx, gen.RecordRailIntentProgressParams{ID: id, MerchantID: mid.UUID(), Progress: b})
 }
 
 // RecordProgressIfAbsent writes one write-ahead progress marker atomically.
@@ -742,19 +713,11 @@ func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key st
 	if err != nil {
 		return false, fmt.Errorf("intents: record progress: %w", err)
 	}
-	result, err := s.db.Qx(ctx).Exec(ctx,
-		`UPDATE openrails.rail_intents
-		    SET result_evidence = coalesce(result_evidence, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb),
-		        updated_at = now()
-		  WHERE id = $1
-		    AND merchant_id = $4
-		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
-		    AND NOT (coalesce(result_evidence, '{}'::jsonb) ? $2::text)
- AND ($2::text <> 'initial_submitted' OR NOT (coalesce(result_evidence,'{}'::jsonb) ? 'qualified_initial_refusal'))`, id, key, b, mid.UUID())
+	n, err := s.db.Gen(ctx).RecordRailIntentProgressIfAbsent(ctx, gen.RecordRailIntentProgressIfAbsentParams{ID: id, MerchantID: mid.UUID(), Key: key, Value: b})
 	if err != nil {
 		return false, err
 	}
-	return result.RowsAffected() == 1, nil
+	return n == 1, nil
 }
 
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {

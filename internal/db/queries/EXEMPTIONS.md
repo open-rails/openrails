@@ -1,12 +1,12 @@
 # SQL gate exemptions
 
-Two gates run in CI (`task sqlc-check`), on top of `sqlc vet`'s `db-prepare`
-correctness check:
+Two gates run under `task sqlc-check`, on top of `sqlc vet`'s `db-prepare`
+correctness check (`TestNoInlineSQL` also runs in CI's unit suite):
 
 | gate | what it proves | allowlist |
 |---|---|---|
 | `internal/db/sqlaudit` | query scope, declared bounds and index availability | `AUDIT_ALLOWLIST.txt` |
-| `scripts/sql-lint.sh` | no hand-written SQL outside `internal/db/gen` | `LINT_ALLOWLIST.txt` |
+| `internal/db` `TestNoInlineSQL` | no SQL string literals outside `internal/db/queries` | `inlineSQLAllowed` in `inlinesql_test.go` |
 
 Every allowlist entry is classified **PERMANENT** (bounded by design) or
 **DEBT** (a real bug, kept only so the gate could be switched on), carries a
@@ -82,9 +82,13 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 ## AUDIT_ALLOWLIST.txt
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
-`custodians`, `merchant_webhooks`. Row counts follow the merchant's own
-configuration, not customer activity, so listing them whole does not scale with
-records on file.
+`custodians`, `merchant_webhooks`, `catalog_meters`, default `catalog_rate_cards`,
+`merchant_secrets`. Row counts follow the merchant's own configuration, not
+customer activity, so listing them whole does not scale with records on file.
+
+**PERMANENT — one row per merchant.** `merchant_api_host_claims` is keyed by
+`merchant_id` alone, so `DeleteProvenMerchantAPIHostClaim`'s residual
+`api_host`/`token` filter is a compare-and-delete guard on a single row.
 
 **PERMANENT — capped by a caller-supplied list.**
 `SnapshotPaymentCards` is capped
@@ -95,6 +99,11 @@ transaction_id)` would make it provable.
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
 listing. The predicate is absent on most calls, so no index serves it
 generically; the merchant index bounds the scan, the page `LIMIT` the result.
+
+`LockUsageEventsForMeterCorrection` is PERMANENT `unplannable`: it holds a
+table-level transaction lock so an event insert cannot race a meter's semantic
+correction. PostgreSQL does not permit `EXPLAIN LOCK TABLE`; execution and the
+surrounding concurrency test are the applicable proofs.
 
 **DEBT (or#837).** Everything else. These are real:
 
@@ -113,67 +122,24 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`.
   The caller's list is bounded but each element's row set is not.
 
-## LINT_ALLOWLIST.txt
+## Inline SQL (`TestNoInlineSQL`)
 
-**PERMANENT** covers what sqlc cannot express: the DB layer itself (`MerchantTx`
-GUCs, the schema-rewrite wrapper, advisory locks), SQL built
-dynamically from operator definitions (metrics, fleet analytics, dump/restore
-over a dynamic table list), and privileged access that runs before merchant
-context exists (DEK bootstrap, merchant secret stores).
+A SQL string literal in non-test Go outside `internal/db/gen` fails the unit
+suite unless its file (or directory) is in `inlineSQLAllowed`, which states the
+reason per entry. What stays inline is what sqlc cannot express:
 
-`internal/merchantarchive/archive.go` and `checks.go` are PERMANENT: the typed
-archive profiles determine table/column projections, insert statements and
-schema coverage checks at runtime. The checks also inspect PostgreSQL catalogs
-for unclassified columns and required merchant coordinates. Identifiers come only from reviewed
-profiles/classifications; merchant IDs and row values remain bound parameters.
-The same transaction owns snapshot isolation, session settings, retained-row
-inserts and restore-guard calls, so export/restore either validates the complete
-billing book or refuses it atomically. sqlc cannot express those dynamic profiles
-or transaction controls.
+- **Transaction/session control** — `SET TRANSACTION`, `SET LOCAL`.
+- **Runtime identifiers** — River's own `river_job` table in a schema named at
+  runtime (`internal/river`), and `internal/merchantarchive`'s per-table
+  export/insert/check statements, built from reviewed archive profiles (row
+  values stay bound parameters).
+- **Catalog introspection** — `pg_catalog` / `information_schema` reads.
+- **Generated SQL** — metrics compiled from definitions (`internal/modules/metrics`).
+- **Schema bootstrap** — `internal/migrate/migrator.go` (see below).
 
-`internal/merchants/restore_identity.go` is PERMANENT privileged pre-context
-provisioning: it creates the destination merchant directory identity before a
-merchant context exists, using the directory pool rather than a merchant-scoped
-billing connection. The caller authorizes the destination group/host authority;
-the insert preserves the source UUID without rebinding an existing identity.
-It follows the same pre-context boundary as the merchant credential stores.
-
-Two more sit in the GUC group: `internal/db/merchant_scope.go` reads
-`app.merchant_id` via `current_setting` (`AssertMerchantScope` checks the LIVE
-session, which is the whole point — a context value would prove nothing), and
-`internal/integrationharness/harness.go` sets it via `set_config`. Neither is a
-query.
-
-`internal/migrate/reset.go` is PERMANENT because the operator-only embedded
-reset must keep its fixed schema DDL, migratekit-ledger delete and advisory lock
-inside one `pgx` transaction. sqlc cannot express the DDL or lock, and splitting
-the exact ledger delete from that transaction would remove the reset's rollback
-guarantee. The target identity, allow-list and confirmation are validated before
-the transaction starts.
-
-`internal/river/progress.go` is PERMANENT for a different reason: it reads
-**River's own** `river_job` table, which is not part of OpenRails' schema, is
-created by River's migrator rather than `migrations/`, and lives in a schema
-named at runtime (`config.RiverSchema`). sqlc has no type information for it and
-could not express the schema-qualified name anyway. Only the schema is
-interpolated, after an identifier check; the kind list is a bound parameter.
-`internal/river/job_liveness.go` is PERMANENT for the same reason, and it
-WRITES: while an OpenRails job runs it refreshes that job's
-`river_job.attempted_at` — the one column River's rescuer reads to decide a
-running job is stuck — because River has no heartbeat API (xs-007 row 31). One
-UPDATE by primary key; only the schema is interpolated, after the same check.
-`internal/river/job_rescue.go` is PERMANENT for the same reason: it returns
-running OpenRails jobs whose liveness beat stopped, which River's rescuer
-skips for timeout-free jobs.
-
-`LockUsageEventsForMeterCorrection` is also PERMANENT, but remains in sqlc: it
-holds a table-level transaction lock so an event insert cannot race a meter's
-semantic correction. PostgreSQL does not permit `EXPLAIN LOCK TABLE`, so the
-auditor cannot plan it; execution and the surrounding concurrency test are the
-applicable proofs.
-
-**DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
-Nothing about them requires raw SQL.
+Static statements in those files (advisory locks, GUC `set_config`, restore
+function calls) are sqlc queries like any other. An allowance whose file no
+longer holds inline SQL fails as stale.
 
 ## Library schema initialization
 

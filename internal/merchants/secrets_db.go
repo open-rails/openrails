@@ -39,11 +39,9 @@ func (d *dbSecretStore) Get(ctx context.Context, merchantID merchant.ID, name st
 	}
 	var s Secret
 	err := d.database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
-		return d.database.Qx(ctx).QueryRow(ctx, `
-			SELECT name, value, version
-			  FROM openrails.merchant_secrets
-			 WHERE merchant_id = $1::uuid AND name = $2
-		`, merchantID.String(), name).Scan(&s.Name, &s.Value, &s.Version)
+		row, err := d.database.Gen(ctx).GetMerchantSecret(ctx, gen.GetMerchantSecretParams{MerchantID: merchantID.UUID(), Name: name})
+		s = Secret{Name: row.Name, Value: row.Value, Version: int(row.Version)}
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -64,17 +62,9 @@ func (d *dbSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, v
 	// actually changes (re-putting the same value is a no-op rotation).
 	var s Secret
 	err := d.database.DataPool().MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-			INSERT INTO openrails.merchant_secrets (merchant_id, name, value, version)
-			VALUES ($1::uuid, $2, $3, 1)
-			ON CONFLICT (merchant_id, name) DO UPDATE
-			   SET value      = EXCLUDED.value,
-			       version    = CASE WHEN openrails.merchant_secrets.value = EXCLUDED.value
-			                         THEN openrails.merchant_secrets.version
-			                         ELSE openrails.merchant_secrets.version + 1 END,
-			       updated_at = current_timestamp
-			RETURNING name, value, version
-		`, merchantID.String(), name, value).Scan(&s.Name, &s.Value, &s.Version)
+		row, err := gen.New(tx).PutMerchantSecret(ctx, gen.PutMerchantSecretParams{MerchantID: merchantID.UUID(), Name: name, Value: value})
+		s = Secret{Name: row.Name, Value: row.Value, Version: int(row.Version)}
+		return err
 	})
 	if err != nil {
 		return Secret{}, fmt.Errorf("merchants: put merchant secret: %w", err)
@@ -87,10 +77,7 @@ func (d *dbSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name
 		return err
 	}
 	err := d.database.DataPool().MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `
-			DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
-		`, merchantID.String(), name)
-		return err
+		return gen.New(tx).DeleteMerchantSecret(ctx, gen.DeleteMerchantSecretParams{MerchantID: merchantID.UUID(), Name: name})
 	})
 	if err != nil {
 		return fmt.Errorf("merchants: delete merchant secret: %w", err)
@@ -104,21 +91,9 @@ func (d *dbSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]str
 	}
 	var names []string
 	err := d.database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
-		rows, err := d.database.Qx(ctx).Query(ctx, `
-			SELECT name FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid ORDER BY name
-		`, merchantID.String())
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var n string
-			if err := rows.Scan(&n); err != nil {
-				return fmt.Errorf("merchants: scan merchant secret name: %w", err)
-			}
-			names = append(names, n)
-		}
-		return rows.Err()
+		var err error
+		names, err = d.database.Gen(ctx).ListMerchantSecretNames(ctx, merchantID.UUID())
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("merchants: list merchant secrets: %w", err)
@@ -132,14 +107,16 @@ func (d *dbSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, v
 	}
 	var result Secret
 	err := d.database.DataPool().CommittedMerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := gen.New(tx).LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
+		q := gen.New(tx)
+		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO openrails.merchant_secrets (merchant_id,name,value,version) VALUES ($1,$2,$3,1) ON CONFLICT (merchant_id,name) DO NOTHING`, id.UUID(), name, value)
-		if err != nil {
+		if err := q.StageMerchantSecret(ctx, gen.StageMerchantSecretParams{MerchantID: id.UUID(), Name: name, Value: value}); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `SELECT name,value,version FROM openrails.merchant_secrets WHERE merchant_id=$1 AND name=$2`, id.UUID(), name).Scan(&result.Name, &result.Value, &result.Version)
+		row, err := q.GetMerchantSecret(ctx, gen.GetMerchantSecretParams{MerchantID: id.UUID(), Name: name})
+		result = Secret{Name: row.Name, Value: row.Value, Version: int(row.Version)}
+		return err
 	})
 	if err != nil {
 		return Secret{}, ErrSecretBackendUnavailable

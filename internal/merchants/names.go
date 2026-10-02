@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,36 +47,30 @@ func (s *Service) Rename(ctx context.Context, id merchant.ID, name string, polic
 		return nil, ErrRenamesDisabled
 	}
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var current string
-		var next *time.Time
-		var now time.Time
-		err := tx.QueryRow(ctx, `
-			SELECT slug, slug_changed_at + make_interval(secs => $2), now()
-			  FROM openrails.merchants
-			 WHERE id = $1 AND deleted_at IS NULL
-			   FOR UPDATE`, id.UUID(), policy.RenameInterval.Seconds()).Scan(&current, &next, &now)
+		q := gen.New(tx)
+		row, err := q.LockMerchantNameForRename(ctx, id.UUID())
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrMerchantNotFound
 		}
-		if err != nil || current == name {
+		if err != nil || row.Slug == name {
 			return err
 		}
-		if next != nil && now.Before(*next) {
-			return &RenameTooSoonError{NextRenameAt: *next}
+		if row.SlugChangedAt != nil {
+			if next := row.SlugChangedAt.Add(policy.RenameInterval); row.Now.Before(next) {
+				return &RenameTooSoonError{NextRenameAt: next}
+			}
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE openrails.merchants SET slug = $2, slug_changed_at = now(), updated_at = now()
-			 WHERE id = $1`, id.UUID(), name); err != nil {
+		if err := q.RenameMerchant(ctx, gen.RenameMerchantParams{ID: id.UUID(), Slug: name}); err != nil {
 			return err
 		}
 		if policy.FormerNames == merchant.FormerNamesImmediate {
 			return nil
 		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO openrails.merchant_slug_aliases (slug, merchant_id, expires_at)
-			VALUES ($1, $2, CASE WHEN $3 THEN NULL ELSE now() + make_interval(secs => $4) END)`,
-			current, id.UUID(), policy.FormerNames == merchant.FormerNamesForever, policy.FormerNameRetention.Seconds())
-		return err
+		return q.InsertMerchantSlugAlias(ctx, gen.InsertMerchantSlugAliasParams{
+			Slug: row.Slug, MerchantID: id.UUID(),
+			Forever:          policy.FormerNames == merchant.FormerNamesForever,
+			RetentionSeconds: policy.FormerNameRetention.Seconds(),
+		})
 	})
 	if err != nil {
 		return nil, nameClaimError(err)
@@ -88,16 +82,8 @@ func (s *Service) Rename(ctx context.Context, id merchant.ID, name string, polic
 // merchant. The returned Slug is always the current name.
 func (s *Service) GetBySlug(ctx context.Context, name string) (*Merchant, error) {
 	name = normalizeSlug(name)
-	return scanMerchant(s.database.Qx(ctx).QueryRow(ctx, `
-		SELECT m.id::text, m.slug, m.status, COALESCE(m.permission_group_id, '')
-		  FROM openrails.merchants m
-		 WHERE m.slug = $1 AND m.deleted_at IS NULL
-		UNION ALL
-		SELECT m.id::text, m.slug, m.status, COALESCE(m.permission_group_id, '')
-		  FROM openrails.merchant_slug_aliases a
-		  JOIN openrails.merchants m ON m.id = a.merchant_id
-		 WHERE a.slug = $1 AND (a.expires_at IS NULL OR a.expires_at > now()) AND m.deleted_at IS NULL
-		 LIMIT 1`, name))
+	row, err := s.database.Gen(ctx).GetMerchantBySlugOrAlias(ctx, name)
+	return toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
 }
 
 // ListByGroups returns the live merchants bound to the given AuthKit groups,
@@ -106,26 +92,15 @@ func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]Direct
 	if len(groupIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.database.Qx(ctx).Query(ctx, `
-		SELECT id, slug, COALESCE(display_name, ''), permission_group_id
-		  FROM openrails.merchants
-		 WHERE permission_group_id = ANY($1) AND deleted_at IS NULL
-		 ORDER BY slug`, groupIDs)
+	rows, err := s.database.Gen(ctx).ListLiveMerchantsByGroupIDs(ctx, groupIDs)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []DirectoryRef
-	for rows.Next() {
-		var id uuid.UUID
-		ref := DirectoryRef{}
-		if err := rows.Scan(&id, &ref.Slug, &ref.DisplayName, &ref.GroupID); err != nil {
-			return nil, err
-		}
-		ref.ID = merchant.ID(id)
-		out = append(out, ref)
+	for _, row := range rows {
+		out = append(out, DirectoryRef{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName, GroupID: row.GroupID})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // nameClaimError maps the live-name index and the alias guard to one refusal.

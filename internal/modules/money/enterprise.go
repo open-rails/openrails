@@ -487,10 +487,6 @@ func (s *MoneyService) DeletePayerRateCard(ctx context.Context, payer identity.C
 		return err
 	}
 	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		_, e := s.db.Qx(ctx).Exec(ctx, `
-DELETE FROM openrails.catalog_rate_cards
-WHERE merchant_id = $1 AND customer_id = $2 AND meter_key = $3`,
-			tid.UUID(), payer.UUID(), meterKey)
-		return e
+		return s.db.Gen(ctx).DeletePayerRateCard(ctx, gen.DeletePayerRateCardParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), MeterKey: meterKey})
 	})
 }

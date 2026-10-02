@@ -1166,6 +1166,23 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndTierGroup(ctx context.Conte
 	return i, err
 }
 
+const linkImportedSubscriptionPaymentMethod = `-- name: LinkImportedSubscriptionPaymentMethod :exec
+UPDATE openrails.subscriptions SET payment_method_id = $1::uuid
+WHERE id = $2::uuid AND merchant_id = $3::uuid AND payment_method_id IS NULL
+  AND deleted_at IS NULL
+`
+
+type LinkImportedSubscriptionPaymentMethodParams struct {
+	PaymentMethodID uuid.UUID
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+}
+
+func (q *Queries) LinkImportedSubscriptionPaymentMethod(ctx context.Context, arg LinkImportedSubscriptionPaymentMethodParams) error {
+	_, err := q.db.Exec(ctx, linkImportedSubscriptionPaymentMethod, arg.PaymentMethodID, arg.ID, arg.MerchantID)
+	return err
+}
+
 const listActiveSubscriptionsByCustomer = `-- name: ListActiveSubscriptionsByCustomer :many
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
@@ -2037,6 +2054,24 @@ func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg 
 	return result.RowsAffected(), nil
 }
 
+const scheduleImportedSubscriptionDeletion = `-- name: ScheduleImportedSubscriptionDeletion :exec
+UPDATE openrails.subscriptions
+SET deletion_scheduled_at = $1::timestamptz, updated_at = $1::timestamptz
+WHERE id = $2::uuid AND merchant_id = $3::uuid AND deletion_scheduled_at IS NULL
+  AND deleted_at IS NULL
+`
+
+type ScheduleImportedSubscriptionDeletionParams struct {
+	At         time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) ScheduleImportedSubscriptionDeletion(ctx context.Context, arg ScheduleImportedSubscriptionDeletionParams) error {
+	_, err := q.db.Exec(ctx, scheduleImportedSubscriptionDeletion, arg.At, arg.ID, arg.MerchantID)
+	return err
+}
+
 const setStripeSubscriptionPaymentMethod = `-- name: SetStripeSubscriptionPaymentMethod :execrows
 UPDATE openrails.subscriptions SET
     payment_method_id = $1::uuid,
@@ -2069,6 +2104,34 @@ func (q *Queries) SetStripeSubscriptionPaymentMethod(ctx context.Context, arg Se
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const stampImportedSubscriptionEvidence = `-- name: StampImportedSubscriptionEvidence :exec
+UPDATE openrails.subscriptions
+SET gateway_response = COALESCE($1::jsonb, gateway_response),
+    retry_attempts = GREATEST(retry_attempts, $2::bigint),
+    last_retry_at = COALESCE($3::timestamptz, last_retry_at)
+WHERE id = $4::uuid AND merchant_id = $5::uuid AND deleted_at IS NULL
+`
+
+type StampImportedSubscriptionEvidenceParams struct {
+	GatewayResponse []byte
+	RetryAttempts   int64
+	LastRetryAt     *time.Time
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+}
+
+// Declared import: seed-time forensics land on the new row only.
+func (q *Queries) StampImportedSubscriptionEvidence(ctx context.Context, arg StampImportedSubscriptionEvidenceParams) error {
+	_, err := q.db.Exec(ctx, stampImportedSubscriptionEvidence,
+		arg.GatewayResponse,
+		arg.RetryAttempts,
+		arg.LastRetryAt,
+		arg.ID,
+		arg.MerchantID,
+	)
+	return err
 }
 
 const subscriptionProjectsStandingAccess = `-- name: SubscriptionProjectsStandingAccess :one

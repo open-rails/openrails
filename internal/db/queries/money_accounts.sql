@@ -86,3 +86,24 @@ UPDATE openrails.money_settings
 SET tier = sqlc.arg(tier)::text, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
+
+-- Every currency a payer holds a balance, settings, pending items or an open invoice in.
+-- name: ListCustomerBalanceCurrencies :many
+SELECT currency::text AS currency
+FROM (
+    SELECT currency FROM openrails.ledger_accounts
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+      AND account_type = 'customer_balance'
+    UNION
+    SELECT currency FROM openrails.money_settings
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+    UNION
+    SELECT currency FROM openrails.invoice_items
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+      AND invoice_id IS NULL AND status = 'pending'
+    UNION
+    SELECT currency FROM openrails.invoices
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+      AND status IN ('open', 'past_due') AND amount_due > 0
+) currencies
+ORDER BY currency;

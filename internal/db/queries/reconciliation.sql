@@ -1020,3 +1020,81 @@ SELECT EXISTS (
       AND p.deleted_at IS NULL AND p.status = 'completed'
       AND (sqlc.narg(since)::timestamptz IS NULL OR p.purchased_at >= sqlc.narg(since)::timestamptz)
 )::bool AS paid;
+
+-- name: ListUnverifiedSubscriptionIDsIn :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+  AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id <> '';
+
+-- Callers pass a limit one above their bulk threshold.
+-- name: ListUnverifiedNMISubscriptionIDs :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+ORDER BY current_period_ends_at NULLS FIRST
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: ListUnverifiedSubscriptionIDsForPSP :many
+SELECT id FROM openrails.subscriptions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND status = 'unverified' AND deleted_at IS NULL
+  AND collection_policy <> 'engine' AND rail_subscription_id <> ''
+ORDER BY current_period_ends_at NULLS FIRST;
+
+-- name: RecordSubscriptionVerificationReads :exec
+UPDATE openrails.subscription_verifications
+SET reads = reads + 1, last_read_at = sqlc.arg(read_at)::timestamptz, last_error = sqlc.narg(last_error)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
+
+-- name: ListSubscriptionVaultRefs :many
+SELECT s.id, pm.rail_customer_ref
+FROM openrails.subscriptions s
+JOIN openrails.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = s.payment_method_id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(ids)::uuid[]) AND s.deleted_at IS NULL;
+
+-- Recorded charges (payments) and declines (attempts) a bulk pass decides from.
+-- name: ListRecordedSubscriptionCharges :many
+SELECT subscription_id, transaction_id::text AS transaction_id, 'completed'::text AS status,
+       purchased_at::timestamptz AS occurred_at, amount::bigint AS amount, currency::text AS currency,
+       ''::text AS response_code
+FROM openrails.payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[])
+  AND purchased_at >= sqlc.arg(since)::timestamptz AND status = 'completed' AND deleted_at IS NULL
+UNION ALL
+SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::timestamptz, amount::bigint,
+       COALESCE(currency, '')::text, COALESCE(response_code, '')::text
+FROM openrails.payment_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[])
+  AND attempted_at >= sqlc.arg(since)::timestamptz AND category <> 'approved' AND transaction_id IS NOT NULL;
+
+-- Resumes an interrupted bulk read, or starts one.
+-- name: StartNMIBulkCheckpoint :one
+INSERT INTO openrails.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(since)::timestamptz,
+        sqlc.arg(until)::timestamptz, 1, sqlc.arg(until)::timestamptz)
+ON CONFLICT (merchant_id, psp_id) DO UPDATE SET merchant_id = EXCLUDED.merchant_id
+RETURNING since, until, next_page;
+
+-- name: SetNMIBulkCheckpointPage :exec
+UPDATE openrails.nmi_bulk_checkpoints SET next_page = sqlc.arg(next_page)::bigint
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid;
+
+-- name: DeleteNMIBulkCheckpoint :exec
+DELETE FROM openrails.nmi_bulk_checkpoints
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid;
+
+-- name: AutoResolveFindingBySubject :exec
+UPDATE openrails.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
+  AND subject_key = sqlc.arg(subject_key)::text
+  AND status IN ('reconcile_required', 'requires_review');
+
+-- name: AutoResolveReviewFindingsByType :exec
+UPDATE openrails.reconciliation_findings
+SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
+    notified_at = NULL, notified_severity = NULL, updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
+  AND status = 'requires_review';

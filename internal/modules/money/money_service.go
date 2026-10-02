@@ -182,54 +182,11 @@ func (s *MoneyService) ListBalancesForCustomer(ctx context.Context, payer identi
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	rows, err := s.db.Qx(ctx).Query(ctx, `
-SELECT currency
-FROM (
-    SELECT currency
-    FROM openrails.ledger_accounts
-    WHERE merchant_id = $1
-      AND customer_id = $2
-      AND account_type = 'customer_balance'
-    UNION
-    SELECT currency
-    FROM openrails.money_settings
-    WHERE merchant_id = $1
-      AND customer_id = $2
-    UNION
-    SELECT currency
-    FROM openrails.invoice_items
-    WHERE merchant_id = $1
-      AND customer_id = $2
-      AND invoice_id IS NULL
-      AND status = 'pending'
-    UNION
-    SELECT currency
-    FROM openrails.invoices
-    WHERE merchant_id = $1
-      AND customer_id = $2
-      AND status IN ('open', 'past_due')
-      AND amount_due > 0
-) currencies
-ORDER BY currency`, tenantID, payerID)
+	q := s.db.Gen(ctx)
+	currencies, err := q.ListCustomerBalanceCurrencies(ctx, gen.ListCustomerBalanceCurrenciesParams{MerchantID: tenantID, CustomerID: payerID})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	currencies := []string{}
-	for rows.Next() {
-		var cur string
-		if err := rows.Scan(&cur); err != nil {
-			return nil, err
-		}
-		currencies = append(currencies, cur)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-
-	q := s.db.Gen(ctx)
 	out := []models.MoneyBalance{}
 	for _, cur := range currencies {
 		bal, err := s.deriveBalance(ctx, q, tenantID, payerID, normalizeCurrency(cur))

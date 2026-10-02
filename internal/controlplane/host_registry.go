@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -32,7 +33,7 @@ func (c *ControlPlane) merchantForHost(ctx context.Context, host string) (mercha
 	if c == nil || c.pool == nil {
 		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for host resolution")
 	}
-	mid, slug, err := c.merchantDirectoryRow(ctx, `api_host = $1`, host)
+	mid, slug, err := c.merchantDirectoryRow(gen.New(c.pool).ListLiveMerchantsByAPIHost(ctx, host))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
 			return merchant.ID{}, "", ErrHostMerchantUnknown

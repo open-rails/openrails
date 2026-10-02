@@ -2,8 +2,8 @@ package hosttools
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/catalog"
@@ -60,8 +61,8 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 		if err != nil {
 			return err
 		}
-		var revision int64
-		if err := snapshot.Qx(ctx).QueryRow(ctx, `SELECT catalog_revision FROM openrails.merchants WHERE id=$1 FOR SHARE`, mid.UUID()).Scan(&revision); err != nil {
+		revision, err := snapshot.Gen(ctx).GetCatalogRevisionForShare(ctx, mid.UUID())
+		if err != nil {
 			return err
 		}
 		manifest, err = dumpCatalogManifest(ctx, snapshot)
@@ -95,17 +96,25 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 		return nil, err
 	}
 	m := &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}
-	productIDs, byID, err := dumpCatalogProducts(ctx, database, tid.UUID())
+	// The default catalog; without one, no product row matches uuid.Nil.
+	var catalogID uuid.UUID
+	if c, err := database.Gen(ctx).GetDefaultApplicationCatalog(ctx, tid.UUID()); err == nil {
+		catalogID = c.ID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("load default catalog: %w", err)
+	}
+	scope := gen.ListLiveCatalogProductsParams{MerchantID: tid.UUID(), CatalogID: catalogID}
+	productIDs, byID, err := dumpCatalogProducts(ctx, database, scope)
 	if err != nil {
 		return nil, err
 	}
 	if m.Meters, err = dumpCatalogMeters(ctx, database, tid.UUID()); err != nil {
 		return nil, err
 	}
-	if err := dumpCatalogPrices(ctx, database, tid.UUID(), byID); err != nil {
+	if err := dumpCatalogPrices(ctx, database, scope, byID); err != nil {
 		return nil, err
 	}
-	if err := dumpCatalogRateCards(ctx, database, tid.UUID(), byID); err != nil {
+	if err := dumpCatalogRateCards(ctx, database, scope, byID); err != nil {
 		return nil, err
 	}
 	for _, id := range productIDs {
@@ -116,172 +125,124 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 	return m, nil
 }
 
-func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]uuid.UUID, map[uuid.UUID]*catalog.ApplyProduct, error) {
-	rows, err := database.Qx(ctx).Query(ctx, `
-	SELECT id, key, display_name, COALESCE(description, ''), entitlements_spec,
-	       tier_group, COALESCE(tier_rank, 0), archived
-	FROM openrails.products
-	WHERE merchant_id = $1 AND NOT archived
-	  AND catalog_id IN (SELECT id FROM openrails.catalogs WHERE merchant_id=$1 AND owner_subject IS NULL)
-	ORDER BY COALESCE(tier_group, ''), tier_rank, key`, merchantID)
+func dumpCatalogProducts(ctx context.Context, database *db.DB, scope gen.ListLiveCatalogProductsParams) ([]uuid.UUID, map[uuid.UUID]*catalog.ApplyProduct, error) {
+	rows, err := database.Gen(ctx).ListLiveCatalogProducts(ctx, scope)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list catalog products: %w", err)
 	}
-	defer rows.Close()
 	var ids []uuid.UUID
 	byID := map[uuid.UUID]*catalog.ApplyProduct{}
-	for rows.Next() {
-		var (
-			id              uuid.UUID
-			p               catalog.ApplyProduct
-			entitlementsRaw []byte
-			tierGroup       sql.NullString
-		)
-		if err := rows.Scan(&id, &p.Key, &p.DisplayName.Value, &p.Description.Value, &entitlementsRaw, &tierGroup, &p.TierRank.Value, &p.Archived.Value); err != nil {
-			return nil, nil, err
-		}
-		p.DisplayName.Set, p.Description.Set, p.TierRank.Set, p.Archived.Set = true, true, true, true
+	for _, row := range rows {
+		p := catalog.ApplyProduct{Key: row.Key}
+		p.DisplayName = catalog.Value(row.DisplayName)
+		p.Description = catalog.Value(row.Description)
+		p.TierRank = catalog.Value(int(row.TierRank))
+		p.Archived = catalog.Value(row.Archived)
 		p.TierGroup = catalog.Null[string]()
-		if tierGroup.Valid {
-			p.TierGroup = catalog.Value(tierGroup.String)
+		if row.TierGroup != nil {
+			p.TierGroup = catalog.Value(*row.TierGroup)
 		}
 		p.EntitlementsSpec.Set = true
 		p.RateCards = catalog.Value([]catalog.RateCard{})
-		if len(entitlementsRaw) == 0 || string(entitlementsRaw) == "null" {
+		if len(row.EntitlementsSpec) == 0 || string(row.EntitlementsSpec) == "null" {
 			p.EntitlementsSpec = catalog.Null[map[string]*int]()
-		} else if err := json.Unmarshal(entitlementsRaw, &p.EntitlementsSpec.Value); err != nil {
+		} else if err := json.Unmarshal(row.EntitlementsSpec, &p.EntitlementsSpec.Value); err != nil {
 			return nil, nil, err
 		}
-		ids = append(ids, id)
+		ids = append(ids, row.ID)
 		cp := p
-		byID[id] = &cp
+		byID[row.ID] = &cp
 	}
-	return ids, byID, rows.Err()
+	return ids, byID, nil
 }
 
 func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.ApplyMeter, error) {
-	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT key, COALESCE(event_type, ''), COALESCE(value_property, ''),
-       COALESCE(aggregation, ''), COALESCE(unit, ''), COALESCE(group_by, '{}'::jsonb)
-FROM openrails.catalog_meters
-WHERE merchant_id = $1
-ORDER BY key`, merchantID)
+	rows, err := database.Gen(ctx).ListCatalogMeters(ctx, merchantID)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog meters: %w", err)
 	}
-	defer rows.Close()
 	var out []catalog.ApplyMeter
-	for rows.Next() {
-		var m catalog.ApplyMeter
-		var groupBy []byte
-		if err := rows.Scan(&m.Key, &m.EventType.Value, &m.ValueProperty.Value, &m.Aggregation.Value, &m.Unit.Value, &groupBy); err != nil {
-			return nil, err
-		}
-		m.EventType.Set, m.ValueProperty.Set, m.Aggregation.Set, m.Unit.Set, m.GroupBy.Set = true, true, true, true, true
-		if err := json.Unmarshal(groupBy, &m.GroupBy.Value); err != nil {
+	for _, row := range rows {
+		m := catalog.ApplyMeter{Key: row.Key}
+		m.EventType = catalog.Value(row.EventType)
+		m.ValueProperty = catalog.Value(row.ValueProperty)
+		m.Aggregation = catalog.Value(row.Aggregation)
+		m.Unit = catalog.Value(row.Unit)
+		m.GroupBy.Set = true
+		if err := json.Unmarshal(row.GroupBy, &m.GroupBy.Value); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
-func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.ApplyProduct) error {
+func dumpCatalogPrices(ctx context.Context, database *db.DB, scope gen.ListLiveCatalogProductsParams, byID map[uuid.UUID]*catalog.ApplyProduct) error {
 	// Metered pricing dumps as rate cards (#707): legacy metered: declarations
 	// are translated at push time, so no price-attached metered shape exists.
-	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.auto_renew,
-       p.trial_unit_amount, p.trial_duration_hours, COALESCE((SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
-           'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
-           'recurring_billing_option_id', binding.recurring_billing_option_id, 'plan_pda', binding.plan_pda, 'flex_id', binding.flex_id)))
-           FROM openrails.price_psp_bindings binding JOIN openrails.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
-           WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id), '{}'::jsonb),
-       p.archived
-FROM openrails.prices p
-WHERE p.merchant_id = $1 AND NOT p.archived
-ORDER BY p.product_id, p.amount, p.currency`, merchantID)
+	rows, err := database.Gen(ctx).ListLiveCatalogPricesWithPSPLinks(ctx, gen.ListLiveCatalogPricesWithPSPLinksParams(scope))
 	if err != nil {
 		return fmt.Errorf("list catalog prices: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			productID               uuid.UUID
-			price                   catalog.ApplyPrice
-			accessHours, trialHours sql.NullInt64
-			trialAmount             sql.NullInt64
-			railsRaw                []byte
-		)
-		if err := rows.Scan(&productID, &price.Key, &price.UnitAmount.Value, &price.Currency.Value, &accessHours, &price.AutoRenew.Value, &trialAmount, &trialHours, &railsRaw, &price.Archived.Value); err != nil {
-			return err
+	for _, row := range rows {
+		p := byID[row.ProductID]
+		if p == nil {
+			continue
 		}
-		if p := byID[productID]; p != nil {
-			price.UnitAmount.Set, price.Currency.Set, price.AutoRenew.Set, price.Archived.Set = true, true, true, true
-			price.AccessDurationHours = catalog.Null[int]()
-			if accessHours.Valid {
-				price.AccessDurationHours = catalog.Value(int(accessHours.Int64))
-			}
-			price.TrialUnitAmount, price.TrialDurationHours = catalog.Null[int64](), catalog.Null[int]()
-			if trialAmount.Valid && trialHours.Valid {
-				price.TrialUnitAmount, price.TrialDurationHours = catalog.Value(trialAmount.Int64), catalog.Value(int(trialHours.Int64))
-			}
-			links := providerLinks(railsRaw)
-			if links == nil {
-				links = map[string]map[string]string{}
-			}
-			price.PSPLinks = catalog.Value(links)
-			price.PSPs = catalog.Value([]string{})
-			for provider := range price.PSPLinks.Value {
-				price.PSPs.Value = append(price.PSPs.Value, provider)
-			}
-			sort.Strings(price.PSPs.Value)
-			p.Prices = append(p.Prices, price)
+		price := catalog.ApplyPrice{Key: row.Key}
+		price.UnitAmount = catalog.Value(row.Amount)
+		price.Currency = catalog.Value(row.Currency)
+		price.AutoRenew = catalog.Value(row.AutoRenew)
+		price.Archived = catalog.Value(row.Archived)
+		price.AccessDurationHours = catalog.Null[int]()
+		if row.AccessDurationHours != nil {
+			price.AccessDurationHours = catalog.Value(int(*row.AccessDurationHours))
 		}
+		price.TrialUnitAmount, price.TrialDurationHours = catalog.Null[int64](), catalog.Null[int]()
+		if row.TrialUnitAmount != nil && row.TrialDurationHours != nil {
+			price.TrialUnitAmount, price.TrialDurationHours = catalog.Value(*row.TrialUnitAmount), catalog.Value(int(*row.TrialDurationHours))
+		}
+		links := providerLinks(row.PspLinks)
+		if links == nil {
+			links = map[string]map[string]string{}
+		}
+		price.PSPLinks = catalog.Value(links)
+		price.PSPs = catalog.Value([]string{})
+		for provider := range price.PSPLinks.Value {
+			price.PSPs.Value = append(price.PSPs.Value, provider)
+		}
+		sort.Strings(price.PSPs.Value)
+		p.Prices = append(p.Prices, price)
 	}
-	return rows.Err()
+	return nil
 }
 
-func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.ApplyProduct) error {
-	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT product_id, ordinal, meter_key, payment_term, filter, allowance, price
-FROM openrails.catalog_rate_cards
-WHERE merchant_id = $1
-ORDER BY product_id, ordinal`, merchantID)
+func dumpCatalogRateCards(ctx context.Context, database *db.DB, scope gen.ListLiveCatalogProductsParams, byID map[uuid.UUID]*catalog.ApplyProduct) error {
+	rows, err := database.Gen(ctx).ListCatalogProductRateCards(ctx, gen.ListCatalogProductRateCardsParams(scope))
 	if err != nil {
 		return fmt.Errorf("list catalog rate cards: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			productID    uuid.UUID
-			rc           catalog.RateCard
-			meterKey     sql.NullString
-			filterRaw    []byte
-			allowanceRaw []byte
-			priceRaw     []byte
-		)
-		if err := rows.Scan(&productID, &rc.Ordinal, &meterKey, &rc.PaymentTerm, &filterRaw, &allowanceRaw, &priceRaw); err != nil {
-			return err
+	for _, row := range rows {
+		rc := catalog.RateCard{Ordinal: int(row.Ordinal), PaymentTerm: row.PaymentTerm}
+		if row.MeterKey != nil {
+			rc.Meter = *row.MeterKey
 		}
-		if meterKey.Valid {
-			rc.Meter = meterKey.String
-		}
-		_ = json.Unmarshal(filterRaw, &rc.Filter)
-		if len(allowanceRaw) > 0 {
+		_ = json.Unmarshal(row.Filter, &rc.Filter)
+		if len(row.Allowance) > 0 {
 			var a catalog.Allowance
-			if err := json.Unmarshal(allowanceRaw, &a); err != nil {
+			if err := json.Unmarshal(row.Allowance, &a); err != nil {
 				return fmt.Errorf("decode rate-card allowance: %w", err)
 			}
 			rc.Allowance = &a
 		}
-		if err := json.Unmarshal(priceRaw, &rc.Price); err != nil {
+		if err := json.Unmarshal(row.Price, &rc.Price); err != nil {
 			return fmt.Errorf("decode rate-card price: %w", err)
 		}
-		if p := byID[productID]; p != nil {
+		if p := byID[row.ProductID]; p != nil {
 			p.RateCards.Value = append(p.RateCards.Value, rc)
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func providerLinks(raw []byte) map[string]map[string]string {
