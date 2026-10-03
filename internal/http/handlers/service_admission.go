@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
@@ -22,7 +22,7 @@ import (
 // maxAdmitBatchItems bounds one /v1/merchant/admissions request (#335).
 const maxAdmitBatchItems = 1000
 
-type serviceAdmitRequest = openrails.AdmitRequest
+type serviceAdmitRequest = billing.AdmitRequest
 
 // admitInputFromRequest maps one admission item onto the service-facade input.
 func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID) billingservice.AdmitInput {
@@ -226,7 +226,7 @@ func ServiceGetTrustLevel(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "trust_level": trustLevel})
 }
 
-type serviceReportWastedSpendRequest = openrails.WastedSpendReport
+type serviceReportWastedSpendRequest = billing.WastedSpendReport
 
 // ServiceReportWastedSpend records host-reported WASTED $ (#497): delegated
 // invokers accrue toward their flat cutoff; direct payer credentials use
@@ -282,7 +282,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 	r.JSON(http.StatusOK, res)
 }
 
-type serviceCreditLimitRequest = openrails.CreditLimitRequest
+type serviceCreditLimitRequest = billing.CreditLimitRequest
 
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
@@ -347,7 +347,7 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(openrails.CreditLimitRequest{CustomerID: (openrails.CustomerID(*payer)).String(), Currency: currency, CreditLimitAmount: v})
+	r.SuccessJSON(billing.CreditLimitRequest{CustomerID: (billing.CustomerID(*payer)).String(), Currency: currency, CreditLimitAmount: v})
 }
 
 // ServiceGetMerchantSettings returns the complete declarative policy document.
@@ -367,7 +367,7 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 
 // ServiceSetMerchantSettings atomically replaces the declarative policy document.
 func ServiceSetMerchantSettings(r *httprequest.Request) {
-	var settings *openrails.MerchantSettings
+	var settings *billing.MerchantSettings
 	decoder := json.NewDecoder(r.Request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&settings); err != nil {

@@ -5,15 +5,15 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // EnsureCustomer materializes or touches the merchant-scoped customer row.
-func (s *Service) EnsureCustomer(ctx context.Context, id uuid.UUID) (*openrails.Customer, error) {
+func (s *Service) EnsureCustomer(ctx context.Context, id uuid.UUID) (*billing.Customer, error) {
 	if id == uuid.Nil {
-		return nil, &openrails.StatusError{Status: http.StatusBadRequest, ErrorDetails: openrails.ErrorDetails{
+		return nil, &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{
 			Type: "invalid_request_error", Code: "invalid_customer_id", Message: "customer id is required"}}
 	}
 	ctx, release, err := s.pin(ctx)
@@ -29,5 +29,5 @@ func (s *Service) EnsureCustomer(ctx context.Context, id uuid.UUID) (*openrails.
 	if err != nil {
 		return nil, err
 	}
-	return &openrails.Customer{ID: (openrails.CustomerID(row.ID)).String(), CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}, nil
+	return &billing.Customer{ID: (billing.CustomerID(row.ID)).String(), CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}, nil
 }

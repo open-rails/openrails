@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -34,23 +35,23 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	vault := w.nmi.AddVault(visa)
 	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: price.plan, Amount: amount, Days: cycle / 24, Months: 0, NextBilling: end})
 	sale := w.nmi.AddScheduleSale(railSub, start)
-	customerID, err := openrails.ParseCustomerID(c.id)
+	customerID, err := billing.ParseCustomerID(c.id)
 	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(price.ID)
+	priceID, err := billing.ParsePriceID(price.ID)
 	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
-	result, err := w.client[tp].ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
-		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
-		PaymentMethods: []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef,
+	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
+	result, err := w.client[tp].ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
+		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
+		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: method.RailMethodRef,
 			InitialTransactionID: sale.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "tier-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "tier-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, AmountCents: cents, Currency: "USD", OccurredAt: start}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: sale.TransactionID, Success: true, AmountCents: cents, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := w.client[tp].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+	subs, err := w.client[tp].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 1)
 	require.Equal(t, "nmi_schedule", subs.Data[0].CollectionPolicy)
@@ -86,7 +87,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			end := l.periodEnd()
 			sales := len(l.tierSales())
 
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			require.Equal(t, "now", preview.Effective)
 			require.Positive(t, preview.AmountDueNow)
@@ -97,7 +98,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Contains(t, preview.Message, fmt.Sprintf("$%d.%02d now", charged/100, charged%100), "money in the currency's minor units")
 			require.Contains(t, preview.Message, end.UTC().Format("January 2, 2006"))
 			key := "up-" + uuid.NewString()
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -122,7 +123,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.False(t, l.c.entitled(old.ent), "the old tier ends now")
 
 			// Replay: the same key answers the same result and sends nothing.
-			again, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
+			again, err := w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			require.Equal(t, done.AmountDueNow, again.AmountDueNow)
 			require.Len(t, l.tierSales(), sales+1)
@@ -158,11 +159,11 @@ func TestLegacyNMITierChange(t *testing.T) {
 			end := l.periodEnd()
 			sales := len(l.tierSales())
 
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: lower.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: lower.ID})
 			require.NoError(t, err)
 			require.Equal(t, "period_end", preview.Effective)
 			require.Zero(t, preview.AmountDueNow)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "down-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: lower.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "down-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: lower.ID})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -210,8 +211,8 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			l := w.legacyOnTier(tp, old, 999, monthHours, 10*day)
 			sales := len(l.tierSales())
 			w.nmi.SetDecline(visa.Last4, "202")
-			_, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
-			var status *openrails.StatusError
+			_, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
+			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "%v", err)
 			require.Equal(t, http.StatusPaymentRequired, status.Status, "%v", err)
 			w.settle()
@@ -249,7 +250,7 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 			sales := len(l.tierSales())
 			w.nmi.FailScheduleUpdates(row.fails)
 			key := "up-" + uuid.NewString()
-			_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
+			_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			w.settle()
 			if row.name == "stuck" {
@@ -293,7 +294,7 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = client.ChangeTier(context.WithoutCancel(t.Context()), l.sub, fmt.Sprintf("race-%d-%s", i, uuid.NewString()), openrails.ChangeTierRequest{PriceID: next.ID})
+			_, errs[i] = client.ChangeTier(context.WithoutCancel(t.Context()), l.sub, fmt.Sprintf("race-%d-%s", i, uuid.NewString()), billing.ChangeTierRequest{PriceID: next.ID})
 		}()
 	}
 	wg.Wait()
@@ -301,7 +302,7 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 	refused := 0
 	for _, err := range errs {
 		if err != nil {
-			var status *openrails.StatusError
+			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "%v", err)
 			require.Equal(t, http.StatusConflict, status.Status, "%v", err)
 			refused++
@@ -325,10 +326,10 @@ func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	sales := len(l.tierSales())
 	for _, tp := range []topology{embedded, remote} {
-		_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: weekly.ID})
-		requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeCadenceUnsupported)
-		_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: weekly.ID})
-		requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeCadenceUnsupported)
+		_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: weekly.ID})
+		requireCode(t, err, http.StatusConflict, billing.CodeTierChangeCadenceUnsupported)
+		_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: weekly.ID})
+		requireCode(t, err, http.StatusConflict, billing.CodeTierChangeCadenceUnsupported)
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales)
@@ -358,10 +359,10 @@ func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 	sales := len(l.tierSales())
 	for _, target := range []tier{unlinked, lower} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: target.ID})
-			requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRequiresLinkedPlan)
-			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: target.ID})
-			requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRequiresLinkedPlan)
+			_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: target.ID})
+			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRequiresLinkedPlan)
+			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, "x-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID})
+			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRequiresLinkedPlan)
 		}
 	}
 	w.settle()
@@ -386,9 +387,9 @@ func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
 			w.nmi.customSchedule(l.railSub)
 			end := l.periodEnd()
 			sales := len(l.tierSales())
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -422,7 +423,7 @@ func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
 	w.nmi.customSchedule(l.railSub)
 	sales := len(l.tierSales())
 	w.nmi.FailScheduleUpdates(1000)
-	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
+	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
 	require.NoError(t, err)
 	w.settle()
 	w.until(func() bool { return len(w.openFindings(tierUpdateStuck)) > 0 }, "the stuck update raises a finding")

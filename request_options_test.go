@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -37,9 +38,9 @@ func targetCredential(_ context.Context, target CredentialTarget) (string, error
 	return "id:" + target.MerchantID.String(), nil
 }
 
-func catalogApplication() *CatalogApplyParams {
-	return &CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
-		Products: []CatalogApplyProduct{{Key: "post", DisplayName: CatalogValue("Post")}}}
+func catalogApplication() *billing.CatalogApplyParams {
+	return &billing.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
+		Products: []billing.CatalogApplyProduct{{Key: "post", DisplayName: billing.CatalogValue("Post")}}}
 }
 
 // Slug selection uses /v2 (a pre-selector server cannot execute it under the
@@ -47,7 +48,7 @@ func catalogApplication() *CatalogApplyParams {
 // Exactly one selector reaches both the headers and the credential provider.
 func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 	seen := make(chan observedRequest, 1)
-	id := MerchantID(uuid.New())
+	id := billing.MerchantID(uuid.New())
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		seen <- observe(r)
 		_, _ = w.Write([]byte(`{}`))
@@ -72,8 +73,8 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 			_, err := client.Catalog.Revision(t.Context(), o...)
 			return http.MethodGet, err
 		},
-		"GET /merchant/payments/" + PaymentID(id).String(): func(o []RequestOption) (string, error) {
-			_, err := client.GetPayment(t.Context(), PaymentID(id), o...)
+		"GET /merchant/payments/" + billing.PaymentID(id).String(): func(o []RequestOption) (string, error) {
+			_, err := client.GetPayment(t.Context(), billing.PaymentID(id), o...)
 			return http.MethodGet, err
 		},
 	}
@@ -110,15 +111,15 @@ func TestInvalidMerchantSelectionFailsBeforeCredentialMint(t *testing.T) {
 		"empty slug":       {WithMerchant("  ")},
 		"bad slug":         {WithMerchant("alpha/bravo")},
 		"leading hyphen":   {WithMerchant("-alpha")},
-		"zero ID":          {ForMerchantID(MerchantID{})},
+		"zero ID":          {ForMerchantID(billing.MerchantID{})},
 		"two slugs":        {WithMerchant("alpha"), WithMerchant("alpha")},
-		"slug and ID":      {WithMerchant("alpha"), ForMerchantID(MerchantID(uuid.New()))},
+		"slug and ID":      {WithMerchant("alpha"), ForMerchantID(billing.MerchantID(uuid.New()))},
 		"invalid then ok":  {WithMerchant("a b"), WithMerchant("alpha")},
 		"only nil options": {nil, nil},
 	} {
 		err := client.Verify(t.Context(), options...)
-		require.ErrorIs(t, err, ErrInvalid, name)
-		var status *StatusError
+		require.ErrorIs(t, err, billing.ErrInvalid, name)
+		var status *billing.StatusError
 		require.ErrorAs(t, err, &status, name)
 		require.Equal(t, "invalid_param", status.Code, name)
 	}
@@ -144,25 +145,25 @@ func TestCredentialFailureNeverFallsBack(t *testing.T) {
 // Ambient context may assert an ID but never select one; a slug cannot be
 // checked against it before server resolution.
 func TestAmbientMerchantAssertion(t *testing.T) {
-	id, other := MerchantID(uuid.New()), MerchantID(uuid.New())
+	id, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	var calls atomic.Int64
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		require.Equal(t, id.String(), r.Header.Get(merchant.BindingHeader))
 		_, _ = w.Write([]byte(`{}`))
 	})
-	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), other), ForMerchantID(id)), ErrConflict)
-	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), id)), ErrInvalid, "slug default with an ambient ID")
-	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), id), WithMerchant("alpha")), ErrInvalid)
+	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), other), ForMerchantID(id)), billing.ErrConflict)
+	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), id)), billing.ErrInvalid, "slug default with an ambient ID")
+	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), id), WithMerchant("alpha")), billing.ErrInvalid)
 	require.Zero(t, calls.Load())
 	require.NoError(t, client.Verify(merchant.WithID(t.Context(), id), ForMerchantID(id)))
-	require.NoError(t, client.Verify(merchant.WithID(t.Context(), MerchantID{}), ForMerchantID(id)), "a zero ambient ID asserts nothing")
+	require.NoError(t, client.Verify(merchant.WithID(t.Context(), billing.MerchantID{}), ForMerchantID(id)), "a zero ambient ID asserts nothing")
 	require.EqualValues(t, 2, calls.Load())
 }
 
 // Caller headers cannot add a second target, override credentials, or be mutated.
 func TestExtraHeadersCannotDuplicateSelectionOrAuthority(t *testing.T) {
-	id := MerchantID(uuid.New())
+	id := billing.MerchantID(uuid.New())
 	for _, byID := range []bool{false, true} {
 		client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
 			slugs, ids := r.Header.Values(merchant.SlugHeader), r.Header.Values(merchant.BindingHeader)
@@ -205,13 +206,13 @@ func TestSlugSelectionCannotWriteThroughOldServer(t *testing.T) {
 	}
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	id := MerchantID(uuid.New())
+	id := billing.MerchantID(uuid.New())
 	client, err := NewRemote(server.URL, WithAPIKey("merchant-alpha-key"), WithMerchantID(id))
 	require.NoError(t, err)
-	_, err = client.Products.Create(t.Context(), &ProductCreateParams{Key: "bravo-post", DisplayName: "Bravo"}, WithMerchant("bravo"))
-	require.ErrorIs(t, err, ErrNotFound)
+	_, err = client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "bravo-post", DisplayName: "Bravo"}, WithMerchant("bravo"))
+	require.ErrorIs(t, err, billing.ErrNotFound)
 	_, err = client.Catalog.Apply(t.Context(), catalogApplication(), WithMerchant("bravo"))
-	require.ErrorIs(t, err, ErrNotFound)
+	require.ErrorIs(t, err, billing.ErrNotFound)
 	require.Zero(t, writes.Load())
 	_, err = client.Catalog.Apply(t.Context(), catalogApplication(), ForMerchantID(id))
 	require.NoError(t, err, "positive control: the old route accepts this credential")
@@ -229,10 +230,10 @@ func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
 	owner, err := client.ForCatalogOwner("channel/é")
 	require.NoError(t, err)
 	require.NotSame(t, client.Catalog, owner.Catalog, "copied views rebind resources to their own parent")
-	_, err = owner.Products.Create(t.Context(), &ProductCreateParams{Key: "post", DisplayName: "Post"})
+	_, err = owner.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post", DisplayName: "Post"})
 	require.NoError(t, err)
 
-	var denied *StatusError
+	var denied *billing.StatusError
 	require.ErrorAs(t, owner.Verify(t.Context()), &denied)
 	require.Equal(t, http.StatusForbidden, denied.Status)
 	_, err = owner.Catalog.Apply(t.Context(), catalogApplication())
@@ -240,10 +241,10 @@ func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
 	_, err = owner.Catalog.Revision(t.Context())
 	require.Error(t, err)
 	_, err = owner.ForCatalogOwner("someone-else")
-	require.ErrorIs(t, err, ErrDenied)
+	require.ErrorIs(t, err, billing.ErrDenied)
 	for _, subject := range []string{"", "a\x00b", "\xff"} {
 		_, err := client.ForCatalogOwner(subject)
-		require.ErrorIs(t, err, ErrInvalid)
+		require.ErrorIs(t, err, billing.ErrInvalid)
 	}
 	require.EqualValues(t, 1, calls.Load())
 }
@@ -258,7 +259,7 @@ func TestConcurrentSelectionDoesNotContaminate(t *testing.T) {
 			return
 		}
 		requests.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": ProductID(uuid.New()).String(), "display_name": slug})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": billing.ProductID(uuid.New()).String(), "display_name": slug})
 	}, WithDefaultMerchant("alpha"), WithCredentialProvider(targetCredential))
 	var wg sync.WaitGroup
 	for i := range 64 {
@@ -267,7 +268,7 @@ func TestConcurrentSelectionDoesNotContaminate(t *testing.T) {
 			if i%2 == 1 {
 				slug, options = "bravo", []RequestOption{WithMerchant("bravo")}
 			}
-			product, err := client.Products.Create(t.Context(), &ProductCreateParams{Key: fmt.Sprintf("post-%d", i), DisplayName: "post"}, options...)
+			product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: fmt.Sprintf("post-%d", i), DisplayName: "post"}, options...)
 			if err != nil || product.DisplayName != slug {
 				t.Errorf("operation for %s returned %+v, %v", slug, product, err)
 			}

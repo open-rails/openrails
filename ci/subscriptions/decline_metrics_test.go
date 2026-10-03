@@ -12,7 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // metricRows runs one metrics query over [since, now] and returns its rows by
@@ -81,13 +81,13 @@ func TestDeclineMetrics(t *testing.T) {
 	since := w.clock.Now().Add(-time.Hour)
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
-	_, err := h.pay("pay-cvc", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
-	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
-	session, err := h.pay("pay-fixed", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
+	require.ErrorIs(t, err, billing.ErrPaymentRefused)
+	session, err := h.pay("pay-fixed", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	w.settle()
 
-	subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: h.c.id})
+	subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: h.c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 1, "%v", session.Status)
 	sub := subs.Data[0].ID
@@ -166,14 +166,14 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	c := w.client[embedded]
 	ctx := t.Context()
 
-	cycles, err := c.ListRebillCycles(ctx, openrails.RebillCycleFilter{SubscriptionID: e.sub})
+	cycles, err := c.ListRebillCycles(ctx, billing.RebillCycleFilter{SubscriptionID: e.sub})
 	require.NoError(t, err)
 	require.Len(t, cycles.Data, 1)
 	cycle := cycles.Data[0]
 	require.Equal(t, []string{"engine", "declined", "collected", "dunning_retry"}, []string{cycle.Owner, cycle.FirstOutcome, cycle.Outcome, cycle.RecoveredBy})
 	require.NotNil(t, cycle.CollectedAt)
 	for outcome, n := range map[string]int{"collected": 1, "open": 0, "lost": 0, "open,lost": 0, "lost,collected": 1} {
-		page, err := c.ListRebillCycles(ctx, openrails.RebillCycleFilter{SubscriptionID: e.sub, Outcome: strings.Split(outcome, ",")})
+		page, err := c.ListRebillCycles(ctx, billing.RebillCycleFilter{SubscriptionID: e.sub, Outcome: strings.Split(outcome, ",")})
 		require.NoError(t, err)
 		require.Len(t, page.Data, n, outcome)
 	}
@@ -182,9 +182,9 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, full.Attempts, 3)
 	require.Equal(t, []string{"rebill", "dunning_retry", "dunning_retry"}, []string{full.Attempts[0].Kind, full.Attempts[1].Kind, full.Attempts[2].Kind})
-	require.Equal(t, openrails.DeclineInsufficientFunds, full.Attempts[0].Reason)
+	require.Equal(t, billing.DeclineInsufficientFunds, full.Attempts[0].Reason)
 
-	attempts, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{CycleID: cycle.ID})
+	attempts, err := c.ListPaymentAttempts(ctx, billing.PaymentAttemptFilter{CycleID: cycle.ID})
 	require.NoError(t, err)
 	require.Equal(t, int64(3), attempts.Total)
 	require.Equal(t, full.Attempts[2].ID, attempts.Data[0].ID, "newest first")
@@ -193,10 +193,10 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	require.Equal(t, "approved", one.Category)
 	require.Equal(t, cycle.ID, *one.CycleID)
 
-	declined, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{Category: []string{"issuer_soft"}, Kind: []string{"dunning_retry"}})
+	declined, err := c.ListPaymentAttempts(ctx, billing.PaymentAttemptFilter{Category: []string{"issuer_soft"}, Kind: []string{"dunning_retry"}})
 	require.NoError(t, err)
 	require.Len(t, declined.Data, 1)
-	failed, err := c.ListPaymentAttempts(ctx, openrails.PaymentAttemptFilter{CycleID: cycle.ID, Kind: []string{"rebill", "dunning_retry"}, Category: []string{"issuer_soft", "issuer_hard"}})
+	failed, err := c.ListPaymentAttempts(ctx, billing.PaymentAttemptFilter{CycleID: cycle.ID, Kind: []string{"rebill", "dunning_retry"}, Category: []string{"issuer_soft", "issuer_hard"}})
 	require.NoError(t, err)
 	require.Len(t, failed.Data, 2, "the cycle's two declines")
 }

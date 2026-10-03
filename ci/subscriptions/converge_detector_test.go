@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/embedoperator"
 	"github.com/open-rails/openrails/internal/failpoint"
 )
@@ -23,7 +23,7 @@ type lifeRow struct {
 	nextRetryAt *time.Time
 }
 
-func (w *world) lifeRow(sub openrails.SubscriptionID) lifeRow {
+func (w *world) lifeRow(sub billing.SubscriptionID) lifeRow {
 	w.t.Helper()
 	var r lifeRow
 	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT status::text, current_period_ends_at, next_retry_at FROM openrails.subscriptions WHERE id = $1`), sub.UUID()).
@@ -32,7 +32,7 @@ func (w *world) lifeRow(sub openrails.SubscriptionID) lifeRow {
 }
 
 // decide stands in for another writer's lifecycle decision on the row.
-func (w *world) decide(sub openrails.SubscriptionID, set string, args ...any) {
+func (w *world) decide(sub billing.SubscriptionID, set string, args ...any) {
 	w.t.Helper()
 	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE openrails.subscriptions SET `+set+`, lifecycle_rev = lifecycle_rev + 1 WHERE id = $1`), append([]any{sub.UUID()}, args...)...)
 	require.NoError(w.t, err)

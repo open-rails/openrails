@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
@@ -26,9 +26,9 @@ type adminUsageMeterPageResponse struct {
 	WritesAllowed       bool   `json:"writes_allowed"`
 }
 
-type adminUsageMeterRequest = openrails.UsageMeterRequest
+type adminUsageMeterRequest = billing.UsageMeterRequest
 
-type adminDefaultUsageRateCardRequest = openrails.DefaultUsageRateCardRequest
+type adminDefaultUsageRateCardRequest = billing.DefaultUsageRateCardRequest
 
 func AdminListUsageMeters(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
@@ -199,7 +199,7 @@ func defaultUsageRateCardInput(
 	meter billingservice.UsageMeterDTO,
 	req adminDefaultUsageRateCardRequest,
 ) (billingservice.UsageRateCardInput, error) {
-	typedProductID, err := openrails.ParseProductID(req.ProductID)
+	typedProductID, err := billing.ParseProductID(req.ProductID)
 	if err != nil || typedProductID.IsZero() {
 		return billingservice.UsageRateCardInput{}, errors.New("product_id required")
 	}

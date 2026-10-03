@@ -12,7 +12,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/failpoint"
 )
@@ -32,7 +32,7 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	sig := s.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now())
 	status, out := b.confirm(c, sig)
 	require.Equal(t, http.StatusOK, status, "%v", out)
-	sub, err := openrails.ParseSubscriptionID(unwrap(out)["subscription_id"].(string))
+	sub, err := billing.ParseSubscriptionID(unwrap(out)["subscription_id"].(string))
 	require.NoError(t, err)
 
 	// The wallet is empty when the period ends: the pull is refused on-chain.

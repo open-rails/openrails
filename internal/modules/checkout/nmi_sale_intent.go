@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -125,7 +125,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 		if duplicate {
 			// NMI's duplicate check refused this unique order unprocessed.
 			evidence["duplicate_refused"] = true
-			evidence["failure_code"] = openrails.CodePaymentDuplicateRefused
+			evidence["failure_code"] = billing.CodePaymentDuplicateRefused
 			reason = "the payment provider refused the charge as a duplicate of an identical charge just made on this card; nothing was charged"
 		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}

@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -49,18 +49,18 @@ const (
 )
 
 var (
-	ErrProviderBillingObservationConflict   = openrails.ErrProviderBillingObservationConflict
-	ErrProviderBillingQualificationRefused  = openrails.ErrProviderBillingQualificationRefused
-	ErrProviderBillingQualificationNotFound = openrails.ErrProviderBillingQualificationNotFound
+	ErrProviderBillingObservationConflict   = billing.ErrProviderBillingObservationConflict
+	ErrProviderBillingQualificationRefused  = billing.ErrProviderBillingQualificationRefused
+	ErrProviderBillingQualificationNotFound = billing.ErrProviderBillingQualificationNotFound
 )
 
-type ProviderBillingObservationConflict = openrails.ProviderBillingObservationConflict
+type ProviderBillingObservationConflict = billing.ProviderBillingObservationConflict
 
-type ProviderBillingLifecycleEvidence = openrails.ProviderBillingLifecycleEvidence
+type ProviderBillingLifecycleEvidence = billing.ProviderBillingLifecycleEvidence
 
-type ProviderBillingRecord = openrails.ProviderBillingRecord
+type ProviderBillingRecord = billing.ProviderBillingRecord
 
-type ProviderBillingEvidenceRefusalKind = openrails.ProviderBillingEvidenceRefusalKind
+type ProviderBillingEvidenceRefusalKind = billing.ProviderBillingEvidenceRefusalKind
 
 const (
 	ProviderBillingRefusalSchemaAmbiguity  ProviderBillingEvidenceRefusalKind = "schema_ambiguity"
@@ -72,9 +72,9 @@ const (
 // ProviderBillingObservationRefusal is a stable typed refusal supplied by a
 // provider adapter or SDK. OpenRails persists it but never parses provider raw
 // bodies. RawBody may be empty when the provider response exceeded its bound.
-type ProviderBillingObservationRefusal = openrails.ProviderBillingObservationRefusal
+type ProviderBillingObservationRefusal = billing.ProviderBillingObservationRefusal
 
-type ProviderBillingObservationInput = openrails.ProviderBillingObservationRequest
+type ProviderBillingObservationInput = billing.ProviderBillingObservationRequest
 
 type ProviderBillingQualification struct {
 	OperationID                    string
@@ -144,11 +144,11 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		return nil, fmt.Errorf("provider billing quiescence must use whole seconds")
 	}
 	if err := validateProviderBillingInput(in); err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	prepared, err := prepareProviderBillingObservation(in)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -180,13 +180,13 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 	// transaction. A stored lifecycle must equal this one (checked below).
 	now := s.now().UTC()
 	if now.Before(in.Lifecycle.ProviderAbsentAt) {
-		return nil, fmt.Errorf("%w: provider billing observation precedes provider absence", openrails.ErrInvalid)
+		return nil, fmt.Errorf("%w: provider billing observation precedes provider absence", billing.ErrInvalid)
 	}
 	if now.Before(in.Lifecycle.WindowsClosedAt) {
-		return nil, fmt.Errorf("%w: provider billing observation precedes rental-window closure", openrails.ErrInvalid)
+		return nil, fmt.Errorf("%w: provider billing observation precedes rental-window closure", billing.ErrInvalid)
 	}
 	if in.QueryEnd.After(now) {
-		return nil, fmt.Errorf("%w: provider billing query ends after observation time", openrails.ErrInvalid)
+		return nil, fmt.Errorf("%w: provider billing query ends after observation time", billing.ErrInvalid)
 	}
 	lifecycleDigest := sha256.Sum256(in.Lifecycle.LifecycleEvidenceBody)
 	qual, err := q.GetProviderBillingQualificationForUpdate(ctx, gen.GetProviderBillingQualificationForUpdateParams{
@@ -366,8 +366,8 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 	if err != nil {
 		return fmt.Errorf("encode provider billing observation: %w", err)
 	}
-	if len(encoded) > openrails.ProviderBillingObservationMaxBytes {
-		return fmt.Errorf("provider billing observation encodes to %d bytes; limit is %d", len(encoded), openrails.ProviderBillingObservationMaxBytes)
+	if len(encoded) > billing.ProviderBillingObservationMaxBytes {
+		return fmt.Errorf("provider billing observation encodes to %d bytes; limit is %d", len(encoded), billing.ProviderBillingObservationMaxBytes)
 	}
 	if err := validateOperationAuthorizationText("observation_id", in.ObservationID, operationAuthorizationMaxIDBytes); err != nil {
 		return err
@@ -505,8 +505,8 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 	if err != nil {
 		return prepared, fmt.Errorf("canonicalize provider billing records: %w", err)
 	}
-	if len(normalized) > openrails.ProviderBillingObservationMaxBytes {
-		return prepared, fmt.Errorf("normalized provider billing records exceed %d bytes", openrails.ProviderBillingObservationMaxBytes)
+	if len(normalized) > billing.ProviderBillingObservationMaxBytes {
+		return prepared, fmt.Errorf("normalized provider billing records exceed %d bytes", billing.ProviderBillingObservationMaxBytes)
 	}
 	prepared.normalizedRecords = normalized
 	prepared.normalizedRecordsDigest = sha256.Sum256(normalized)
@@ -714,7 +714,7 @@ func (s *MoneyService) GetProviderBillingQualification(ctx context.Context, oper
 // and observes its uncommitted qualification and settlement.
 func (s *MoneyService) GetProviderBillingQualificationInTx(ctx context.Context, txDB *db.DB, operationID string) (*ProviderBillingQualification, error) {
 	if err := validateOperationID(operationID); err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
@@ -18,7 +18,7 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 		priceObjects[i] = PriceToAPI(price)
 	}
 	return api.ProductObject{
-		ID:               openrails.ProductID(p.ID),
+		ID:               billing.ProductID(p.ID),
 		Object:           "product",
 		Key:              p.Key,
 		Name:             p.DisplayName,
@@ -60,9 +60,9 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 // paymentToAPIWithRefundTotal keeps status derivation identical for detailed
 // payments and customer history, without loading unbounded refund objects.
 func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.PaymentObject {
-	var subID *openrails.SubscriptionID
+	var subID *billing.SubscriptionID
 	if p.SubscriptionID != nil {
-		s := openrails.SubscriptionID(*p.SubscriptionID)
+		s := billing.SubscriptionID(*p.SubscriptionID)
 		subID = &s
 	}
 	object := "charge"
@@ -78,9 +78,9 @@ func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.Pa
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (openrails.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, CreatedAt: p.CreatedAt}
+	payment := api.PaymentObject{ID: billing.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (billing.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, CreatedAt: p.CreatedAt}
 	if p.RefundedPaymentID != nil {
-		original := openrails.PaymentID(*p.RefundedPaymentID)
+		original := billing.PaymentID(*p.RefundedPaymentID)
 		payment.RefundedPaymentID = &original
 		payment.Reason = adminRefundMetadataString(p.Metadata, "admin_refund_reason")
 	}
@@ -93,23 +93,23 @@ func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.Pa
 }
 
 type userPaymentObject struct {
-	ID             openrails.PaymentID       `json:"id"`
-	Object         string                    `json:"object"`
-	Status         string                    `json:"status,omitempty"`
-	Amount         int64                     `json:"amount,string"`
-	AmountRefunded int64                     `json:"amount_refunded,string"`
-	Currency       string                    `json:"currency"`
-	CustomerID     string                    `json:"customer_id"`
-	SubscriptionID *openrails.SubscriptionID `json:"subscription_id,omitempty"`
-	Rail           string                    `json:"rail"`
-	Refunded       bool                      `json:"refunded"`
-	Captured       bool                      `json:"captured,omitempty"`
-	CreatedAt      time.Time                 `json:"created_at"`
-	Price          *api.PriceObject          `json:"price,omitempty"`
-	Product        *openrails.ProductSummary `json:"product,omitempty"`
-	Card           *paymentCardJSON          `json:"card,omitempty"`
+	ID             billing.PaymentID       `json:"id"`
+	Object         string                  `json:"object"`
+	Status         string                  `json:"status,omitempty"`
+	Amount         int64                   `json:"amount,string"`
+	AmountRefunded int64                   `json:"amount_refunded,string"`
+	Currency       string                  `json:"currency"`
+	CustomerID     string                  `json:"customer_id"`
+	SubscriptionID *billing.SubscriptionID `json:"subscription_id,omitempty"`
+	Rail           string                  `json:"rail"`
+	Refunded       bool                    `json:"refunded"`
+	Captured       bool                    `json:"captured,omitempty"`
+	CreatedAt      time.Time               `json:"created_at"`
+	Price          *api.PriceObject        `json:"price,omitempty"`
+	Product        *billing.ProductSummary `json:"product,omitempty"`
+	Card           *paymentCardJSON        `json:"card,omitempty"`
 	// Failure explains a failed charge in customer terms.
-	Failure *openrails.PaymentFailure `json:"failure,omitempty"`
+	Failure *billing.PaymentFailure `json:"failure,omitempty"`
 }
 
 // paymentCardJSON is the card snapshot for a single payment (the card used for
@@ -155,7 +155,7 @@ func PaymentToUserAPI(p *models.Payment, amountRefunded int64) userPaymentObject
 	}
 }
 
-func paymentFailure(p *models.Payment, status string) *openrails.PaymentFailure {
+func paymentFailure(p *models.Payment, status string) *billing.PaymentFailure {
 	if status != "failed" {
 		return nil
 	}
@@ -208,5 +208,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		}
 		sort.Strings(providers)
 	}
-	return api.PriceObject{ID: (openrails.PriceID(p.ID)).String(), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: (openrails.ProductID(p.ProductID)).String(), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, CreatedAt: p.CreatedAt}
+	return api.PriceObject{ID: (billing.PriceID(p.ID)).String(), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: (billing.ProductID(p.ProductID)).String(), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, CreatedAt: p.CreatedAt}
 }

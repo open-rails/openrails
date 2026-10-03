@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
@@ -25,7 +25,7 @@ type EffectOptions struct {
 	// EndedReason is the premium_ended notice's reason.
 	EndedReason PremiumEndReason
 	// Notice is the base data of every customer notice.
-	Notice openrails.NotificationData
+	Notice billing.NotificationData
 }
 
 // ApplyEffects carries out a transition's effects inside the caller's
@@ -149,7 +149,7 @@ func revokeReason(sub *models.Subscription, opts EffectOptions) models.Entitleme
 // and period so a replayed transition never notifies twice.
 func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB, sub *models.Subscription, kind lifecycle.NoticeKind, granted *lifecycle.GrantPeriod, opts EffectOptions) (*models.NotificationQueue, error) {
 	data := opts.Notice
-	data.SubscriptionID = openrails.SubscriptionID(sub.ID)
+	data.SubscriptionID = billing.SubscriptionID(sub.ID)
 	if data.Rail == "" {
 		data.Rail, data.RailSubscriptionID = string(sub.Rail), sub.RailSubscriptionID
 	}

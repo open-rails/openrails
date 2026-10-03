@@ -22,6 +22,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/cache"
@@ -96,8 +97,8 @@ type Options struct {
 	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
 	// opt in explicitly when they need notification email or CCBill username
 	// resolution.
-	UserDirectory    openrails.UserDirectory
-	UsernameResolver openrails.UsernameResolver
+	UserDirectory    billing.UserDirectory
+	UsernameResolver billing.UsernameResolver
 }
 
 // Runtime is the in-process engine: Client() for the shared client, HTTPRoutes()

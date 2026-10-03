@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // SEC-33: provider account ids are global and CCBill events route by account
@@ -22,10 +22,10 @@ func TestSecurityProviderAccountClaimsNeedProof(t *testing.T) {
 	r := w.rival()
 	zero := int64(0)
 	for _, account := range []string{"945280-0001", "945280-0000"} {
-		_, err := r.client.PaymentProviders.Upsert(t.Context(), "ccbill", &openrails.UpsertPaymentProviderParams{OperationID: uuid.New(), ExpectedRevision: &zero, AccountID: account})
+		_, err := r.client.PaymentProviders.Upsert(t.Context(), "ccbill", &billing.UpsertPaymentProviderParams{OperationID: uuid.New(), ExpectedRevision: &zero, AccountID: account})
 		require.Error(t, err, "an unproven claim of %s is refused", account)
 	}
-	list, err := r.client.PaymentProviders.List(t.Context(), &openrails.PaymentProviderListParams{Provider: "ccbill"})
+	list, err := r.client.PaymentProviders.List(t.Context(), &billing.PaymentProviderListParams{Provider: "ccbill"})
 	require.NoError(t, err)
 	for _, psp := range list.Data {
 		require.NotContains(t, []string{"945280-0001", "945280-0000"}, psp.AccountID)

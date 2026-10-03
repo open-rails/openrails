@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -84,7 +84,7 @@ type CaptureHoldRequest struct {
 	SourceID   string
 }
 
-type CreditTransaction = openrails.CreditTransaction
+type CreditTransaction = billing.CreditTransaction
 
 type WithdrawCreditsRequest struct {
 	CustomerID *identity.CustomerID
@@ -136,7 +136,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      openrails.CustomerID(trx.CustomerID).String(),
+		CustomerID:      billing.CustomerID(trx.CustomerID).String(),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -230,7 +230,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      openrails.CustomerID(trx.CustomerID).String(),
+		CustomerID:      billing.CustomerID(trx.CustomerID).String(),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -274,7 +274,7 @@ func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      openrails.CustomerID(trx.CustomerID).String(),
+		CustomerID:      billing.CustomerID(trx.CustomerID).String(),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -290,7 +290,7 @@ func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID
 	}, nil
 }
 
-func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*openrails.CaptureReceipt, error) {
+func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*billing.CaptureReceipt, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -300,7 +300,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*ope
 	if req.RequestID == "" {
 		return nil, fmt.Errorf("request_id required")
 	}
-	return s.moneyService().CaptureAdmission(ctx, req.RequestID, req.Amount, &openrails.CaptureUsage{
+	return s.moneyService().CaptureAdmission(ctx, req.RequestID, req.Amount, &billing.CaptureUsage{
 		EventType: req.EventType, Resource: req.Resource, Source: req.Source, SourceID: req.SourceID,
 		Dimensions: req.Dimensions, Metadata: req.Metadata,
 	})
@@ -319,7 +319,7 @@ func (s *Service) AdmissionCustomer(ctx context.Context, requestID string) (iden
 
 // ServiceUsageRollupRow is one grouped spend bucket (dimension value, event
 // count, summed host-priced amount).
-type ServiceUsageRollupRow = openrails.UsageRollupRow
+type ServiceUsageRollupRow = billing.UsageRollupRow
 
 // ServiceUsageRollupRequest selects a payer + window + grouping dimension.
 type ServiceUsageRollupRequest struct {
@@ -359,7 +359,7 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 }
 
 // ResourceRevenueDailyRow is one day's revenue in internal units for an endpoint.
-type ResourceRevenueDailyRow = openrails.ResourceRevenueDailyRow
+type ResourceRevenueDailyRow = billing.ResourceRevenueDailyRow
 
 // ResourceRevenueDaily returns per-day revenue for a resource (typed
 // attribution column) across all payers in the merchant over [from, to) — powers

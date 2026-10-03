@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Known actions. Params are plain JSON objects; ids travel in their typed
@@ -145,7 +145,7 @@ func RevokeEntitlementRec(entitlementID, asOf string, alternative *Recommendatio
 
 // RecordAdminGrantRec recommends legitimizing access with an admin-sourced
 // grant. productID may be zero when the source is gone (operator overrides).
-func RecordAdminGrantRec(customerID openrails.CustomerID, productID openrails.ProductID, reason string) Recommendation {
+func RecordAdminGrantRec(customerID billing.CustomerID, productID billing.ProductID, reason string) Recommendation {
 	params := map[string]any{"customer_id": customerID.String()}
 	if !productID.IsZero() {
 		params["product_id"] = productID.String()
@@ -160,7 +160,7 @@ func RecordAdminGrantRec(customerID openrails.CustomerID, productID openrails.Pr
 // one payment. Either id may be empty (refund-only for one-off duplicates
 // without a subscription; cancel-only when no payment linkage exists) — the
 // executor treats both as optional but requires at least one.
-func CancelAndRefundRec(subscriptionID openrails.SubscriptionID, refundPaymentID openrails.PaymentID) Recommendation {
+func CancelAndRefundRec(subscriptionID billing.SubscriptionID, refundPaymentID billing.PaymentID) Recommendation {
 	params := map[string]any{}
 	if !subscriptionID.IsZero() {
 		params["subscription_id"] = subscriptionID.String()

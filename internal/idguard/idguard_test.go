@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -32,7 +32,7 @@ func TestGuardsRefuseZeroIdentifiers(t *testing.T) {
 				require.NoError(t, tc.err)
 				return
 			}
-			require.ErrorIs(t, tc.err, openrails.ErrInvalid)
+			require.ErrorIs(t, tc.err, billing.ErrInvalid)
 			var se *apperr.Error
 			require.ErrorAs(t, tc.err, &se)
 			require.Equal(t, 400, se.Status)
@@ -47,8 +47,8 @@ func TestGuardsRefuseZeroIdentifiers(t *testing.T) {
 // zero UUID is refused at parse (#479).
 func TestWireIdentifierSpellingsNeverYieldAUsableZero(t *testing.T) {
 	for prefix, parse := range map[string]func(string) (bool, error){
-		"sub_": func(s string) (bool, error) { id, err := openrails.ParseSubscriptionID(s); return id.IsZero(), err },
-		"pm_":  func(s string) (bool, error) { id, err := openrails.ParsePaymentMethodID(s); return id.IsZero(), err },
+		"sub_": func(s string) (bool, error) { id, err := billing.ParseSubscriptionID(s); return id.IsZero(), err },
+		"pm_":  func(s string) (bool, error) { id, err := billing.ParsePaymentMethodID(s); return id.IsZero(), err },
 	} {
 		for _, blank := range []string{"", " ", "\t  \n"} {
 			isZero, err := parse(blank)

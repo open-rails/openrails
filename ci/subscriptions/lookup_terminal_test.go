@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // #1104: a host whose lookup after a decline failed retries the same key with
@@ -19,15 +19,15 @@ func TestLookupAnswersAFinishedSessionForOtherDetails(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	c := w.newCustomer()
-	request := func(key string, c2 card) openrails.CreateCheckoutSessionRequest {
-		return openrails.CreateCheckoutSessionRequest{
-			Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
-			PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(c2), NameOnCard: "Lookup Payer", Zip: "10001", Country: "US"},
+	request := func(key string, c2 card) billing.CreateCheckoutSessionRequest {
+		return billing.CreateCheckoutSessionRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
+			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(c2), NameOnCard: "Lookup Payer", Zip: "10001", Country: "US"},
 		}
 	}
 	declinedCard := card{Brand: "visa", Last4: "0002", Decline: "202"}

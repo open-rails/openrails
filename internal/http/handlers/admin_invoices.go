@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -66,7 +66,7 @@ func ListAdminInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 		}
 		filter := billingservice.MerchantInvoiceFilter{}
 		if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
-			id, err := openrails.ParseCustomerID(raw)
+			id, err := billing.ParseCustomerID(raw)
 			if err != nil || id.IsZero() {
 				r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 				return
@@ -208,7 +208,7 @@ func MutateAdminInvoice(action billingservice.InvoiceAdminAction) func(*httprequ
 		if !ok {
 			return
 		}
-		var body openrails.RecordInvoicePaymentRequest
+		var body billing.RecordInvoicePaymentRequest
 		if action == billingservice.InvoiceAdminRecordPayment {
 			if !r.BindJSON(&body) {
 				return
@@ -238,7 +238,7 @@ func RetryAdminInvoiceCollection(r *httprequest.Request) {
 		return
 	}
 	var body struct {
-		PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
+		PaymentMethodID billing.PaymentMethodID `json:"payment_method_id"`
 	}
 	if !r.BindJSON(&body) {
 		return
@@ -368,16 +368,16 @@ var invoiceAdminRefusals = []struct {
 	status int
 	code   string
 }{
-	{money.ErrInvoiceActionNotAllowed, http.StatusConflict, openrails.CodeInvoiceActionNotAllowed},
-	{money.ErrInvoiceNotRetryable, http.StatusConflict, openrails.CodeInvoiceNotRetryable},
-	{money.ErrInvoiceRetryInProgress, http.StatusConflict, openrails.CodeInvoiceRetryInProgress},
-	{money.ErrInvoiceRetryOutcomeUnknown, http.StatusConflict, openrails.CodeInvoiceRetryOutcomeUnknown},
-	{money.ErrInvoiceRetryIdempotencyConflict, http.StatusConflict, openrails.CodeInvoiceRetryIdempotencyConflict},
-	{money.ErrInvoicePaymentReferenceUsed, http.StatusConflict, openrails.CodeInvoicePaymentReferenceUsed},
-	{money.ErrInvoicePaymentExceedsDue, http.StatusConflict, openrails.CodeInvoicePaymentExceedsDue},
-	{money.ErrInvoicePaymentInvalid, http.StatusBadRequest, openrails.CodeInvoicePaymentInvalid},
-	{money.ErrCollectionPaymentMethodInvalid, http.StatusBadRequest, openrails.CodeCollectionPaymentMethodInvalid},
-	{money.ErrCollectionPaymentMethodRequired, http.StatusBadRequest, openrails.CodeCollectionPaymentMethodRequired},
+	{money.ErrInvoiceActionNotAllowed, http.StatusConflict, billing.CodeInvoiceActionNotAllowed},
+	{money.ErrInvoiceNotRetryable, http.StatusConflict, billing.CodeInvoiceNotRetryable},
+	{money.ErrInvoiceRetryInProgress, http.StatusConflict, billing.CodeInvoiceRetryInProgress},
+	{money.ErrInvoiceRetryOutcomeUnknown, http.StatusConflict, billing.CodeInvoiceRetryOutcomeUnknown},
+	{money.ErrInvoiceRetryIdempotencyConflict, http.StatusConflict, billing.CodeInvoiceRetryIdempotencyConflict},
+	{money.ErrInvoicePaymentReferenceUsed, http.StatusConflict, billing.CodeInvoicePaymentReferenceUsed},
+	{money.ErrInvoicePaymentExceedsDue, http.StatusConflict, billing.CodeInvoicePaymentExceedsDue},
+	{money.ErrInvoicePaymentInvalid, http.StatusBadRequest, billing.CodeInvoicePaymentInvalid},
+	{money.ErrCollectionPaymentMethodInvalid, http.StatusBadRequest, billing.CodeCollectionPaymentMethodInvalid},
+	{money.ErrCollectionPaymentMethodRequired, http.StatusBadRequest, billing.CodeCollectionPaymentMethodRequired},
 }
 
 func writeInvoiceAdminError(r *httprequest.Request, err error) {

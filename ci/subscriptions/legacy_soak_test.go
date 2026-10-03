@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -28,10 +28,10 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			paid := completed(w.payments(tp, l.c.id))
 			require.Len(t, paid, 1)
 			legacy := paid[0]
-			params := openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + legacy.ID.String()}
+			params := billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + legacy.ID.String()}
 
 			_, err := w.client[tp].RefundPayment(t.Context(), legacy.ID, params)
-			requireCode(t, err, http.StatusConflict, openrails.CodeProviderCancelHeld)
+			requireCode(t, err, http.StatusConflict, billing.CodeProviderCancelHeld)
 			w.settle()
 			require.Empty(t, w.nmi.CallsTo(http.MethodPost, "/payments/"+legacy.TransactionID+"/refund", nil), "nothing refunded")
 			require.Equal(t, "active", w.subscription(tp, l.sub).Status)
@@ -78,10 +78,10 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 			active := b.add(&bookRow{source: "active", tier: monthly, paid: now.Add(10 * day), declared: true})
 			last := now.Add(-12 * time.Hour)
 			pastDue := b.add(&bookRow{source: "past_due", tier: monthly, paid: now.Add(-day), declared: true,
-				dunning: &openrails.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
+				dunning: &billing.DunningEvidence{Retries: 1, LastRetryAt: &last, ScheduleLive: true}})
 			w.nmi.EditSchedule(pastDue.schedule, func(s *nmimock.Schedule) { s.NextBilling = pastDue.paid.AddDate(0, 0, 30) })
 			runway := b.add(&bookRow{source: "runway", tier: monthly, paid: now.Add(20 * day), declared: true,
-				cancel: openrails.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
+				cancel: billing.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
 			w.nmi.DeleteSchedule(runway.schedule)
 
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)

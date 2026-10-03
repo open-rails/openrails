@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // attempt is one payment_attempts row (#1110).
@@ -55,9 +55,9 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
 
-	_, err := h.pay("pay-cvc", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
-	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
-	session, err := h.pay("pay-fixed", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
+	require.ErrorIs(t, err, billing.ErrPaymentRefused)
+	session, err := h.pay("pay-fixed", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)
 	w.settle()
@@ -88,9 +88,9 @@ func TestNewCardAttemptsSaleDeclined(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: price.ID}
 
-	_, err := h.pay("pay-nsf", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
-	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
-	_, err = h.pay("pay-ok", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	_, err := h.pay("pay-nsf", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
+	require.ErrorIs(t, err, billing.ErrPaymentRefused)
+	_, err = h.pay("pay-ok", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	w.settle()
 
@@ -124,13 +124,13 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	require.Equal(t, "approved", rows[1].Category)
 	require.Equal(t, *rows[0].Checkout, *rows[1].Checkout)
 
-	product, err := w.client[embedded].Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := w.client[embedded].Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	post, err := w.client[embedded].Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	post, err := w.client[embedded].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	buyer := w.newCustomer()
 	h := hostedPay{w: w, c: buyer, tp: embedded, price: post.ID}
-	_, err = h.pay("sale-1", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	_, err = h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	w.settle()
 	rows = w.attempts(buyer.id)

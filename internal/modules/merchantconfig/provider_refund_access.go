@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 )
 
@@ -12,10 +12,10 @@ import (
 // means the default.
 func NormalizeProviderRefundAccess(v string) (string, error) {
 	switch v {
-	case "", openrails.ProviderRefundRevokeOnFull, openrails.ProviderRefundRevokeOnAny, openrails.ProviderRefundKeep:
+	case "", billing.ProviderRefundRevokeOnFull, billing.ProviderRefundRevokeOnAny, billing.ProviderRefundKeep:
 		return v, nil
 	}
-	return "", fmt.Errorf("provider_refund_access must be %q, %q or %q", openrails.ProviderRefundRevokeOnFull, openrails.ProviderRefundRevokeOnAny, openrails.ProviderRefundKeep)
+	return "", fmt.Errorf("provider_refund_access must be %q, %q or %q", billing.ProviderRefundRevokeOnFull, billing.ProviderRefundRevokeOnAny, billing.ProviderRefundKeep)
 }
 
 // ProviderRefundRevokes applies the merchant's provider_refund_access policy
@@ -29,9 +29,9 @@ func ProviderRefundRevokes(ctx context.Context, d *db.DB, refunded, captured int
 		return false, fmt.Errorf("load provider refund policy: %w", err)
 	}
 	switch cfg.ProviderRefundAccess {
-	case openrails.ProviderRefundKeep:
+	case billing.ProviderRefundKeep:
 		return false, nil
-	case openrails.ProviderRefundRevokeOnAny:
+	case billing.ProviderRefundRevokeOnAny:
 		return refunded > 0, nil
 	default:
 		return captured > 0 && refunded >= captured, nil

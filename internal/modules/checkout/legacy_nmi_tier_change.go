@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -31,13 +31,13 @@ import (
 // future charges only — and schedules the local price; the mirrored renewal at
 // E opens the new tier. Both prices must share the period's cadence.
 
-var errTierChangeLinkedPlan = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRequiresLinkedPlan,
+var errTierChangeLinkedPlan = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRequiresLinkedPlan,
 	Message: "this subscription is on a named NMI plan, which changes only by switching plans; link the new price to an NMI plan of the same amount and billing cycle"}
 
-var errTierChangeScheduleUnavailable = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused,
+var errTierChangeScheduleUnavailable = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused,
 	Message: "the provider's billing schedule for this subscription could not be read; try again later"}
 
-var errTierChangeCadence = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeCadenceUnsupported,
+var errTierChangeCadence = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeCadenceUnsupported,
 	Message: "this subscription is billed on the provider's schedule, which keeps its billing date; change to a price of the same billing cycle"}
 
 // providerNMITierAdmissible refuses what an in-place change cannot honour.
@@ -148,7 +148,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
 	database := s.SubscriptionService.Database()
 	if prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key); err == nil {
-		return s.replayTierChangeOperation(ctx, prior, &TierChangeRequest{SubscriptionID: sub.ID, PriceID: openrails.PriceID(newPrice.ID).String()}, user)
+		return s.replayTierChangeOperation(ctx, prior, &TierChangeRequest{SubscriptionID: sub.ID, PriceID: billing.PriceID(newPrice.ID).String()}, user)
 	} else if !db.IsNotFound(err) {
 		return nil, err
 	}

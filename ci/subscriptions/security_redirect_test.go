@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // SEC-33: checkout return URLs are an open-redirect vector (a phishing page
@@ -21,9 +21,9 @@ func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	c := w.newCustomer()
 	method := c.saveCard("stripe", visa)
 	create := func(tp topology, success, cancel string) error {
-		_, err := w.client[tp].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-			OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
-			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
+		_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
 			SuccessURL: success, CancelURL: cancel,
 		})
 		return err

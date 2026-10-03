@@ -18,7 +18,7 @@ import (
 )
 
 // Invalid is the coded invalid-parameter refusal: HTTP 400, code
-// invalid_param, naming the offending field. errors.Is(err, openrails.ErrInvalid)
+// invalid_param, naming the offending field. errors.Is(err, billing.ErrInvalid)
 // classifies it identically in embedded and remote callers.
 func Invalid(field, message string) error {
 	return apperr.Invalidf("%s", message).WithParam(field)

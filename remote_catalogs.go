@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // ForCatalogOwner returns a catalog-only view of this client for one owner.
@@ -21,7 +23,7 @@ func (c *Client) ForCatalogOwner(subject string) (*Client, error) {
 		return nil, invalidErr("client is required")
 	}
 	if c.catalogOwner != "" && c.catalogOwner != subject {
-		return nil, &StatusError{Status: http.StatusForbidden, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients cannot change owner"}}
+		return nil, &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients cannot change owner"}}
 	}
 	scoped := *c
 	scoped.ownCatalog = true
@@ -33,8 +35,8 @@ func (c *Client) ForCatalogOwner(subject string) (*Client, error) {
 // EnsureOwnCatalog returns the catalog belonging to the Gate-verified subject.
 // Use ForCatalogOwner for an explicitly scoped host client, or WithOwnCatalog
 // with a credential whose Gate resolves the owner subject and permissions.
-func (c *Client) EnsureOwnCatalog(ctx context.Context, requestOptions ...RequestOption) (*Catalog, error) {
-	var out Catalog
+func (c *Client) EnsureOwnCatalog(ctx context.Context, requestOptions ...RequestOption) (*billing.Catalog, error) {
+	var out billing.Catalog
 	if err := c.do(ctx, http.MethodPut, "/v1/catalog", struct{}{}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -43,11 +45,11 @@ func (c *Client) EnsureOwnCatalog(ctx context.Context, requestOptions ...Request
 
 // EnsureCatalogForOwner is a merchant-administrator operation. The supplied
 // subject selects business data; the credential's merchant grant authorizes it.
-func (c *Client) EnsureCatalogForOwner(ctx context.Context, subject string, requestOptions ...RequestOption) (*Catalog, error) {
+func (c *Client) EnsureCatalogForOwner(ctx context.Context, subject string, requestOptions ...RequestOption) (*billing.Catalog, error) {
 	if subject == "" || !utf8.ValidString(subject) || strings.ContainsRune(subject, 0) {
 		return nil, invalidErr("catalog owner subject must be nonempty UTF-8 text without NUL")
 	}
-	var out Catalog
+	var out billing.Catalog
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalogs", struct {
 		OwnerSubject string `json:"owner_subject"`
 	}{OwnerSubject: subject}, &out, requestOptions...); err != nil {
@@ -56,12 +58,12 @@ func (c *Client) EnsureCatalogForOwner(ctx context.Context, subject string, requ
 	return &out, nil
 }
 
-func (c *Client) GetCatalog(ctx context.Context, id CatalogID, requestOptions ...RequestOption) (*Catalog, error) {
+func (c *Client) GetCatalog(ctx context.Context, id billing.CatalogID, requestOptions ...RequestOption) (*billing.Catalog, error) {
 	key, err := requireTypedID("catalog_id", id)
 	if err != nil {
 		return nil, err
 	}
-	var out Catalog
+	var out billing.Catalog
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalogs/"+key, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -70,11 +72,11 @@ func (c *Client) GetCatalog(ctx context.Context, id CatalogID, requestOptions ..
 
 // GetCatalogForOwner retrieves an existing catalog using merchant-administrator
 // authority. It returns ErrNotFound without creating anything when absent.
-func (c *Client) GetCatalogForOwner(ctx context.Context, subject string, requestOptions ...RequestOption) (*Catalog, error) {
+func (c *Client) GetCatalogForOwner(ctx context.Context, subject string, requestOptions ...RequestOption) (*billing.Catalog, error) {
 	if subject == "" || !utf8.ValidString(subject) || strings.ContainsRune(subject, 0) {
 		return nil, invalidErr("catalog owner subject must be nonempty UTF-8 text without NUL")
 	}
-	var out Catalog
+	var out billing.Catalog
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalogs/by-owner?owner_subject="+url.QueryEscape(subject), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -82,9 +84,9 @@ func (c *Client) GetCatalogForOwner(ctx context.Context, subject string, request
 }
 
 // ListCatalogs returns one page of catalogs visible to a merchant administrator.
-func (c *Client) ListCatalogs(ctx context.Context, options PageOptions, requestOptions ...RequestOption) ([]Catalog, error) {
+func (c *Client) ListCatalogs(ctx context.Context, options billing.PageOptions, requestOptions ...RequestOption) ([]billing.Catalog, error) {
 	var out struct {
-		Items []Catalog `json:"items"`
+		Items []billing.Catalog `json:"items"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalogs?"+pageQuery(options).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

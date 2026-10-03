@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // ProductClient is the product resource on an embedded or remote Client.
@@ -21,57 +23,50 @@ func (c *Client) initResources() {
 	c.Prices = &PriceClient{client: c}
 }
 
-func (p *ProductClient) Create(ctx context.Context, params *ProductCreateParams, requestOptions ...RequestOption) (*Product, error) {
-	var out Product
+func (p *ProductClient) Create(ctx context.Context, params *billing.ProductCreateParams, requestOptions ...RequestOption) (*billing.Product, error) {
+	var out billing.Product
 	if err := p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/products", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *ProductClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*Product, error) {
+func (p *ProductClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.Product, error) {
 	id, err := resourceProductID(id)
 	if err != nil {
 		return nil, err
 	}
-	var out Product
+	var out billing.Product
 	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/products/"+id, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *ProductClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*Product, error) {
+func (p *ProductClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Product, error) {
 	key, err := pathID("key", key)
 	if err != nil {
 		return nil, err
 	}
-	var out Product
+	var out billing.Product
 	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/products/by-key/"+key, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *ProductClient) Update(ctx context.Context, id string, params *ProductUpdateParams, requestOptions ...RequestOption) (*Product, error) {
+func (p *ProductClient) Update(ctx context.Context, id string, params *billing.ProductUpdateParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	id, err := resourceProductID(id)
 	if err != nil {
 		return nil, err
 	}
-	var out Product
+	var out billing.Product
 	if err = p.client.do(ctx, http.MethodPatch, p.client.catalogPath()+"/products/"+id, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-type ProductListParams struct {
-	PageOptions
-	CatalogID string
-	Archived  *bool
-	TierGroup string
-}
-
-func (p *ProductClient) List(ctx context.Context, params *ProductListParams, requestOptions ...RequestOption) (*CatalogPage[Product], error) {
+func (p *ProductClient) List(ctx context.Context, params *billing.ProductListParams, requestOptions ...RequestOption) (*billing.CatalogPage[billing.Product], error) {
 	if params == nil {
-		params = &ProductListParams{}
+		params = &billing.ProductListParams{}
 	}
 	q := pageQuery(params.PageOptions)
 	q.Set("catalog_id", params.CatalogID)
@@ -79,13 +74,13 @@ func (p *ProductClient) List(ctx context.Context, params *ProductListParams, req
 	if params.Archived != nil {
 		q.Set("archived", strconv.FormatBool(*params.Archived))
 	}
-	var out CatalogPage[Product]
+	var out billing.CatalogPage[billing.Product]
 	if err := p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *PriceClient) Create(ctx context.Context, params *PriceCreateParams, requestOptions ...RequestOption) (*Price, error) {
+func (p *PriceClient) Create(ctx context.Context, params *billing.PriceCreateParams, requestOptions ...RequestOption) (*billing.Price, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -108,58 +103,49 @@ func (p *PriceClient) Create(ctx context.Context, params *PriceCreateParams, req
 	if selectors != 1 {
 		return nil, invalidErr("exactly one of product_id, product_key and product_data is required")
 	}
-	var out Price
+	var out billing.Price
 	if err := p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/prices", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *PriceClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*Price, error) {
+func (p *PriceClient) Retrieve(ctx context.Context, id string, requestOptions ...RequestOption) (*billing.Price, error) {
 	id, err := resourcePriceID(id)
 	if err != nil {
 		return nil, err
 	}
-	var out Price
+	var out billing.Price
 	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/prices/"+id, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *PriceClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*Price, error) {
+func (p *PriceClient) RetrieveByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Price, error) {
 	key, err := pathID("key", key)
 	if err != nil {
 		return nil, err
 	}
-	var out Price
+	var out billing.Price
 	if err = p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
-func (p *PriceClient) Update(ctx context.Context, id string, params *PriceUpdateParams, requestOptions ...RequestOption) (*Price, error) {
+func (p *PriceClient) Update(ctx context.Context, id string, params *billing.PriceUpdateParams, requestOptions ...RequestOption) (*billing.Price, error) {
 	id, err := resourcePriceID(id)
 	if err != nil {
 		return nil, err
 	}
-	var out Price
+	var out billing.Price
 	if err = p.client.do(ctx, http.MethodPatch, p.client.catalogPath()+"/prices/"+id, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-type PriceListParams struct {
-	PageOptions
-	CatalogID string
-	ProductID string
-	Archived  *bool
-	Currency  string
-	Type      string
-}
-
-func (p *PriceClient) List(ctx context.Context, params *PriceListParams, requestOptions ...RequestOption) (*CatalogPage[Price], error) {
+func (p *PriceClient) List(ctx context.Context, params *billing.PriceListParams, requestOptions ...RequestOption) (*billing.CatalogPage[billing.Price], error) {
 	if params == nil {
-		params = &PriceListParams{}
+		params = &billing.PriceListParams{}
 	}
 	q := pageQuery(params.PageOptions)
 	q.Set("catalog_id", params.CatalogID)
@@ -169,21 +155,21 @@ func (p *PriceClient) List(ctx context.Context, params *PriceListParams, request
 	if params.Archived != nil {
 		q.Set("archived", strconv.FormatBool(*params.Archived))
 	}
-	var out CatalogPage[Price]
+	var out billing.CatalogPage[billing.Price]
 	if err := p.client.do(ctx, http.MethodGet, p.client.catalogPath()+"/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func resourceProductID(id string) (string, error) {
-	parsed, err := ParseProductID(id)
+	parsed, err := billing.ParseProductID(id)
 	if err != nil {
 		return "", invalidErr("invalid product_id")
 	}
 	return requireTypedID("product_id", parsed)
 }
 func resourcePriceID(id string) (string, error) {
-	parsed, err := ParsePriceID(id)
+	parsed, err := billing.ParsePriceID(id)
 	if err != nil {
 		return "", invalidErr("invalid price_id")
 	}
@@ -191,7 +177,7 @@ func resourcePriceID(id string) (string, error) {
 }
 
 // SetKey moves a price onto a merchant-unique lookup key.
-func (p *PriceClient) SetKey(ctx context.Context, id, key string, requestOptions ...RequestOption) (*Price, error) {
+func (p *PriceClient) SetKey(ctx context.Context, id, key string, requestOptions ...RequestOption) (*billing.Price, error) {
 	id, err := resourcePriceID(id)
 	if err != nil {
 		return nil, err
@@ -200,7 +186,7 @@ func (p *PriceClient) SetKey(ctx context.Context, id, key string, requestOptions
 	if err != nil {
 		return nil, err
 	}
-	var out Price
+	var out billing.Price
 	if err = p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/prices/"+id+"/key", struct {
 		Key string `json:"key"`
 	}{key}, &out, requestOptions...); err != nil {
@@ -211,7 +197,7 @@ func (p *PriceClient) SetKey(ctx context.Context, id, key string, requestOptions
 
 // Ensure creates params only when its key is absent. Existing definitions
 // are preserved. The server owns concurrency and catalog scope.
-func (p *ProductClient) Ensure(ctx context.Context, params *ProductCreateParams, requestOptions ...RequestOption) (*Product, error) {
+func (p *ProductClient) Ensure(ctx context.Context, params *billing.ProductCreateParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	if params == nil {
 		return nil, invalidErr("product parameters are required")
 	}
@@ -219,7 +205,7 @@ func (p *ProductClient) Ensure(ctx context.Context, params *ProductCreateParams,
 	if err != nil {
 		return nil, err
 	}
-	var out Product
+	var out billing.Product
 	if err = p.client.do(ctx, http.MethodPut, p.client.catalogPath()+"/products/by-key/"+key, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}

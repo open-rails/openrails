@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
@@ -96,9 +96,9 @@ func TestProviderBillingObservationEnvelopeIsTransportNeutral(t *testing.T) {
 		},
 	}
 	// base64 expands raw bytes by 4/3: this raw body fits, one more block does not.
-	in.RawBody = make([]byte, openrails.ProviderBillingObservationMaxBytes*3/4-1024)
+	in.RawBody = make([]byte, billing.ProviderBillingObservationMaxBytes*3/4-1024)
 	require.NoError(t, validateProviderBillingInput(in))
-	in.RawBody = make([]byte, openrails.ProviderBillingObservationMaxBytes*3/4)
+	in.RawBody = make([]byte, billing.ProviderBillingObservationMaxBytes*3/4)
 	require.ErrorContains(t, validateProviderBillingInput(in), "limit is")
 
 	for _, id := range []string{".", "..", "bad\x00id", string([]byte{0xff})} {

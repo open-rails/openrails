@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -23,7 +23,7 @@ func (body *customerBillingPolicyWrite) UnmarshalJSON(raw []byte) error {
 }
 
 func ServiceGetCustomerBillingPolicy(r *httprequest.Request) {
-	customer, err := openrails.ParseCustomerID(r.Param("customer_id"))
+	customer, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || customer.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
@@ -42,7 +42,7 @@ func ServiceGetCustomerBillingPolicy(r *httprequest.Request) {
 }
 
 func ServiceSetCustomerBillingPolicy(r *httprequest.Request) {
-	customer, err := openrails.ParseCustomerID(r.Param("customer_id"))
+	customer, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || customer.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return

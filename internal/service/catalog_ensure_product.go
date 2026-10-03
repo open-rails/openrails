@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -54,18 +54,18 @@ func (s *Service) ensureProduct(ctx context.Context, req CreateProductRequest, o
 		}
 		if req.CatalogID.IsZero() {
 			if owned {
-				req.CatalogID = openrails.CatalogID(*catalogscope.QueryID(ctx))
+				req.CatalogID = billing.CatalogID(*catalogscope.QueryID(ctx))
 			} else {
 				row, err := catalog.NewCatalogRepo(scoped.catalogTx).Ensure(ctx, nil)
 				if err != nil {
 					return err
 				}
-				req.CatalogID = openrails.CatalogID(row.ID)
+				req.CatalogID = billing.CatalogID(row.ID)
 			}
 		}
 		var err error
 		product, err = scoped.GetProductByKey(ctx, req.Key)
-		if errors.Is(err, openrails.ErrNotFound) {
+		if errors.Is(err, billing.ErrNotFound) {
 			err = scoped.catalogTx.MerchantTx(ctx, func(ctx context.Context, createTx pgx.Tx) error {
 				creating := scoped
 				creating.catalogTx = scoped.catalogTx.NewWithPgxTx(createTx)
@@ -73,9 +73,9 @@ func (s *Service) ensureProduct(ctx context.Context, req CreateProductRequest, o
 				product, err = creating.CreateProduct(ctx, req)
 				return err
 			})
-			if errors.Is(err, openrails.ErrConflict) {
+			if errors.Is(err, billing.ErrConflict) {
 				product, err = scoped.GetProductByKey(ctx, req.Key)
-				if errors.Is(err, openrails.ErrNotFound) {
+				if errors.Is(err, billing.ErrNotFound) {
 					return ErrCatalogConflict
 				}
 			}

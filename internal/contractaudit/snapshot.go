@@ -58,7 +58,7 @@ var (
 		"pkg/billingauth/",
 		"testdata/wire/",
 	}
-	boundaryFiles    = map[string]bool{"errors.go": true}
+	boundaryFiles    = map[string]bool{"billing/errors.go": true}
 	authorityImports = map[string]bool{Module + "/permissions": true, Module + "/pkg/billingauth": true, Module + "/internal/auth/policy": true}
 	nonPublicRoots   = map[string]bool{"cmd": true, "internal": true, "scripts": true, "tests": true, "tools": true}
 	wireCodecMethods = map[string]bool{"MarshalJSON": true, "UnmarshalJSON": true, "MarshalText": true, "UnmarshalText": true}

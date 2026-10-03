@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
@@ -68,7 +68,7 @@ func PayMyInvoiceNow(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid invoice id")
 		return
 	}
-	var body openrails.PayInvoiceNowRequest
+	var body billing.PayInvoiceNowRequest
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -103,12 +103,12 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	id, err := openrails.ParseSubscriptionID(r.Param("id"))
+	id, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription id")
 		return
 	}
-	var body openrails.RetrySubscriptionNowRequest
+	var body billing.RetrySubscriptionNowRequest
 	if !r.BindJSON(&body) {
 		return
 	}

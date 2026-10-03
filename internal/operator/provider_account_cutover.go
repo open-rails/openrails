@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -58,15 +58,15 @@ var ErrProviderAccountCutoverNotQualified = subscriptions.ErrProviderAccountCuto
 // two is required. Give both to check a re-entered card against the intended
 // target.
 type ProviderAccountCutoverQuery struct {
-	SubscriptionID             openrails.SubscriptionID
-	ReplacementPaymentMethodID *openrails.PaymentMethodID
+	SubscriptionID             billing.SubscriptionID
+	ReplacementPaymentMethodID *billing.PaymentMethodID
 	TargetPSPID                *uuid.UUID
 }
 
 // ProviderAccountCutoverReport is the resolved plan with the identities it was
 // computed from. Safe to serialize into a runbook; never a completed cutover.
 type ProviderAccountCutoverReport struct {
-	SubscriptionID openrails.SubscriptionID   `json:"subscription_id"`
+	SubscriptionID billing.SubscriptionID     `json:"subscription_id"`
 	SourcePSPID    uuid.UUID                  `json:"source_psp_id"`
 	TargetPSPID    uuid.UUID                  `json:"target_psp_id"`
 	Plan           ProviderAccountCutoverPlan `json:"plan"`
@@ -108,7 +108,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 		sub, err := dbq.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{ID: q.SubscriptionID.UUID(), MerchantID: merchantID.UUID()})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("subscription %s: %w", q.SubscriptionID, openrails.ErrNotFound)
+				return fmt.Errorf("subscription %s: %w", q.SubscriptionID, billing.ErrNotFound)
 			}
 			return fmt.Errorf("subscription %s: %w", q.SubscriptionID, err)
 		}
@@ -163,12 +163,12 @@ func pspRow(ctx context.Context, q *gen.Queries, merchantID merchant.ID, id uuid
 	psp, err := q.GetPSP(ctx, gen.GetPSPParams{ID: id, MerchantID: merchantID.UUID()})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, openrails.ErrNotFound)
+			return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, billing.ErrNotFound)
 		}
 		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, err)
 	}
 	if psp.MerchantID != merchantID.UUID() {
-		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, openrails.ErrNotFound)
+		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, billing.ErrNotFound)
 	}
 	return psp, nil
 }

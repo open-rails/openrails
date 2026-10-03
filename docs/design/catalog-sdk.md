@@ -9,8 +9,8 @@ The server validates their kind, merchant and catalog before applying changes.
 ```go
 owner, err := client.ForCatalogOwner(authorID)
 if err != nil { return err }
-price, err := owner.Prices.Create(ctx, &openrails.PriceCreateParams{
-    ProductData: &openrails.PriceCreateProductDataParams{
+price, err := owner.Prices.Create(ctx, &billing.PriceCreateParams{
+    ProductData: &billing.PriceCreateProductDataParams{
         Key: "post-" + billingKey,
         DisplayName: title,
     },
@@ -60,17 +60,17 @@ history. Use `ProductAccess.List` with its cursor only when displaying purchase
 history itself.
 
 ```go
-access, err := client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{
+access, err := client.ProductAccess.CheckMany(ctx, &billing.ProductAccessCheckManyParams{
     CustomerID: customerID,
     ProductIDs: pageProductIDs,
 })
 if err != nil { return err }
 _ = access[productID]
 
-session, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-    Customer: openrails.CheckoutCustomerIdentity{ID: customerID},
+session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
+    Customer: billing.CheckoutCustomerIdentity{ID: customerID},
     PriceID: price.ID,
-    PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+    PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
     IdempotencyKey: checkoutAttemptKey,
     SuccessURL: successURL,
     CancelURL: cancelURL,

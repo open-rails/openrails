@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
@@ -78,7 +78,7 @@ func DeclarePSP(ctx context.Context, application *app.App, merchantID merchant.I
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = openrails.ErrConflict
+		err = billing.ErrConflict
 	}
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("embedded billing: declare PSP %s: %w", key, err)

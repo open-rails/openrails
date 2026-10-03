@@ -123,12 +123,12 @@ Embedded hosts:
 ```go
 // client is returned by runtime.Client(openrails.WithMerchantID(mid))
 // or openrails.NewRemote(...); both use the same operations.
-for _, kind := range []openrails.HostEventType{
-    openrails.HostEventDelinquencyGrace,
-    openrails.HostEventDelinquencyEntered,
-    openrails.HostEventDelinquencyCleared,
+for _, kind := range []billing.HostEventType{
+    billing.HostEventDelinquencyGrace,
+    billing.HostEventDelinquencyEntered,
+    billing.HostEventDelinquencyCleared,
 } {
-    events, err := client.ListHostEvents(ctx, openrails.HostEventListOptions{Type: kind, Limit: 100})
+    events, err := client.ListHostEvents(ctx, billing.HostEventListOptions{Type: kind, Limit: 100})
     if err != nil { return err }
     for _, event := range events {
         if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {

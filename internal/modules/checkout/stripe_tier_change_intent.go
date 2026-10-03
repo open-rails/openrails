@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -757,10 +757,10 @@ func stripeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, 
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
 	}
-	subID := openrails.SubscriptionID(p.SubscriptionID)
+	subID := billing.SubscriptionID(p.SubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: (openrails.PriceID(p.PriceID)).String(),
+		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: (billing.PriceID(p.PriceID)).String(),
 		Payment: CheckoutSessionPaymentResponse{Rail: string(models.RailStripe)}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(), Effective: effectiveOf(p.Action),

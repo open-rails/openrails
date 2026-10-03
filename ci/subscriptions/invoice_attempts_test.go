@@ -11,7 +11,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/embed"
 )
 
@@ -31,7 +31,7 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	const owed = 50_000_000 // the default invoice threshold
 	require.NoError(t, client.SetCreditLimit(ctx, c.id, "USD", owed))
 	request, expires := uuid.NewString(), w.clock.Now().Add(time.Hour)
-	admitted, err := client.Admit(ctx, openrails.AdmitRequest{CustomerID: c.id, Invoker: c.id, InvokerType: "payer", Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires})
+	admitted, err := client.Admit(ctx, billing.AdmitRequest{CustomerID: c.id, Invoker: c.id, InvokerType: "payer", Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed, "%+v", admitted)
 	_, err = client.Capture(ctx, request, owed, nil)
@@ -41,7 +41,7 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: embed.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(res.Job.ID)
-	invoices, _, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: c.id}, 10, 0)
+	invoices, _, err := client.ListMerchantInvoices(ctx, billing.MerchantInvoiceFilter{CustomerID: c.id}, 10, 0)
 	require.NoError(t, err)
 	require.Len(t, invoices, 1)
 	invoice := invoices[0].ID.String()

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -15,21 +15,21 @@ import (
 // serviceDelinquencyResponse is one payer's delinquency state on the wire;
 // instants are time.Time so they encode at full RFC3339 precision.
 type serviceDelinquencyResponse struct {
-	CustomerID      openrails.CustomerID `json:"customer_id"`
-	Currency        string               `json:"currency"`
-	State           string               `json:"state"`
-	OverdueSince    *time.Time           `json:"overdue_since,omitempty"`
-	OverdueAmount   int64                `json:"overdue_amount,string"`
-	OverdueInvoices int                  `json:"overdue_invoices"`
-	EnteredAt       time.Time            `json:"entered_at"`
-	EvaluatedAt     time.Time            `json:"evaluated_at"`
+	CustomerID      billing.CustomerID `json:"customer_id"`
+	Currency        string             `json:"currency"`
+	State           string             `json:"state"`
+	OverdueSince    *time.Time         `json:"overdue_since,omitempty"`
+	OverdueAmount   int64              `json:"overdue_amount,string"`
+	OverdueInvoices int                `json:"overdue_invoices"`
+	EnteredAt       time.Time          `json:"entered_at"`
+	EvaluatedAt     time.Time          `json:"evaluated_at"`
 }
 
 func serviceDelinquencyRows(rows []billingservice.DelinquencySnapshot) []serviceDelinquencyResponse {
 	out := make([]serviceDelinquencyResponse, 0, len(rows))
 	for _, r := range rows {
 		row := serviceDelinquencyResponse{
-			CustomerID:      openrails.CustomerID(r.CustomerID),
+			CustomerID:      billing.CustomerID(r.CustomerID),
 			Currency:        r.Currency,
 			State:           r.State.String(),
 			OverdueAmount:   r.OverdueAmount,

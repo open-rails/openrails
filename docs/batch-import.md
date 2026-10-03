@@ -41,7 +41,7 @@ What import does **not** do:
 
 ### The import surface
 
-**Client**: `client.ImportBilling(ctx, openrails.DeclaredBilling{...})` on the
+**Client**: `client.ImportBilling(ctx, billing.DeclaredBilling{...})` on the
 merchant-bound Client, in every deployment (`rt.Client()` in process, or
 `openrails.NewRemote`). Resolve public names once with `rt.ResolveMerchant`
 and bind the Client to the captured UUID. **HTTP**: `POST /v1/import/billing`

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -69,12 +69,12 @@ func adminTierChangeRequest(
 	if !r.BindJSON(&body) {
 		return nil, nil, nil, false
 	}
-	if id, err := openrails.ParsePriceID(body.PriceID); err != nil || id.IsZero() {
+	if id, err := billing.ParsePriceID(body.PriceID); err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return nil, nil, nil, false
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return nil, nil, nil, false
@@ -120,7 +120,7 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 	// An engine subscription's service answers its own schedule: the same
 	// downgrade replays, another is a typed refusal, an upgrade replaces it.
 	if subscription.ScheduledPriceID != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodeTierChangeAlreadyScheduled, "subscription already has a tier change scheduled"))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeTierChangeAlreadyScheduled, "subscription already has a tier change scheduled"))
 		return false
 	}
 	if subscription.Rail == models.RailCCBill {

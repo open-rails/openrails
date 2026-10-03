@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -282,7 +282,7 @@ func TestResolveProviders(t *testing.T) {
 	unconfigured := func() *Service { return &Service{rt: &app.Runtime{}} }
 	product := &models.Product{ID: uuid.New(), Key: "premium"}
 	recurring := func(psps ...string) CreatePriceRequest {
-		return CreatePriceRequest{ProductID: openrails.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), AutoRenew: true, PSPs: psps}
+		return CreatePriceRequest{ProductID: billing.ProductID(product.ID), UnitAmount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(720), AutoRenew: true, PSPs: psps}
 	}
 
 	t.Run("unknown provider fails loudly", func(t *testing.T) {

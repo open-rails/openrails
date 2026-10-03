@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
@@ -21,11 +21,11 @@ import (
 
 // ApplyCatalog applies one durable local operation. It never invokes provider
 // network writes; unsupported provider-link changes fail before local mutation.
-func (s *Service) ApplyCatalog(ctx context.Context, params openrails.CatalogApplyParams) (*openrails.CatalogApplicationReceipt, error) {
+func (s *Service) ApplyCatalog(ctx context.Context, params billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
 	return s.applyCatalog(ctx, params, s.verifyCatalogProviderReference)
 }
 
-func (s *Service) applyCatalog(ctx context.Context, params openrails.CatalogApplyParams, verify catalogReferenceVerifier) (*openrails.CatalogApplicationReceipt, error) {
+func (s *Service) applyCatalog(ctx context.Context, params billing.CatalogApplyParams, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -55,7 +55,7 @@ func (s *Service) applyCatalog(ctx context.Context, params openrails.CatalogAppl
 	if prepared.replay != nil {
 		return prepared.replay, nil
 	}
-	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*openrails.CatalogApplicationReceipt, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.CatalogApplicationReceipt, error) {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
@@ -86,7 +86,7 @@ func (s *Service) applyCatalog(ctx context.Context, params openrails.CatalogAppl
 		if params.CatalogID == "" {
 			target, err = repo.Ensure(ctx, nil)
 		} else {
-			id, parseErr := openrails.ParseCatalogID(params.CatalogID)
+			id, parseErr := billing.ParseCatalogID(params.CatalogID)
 			if parseErr != nil {
 				return nil, apperr.Invalidf("invalid catalog_id")
 			}
@@ -97,7 +97,7 @@ func (s *Service) applyCatalog(ctx context.Context, params openrails.CatalogAppl
 		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
-		receipt := &openrails.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, CatalogID: openrails.CatalogID(target.ID).String(), BaseRevision: revision}
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: params.ApplicationID, CatalogID: billing.CatalogID(target.ID).String(), BaseRevision: revision}
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -134,7 +134,7 @@ func (s *Service) applyCatalog(ctx context.Context, params openrails.CatalogAppl
 	})
 }
 
-func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, params openrails.CatalogApplyParams, receipt *openrails.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, params billing.CatalogApplyParams, receipt *billing.CatalogApplicationReceipt) error {
 	// Enumerate all pages without public active/tier filtering. The merchant lock
 	// makes the stable pagination snapshot safe while the eventual apply mutates it.
 	existing := map[string]*CatalogProduct{}
@@ -165,7 +165,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			if e == nil && foreign.CatalogID.UUID() != target {
 				return ErrCatalogConflict
 			}
-			if e != nil && !errors.Is(e, openrails.ErrNotFound) {
+			if e != nil && !errors.Is(e, billing.ErrNotFound) {
 				return e
 			}
 			if decl.Archived.Set && decl.Archived.Value && !decl.DisplayName.Set {
@@ -174,7 +174,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, target uuid.UUID, pa
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
 				return apperr.Invalidf("new product %q requires display_name", decl.Key)
 			}
-			req := CreateProductRequest{CatalogID: openrails.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
+			req := CreateProductRequest{CatalogID: billing.CatalogID(target), Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
 			if decl.TierGroup.Set && !decl.TierGroup.Null {
 				req.TierGroup = &decl.TierGroup.Value
 			}
@@ -243,7 +243,7 @@ func productApplicationChanges(p *CatalogProduct, r UpdateProductRequest) bool {
 	return r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.EntitlementsSpec, p.EntitlementsSpec)
 }
 
-func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduct, declarations []openrails.CatalogApplyPrice, prune bool, receipt *openrails.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduct, declarations []billing.CatalogApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
 	prices, err := s.ListPricesByProduct(ctx, product.ID, false)
 	if err != nil {
 		return err
@@ -294,10 +294,10 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduc
 			}
 			continue
 		}
-		expectedID := openrails.PriceID(priceDeterministicID(product.ID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours))
+		expectedID := billing.PriceID(priceDeterministicID(product.ID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours))
 		if prior, lookupErr := s.GetPrice(ctx, expectedID); lookupErr == nil && prior.Key != decl.Key {
 			return ErrCatalogConflict
-		} else if lookupErr != nil && !errors.Is(lookupErr, openrails.ErrNotFound) {
+		} else if lookupErr != nil && !errors.Is(lookupErr, billing.ErrNotFound) {
 			return lookupErr
 		}
 		out, e := s.CreatePrice(ctx, req)
@@ -323,7 +323,7 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *CatalogProduc
 	return nil
 }
 
-func (s *Service) applyCatalogBilling(ctx context.Context, params openrails.CatalogApplyParams) error {
+func (s *Service) applyCatalogBilling(ctx context.Context, params billing.CatalogApplyParams) error {
 	hasCards := false
 	for _, p := range params.Products {
 		hasCards = hasCards || p.RateCards.Set
@@ -411,7 +411,7 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params openrails.Cata
 		return s.SyncCatalogSidecars(ctx, desired, CatalogMutationOptions{Insert: true, Overwrite: true, Prune: true})
 	})
 }
-func catalogApplicationPriceRequest(product *CatalogProduct, decl openrails.CatalogApplyPrice, byKey map[string][]CatalogPrice, byID map[string]CatalogPrice) (current *CatalogPrice, req CreatePriceRequest, err error) {
+func catalogApplicationPriceRequest(product *CatalogProduct, decl billing.CatalogApplyPrice, byKey map[string][]CatalogPrice, byID map[string]CatalogPrice) (current *CatalogPrice, req CreatePriceRequest, err error) {
 	if decl.ID != "" {
 		p, ok := byID[decl.ID]
 		if !ok || p.Key != decl.Key {

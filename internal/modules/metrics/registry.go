@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // The registry is the single source of truth for the metrics vocabulary:
@@ -132,12 +132,12 @@ var Dimensions = []Dimension{
 	{Name: "rail", Description: "payment rail (e.g. stripe, mobius, ccbill, solana)"},
 	{Name: "rail_account", Description: "operator-declared PSP label; VAMP thresholds apply per account"},
 	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
-	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseProductID(s) })},
-	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParsePriceID(s) })},
+	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseProductID(s) })},
+	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: hourly|daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"hourly", "daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "awaiting_method", "unverified"}},
-	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseCustomerID(s) })},
+	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
@@ -872,7 +872,7 @@ func (m *Measure) components() []*Measure {
 // declineReasonValues are the reason dimension's values.
 func declineReasonValues() []string {
 	var out []string
-	for _, r := range openrails.DeclineReasons() {
+	for _, r := range billing.DeclineReasons() {
 		out = append(out, string(r))
 	}
 	slices.Sort(out)

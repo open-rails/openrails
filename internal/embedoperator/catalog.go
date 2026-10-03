@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -12,7 +12,7 @@ import (
 
 // ApplyCatalog is a local operator operation against one explicitly selected
 // merchant. Ordinary Client writes remain governed by AllowCatalogUpdates.
-func (r *Operator) ApplyCatalog(ctx context.Context, merchantID merchant.ID, params *openrails.CatalogApplyParams) (*openrails.CatalogApplicationReceipt, error) {
+func (r *Operator) ApplyCatalog(ctx context.Context, merchantID merchant.ID, params *billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
 	if err := r.initialized(); err != nil {
 		return nil, err
 	}

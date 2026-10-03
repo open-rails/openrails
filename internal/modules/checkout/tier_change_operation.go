@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -148,7 +148,7 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 	price := strings.TrimSpace(req.PriceID)
 	if user == nil || !sameCustomer(subject.UserID, user.ID) ||
 		(req.SubscriptionID != uuid.Nil && req.SubscriptionID != subject.SubscriptionID) ||
-		(price != subject.RequestedPrice && price != openrails.PriceID(subject.PriceID).String()) {
+		(price != subject.RequestedPrice && price != billing.PriceID(subject.PriceID).String()) {
 		return nil, tierChangeIdempotencyConflict()
 	}
 	if s.Intents != nil && (in.Status == intents.StatusPending || in.Status == intents.StatusFailedRetryable) {
@@ -190,7 +190,7 @@ func tierChangeProcessing(resp *TierChangeResponse) (*TierChangeResponse, error)
 // before submission (providerStatus 0) is a 409: the change did not happen
 // and a new request needs a new key.
 func tierChangeRefused(in gen.OpenrailsRailIntent, providerStatus int, declineCode string) error {
-	refusal := &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused, Message: "tier change was not executed"}
+	refusal := &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "tier change was not executed"}
 	if in.LastFailureReason != nil && *in.LastFailureReason != "" {
 		refusal.Message = *in.LastFailureReason
 	}

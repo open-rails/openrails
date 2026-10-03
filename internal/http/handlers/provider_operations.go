@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -17,7 +17,7 @@ import (
 // caller-rated settlement amount is refused, never ignored.
 
 func ServiceOpenOperationAuthorization(r *httprequest.Request) {
-	var req openrails.OperationAuthorizationRequest
+	var req billing.OperationAuthorizationRequest
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
@@ -36,7 +36,7 @@ func ServiceGetOperationAuthorization(r *httprequest.Request) {
 }
 
 func ServiceReleaseOperationAuthorization(r *httprequest.Request) {
-	var req openrails.ReleaseOperationAuthorizationRequest
+	var req billing.ReleaseOperationAuthorizationRequest
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
@@ -47,7 +47,7 @@ func ServiceReleaseOperationAuthorization(r *httprequest.Request) {
 }
 
 func ServiceRecordProviderBillingObservation(r *httprequest.Request) {
-	var req openrails.ProviderBillingObservationRequest
+	var req billing.ProviderBillingObservationRequest
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
@@ -101,20 +101,20 @@ func writeProviderOperationError(r *httprequest.Request, err error) {
 	var coded interface{ ErrorCode() string }
 	var out *api.APIError
 	switch {
-	case errors.Is(err, openrails.ErrInsufficientCredits):
+	case errors.Is(err, billing.ErrInsufficientCredits):
 		out = api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, api.CodeInsufficientCredits, "Insufficient credits")
-	case errors.As(err, &coded) && errors.Is(err, openrails.ErrNotFound):
+	case errors.As(err, &coded) && errors.Is(err, billing.ErrNotFound):
 		out = api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, coded.ErrorCode(), err.Error())
-	case errors.As(err, &coded) && errors.Is(err, openrails.ErrConflict):
+	case errors.As(err, &coded) && errors.Is(err, billing.ErrConflict):
 		out = api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, coded.ErrorCode(), err.Error())
-	case errors.Is(err, openrails.ErrInvalid):
+	case errors.Is(err, billing.ErrInvalid):
 		out = api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, err.Error())
 	default:
 		r.InternalError("provider operation failed", err)
 		return
 	}
-	var authorizationConflict *openrails.OperationAuthorizationConflict
-	var observationConflict *openrails.ProviderBillingObservationConflict
+	var authorizationConflict *billing.OperationAuthorizationConflict
+	var observationConflict *billing.ProviderBillingObservationConflict
 	switch {
 	case errors.As(err, &authorizationConflict):
 		out.Param = &authorizationConflict.Field

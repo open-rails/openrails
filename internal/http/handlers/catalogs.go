@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
-func catalogView(row gen.OpenrailsCatalog) openrails.Catalog {
-	return openrails.Catalog{ID: openrails.CatalogID(row.ID), MerchantID: openrails.MerchantID(row.MerchantID), OwnerSubject: row.OwnerSubject, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+func catalogView(row gen.OpenrailsCatalog) billing.Catalog {
+	return billing.Catalog{ID: billing.CatalogID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), OwnerSubject: row.OwnerSubject, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 
 func OwnCatalog(r *request.Request) {
@@ -66,7 +66,7 @@ func EnsureCatalogForOwner(r *request.Request) {
 }
 
 func GetCatalog(r *request.Request) {
-	id, err := openrails.ParseCatalogID(r.Param("id"))
+	id, err := billing.ParseCatalogID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid catalog_id")
 		return
@@ -112,11 +112,11 @@ func ListCatalogs(r *request.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	items := make([]openrails.Catalog, 0, len(rows))
+	items := make([]billing.Catalog, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, catalogView(row))
 	}
 	r.JSON(http.StatusOK, struct {
-		Items []openrails.Catalog `json:"items"`
+		Items []billing.Catalog `json:"items"`
 	}{Items: items})
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -19,7 +19,7 @@ type CredentialTransitionParams = merchants.CredentialTransitionRequest
 // stable CredentialSnapshotID; every later restart must supply that snapshot.
 // Neither backend connections nor this maintenance operation are exposed by a
 // remote Client or HTTP route.
-func (o *Operator) TransitionProviderCredentials(ctx context.Context, id merchant.ID, rail string, params CredentialTransitionParams, source *embed.Runtime) (*openrails.PaymentProviderConfig, error) {
+func (o *Operator) TransitionProviderCredentials(ctx context.Context, id merchant.ID, rail string, params CredentialTransitionParams, source *embed.Runtime) (*billing.PaymentProviderConfig, error) {
 	if err := o.initialized(); err != nil {
 		return nil, err
 	}

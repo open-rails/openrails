@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // saveFrom submits one NMI card save for c to replica r from client address ip.
@@ -62,9 +62,9 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", refusedCard), "blocked on replica %s", r.replica.name)
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", visa), "a good card is refused while blocked")
 			for _, tp := range []topology{embedded, remote} {
-				_, err := r.client[tp].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-					OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
-					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: r.psp["nmi"], Rail: "nmi"},
+				_, err := r.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: r.psp["nmi"], Rail: "nmi"},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 				})
 				require.Error(t, err, "%s checkout for a blocked customer", tp)
@@ -119,15 +119,15 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	t.Parallel()
 	declined := card{Brand: "visa", Last4: "0002", Decline: "202"}
 	pay := func(w *world, tp topology, price string, c *customer, ip string, cd card) error {
-		_, err := w.client[tp].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-			Customer: openrails.CheckoutCustomerIdentity{ID: c.id, ClientIP: ip}, PriceID: price, IdempotencyKey: "host-" + uuid.NewString(), Confirm: true,
-			PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(cd), NameOnCard: "Host Payer", Zip: "10001", Country: "US"},
+		_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id, ClientIP: ip}, PriceID: price, IdempotencyKey: "host-" + uuid.NewString(), Confirm: true,
+			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(cd), NameOnCard: "Host Payer", Zip: "10001", Country: "US"},
 		})
 		return err
 	}
 	refused := func(t *testing.T, err error, status int) {
 		t.Helper()
-		var se *openrails.StatusError
+		var se *billing.StatusError
 		require.ErrorAs(t, err, &se)
 		require.Equal(t, status, se.Status, "%v", err)
 		if status == http.StatusTooManyRequests {
@@ -139,7 +139,7 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000).ID
 		for range 6 {
-			require.ErrorIs(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", declined), openrails.ErrPaymentRefused)
+			require.ErrorIs(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", declined), billing.ErrPaymentRefused)
 		}
 		sales := len(w.nmi.Sales())
 		refused(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", visa), http.StatusTooManyRequests)
@@ -153,7 +153,7 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		var tester *customer
 		for i := range 100 {
 			tester = w.newCustomer()
-			require.ErrorIs(t, pay(w, embedded, price, tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined), openrails.ErrPaymentRefused)
+			require.ErrorIs(t, pay(w, embedded, price, tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined), billing.ErrPaymentRefused)
 		}
 		sales := len(w.nmi.Sales())
 		refused(t, pay(w, embedded, price, tester, "2001:db8:77:64::1", visa), http.StatusTooManyRequests)

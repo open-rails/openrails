@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // findingsAbout lists every recorded finding (any status, auto-fixed
 // included) whose subject names the subscription.
-func (w *world) findingsAbout(sub openrails.SubscriptionID) []string {
+func (w *world) findingsAbout(sub billing.SubscriptionID) []string {
 	w.t.Helper()
 	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT finding_type || ':' || status FROM openrails.reconciliation_findings
 		WHERE subject_key LIKE '%' || $1 || '%' ORDER BY created_at`), sub.UUID().String())
@@ -34,7 +34,7 @@ type accessWindow struct {
 
 // subscriptionWindows is a subscription's live (not deleted) subscription-sourced
 // entitlement windows.
-func (w *world) subscriptionWindows(sub openrails.SubscriptionID) []accessWindow {
+func (w *world) subscriptionWindows(sub billing.SubscriptionID) []accessWindow {
 	w.t.Helper()
 	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT start_at, end_at FROM openrails.entitlements
 		WHERE source_type = 'subscription' AND source_id = $1::uuid AND deleted_at IS NULL AND revoked_at IS NULL ORDER BY start_at`), sub.UUID().String())
@@ -102,7 +102,7 @@ func TestLegacyImportRaisesNoFindings(t *testing.T) {
 			b := w.newLegacyBook()
 			active := b.add(&bookRow{source: "active", tier: monthly, paid: now.Add(10 * day), declared: true})
 			cancelled := b.add(&bookRow{source: "cancelled", tier: monthly, paid: now.Add(20 * day), declared: true,
-				cancel: openrails.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
+				cancel: billing.CancelEvidence{Kind: "user_cancelled", At: now.Add(-5 * day)}})
 			w.nmi.DeleteSchedule(cancelled.schedule)
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)
 			require.NoError(t, err)
@@ -133,7 +133,7 @@ func (f *stripeFake) dashboardRefund(chargeID string, amount int64) {
 
 func (w *world) setProviderRefundAccess(policy string) {
 	w.t.Helper()
-	require.NoError(w.t, w.client[embedded].SetMerchantSettings(w.t.Context(), openrails.MerchantSettings{ProviderRefundAccess: &policy}))
+	require.NoError(w.t, w.client[embedded].SetMerchantSettings(w.t.Context(), billing.MerchantSettings{ProviderRefundAccess: &policy}))
 }
 
 // #1080 item 5: a refund made in the provider's own dashboard follows the
@@ -151,13 +151,13 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 	rows := []row{
 		{"legacy_full_default", "legacy", "", true, true, true},
 		{"legacy_partial_default", "legacy", "", false, true, false},
-		{"legacy_full_keep", "legacy", openrails.ProviderRefundKeep, true, true, false},
-		{"legacy_partial_any", "legacy", openrails.ProviderRefundRevokeOnAny, false, true, true},
+		{"legacy_full_keep", "legacy", billing.ProviderRefundKeep, true, true, false},
+		{"legacy_partial_any", "legacy", billing.ProviderRefundRevokeOnAny, false, true, true},
 		{"legacy_full_disarmed", "legacy", "", true, false, true},
 		{"nmi_engine_full_default", "nmi", "", true, true, true},
 		{"nmi_engine_partial_default", "nmi", "", false, true, false},
 		{"stripe_engine_full_default", "stripe", "", true, true, true},
-		{"stripe_engine_full_keep", "stripe", openrails.ProviderRefundKeep, true, true, false},
+		{"stripe_engine_full_keep", "stripe", billing.ProviderRefundKeep, true, true, false},
 	}
 	for i, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
@@ -173,7 +173,7 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 			var (
 				c       *customer
 				ent     string
-				sub     openrails.SubscriptionID
+				sub     billing.SubscriptionID
 				railSub string
 			)
 			rail := "nmi"

@@ -4,21 +4,21 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/decline"
 )
 
 // operationFailure renders a refused card operation's retained provider
 // evidence as the customer-facing decline. Raw codes stay in the evidence.
-func operationFailure(in gen.OpenrailsRailIntent) *openrails.PaymentFailure {
+func operationFailure(in gen.OpenrailsRailIntent) *billing.PaymentFailure {
 	failure := operationReason(in).Failure()
 	return &failure
 }
 
 // operationReason classifies a refused card operation's retained provider
 // evidence.
-func operationReason(in gen.OpenrailsRailIntent) openrails.DeclineReason {
+func operationReason(in gen.OpenrailsRailIntent) billing.DeclineReason {
 	evidence := map[string]json.RawMessage{}
 	_ = json.Unmarshal(in.ResultEvidence, &evidence)
 	if raw, ok := evidence["qualified_initial_refusal"]; ok {
@@ -58,5 +58,5 @@ func operationReason(in gen.OpenrailsRailIntent) openrails.DeclineReason {
 			CVV:          get("cvv_response"),
 		}).Reason
 	}
-	return openrails.DeclineProcessingError
+	return billing.DeclineProcessingError
 }

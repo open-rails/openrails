@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
@@ -16,8 +16,8 @@ import (
 
 // This is a view of the existing engine operation, never authority to submit.
 // Admission repeats payer, lifecycle, released-period and instrument checks.
-func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Subscription) (*openrails.PaymentRecovery, error) {
-	out := &openrails.PaymentRecovery{}
+func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Subscription) (*billing.PaymentRecovery, error) {
+	out := &billing.PaymentRecovery{}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		if p.Renewal.CustomerID != sub.CustomerID || p.Renewal.SubscriptionID != sub.ID {
 			return nil, errors.New("engine recovery operation scope mismatch")
 		}
-		out.Operation = &openrails.PaymentOperation{ID: current.ID, Status: current.Status}
+		out.Operation = &billing.PaymentOperation{ID: current.ID, Status: current.Status}
 		out.BlockedReason = "payment_in_progress"
 		if intents.EvidenceString(current, "stripe_payment_intent_id") != "" {
 			out.BlockedReason = "authentication_required"
@@ -64,7 +64,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	}
 	if latest.Status != intents.StatusFailedTerminal {
 		out.BlockedReason = "payment_in_progress"
-		out.Operation = &openrails.PaymentOperation{ID: latest.ID, Status: latest.Status}
+		out.Operation = &billing.PaymentOperation{ID: latest.ID, Status: latest.Status}
 		return out, nil
 	}
 	if err := intents.ValidateSubscriptionCollectionTerminal(latest); err != nil {

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // These commands commit in OpenRails-owned transactions in every deployment.
@@ -26,20 +28,20 @@ func providerOperationPath(operationID string) (string, error) {
 
 // OpenOperationAuthorization reserves capacity for one provider operation. An
 // identical retry replays; any changed immutable field is refused.
-func (c *Client) OpenOperationAuthorization(ctx context.Context, req OperationAuthorizationRequest, requestOptions ...RequestOption) (*OperationAuthorization, error) {
-	var out OperationAuthorization
+func (c *Client) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationRequest, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
+	var out billing.OperationAuthorization
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/provider-operations", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetOperationAuthorization(ctx context.Context, operationID string, requestOptions ...RequestOption) (*OperationAuthorization, error) {
+func (c *Client) GetOperationAuthorization(ctx context.Context, operationID string, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
 	path, err := providerOperationPath(operationID)
 	if err != nil {
 		return nil, err
 	}
-	var out OperationAuthorization
+	var out billing.OperationAuthorization
 	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -48,12 +50,12 @@ func (c *Client) GetOperationAuthorization(ctx context.Context, operationID stri
 
 // ReleaseOperationAuthorization releases an open reservation after proven
 // provider non-creation. It is refused once billing evidence exists.
-func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req ReleaseOperationAuthorizationRequest, requestOptions ...RequestOption) (*OperationAuthorization, error) {
+func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationRequest, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
 		return nil, err
 	}
-	var out OperationAuthorization
+	var out billing.OperationAuthorization
 	if err := c.do(ctx, http.MethodPost, path+"/release", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -67,7 +69,7 @@ func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req ReleaseO
 // ProviderBillingObservationMaxBytes, so the cap is applied here first: an
 // oversized observation gets the server's invalid_param refusal in every
 // deployment instead of the transport's body-limit status.
-func (c *Client) RecordProviderBillingObservation(ctx context.Context, req ProviderBillingObservationRequest, requestOptions ...RequestOption) (*ProviderBillingQualification, error) {
+func (c *Client) RecordProviderBillingObservation(ctx context.Context, req billing.ProviderBillingObservationRequest, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
 		return nil, err
@@ -76,22 +78,22 @@ func (c *Client) RecordProviderBillingObservation(ctx context.Context, req Provi
 	if err != nil {
 		return nil, fmt.Errorf("openrails: marshal request: %w", err)
 	}
-	if len(encoded) > ProviderBillingObservationMaxBytes {
-		return nil, invalidErr(fmt.Sprintf("%v: provider billing observation encodes to %d bytes; limit is %d", ErrInvalid, len(encoded), ProviderBillingObservationMaxBytes))
+	if len(encoded) > billing.ProviderBillingObservationMaxBytes {
+		return nil, invalidErr(fmt.Sprintf("%v: provider billing observation encodes to %d bytes; limit is %d", billing.ErrInvalid, len(encoded), billing.ProviderBillingObservationMaxBytes))
 	}
-	var out ProviderBillingQualification
+	var out billing.ProviderBillingQualification
 	if err := c.do(ctx, http.MethodPost, path+"/observations", json.RawMessage(encoded), &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetProviderBillingQualification(ctx context.Context, operationID string, requestOptions ...RequestOption) (*ProviderBillingQualification, error) {
+func (c *Client) GetProviderBillingQualification(ctx context.Context, operationID string, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
 	path, err := providerOperationPath(operationID)
 	if err != nil {
 		return nil, err
 	}
-	var out ProviderBillingQualification
+	var out billing.ProviderBillingQualification
 	if err := c.do(ctx, http.MethodGet, path+"/qualification", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -27,12 +27,12 @@ import (
 // These commands are internal: the HTTP adapter establishes verified customer
 // action authority before passing the payer. The public Client always crosses
 // that same adapter, including embedded mode.
-func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, request openrails.PayInvoiceNowRequest) (*openrails.InvoicePayNowResult, error) {
+func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, request billing.PayInvoiceNowRequest) (*billing.InvoicePayNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	var out *openrails.InvoicePayNowResult
+	var out *billing.InvoicePayNowResult
 	err = rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		result, err := s.moneyService().PayInvoiceNow(ctx, rt.IntentRunner(), payer, money.InvoiceCollectionRetryRequest{InvoiceID: request.InvoiceID, PaymentMethodID: request.PaymentMethodID.UUID(), IdempotencyKey: request.IdempotencyKey})
 		if err != nil {
@@ -41,18 +41,18 @@ func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, 
 		if err := customerPaymentRefusal(result.Operation); err != nil {
 			return err
 		}
-		out = &openrails.InvoicePayNowResult{Invoice: invoiceToDTO(result.Invoice), Attempt: invoicePaymentAttemptToDTO(result.Attempt), Operation: openrails.PaymentOperation{ID: result.Operation.ID, Status: result.Operation.Status}, Replayed: result.Replayed}
+		out = &billing.InvoicePayNowResult{Invoice: invoiceToDTO(result.Invoice), Attempt: invoicePaymentAttemptToDTO(result.Attempt), Operation: billing.PaymentOperation{ID: result.Operation.ID, Status: result.Operation.Status}, Replayed: result.Replayed}
 		return nil
 	})
 	return out, err
 }
 
-func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request openrails.RetrySubscriptionNowRequest, principal billingauth.DelegatedPrincipal) (*openrails.SubscriptionRetryNowResult, error) {
+func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request billing.RetrySubscriptionNowRequest, principal billingauth.DelegatedPrincipal) (*billing.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	var out *openrails.SubscriptionRetryNowResult
+	var out *billing.SubscriptionRetryNowResult
 	err = rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var method *uuid.UUID
 		if request.PaymentMethodID != nil {
@@ -91,13 +91,13 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err != nil {
 			return err
 		}
-		out = &openrails.SubscriptionRetryNowResult{Subscription: sub.View(), Operation: openrails.PaymentOperation{ID: result.ID, Status: result.Status}, Replayed: replayed}
+		out = &billing.SubscriptionRetryNowResult{Subscription: sub.View(), Operation: billing.PaymentOperation{ID: result.ID, Status: result.Status}, Replayed: replayed}
 		return nil
 	})
 	return out, err
 }
 
-func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*openrails.PaymentRecovery, error) {
+func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*billing.PaymentRecovery, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -107,13 +107,13 @@ func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return nil, err
 	}
-	out := &openrails.PaymentRecovery{}
+	out := &billing.PaymentRecovery{}
 	if invoice.CollectionIntentID != nil {
 		row, err := intents.NewStore(s.rt.DB).Get(ctx, *invoice.CollectionIntentID)
 		if err != nil {
 			return nil, err
 		}
-		out.Operation = &openrails.PaymentOperation{ID: row.ID, Status: row.Status}
+		out.Operation = &billing.PaymentOperation{ID: row.ID, Status: row.Status}
 		out.BlockedReason = "payment_in_progress"
 	} else if invoice.AmountDue <= 0 || (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible") {
 		out.BlockedReason = "invoice_not_payable"
@@ -137,7 +137,7 @@ func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID
 	return out, nil
 }
 
-func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*openrails.PaymentRecovery, error) {
+func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*billing.PaymentRecovery, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -153,14 +153,14 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		return s.engineSubscriptionRecovery(ctx, sub)
 	}
-	out := &openrails.PaymentRecovery{}
+	out := &billing.PaymentRecovery{}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	row, err := s.rt.DB.Gen(ctx).GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: mid.UUID(), SubscriptionID: id})
 	if err == nil {
-		out.Operation = &openrails.PaymentOperation{ID: row.ID, Status: row.Status}
+		out.Operation = &billing.PaymentOperation{ID: row.ID, Status: row.Status}
 		out.BlockedReason = "payment_in_progress"
 		return out, nil
 	}

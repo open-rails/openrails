@@ -171,14 +171,14 @@ if err := client.Verify(ctx); err != nil { // authenticated boot probe
     log.Fatal(err)                         // unreachable, bad key — fail fast
 }
 
-verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-    CustomerID:      openrails.CustomerID(customerID), // the host's subject UUID
+verdicts, err := client.AdmitBatch(ctx, []billing.AdmitRequest{{
+    CustomerID:      billing.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
     RequestID:       requestID, // idempotency key
 }})
-receipt, err := client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
+receipt, err := client.Capture(ctx, requestID, 43_000, &billing.CaptureUsage{EventType: "chat.completion"})
 // or client.Release(ctx, requestID) if the work failed
 ```
 
@@ -193,7 +193,7 @@ remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
 `ErrPaymentRefused` (402 `card_declined` / `payment_method_stale`),
 `ErrInternal`, and `ErrUnreachable` — which wraps transport failures,
 timeouts, and 5xx. Every server error is a `*StatusError` carrying the HTTP
-status and wire code/message ([api/errors.md](api/errors.md)). Identifiers are typed (`openrails.CustomerID`,
+status and wire code/message ([api/errors.md](api/errors.md)). Identifiers are typed (`billing.CustomerID`,
 `ProductID`, `PriceID`, `SubscriptionID`, `PaymentID`, `PaymentMethodID`,
 `CheckoutSessionID`): a zero id, or a blank, whitespace or dot key, is refused
 by the Client before any request with the same `400 invalid_param`

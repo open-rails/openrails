@@ -31,6 +31,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/permissions"
@@ -671,10 +672,10 @@ func (c *customer) saveCard(rail string, card card) string {
 // subscribe enrolls an engine-owned membership the way the demo does: the
 // application creates the catalog-authoritative session through the merchant
 // Client, then the signed-in payer reads the quote and confirms it.
-func (c *customer) subscribe(tp topology, rail, priceID, entitlement, method string) openrails.SubscriptionID {
+func (c *customer) subscribe(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
 	id := c.enrollOnce(tp, rail, priceID, entitlement, method)
-	subs, err := c.w.client[tp].ListSubscriptions(c.w.t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+	subs, err := c.w.client[tp].ListSubscriptions(c.w.t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 	require.NoError(c.w.t, err)
 	require.Len(c.w.t, subs.Data, 1)
 	require.Equal(c.w.t, id, subs.Data[0].ID)
@@ -682,16 +683,16 @@ func (c *customer) subscribe(tp topology, rail, priceID, entitlement, method str
 }
 
 // subscribeAgain enrolls a returning customer, whose earlier memberships stay.
-func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, method string) openrails.SubscriptionID {
+func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
 	return c.enrollOnce(tp, rail, priceID, entitlement, method)
 }
 
-func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method string) openrails.SubscriptionID {
+func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	session, err := c.w.client[tp].CreateCheckoutSession(c.w.t.Context(), openrails.CreateCheckoutSessionRequest{
-		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
-		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
+	session, err := c.w.client[tp].CreateCheckoutSession(c.w.t.Context(), billing.CreateCheckoutSessionRequest{
+		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
+		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)
@@ -702,7 +703,7 @@ func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method st
 	c.w.settle()
 	sub, ok := done["subscription_id"].(string)
 	require.True(c.w.t, ok, "confirmation names the membership: %v", done)
-	var id openrails.SubscriptionID
+	var id billing.SubscriptionID
 	require.NoError(c.w.t, json.Unmarshal([]byte(`"`+sub+`"`), &id))
 	return id
 }
@@ -715,38 +716,38 @@ func (c *customer) entitled(entitlement string) bool {
 }
 
 // membership creates a monthly auto-renew product and price.
-func (w *world) membership(entitlement string, unitAmount int64) *openrails.Price {
+func (w *world) membership(entitlement string, unitAmount int64) *billing.Price {
 	w.t.Helper()
 	return w.membershipEvery(entitlement, unitAmount, monthHours)
 }
 
 // membershipEvery is an engine membership renewing every hours.
-func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int) *openrails.Price {
+func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
+	product, err := client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", EntitlementsSpec: map[string]*int{entitlement: nil}})
 	require.NoError(w.t, err)
-	price, err := client.Prices.Create(w.t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.Prices.Create(w.t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
 
-func (w *world) subscription(tp topology, id openrails.SubscriptionID) *openrails.Subscription {
+func (w *world) subscription(tp topology, id billing.SubscriptionID) *billing.Subscription {
 	w.t.Helper()
 	sub, err := w.client[tp].GetSubscription(w.t.Context(), id)
 	require.NoError(w.t, err)
 	return sub
 }
 
-func (w *world) payments(tp topology, customerID string) []openrails.Payment {
+func (w *world) payments(tp topology, customerID string) []billing.Payment {
 	w.t.Helper()
-	page, err := w.client[tp].ListPayments(w.t.Context(), openrails.PaymentFilter{CustomerID: customerID, PageOptions: openrails.PageOptions{Limit: 100}})
+	page, err := w.client[tp].ListPayments(w.t.Context(), billing.PaymentFilter{CustomerID: customerID, PageOptions: billing.PageOptions{Limit: 100}})
 	require.NoError(w.t, err)
 	return page.Data
 }
 
-func completed(payments []openrails.Payment) []openrails.Payment {
-	var out []openrails.Payment
+func completed(payments []billing.Payment) []billing.Payment {
+	var out []billing.Payment
 	for _, p := range payments {
 		if p.Status == "succeeded" || p.Status == "completed" {
 			out = append(out, p)

@@ -3,20 +3,12 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"time"
+
+	"github.com/open-rails/openrails/billing"
 )
 
-// GrantEntitlementRequest grants an admin-sourced entitlement window. Omit both
-// Hours and EndAt for an indefinite grant; Hours extends the customer's finite
-// timeline, EndAt fixes this grant's own end.
-type GrantEntitlementRequest struct {
-	Entitlement string     `json:"entitlement"`
-	Hours       *int       `json:"hours,omitempty"`
-	EndAt       *time.Time `json:"end_at,omitempty"`
-}
-
 // GrantEntitlement records an admin-sourced entitlement for a customer.
-func (c *Client) GrantEntitlement(ctx context.Context, customerID string, request GrantEntitlementRequest, requestOptions ...RequestOption) (*EntitlementRecord, error) {
+func (c *Client) GrantEntitlement(ctx context.Context, customerID string, request billing.GrantEntitlementRequest, requestOptions ...RequestOption) (*billing.EntitlementRecord, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -25,7 +17,7 @@ func (c *Client) GrantEntitlement(ctx context.Context, customerID string, reques
 	if err != nil {
 		return nil, err
 	}
-	var out EntitlementRecord
+	var out billing.EntitlementRecord
 	if err := c.do(ctx, http.MethodPost, path+"/entitlements", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}

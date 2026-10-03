@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -140,7 +140,7 @@ const UnpaidActiveFindingType = "pull.ccbill.active_without_payment"
 
 func (w CCBillReconciler) recordUnpaidActiveFinding(ctx context.Context, sub *models.Subscription, record ccbill.CCBillRecord) error {
 	evidence, err := json.Marshal(map[string]any{
-		"subscription_id":      openrails.SubscriptionID(sub.ID).String(),
+		"subscription_id":      billing.SubscriptionID(sub.ID).String(),
 		"rail_subscription_id": strings.TrimSpace(record.SubscriptionID),
 		"local_status":         string(sub.Status),
 		"datalink_status":      record.Status,

@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
@@ -212,7 +212,7 @@ func TestUsageMeterAndRateCardInput(t *testing.T) {
 	}
 	meter := billingservice.UsageMeterDTO{Key: "storage-gb", GroupBy: map[string]string{"region": "metadata.region"}}
 	input, err := defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{
-		ProductID: openrails.ProductID(product).String(), Filter: map[string][]string{" region ": {" eu ", "eu"}}, Price: price("usd"),
+		ProductID: billing.ProductID(product).String(), Filter: map[string][]string{" region ": {" eu ", "eu"}}, Price: price("usd"),
 	})
 	require.NoError(t, err)
 	require.Equal(t, product, *input.ProductID)
@@ -220,7 +220,7 @@ func TestUsageMeterAndRateCardInput(t *testing.T) {
 	require.Equal(t, "USD", input.Price.Currency)
 	require.Equal(t, map[string][]string{"region": {"eu"}}, input.Filter)
 
-	_, err = defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{ProductID: openrails.ProductID(product).String(), Price: price("GBP")})
+	_, err = defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{ProductID: billing.ProductID(product).String(), Price: price("GBP")})
 	require.EqualError(t, err, `money: unknown currency "GBP"`)
 	_, err = defaultUsageRateCardInput(meter, adminDefaultUsageRateCardRequest{ProductID: "nope", Price: price("USD")})
 	require.EqualError(t, err, "product_id required")
@@ -275,7 +275,7 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 	log.SetLevel(log.ErrorLevel)
 	t.Cleanup(func() { log.SetOutput(prevOut); log.SetLevel(prevLevel) })
 
-	payer := func() openrails.CustomerID { return openrails.CustomerID(uuid.New()) }
+	payer := func() billing.CustomerID { return billing.CustomerID(uuid.New()) }
 	allowed, broke, abusive, failing, scopedOut, holdless, reused := payer(), payer(), payer(), payer(), payer(), payer(), payer()
 	deadline := time.Now().Add(time.Hour)
 	items := []serviceAdmitRequest{
@@ -292,7 +292,7 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 	cause := errors.New(`ERROR: relation "openrails.billing_policy_bindings" does not exist (SQLSTATE 42P01)`)
 	var seenTrust string
 	admit := func(_ context.Context, in billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
-		switch openrails.CustomerID(in.CustomerID) {
+		switch billing.CustomerID(in.CustomerID) {
 		case allowed:
 			seenTrust = in.TrustLevel
 			return &billingservice.AdmitResult{Allowed: true}, nil
@@ -308,7 +308,7 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 			return nil, cause
 		}
 	}
-	allows := func(id billingidentity.CustomerID) bool { return openrails.CustomerID(id) != scopedOut }
+	allows := func(id billingidentity.CustomerID) bool { return billing.CustomerID(id) != scopedOut }
 
 	out := serviceAdmitBatchVerdicts(context.Background(), items, allows, admit)
 	require.Len(t, out, len(items))

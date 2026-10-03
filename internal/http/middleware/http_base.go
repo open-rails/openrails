@@ -11,7 +11,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -60,7 +60,7 @@ func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 				if isMerchantArchiveImport(r) && limit != maxBytes {
 					if r.ContentLength > limit {
 						w.Header().Set("X-Request-ID", httprequest.EnsureRequestID(r))
-						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, openrails.CodeRequestBodyTooLarge, "billing archive exceeds its size limit")
+						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, billing.CodeRequestBodyTooLarge, "billing archive exceeds its size limit")
 						return
 					}
 					// Authenticate before reading a potentially large archive. Its
@@ -77,9 +77,9 @@ func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 					w.Header().Set("X-Request-ID", httprequest.EnsureRequestID(r))
 					var tooLarge *http.MaxBytesError
 					if errors.As(err, &tooLarge) {
-						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, openrails.CodeRequestBodyTooLarge, "request body too large")
+						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, billing.CodeRequestBodyTooLarge, "request body too large")
 					} else {
-						billingauth.WriteJSONError(w, http.StatusBadRequest, openrails.CodeInvalidRequestBody, "could not read request body")
+						billingauth.WriteJSONError(w, http.StatusBadRequest, billing.CodeInvalidRequestBody, "could not read request body")
 					}
 					return
 				}

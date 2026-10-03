@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
@@ -9,5 +9,5 @@ import (
 // string on this deployment's wire is expressed in.
 func GetCurrencies(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "public, max-age=3600")
-	r.SuccessJSON(openrails.CurrencyRegistry{Object: "currencies", Currencies: openrails.Currencies()})
+	r.SuccessJSON(billing.CurrencyRegistry{Object: "currencies", Currencies: billing.Currencies()})
 }

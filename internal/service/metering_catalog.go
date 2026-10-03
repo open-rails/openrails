@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -25,13 +25,13 @@ var (
 )
 
 // UsageMeterDTO is one merchant-scoped usage stream and its billing state.
-type UsageMeterDTO = openrails.UsageMeterDTO
+type UsageMeterDTO = billing.UsageMeterDTO
 
 // DefaultUsageRateCardDTO is the merchant-default in-arrears price for a meter.
-type DefaultUsageRateCardDTO = openrails.DefaultUsageRateCardDTO
+type DefaultUsageRateCardDTO = billing.DefaultUsageRateCardDTO
 
 // UsageMeterOverrideDTO is one negotiated payer price for a meter.
-type UsageMeterOverrideDTO = openrails.UsageMeterOverrideDTO
+type UsageMeterOverrideDTO = billing.UsageMeterOverrideDTO
 
 // ListUsageMeters returns a deterministic page of merchant meters.
 func (s *Service) ListUsageMeters(
@@ -109,7 +109,7 @@ func (s *Service) ListUsageMeterOverrides(
 	items := make([]UsageMeterOverrideDTO, 0, len(page.Items))
 	for _, override := range page.Items {
 		items = append(items, UsageMeterOverrideDTO{
-			CustomerID: openrails.CustomerID(override.CustomerID).String(),
+			CustomerID: billing.CustomerID(override.CustomerID).String(),
 			Subject:    override.Subject,
 			Email:      override.Email,
 			Price:      override.Price,
@@ -145,7 +145,7 @@ func usageMeterDTO(meter money.UsageMeter) UsageMeterDTO {
 	if meter.DefaultRateCard != nil {
 		dto.DefaultRateCard = &DefaultUsageRateCardDTO{
 			ID:         meter.DefaultRateCard.ID,
-			ProductID:  openrails.ProductID(meter.DefaultRateCard.ProductID).String(),
+			ProductID:  billing.ProductID(meter.DefaultRateCard.ProductID).String(),
 			ProductKey: meter.DefaultRateCard.ProductKey,
 			Filter:     meter.DefaultRateCard.Filter,
 			Price:      meter.DefaultRateCard.Price,

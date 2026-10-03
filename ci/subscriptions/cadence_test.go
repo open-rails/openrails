@@ -17,22 +17,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
 // cadencePrice creates an auto-renew product and a price at hours with the
 // default (omitted) key.
-func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount int64, hours int) *openrails.Price {
+func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount int64, hours int) *billing.Price {
 	w.t.Helper()
 	client := w.client[tp]
 	product, err := client.Products.RetrieveByKey(w.t.Context(), productKey)
 	if err != nil {
-		product, err = client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: productKey, DisplayName: "Cadence " + productKey, EntitlementsSpec: map[string]*int{entitlement: nil}})
+		product, err = client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: productKey, DisplayName: "Cadence " + productKey, EntitlementsSpec: map[string]*int{entitlement: nil}})
 	}
 	require.NoError(w.t, err)
-	price, err := client.Prices.Create(w.t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.Prices.Create(w.t.Context(), &billing.PriceCreateParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
@@ -69,13 +69,13 @@ func TestCadencePriceKeys(t *testing.T) {
 			products, err := w.client[tp].Products.RetrieveByKey(t.Context(), product)
 			require.NoError(t, err)
 			explicit := 36
-			held, err := w.client[tp].Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &explicit})
+			held, err := w.client[tp].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &explicit})
 			require.NoError(t, err)
 			twoDays := 48
-			_, err = w.client[tp].Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: products.ID, UnitAmount: 6_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &twoDays})
-			require.ErrorIs(t, err, openrails.ErrPriceKeyCadenceConflict)
-			require.ErrorIs(t, err, openrails.ErrConflict)
-			var status *openrails.StatusError
+			_, err = w.client[tp].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: products.ID, UnitAmount: 6_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &twoDays})
+			require.ErrorIs(t, err, billing.ErrPriceKeyCadenceConflict)
+			require.ErrorIs(t, err, billing.ErrConflict)
+			var status *billing.StatusError
 			if errors.As(err, &status) {
 				require.Equal(t, "price_key_cadence_conflict", status.Code)
 			}

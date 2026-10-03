@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -118,18 +118,18 @@ type RepriceAllPriorVersionsRequest struct {
 // tags match the shape documented for #777 console consumers: {batch_id,
 // to_price_id, matched, scheduled:[...], skipped:[...]}.
 type RepriceBatchResult struct {
-	BatchID   uuid.UUID         `json:"batch_id"`
-	ToPriceID openrails.PriceID `json:"to_price_id"`
-	Matched   int               `json:"matched"`
-	Scheduled []RepriceOutcome  `json:"scheduled"`
-	Skipped   []RepriceOutcome  `json:"skipped"`
+	BatchID   uuid.UUID        `json:"batch_id"`
+	ToPriceID billing.PriceID  `json:"to_price_id"`
+	Matched   int              `json:"matched"`
+	Scheduled []RepriceOutcome `json:"scheduled"`
+	Skipped   []RepriceOutcome `json:"skipped"`
 }
 
 // RepriceOutcome is one subscription's result within a bulk reprice.
 type RepriceOutcome struct {
-	SubscriptionID openrails.SubscriptionID `json:"subscription_id"`
-	RepriceID      uuid.UUID                `json:"reprice_id,omitempty"` // zero when Skipped
-	Reason         string                   `json:"reason,omitempty"`     // set when skipped (constraint violation)
+	SubscriptionID billing.SubscriptionID `json:"subscription_id"`
+	RepriceID      uuid.UUID              `json:"reprice_id,omitempty"` // zero when Skipped
+	Reason         string                 `json:"reason,omitempty"`     // set when skipped (constraint violation)
 	// AcknowledgedShortNotice (#781) is true when this scheduled item's
 	// effective_at was inside the merchant's notice window and was scheduled
 	// anyway via the batch's AcknowledgeShortNotice override — audit evidence
@@ -145,7 +145,7 @@ type RepriceOutcome struct {
 // the new version — at that moment every existing subscriber on the key is
 // still, by definition, a "prior version" candidate once the bump lands.
 type RepricePreviewResult struct {
-	PriceKey  string            `json:"price_key"`
-	ToPriceID openrails.PriceID `json:"to_price_id"`
-	Matched   int               `json:"matched"`
+	PriceKey  string          `json:"price_key"`
+	ToPriceID billing.PriceID `json:"to_price_id"`
+	Matched   int             `json:"matched"`
 }

@@ -6,19 +6,19 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // RecordProviderBillingObservation records exact provider/lifecycle facts in an
 // OpenRails-owned transaction. OpenRails alone qualifies, rates, and settles.
-func (s *Service) RecordProviderBillingObservation(ctx context.Context, req openrails.ProviderBillingObservationRequest) (*openrails.ProviderBillingQualification, error) {
+func (s *Service) RecordProviderBillingObservation(ctx context.Context, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	var out *openrails.ProviderBillingQualification
+	var out *billing.ProviderBillingQualification
 	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		out, err = s.RecordProviderBillingObservationTx(ctx, tx, req)
 		return err
@@ -28,7 +28,7 @@ func (s *Service) RecordProviderBillingObservation(ctx context.Context, req open
 
 // RecordProviderBillingObservationTx is the host-transaction form. It never
 // calls a provider and accepts no caller-rated amount.
-func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req openrails.ProviderBillingObservationRequest) (*openrails.ProviderBillingQualification, error) {
+func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx
 	return providerBillingQualificationFromMoney(result), nil
 }
 
-func (s *Service) GetProviderBillingQualification(ctx context.Context, operationID string) (*openrails.ProviderBillingQualification, error) {
+func (s *Service) GetProviderBillingQualification(ctx context.Context, operationID string) (*billing.ProviderBillingQualification, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (s *Service) GetProviderBillingQualification(ctx context.Context, operation
 	return providerBillingQualificationFromMoney(result), nil
 }
 
-func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*openrails.ProviderBillingQualification, error) {
+func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -88,11 +88,11 @@ func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.
 	return providerBillingQualificationFromMoney(result), nil
 }
 
-func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *openrails.ProviderBillingQualification {
-	return &openrails.ProviderBillingQualification{
+func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *billing.ProviderBillingQualification {
+	return &billing.ProviderBillingQualification{
 		OperationID: result.OperationID,
 		MerchantID:  result.MerchantID,
-		Lifecycle: openrails.ProviderBillingLifecycleEvidence{
+		Lifecycle: billing.ProviderBillingLifecycleEvidence{
 			Provider:                 result.Provider,
 			ProviderResourceID:       result.ProviderResourceID,
 			ProviderLifetimeStart:    result.ProviderLifetimeStart,
@@ -106,8 +106,8 @@ func providerBillingQualificationFromMoney(result *money.ProviderBillingQualific
 		},
 		LifecycleEvidenceSHA256:        result.LifecycleEvidenceSHA256,
 		QuiescenceSeconds:              int64(result.Quiescence.Seconds()),
-		State:                          openrails.ProviderBillingQualificationState(result.State),
-		Reason:                         openrails.ProviderBillingQualificationReason(result.Reason),
+		State:                          billing.ProviderBillingQualificationState(result.State),
+		Reason:                         billing.ProviderBillingQualificationReason(result.Reason),
 		BaselineObservationID:          result.BaselineObservationID,
 		QualifiedObservationID:         result.QualifiedObservationID,
 		QualifiedProviderCostUSDMicros: result.QualifiedProviderCostUSDMicros,

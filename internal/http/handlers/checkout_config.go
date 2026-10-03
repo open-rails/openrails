@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -122,7 +122,7 @@ func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope
 // advertiseCheckoutOptions attaches to each option the browser driver and
 // public values that render it, from the same armed-PSP projection
 // /checkout-config serves (#1078). Hosts pass options through unchanged.
-func advertiseCheckoutOptions(options []openrails.CheckoutRailOption, cfg merchants.PublicCheckoutConfig) {
+func advertiseCheckoutOptions(options []billing.CheckoutRailOption, cfg merchants.PublicCheckoutConfig) {
 	byID := make(map[string]merchants.PublicPSPConfig, len(cfg.PSPs))
 	for _, psp := range cfg.PSPs {
 		byID[psp.PSPID] = psp
@@ -163,23 +163,23 @@ func advertiseCheckoutOptions(options []openrails.CheckoutRailOption, cfg mercha
 // solanaOptionToken is the token a Solana option settles in: the one the price
 // binds, else the merchant's preferred accepted token, else its first accepted
 // stablecoin. A bound token the merchant does not list keeps its symbol.
-func solanaOptionToken(cfg *openrails.SolanaCheckoutConfig, bound string) (openrails.SolanaCheckoutToken, bool) {
+func solanaOptionToken(cfg *billing.SolanaCheckoutConfig, bound string) (billing.SolanaCheckoutToken, bool) {
 	if cfg == nil {
-		return openrails.SolanaCheckoutToken{}, false
+		return billing.SolanaCheckoutToken{}, false
 	}
-	find := func(symbol string) (openrails.SolanaCheckoutToken, bool) {
+	find := func(symbol string) (billing.SolanaCheckoutToken, bool) {
 		for _, token := range cfg.Tokens {
 			if strings.EqualFold(token.Symbol, symbol) {
 				return token, true
 			}
 		}
-		return openrails.SolanaCheckoutToken{}, false
+		return billing.SolanaCheckoutToken{}, false
 	}
 	if bound = strings.ToUpper(strings.TrimSpace(bound)); bound != "" {
 		if token, ok := find(bound); ok {
 			return token, true
 		}
-		return openrails.SolanaCheckoutToken{Symbol: bound}, true
+		return billing.SolanaCheckoutToken{Symbol: bound}, true
 	}
 	if token, ok := find(cfg.PreferredToken); ok {
 		return token, true
@@ -192,7 +192,7 @@ func solanaOptionToken(cfg *openrails.SolanaCheckoutConfig, bound string) (openr
 	if len(cfg.Tokens) > 0 {
 		return cfg.Tokens[0], true
 	}
-	return openrails.SolanaCheckoutToken{}, false
+	return billing.SolanaCheckoutToken{}, false
 }
 
 // solanaClusterName is the Solana cluster name browsers expect.

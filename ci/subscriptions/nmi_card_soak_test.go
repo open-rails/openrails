@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -60,9 +60,9 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			require.Empty(t, verification.Form.Get("amount"), "a verification moves no funds")
 			require.Equal(t, "mastercard", saved.cardType)
 
-			id, err := openrails.ParsePaymentMethodID(method)
+			id, err := billing.ParsePaymentMethodID(method)
 			require.NoError(t, err)
-			require.NoError(t, w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), e.sub, openrails.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id}))
+			require.NoError(t, w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), e.sub, billing.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id}))
 			sales := len(w.nmi.ledger(""))
 			end := e.periodEnd()
 			e.toPeriodEnd()
@@ -145,7 +145,7 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 	product := w.subscription(embedded, e.sub).ProductID
 	for i, tp := range []topology{embedded, remote} {
 		group, rank := fmt.Sprintf("g%d-%s", i, uuid.NewString()[:6]), i+1
-		updated, err := w.client[tp].Products.Update(t.Context(), product, &openrails.ProductUpdateParams{TierGroup: &group, SetTierGroup: true, TierRank: &rank})
+		updated, err := w.client[tp].Products.Update(t.Context(), product, &billing.ProductUpdateParams{TierGroup: &group, SetTierGroup: true, TierRank: &rank})
 		require.NoError(t, err, "a live product takes a tier group")
 		require.NotNil(t, updated.TierGroup)
 		require.Equal(t, group, *updated.TierGroup)
@@ -157,8 +157,8 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 	other := w.membership("content:other", 4_990_000)
 	e.c.subscribeAgain(embedded, "nmi", other.ID, "content:other", e.method)
 	group := "joined-" + uuid.NewString()[:6]
-	_, err := w.client[remote].Products.Update(t.Context(), product, &openrails.ProductUpdateParams{TierGroup: &group, SetTierGroup: true})
+	_, err := w.client[remote].Products.Update(t.Context(), product, &billing.ProductUpdateParams{TierGroup: &group, SetTierGroup: true})
 	require.NoError(t, err)
-	_, err = w.client[remote].Products.Update(t.Context(), other.ProductID, &openrails.ProductUpdateParams{TierGroup: &group, SetTierGroup: true})
+	_, err = w.client[remote].Products.Update(t.Context(), other.ProductID, &billing.ProductUpdateParams{TierGroup: &group, SetTierGroup: true})
 	requireCode(t, err, http.StatusConflict, "product_tier_group_conflict")
 }

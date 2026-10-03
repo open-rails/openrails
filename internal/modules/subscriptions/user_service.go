@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"net/http"
 	"time"
@@ -12,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -106,7 +106,7 @@ func (s *UserSubscriptionService) now() time.Time {
 }
 
 // UserSubscriptionResponse is a customer's subscription with the catalog rows
-// its wire projection needs. The HTTP layer serves it as openrails.Subscription.
+// its wire projection needs. The HTTP layer serves it as billing.Subscription.
 type UserSubscriptionResponse struct {
 	*models.Subscription
 	// EvaluatedAt binds derived eligibility flags to the service's business clock.
@@ -114,7 +114,7 @@ type UserSubscriptionResponse struct {
 	Price            *models.Price
 	ScheduledPrice   *models.Price
 	ScheduledProduct *models.Product
-	Access           *openrails.SubscriptionAccess
+	Access           *billing.SubscriptionAccess
 }
 
 // EvaluationTime defaults only for responses constructed without a service.
@@ -151,8 +151,8 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 }
 
 // GetUserAccessStatus composes all active access grants (subscriptions + entitlements) for a user.
-func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userID string) ([]*openrails.SubscriptionAccess, error) {
-	grants := make([]*openrails.SubscriptionAccess, 0, 2)
+func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userID string) ([]*billing.SubscriptionAccess, error) {
+	grants := make([]*billing.SubscriptionAccess, 0, 2)
 	skipSubscriptionIDs := make(map[uuid.UUID]struct{})
 	if s.SubscriptionService != nil {
 		if sub, err := s.SubscriptionService.GetActiveSubscription(ctx, userID); err == nil {
@@ -429,7 +429,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		EventType:  models.NotificationPremiumEnded,
-		Data:       openrails.NotificationData{Reason: string(PremiumEndReasonUserCancel)},
+		Data:       billing.NotificationData{Reason: string(PremiumEndReasonUserCancel)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
@@ -443,12 +443,12 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	return nil
 }
 
-func accessFromSubscription(sub *models.Subscription) *openrails.SubscriptionAccess {
-	grant := &openrails.SubscriptionAccess{
+func accessFromSubscription(sub *models.Subscription) *billing.SubscriptionAccess {
+	grant := &billing.SubscriptionAccess{
 		Kind:           "subscription",
 		Entitlement:    "premium",
 		Rail:           string(sub.Rail),
-		SubscriptionID: openrails.SubscriptionID(sub.ID),
+		SubscriptionID: billing.SubscriptionID(sub.ID),
 		StartAt:        sub.StartedAt,
 	}
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
@@ -460,7 +460,7 @@ func accessFromSubscription(sub *models.Subscription) *openrails.SubscriptionAcc
 	return grant
 }
 
-func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, userID string) (*openrails.SubscriptionAccess, error) {
+func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, userID string) (*billing.SubscriptionAccess, error) {
 	grants, err := s.entitlementAccessGrants(ctx, userID, nil)
 	if err != nil {
 		return nil, err
@@ -471,7 +471,7 @@ func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, u
 	return nil, nil
 }
 
-func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, userID string, skipSubs map[uuid.UUID]struct{}) ([]*openrails.SubscriptionAccess, error) {
+func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, userID string, skipSubs map[uuid.UUID]struct{}) ([]*billing.SubscriptionAccess, error) {
 	if s.EntitlementService == nil {
 		return nil, nil
 	}
@@ -479,7 +479,7 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 	if err != nil {
 		return nil, fmt.Errorf("failed to list entitlements: %w", err)
 	}
-	grants := make([]*openrails.SubscriptionAccess, 0, len(ents))
+	grants := make([]*billing.SubscriptionAccess, 0, len(ents))
 	for _, ent := range ents {
 		if ent.Entitlement == "" {
 			continue
@@ -490,7 +490,7 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 				continue
 			}
 		}
-		grant := &openrails.SubscriptionAccess{
+		grant := &billing.SubscriptionAccess{
 			Kind:        "entitlement",
 			Entitlement: ent.Entitlement,
 			SourceType:  string(ent.SourceType),
@@ -498,10 +498,10 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 			EndAt:       ent.EndAt,
 		}
 		if ent.SourceID != nil {
-			grant.SourceID = openrails.SourceRef(string(ent.SourceType), ent.SourceID.String())
+			grant.SourceID = billing.SourceRef(string(ent.SourceType), ent.SourceID.String())
 		}
 		if fromSubscription {
-			grant.SubscriptionID = openrails.SubscriptionID(*ent.SourceID)
+			grant.SubscriptionID = billing.SubscriptionID(*ent.SourceID)
 		}
 		grants = append(grants, grant)
 	}

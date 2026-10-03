@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 
@@ -127,22 +127,22 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, curre
 // (event_type identifies the billed usage). It mirrors
 // models.InvoiceLineItem on the public facade so HTTP/library callers don't
 // import the internal models/credits packages.
-type InvoiceLineItemDTO = openrails.InvoiceLineItemDTO
+type InvoiceLineItemDTO = billing.InvoiceLineItemDTO
 
 // InvoiceDTO is the public view of a finalized monthly itemized invoice (issue
 // #303), served by the customer-facing GET /v1/me/invoices[/:id] routes. It is
 // a public projection of models.Invoice so callers don't import internal types.
-type InvoiceDTO = openrails.InvoiceDTO
+type InvoiceDTO = billing.InvoiceDTO
 
 // InvoicePaymentAttemptDTO is one automatic collection attempt for an invoice.
-type InvoicePaymentAttemptDTO = openrails.InvoicePaymentAttemptDTO
+type InvoicePaymentAttemptDTO = billing.InvoicePaymentAttemptDTO
 
-type InvoiceCollectionRetryRequest = openrails.InvoiceCollectionRetryRequest
+type InvoiceCollectionRetryRequest = billing.InvoiceCollectionRetryRequest
 
-type InvoiceCollectionRetryResult = openrails.InvoiceCollectionRetryResult
+type InvoiceCollectionRetryResult = billing.InvoiceCollectionRetryResult
 
 // InvoiceContactDTO is one billing contact on an invoice document (#798).
-type InvoiceContactDTO = openrails.InvoiceContactDTO
+type InvoiceContactDTO = billing.InvoiceContactDTO
 
 func contactsToDTO(contacts []models.InvoiceContact) []InvoiceContactDTO {
 	if len(contacts) == 0 {
@@ -212,7 +212,7 @@ func invoicePaymentAttemptToDTO(attempt models.InvoicePaymentAttempt) InvoicePay
 		Currency:        attempt.Currency,
 		Amount:          attempt.Amount,
 		Status:          attempt.Status,
-		PaymentMethodID: (*openrails.PaymentMethodID)(attempt.PaymentMethodID),
+		PaymentMethodID: (*billing.PaymentMethodID)(attempt.PaymentMethodID),
 		Rail:            attempt.Rail,
 		RailPaymentID:   attempt.RailPaymentID,
 		FailureCode:     attempt.FailureCode,

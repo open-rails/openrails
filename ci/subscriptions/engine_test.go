@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/riverqueue/river"
@@ -32,7 +32,7 @@ type engineCase struct {
 	price   string
 	amount  int64
 	ent     string
-	sub     openrails.SubscriptionID
+	sub     billing.SubscriptionID
 	method  string
 	started time.Time
 }
@@ -139,7 +139,7 @@ func TestEngineHappyRenewals(t *testing.T) {
 // requireLedgerAgreement: every local payment is a provider charge of the
 // same amount, and every provider charge is a local payment (no orphan, no
 // duplicate).
-func (e *engineCase) requireLedgerAgreement(local []openrails.Payment) {
+func (e *engineCase) requireLedgerAgreement(local []billing.Payment) {
 	t := e.w.t
 	t.Helper()
 	provider := map[string]int64{}
@@ -462,7 +462,7 @@ func TestEngineAccountDeletionCancels(t *testing.T) {
 					require.Equal(t, "past_due", w.subscription(tp, e.sub).Status)
 				}
 				attempts := e.providerAttempts()
-				request := openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_1", AccountDeletion: true}
+				request := billing.CancelSubscriptionRequest{Reason: "Account deletion evt_1", AccountDeletion: true}
 				require.NoError(t, w.client[tp].CancelSubscription(t.Context(), e.sub, request))
 				sub := w.subscription(tp, e.sub)
 				require.Equal(t, "cancelled", sub.Status)
@@ -486,7 +486,7 @@ func TestEngineRepricing(t *testing.T) {
 		price, err := w.client[tp].Prices.Retrieve(t.Context(), old.price)
 		require.NoError(t, err)
 		hours := monthHours
-		bumped, err := w.client[tp].Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		bumped, err := w.client[tp].Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 14_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		require.NotEqual(t, price.ID, bumped.ID)
 		archived, err := w.client[tp].Prices.Retrieve(t.Context(), price.ID)
@@ -537,10 +537,10 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				if paid[1].CreatedAt.After(renewal.CreatedAt) {
 					renewal = paid[1]
 				}
-				refund, err := w.client[tp].RefundPayment(t.Context(), renewal.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: revoke, IdempotencyKey: "refund-" + renewal.ID.String()})
+				refund, err := w.client[tp].RefundPayment(t.Context(), renewal.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: revoke, IdempotencyKey: "refund-" + renewal.ID.String()})
 				require.NoError(t, err)
 				w.settle()
-				again, err := w.client[tp].RefundPayment(t.Context(), renewal.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: revoke, IdempotencyKey: "refund-" + renewal.ID.String()})
+				again, err := w.client[tp].RefundPayment(t.Context(), renewal.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: revoke, IdempotencyKey: "refund-" + renewal.ID.String()})
 				require.NoError(t, err)
 				require.Equal(t, refund.ID, again.ID, "a replayed refund is the same refund")
 				w.settle()
@@ -578,7 +578,7 @@ func TestEngineRenewalRefunds(t *testing.T) {
 			e := enroll(t, w, rail, tp)
 			price, err := w.client[tp].Prices.Retrieve(t.Context(), e.price)
 			require.NoError(t, err)
-			archive, err := w.client[tp].ArchiveProduct(t.Context(), openrails.ArchiveProductParams{ProductID: price.ProductID, Action: openrails.PurchaseActionRefund, Window: 365 * day, Reason: "retired", IdempotencyKey: "archive-" + price.ProductID})
+			archive, err := w.client[tp].ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: price.ProductID, Action: billing.PurchaseActionRefund, Window: 365 * day, Reason: "retired", IdempotencyKey: "archive-" + price.ProductID})
 			require.NoError(t, err)
 			w.settle()
 			require.True(t, archive.Complete)
@@ -605,9 +605,9 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			declined := c.saveCard(rail, card{Brand: "visa", Last4: "0002", Decline: map[string]string{"stripe": "insufficient_funds", "nmi": "202"}[rail]})
-			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
-				IdempotencyKey: "enroll-declined", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: declined},
+			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+				IdempotencyKey: "enroll-declined", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: declined},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
@@ -617,7 +617,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			w.until(func() bool {
 				return unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))["status"] == "failed"
 			}, "the declined enrollment resolves as failed")
-			subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+			subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 			require.NoError(t, err)
 			require.Empty(t, subs.Data)
 			require.False(t, c.entitled("content:members"))
@@ -637,9 +637,9 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	c := w.newCustomer()
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
-	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
-		IdempotencyKey: "enroll-3ds", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: challenged},
+	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+		IdempotencyKey: "enroll-3ds", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: challenged},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -711,9 +711,9 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		c := w.newCustomer()
 		method := c.saveCard("nmi", visa)
 		w.nmi.RefuseDuplicates(1)
-		session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-			OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
-			IdempotencyKey: "enroll-dup", PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
+		session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+			IdempotencyKey: "enroll-dup", PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentMethodID: method},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 		})
 		require.NoError(t, err)
@@ -929,15 +929,15 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	c := w.newCustomer()
-	buy := func(method, key string) *openrails.CheckoutSession {
-		session, err := client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-			OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
-			IdempotencyKey: key, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
+	buy := func(method, key string) *billing.CheckoutSession {
+		session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+			OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
+			IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["stripe"], Rail: "stripe", PaymentMethodID: method},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 		})
 		require.NoError(t, err)

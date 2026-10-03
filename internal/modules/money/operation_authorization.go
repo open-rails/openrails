@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -42,16 +42,16 @@ const (
 )
 
 var (
-	ErrOperationAuthorizationConflict           = openrails.ErrOperationAuthorizationConflict
-	ErrOperationAuthorizationNotFound           = openrails.ErrOperationAuthorizationNotFound
-	ErrOperationAuthorizationNotOpen            = openrails.ErrOperationAuthorizationNotOpen
-	ErrOperationAuthorizationHasBillingEvidence = openrails.ErrOperationAuthorizationHasBillingEvidence
+	ErrOperationAuthorizationConflict           = billing.ErrOperationAuthorizationConflict
+	ErrOperationAuthorizationNotFound           = billing.ErrOperationAuthorizationNotFound
+	ErrOperationAuthorizationNotOpen            = billing.ErrOperationAuthorizationNotOpen
+	ErrOperationAuthorizationHasBillingEvidence = billing.ErrOperationAuthorizationHasBillingEvidence
 )
 
 // OperationAuthorizationConflict means an operation id already committed with
 // a different immutable field. The field name is safe to report; body contents
 // are intentionally omitted from the error.
-type OperationAuthorizationConflict = openrails.OperationAuthorizationConflict
+type OperationAuthorizationConflict = billing.OperationAuthorizationConflict
 
 type OperationAuthorizationInput struct {
 	OperationID             string
@@ -103,7 +103,7 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, fmt.Errorf("operation authorization requires a bound transaction")
 	}
 	if err := validateOperationAuthorizationInput(in); err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -459,7 +459,7 @@ func (s *MoneyService) GetOperationAuthorizationInTx(ctx context.Context, txDB *
 		return nil, fmt.Errorf("operation authorization requires a bound transaction")
 	}
 	if err := validateOperationID(operationID); err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -497,10 +497,10 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 		return nil, fmt.Errorf("operation authorization requires a bound transaction")
 	}
 	if err := validateOperationID(operationID); err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	if err := validateOperationAuthorizationText("release_reference", releaseReference, operationAuthorizationMaxReferenceBytes); err != nil {
-		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -154,20 +154,20 @@ func rejectRawCardFieldValues(fields ...rawCardField) error {
 	return nil
 }
 
-type subscriptionSummary = openrails.PaymentMethodSubscription
+type subscriptionSummary = billing.PaymentMethodSubscription
 
-type paymentMethodResponse = openrails.PaymentMethod
+type paymentMethodResponse = billing.PaymentMethod
 
 // paymentMethodHealth is the #589 DERIVED per-method health, computed at query
 // time (never a stored column). last_charge_* come from openrails.payments via the
 // subscription link; expiry_status from the card's expiry vs now.
-type paymentMethodHealth = openrails.PaymentMethodHealth
+type paymentMethodHealth = billing.PaymentMethodHealth
 
-type paymentMethodBillingDetails = openrails.BillingDetails
+type paymentMethodBillingDetails = billing.BillingDetails
 
-type paymentMethodAddress = openrails.BillingAddress
+type paymentMethodAddress = billing.BillingAddress
 
-type paymentMethodCardDetails = openrails.CardDetails
+type paymentMethodCardDetails = billing.CardDetails
 
 func CreatePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
@@ -224,7 +224,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			return
 		}
 		if errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused) {
-			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentDuplicateRefused, err.Error()))
+			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentDuplicateRefused, err.Error()))
 			return
 		}
 		if providerErr := createPaymentMethodProviderError(err); providerErr != nil {
@@ -332,7 +332,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	typedMethodID, err := openrails.ParsePaymentMethodID(path.ID)
+	typedMethodID, err := billing.ParsePaymentMethodID(path.ID)
 	if err != nil || typedMethodID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
 		return
@@ -555,7 +555,7 @@ func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 		return
 	}
 
-	typedId, err := openrails.ParsePaymentMethodID(path.ID)
+	typedId, err := billing.ParsePaymentMethodID(path.ID)
 	if err != nil || typedId.IsZero() {
 		log.WithError(err).WithField("id", path.ID).Error("Invalid payment method ID format")
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
@@ -645,7 +645,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	var subs []subscriptionSummary
 	for _, s := range pm.Subscriptions {
-		summary := subscriptionSummary{ID: openrails.SubscriptionID(s.ID).String(), CreatedAt: s.CreatedAt}
+		summary := subscriptionSummary{ID: billing.SubscriptionID(s.ID).String(), CreatedAt: s.CreatedAt}
 		if s.Product != nil {
 			summary.DisplayName = s.Product.DisplayName
 			summary.Description = s.Product.Description
@@ -655,7 +655,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	metadata := paymentMethodMetadataToAPI(pm.Metadata)
 	return paymentMethodResponse{
-		ID:             openrails.PaymentMethodID(pm.ID).String(),
+		ID:             billing.PaymentMethodID(pm.ID).String(),
 		Object:         "payment_method",
 		Type:           "card",
 		Rail:           string(pm.Rail),
@@ -886,7 +886,7 @@ func setDefaultPaymentMethodForCustomer(r *httprequest.Request, customerID strin
 	if !r.BindJSON(&body) {
 		return
 	}
-	methodID, err := openrails.ParsePaymentMethodID(body.PaymentMethodID)
+	methodID, err := billing.ParsePaymentMethodID(body.PaymentMethodID)
 	if err != nil || methodID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
 		return
@@ -901,7 +901,7 @@ func setDefaultPaymentMethodForCustomer(r *httprequest.Request, customerID strin
 		r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 		return
 	case errors.Is(err, paymentmethods.ErrPaymentMethodNotUsable):
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentMethodNotUsable, err.Error()))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentMethodNotUsable, err.Error()))
 		return
 	case err != nil:
 		r.InternalError("Failed to set the default payment method", err)

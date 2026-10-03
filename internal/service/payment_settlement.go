@@ -5,14 +5,14 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func (s *Service) HasSettledPayment(ctx context.Context, customerID, priceID uuid.UUID) (bool, error) {
 	if customerID == uuid.Nil || priceID == uuid.Nil {
-		return false, &openrails.StatusError{Status: http.StatusBadRequest, ErrorDetails: openrails.ErrorDetails{
+		return false, &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{
 			Type: "invalid_request_error", Code: "invalid_settlement_status_request", Message: "customer and price ids are required"}}
 	}
 	ctx, release, err := s.pin(ctx)

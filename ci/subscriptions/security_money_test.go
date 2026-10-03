@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // SEC: checkout money is the catalog's. Hosts forward browser-chosen price
@@ -31,10 +32,10 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			cheap := w.membership("content:basic", 1_000_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			request := func(priceID, entitlement string) openrails.CreateCheckoutSessionRequest {
-				return openrails.CreateCheckoutSessionRequest{
-					OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
-					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+			request := func(priceID, entitlement string) billing.CreateCheckoutSessionRequest {
+				return billing.CreateCheckoutSessionRequest{
+					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
+					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
@@ -43,14 +44,14 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 				_, err := w.client[tp].CreateCheckoutSession(ctx, request(cheap.ID, "content:vip"))
 				require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
 			}
-			_, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
+			_, err := client.Prices.Create(ctx, &billing.PriceCreateParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
 			require.Error(t, err, "negative prices are refused")
 			negative := -24
-			_, err = client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "neg-" + uuid.NewString()[:8], DisplayName: "Negative", EntitlementsSpec: map[string]*int{"content:neg": &negative}})
+			_, err = client.Products.Create(ctx, &billing.ProductCreateParams{Key: "neg-" + uuid.NewString()[:8], DisplayName: "Negative", EntitlementsSpec: map[string]*int{"content:neg": &negative}})
 			require.Error(t, err, "a negative access duration is refused")
 
 			archived := w.membership("content:archived", 1_000_000)
-			_, err = client.ArchiveProduct(ctx, openrails.ArchiveProductParams{ProductID: archived.ProductID, Action: openrails.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID})
+			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID, Action: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID})
 			require.NoError(t, err)
 			_, err = client.CreateCheckoutSession(ctx, request(archived.ID, "content:archived"))
 			require.Error(t, err, "an archived price is not purchasable")
@@ -86,16 +87,16 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			w := newWorld(t)
 			replica := w.sibling()
 			client := w.client[embedded]
-			product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+			product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 			require.NoError(t, err)
-			price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+			price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 			require.NoError(t, err)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			buy := func(client *openrails.Client) error {
-				_, err := client.CreateCheckoutSession(context.WithoutCancel(t.Context()), openrails.CreateCheckoutSessionRequest{
-					OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
-					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+				_, err := client.CreateCheckoutSession(context.WithoutCancel(t.Context()), billing.CreateCheckoutSessionRequest{
+					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
+					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				})
 				return err

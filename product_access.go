@@ -7,44 +7,23 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // ProductAccessClient checks access for a bounded set of products and lists
 // purchases one page at a time. IDs use the same strings as the HTTP API.
 type ProductAccessClient struct{ client *Client }
 
-const ProductAccessMaxPageSize = 100
-
-type ProductAccessCheckParams struct {
-	CustomerID string
-	ProductID  string
-	ProductKey string
-}
-type ProductAccessCheckManyParams struct {
-	CustomerID  string
-	ProductIDs  []string
-	ProductKeys []string
-}
-type ProductAccessListParams struct {
-	CustomerID string
-	Limit      int
-	Cursor     string
-}
-type ProductAccessList struct {
-	Data       []ProductAccessGrant `json:"data"`
-	HasMore    bool                 `json:"has_more"`
-	NextCursor string               `json:"next_cursor,omitempty"`
-}
-
 func productAccessCustomerPath(id string) (string, error) {
-	customer, err := ParseCustomerID(id)
+	customer, err := billing.ParseCustomerID(id)
 	if err != nil || customer.IsZero() {
 		return "", invalidErr("customer_id must be a nonzero UUID")
 	}
 	return "/v1/merchant/users/" + customer.String() + "/product-access", nil
 }
 
-func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCheckParams, requestOptions ...RequestOption) (*ProductAccessCheck, error) {
+func (s *ProductAccessClient) Check(ctx context.Context, params *billing.ProductAccessCheckParams, requestOptions ...RequestOption) (*billing.ProductAccessCheck, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -62,13 +41,13 @@ func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCh
 		}
 		query.Set("product_key", params.ProductKey)
 	} else {
-		product, err := ParseProductID(params.ProductID)
+		product, err := billing.ParseProductID(params.ProductID)
 		if err != nil || product.IsZero() {
 			return nil, invalidErr("product_id is invalid")
 		}
 		query.Set("product_id", product.String())
 	}
-	var out ProductAccessCheck
+	var out billing.ProductAccessCheck
 	if err = s.client.do(ctx, http.MethodGet, path+"?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -79,7 +58,7 @@ func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCh
 // returns an empty map; duplicates share one decision. Supply exactly one nonnil
 // ProductIDs or ProductKeys collection, at most 100 entries. Result keys match
 // the supplied coordinates; missing products have an explicit false decision.
-func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAccessCheckManyParams, requestOptions ...RequestOption) (map[string]bool, error) {
+func (s *ProductAccessClient) CheckMany(ctx context.Context, params *billing.ProductAccessCheckManyParams, requestOptions ...RequestOption) (map[string]bool, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -90,7 +69,7 @@ func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAcce
 	if (params.ProductIDs == nil) == (params.ProductKeys == nil) {
 		return nil, invalidErr("exactly one of product_ids and product_keys is required")
 	}
-	if len(params.ProductIDs)+len(params.ProductKeys) > ProductAccessMaxPageSize {
+	if len(params.ProductIDs)+len(params.ProductKeys) > billing.ProductAccessMaxPageSize {
 		return nil, invalidErr("at most 100 products are allowed")
 	}
 	for _, key := range params.ProductKeys {
@@ -103,7 +82,7 @@ func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAcce
 		ids = make([]string, 0, len(params.ProductIDs))
 	}
 	for _, id := range params.ProductIDs {
-		product, err := ParseProductID(id)
+		product, err := billing.ParseProductID(id)
 		if err != nil || product.IsZero() {
 			return nil, invalidErr("product_id is invalid")
 		}
@@ -128,7 +107,7 @@ func validProductKey(key string) bool {
 	return strings.TrimSpace(key) != "" && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }
 
-func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessListParams, requestOptions ...RequestOption) (*ProductAccessList, error) {
+func (s *ProductAccessClient) List(ctx context.Context, params *billing.ProductAccessListParams, requestOptions ...RequestOption) (*billing.ProductAccessList, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -136,7 +115,7 @@ func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessLis
 	if err != nil {
 		return nil, err
 	}
-	if params.Limit < 0 || params.Limit > ProductAccessMaxPageSize {
+	if params.Limit < 0 || params.Limit > billing.ProductAccessMaxPageSize {
 		return nil, invalidErr("limit must be between 1 and 100")
 	}
 	query := url.Values{}
@@ -146,7 +125,7 @@ func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessLis
 	if params.Cursor != "" {
 		query.Set("cursor", params.Cursor)
 	}
-	var out ProductAccessList
+	var out billing.ProductAccessList
 	if err = s.client.do(ctx, http.MethodGet, path+"?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}

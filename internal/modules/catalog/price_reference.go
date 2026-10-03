@@ -3,7 +3,7 @@ package catalog
 import (
 	"context"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -13,7 +13,7 @@ import (
 // collides with a key, so an id parse is tried first and a key lookup follows
 // only when the reference is not an id.
 func ResolveReference(ctx context.Context, prices *PriceService, ref string) (*models.Price, error) {
-	if id, err := openrails.ParsePriceID(ref); err == nil && !id.IsZero() {
+	if id, err := billing.ParsePriceID(ref); err == nil && !id.IsZero() {
 		return prices.GetByID(ctx, id.UUID())
 	}
 	tid, err := merchant.Require(ctx)

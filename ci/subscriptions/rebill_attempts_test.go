@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // cycleAttempt is one rebill attempt with its cycle (#1111).
@@ -22,7 +22,7 @@ type cycleAttempt struct {
 	DueAt, AttemptedAt                         time.Time
 }
 
-func (w *world) cycleAttempts(sub openrails.SubscriptionID) []cycleAttempt {
+func (w *world) cycleAttempts(sub billing.SubscriptionID) []cycleAttempt {
 	w.t.Helper()
 	schema := pgx.Identifier{w.schema}.Sanitize()
 	rows, err := w.pool.Query(w.t.Context(), `SELECT a.kind, a.owner, a.source, a.observed_via, a.category, a.reason, a.transaction_id, c.id, c.due_at, a.attempted_at

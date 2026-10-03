@@ -2,7 +2,9 @@
 // billing. Hosts explicitly supply their identity integration.
 package identity
 
-import "github.com/open-rails/openrails"
+import (
+	"github.com/open-rails/openrails/billing"
+)
 
-type UserDirectory = openrails.UserDirectory
-type UsernameResolver = openrails.UsernameResolver
+type UserDirectory = billing.UserDirectory
+type UsernameResolver = billing.UsernameResolver

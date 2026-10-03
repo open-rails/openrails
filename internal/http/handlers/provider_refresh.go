@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -31,5 +31,5 @@ func RefreshProviders(r *httprequest.Request) {
 	if queued {
 		status = "already_running"
 	}
-	r.JSON(http.StatusAccepted, openrails.ProviderRefresh{Status: status, JobID: id})
+	r.JSON(http.StatusAccepted, billing.ProviderRefresh{Status: status, JobID: id})
 }

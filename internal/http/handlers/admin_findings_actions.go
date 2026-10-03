@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -222,7 +222,7 @@ func executeRecordAdminGrant(r *httprequest.Request, finding reconcile.FindingRe
 	if customerID == "" {
 		return paramErrorf("recommendation param \"customer_id\" is required")
 	}
-	productID, err := paramTypedID(params, "product_id", openrails.ParseProductID)
+	productID, err := paramTypedID(params, "product_id", billing.ParseProductID)
 	if err != nil {
 		return err
 	}
@@ -250,11 +250,11 @@ func executeRecordAdminGrant(r *httprequest.Request, finding reconcile.FindingRe
 // compensation state. Both ids are optional (#690: a pure one-off ownership
 // duplicate has no subscription — refund-only), but at least one is required.
 func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRecord, params map[string]any, notes string, result map[string]any) error {
-	typedSubID, hasCancel, err := paramOptionalTypedID(params, "subscription_id", openrails.ParseSubscriptionID)
+	typedSubID, hasCancel, err := paramOptionalTypedID(params, "subscription_id", billing.ParseSubscriptionID)
 	if err != nil {
 		return err
 	}
-	typedPaymentID, hasRefund, err := paramOptionalTypedID(params, "refund_payment_id", openrails.ParsePaymentID)
+	typedPaymentID, hasRefund, err := paramOptionalTypedID(params, "refund_payment_id", billing.ParsePaymentID)
 	if err != nil {
 		return err
 	}
@@ -350,7 +350,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 				localResult["provider_cancel"] = "queued"
 			}
 			localResult["cancel"] = "cancelled"
-			localResult["subscription_id"] = openrails.SubscriptionID(subID).String()
+			localResult["subscription_id"] = billing.SubscriptionID(subID).String()
 			return nil
 		})
 		if err != nil {
@@ -398,7 +398,7 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	if err != nil {
 		return fmt.Errorf("refund payment %s: %w", paymentID, err)
 	}
-	result["refund_payment_id"] = openrails.PaymentID(paymentID).String()
+	result["refund_payment_id"] = billing.PaymentID(paymentID).String()
 	if refund != nil {
 		result["refund_amount"] = strconv.FormatInt(-refund.Amount, 10)
 	}

@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
@@ -544,7 +544,7 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 		require.Equal(t, "USD", b.Currency, "CUR-6 canonical upper case")
 		require.Equal(t, customerID, b.CustomerID)
 		require.Equal(t, priceID, b.PriceID)
-		require.Equal(t, openrails.CheckoutSessionID(sessionID).String(), fc.LocalEvidence["checkout_session_id"])
+		require.Equal(t, billing.CheckoutSessionID(sessionID).String(), fc.LocalEvidence["checkout_session_id"])
 		require.Equal(t, "purchase_memo", fc.LocalEvidence["correlated_via"])
 
 		for sig, reason := range map[string]string{sigFromByte(2): "disagrees", sigFromByte(3): "unpriced"} {

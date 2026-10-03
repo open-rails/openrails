@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
@@ -15,7 +15,7 @@ func GetMyBillingStatus(r *httprequest.Request) {
 		return
 	}
 
-	out := openrails.BillingStatus{}
+	out := billing.BillingStatus{}
 	if r.State.UserSubscriptionService != nil {
 		resp, err := r.State.UserSubscriptionService.GetUserSubscription(r.Request.Context(), user.ID)
 		if err == nil {

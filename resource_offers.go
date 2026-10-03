@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
-)
 
-const MaxEntitlementChecks = 100
+	"github.com/open-rails/openrails/billing"
+)
 
 // CheckEntitlements checks a bounded set of opaque resource/feature keys using
 // retained access grants. Catalog edits and archival do not rewrite purchases.
@@ -17,7 +17,7 @@ func (c *Client) CheckEntitlements(ctx context.Context, customerID string, entit
 	if err != nil {
 		return nil, err
 	}
-	if len(entitlements) > MaxEntitlementChecks {
+	if len(entitlements) > billing.MaxEntitlementChecks {
 		return nil, invalidErr("at most 100 entitlements are allowed")
 	}
 	for _, key := range entitlements {
@@ -36,62 +36,12 @@ func (c *Client) CheckEntitlements(ctx context.Context, customerID string, entit
 	return result, err
 }
 
-// OfferKind distinguishes commercial access terms; currency preference never
-// substitutes a subscription or rental for permanent ownership.
-type OfferKind string
-
-const (
-	OfferPermanent OfferKind = "permanent"
-	OfferFinite    OfferKind = "finite"
-	OfferRecurring OfferKind = "recurring"
-)
-
-// OfferListParams applies to every requested key. Limit bounds each key's
-// page; Cursors continues the keys it names from their NextCursor.
-type OfferListParams struct {
-	Kind              OfferKind
-	PreferredCurrency string
-	Limit             int
-	Cursors           map[string]string
-}
-
-// OfferLookupRequest is the wire body of POST {catalog}/offers/lookup.
-type OfferLookupRequest struct {
-	Entitlements      []string          `json:"entitlements"`
-	Kind              OfferKind         `json:"kind"`
-	PreferredCurrency string            `json:"preferred_currency,omitempty"`
-	PageSize          int               `json:"page_size,omitempty"`
-	Cursors           map[string]string `json:"cursors,omitempty"`
-}
-
-// CatalogOffer is an active price and the product benefits it buys. The price
-// ID is immutable; its key selects the current version when starting checkout.
-type CatalogOffer struct {
-	Kind                OfferKind       `json:"kind"`
-	ProductID           string          `json:"product_id"`
-	ProductKey          string          `json:"product_key"`
-	ProductName         string          `json:"product_name"`
-	PriceID             string          `json:"price_id"`
-	PriceKey            string          `json:"price_key,omitempty"`
-	UnitAmount          int64           `json:"unit_amount,string"`
-	Currency            string          `json:"currency"`
-	AccessDurationHours *int            `json:"access_duration_hours,omitempty"`
-	AutoRenew           bool            `json:"auto_renew"`
-	EntitlementsSpec    map[string]*int `json:"entitlements_spec"`
-}
-
-type OfferList struct {
-	Data       []CatalogOffer `json:"data"`
-	HasMore    bool           `json:"has_more"`
-	NextCursor string         `json:"next_cursor,omitempty"`
-}
-
 // ListOffersForEntitlements returns one bounded page of active offers per
 // opaque resource key (at most 100 keys) in one request. Every requested key
 // is present in the result. PreferredCurrency ranks matching offers first;
 // alternatives retain their actual native currency and amount.
-func (c *Client) ListOffersForEntitlements(ctx context.Context, entitlements []string, params OfferListParams, requestOptions ...RequestOption) (map[string]OfferList, error) {
-	if len(entitlements) > MaxEntitlementChecks {
+func (c *Client) ListOffersForEntitlements(ctx context.Context, entitlements []string, params billing.OfferListParams, requestOptions ...RequestOption) (map[string]billing.OfferList, error) {
+	if len(entitlements) > billing.MaxEntitlementChecks {
 		return nil, invalidErr("at most 100 entitlements are allowed")
 	}
 	for _, key := range entitlements {
@@ -99,16 +49,16 @@ func (c *Client) ListOffersForEntitlements(ctx context.Context, entitlements []s
 			return nil, invalidErr("entitlement must be a nonempty key of at most 256 bytes")
 		}
 	}
-	if params.Kind != OfferPermanent && params.Kind != OfferFinite && params.Kind != OfferRecurring {
+	if params.Kind != billing.OfferPermanent && params.Kind != billing.OfferFinite && params.Kind != billing.OfferRecurring {
 		return nil, invalidErr("kind must be permanent, finite or recurring")
 	}
 	if params.Limit < 0 || params.Limit > 100 {
 		return nil, invalidErr("limit must be between 1 and 100")
 	}
 	if len(entitlements) == 0 {
-		return map[string]OfferList{}, nil
+		return map[string]billing.OfferList{}, nil
 	}
-	var result map[string]OfferList
-	err := c.do(ctx, http.MethodPost, c.catalogPath()+"/offers/lookup", OfferLookupRequest{entitlements, params.Kind, params.PreferredCurrency, params.Limit, params.Cursors}, &result, requestOptions...)
+	var result map[string]billing.OfferList
+	err := c.do(ctx, http.MethodPost, c.catalogPath()+"/offers/lookup", billing.OfferLookupRequest{Entitlements: entitlements, Kind: params.Kind, PreferredCurrency: params.PreferredCurrency, PageSize: params.Limit, Cursors: params.Cursors}, &result, requestOptions...)
 	return result, err
 }

@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -16,7 +16,7 @@ import (
 // CheckMany resolves only the requested resource keys; it never enumerates a
 // customer's complete entitlement history or consults mutable product contents.
 func (s *EntitlementService) CheckMany(ctx context.Context, customerID string, keys []string, at time.Time) (map[string]bool, error) {
-	if len(keys) > openrails.MaxEntitlementChecks {
+	if len(keys) > billing.MaxEntitlementChecks {
 		return nil, apperr.Invalidf("at most 100 entitlements are allowed")
 	}
 	for _, key := range keys {

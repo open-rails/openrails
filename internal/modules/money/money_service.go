@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -73,7 +73,7 @@ func derefInt(v *int64) int64 {
 
 // ErrInsufficientCredits is the public sentinel, so embedded host transactions
 // and Client calls classify a capacity refusal identically.
-var ErrInsufficientCredits = openrails.ErrInsufficientCredits
+var ErrInsufficientCredits = billing.ErrInsufficientCredits
 
 type MoneyService struct {
 	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.

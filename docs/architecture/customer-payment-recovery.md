@@ -16,7 +16,7 @@ inherits it) and construct a customer Client with explicit credentials:
 customer, err := runtime.Client(openrails.WithTokenProvider(func(ctx context.Context) (string, error) {
     return verifiedCustomerToken, nil
 }))
-result, err := customer.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{
+result, err := customer.PayInvoiceNow(ctx, billing.PayInvoiceNowRequest{
     InvoiceID: invoiceID,
     PaymentMethodID: paymentMethodID,
     IdempotencyKey: stableKeyForThisCustomerAction,

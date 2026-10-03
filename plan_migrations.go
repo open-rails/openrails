@@ -4,81 +4,18 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/billing"
 )
 
-// PlanMigrationRequest moves a price's subscribers to a price of another
-// product at each subscription's first renewal on or after EffectiveAt.
-// Prices are addressed by ID or key.
-type PlanMigrationRequest struct {
-	SourcePrice string `json:"source_price"`
-	TargetPrice string `json:"target_price"`
-	// EffectiveAt and NoticeDays are mutually exclusive; both empty means now.
-	EffectiveAt time.Time `json:"effective_at,omitzero"`
-	NoticeDays  int       `json:"notice_days,omitempty"`
-	// Immediate also applies access cutover now for auto-migratable
-	// subscriptions; nothing is charged until the next invoice.
-	Immediate bool `json:"immediate,omitempty"`
-	// AcknowledgeShortNotice permits a price increase inside the merchant's
-	// notice window.
-	AcknowledgeShortNotice bool `json:"acknowledge_short_notice,omitempty"`
-	// FallbackPolicy applies to rails that cannot be migrated server-side:
-	// keep_grandfathered (default) or cancel_at_period_end.
-	FallbackPolicy string `json:"fallback_policy,omitempty"`
-	// ArchiveSource defaults to true on create; preview ignores it.
-	ArchiveSource *bool `json:"archive_source,omitempty"`
-}
-
-// PlanMigrationOutcome classifies one subscription:
-// scheduled, applied_immediately, skipped or blocked.
-type PlanMigrationOutcome struct {
-	SubscriptionID SubscriptionID `json:"subscription_id"`
-	RepriceID      *uuid.UUID     `json:"reprice_id,omitempty"`
-	Rail           string         `json:"rail"`
-	Disposition    string         `json:"disposition"`
-	Reason         string         `json:"reason,omitempty"`
-}
-
-// PlanMigrationRailCounts summarizes what each rail can migrate server-side.
-type PlanMigrationRailCounts struct {
-	Auto           int `json:"auto"`
-	RequiresAction int `json:"requires_action"`
-	Skipped        int `json:"skipped"`
-}
-
-// PlanMigrationResult is returned by preview (BatchID nil, nothing written)
-// and create.
-type PlanMigrationResult struct {
-	BatchID        *uuid.UUID                          `json:"batch_id,omitempty"`
-	SourcePriceID  string                              `json:"source_price_id"`
-	TargetPriceID  string                              `json:"target_price_id"`
-	EffectiveAt    time.Time                           `json:"effective_at"`
-	FallbackPolicy string                              `json:"fallback_policy"`
-	Matched        int                                 `json:"matched"`
-	Scheduled      int                                 `json:"scheduled"`
-	Skipped        int                                 `json:"skipped"`
-	Blocked        int                                 `json:"blocked"`
-	ByRail         map[string]*PlanMigrationRailCounts `json:"by_rail"`
-	Outcomes       []PlanMigrationOutcome              `json:"outcomes"`
-	SourceArchived bool                                `json:"source_archived"`
-}
-
-// PlanMigrationCancelResult reports scheduled rows canceled. Subscriptions in
-// RailReleaseRequired still have a provider-side schedule to release.
-type PlanMigrationCancelResult struct {
-	Canceled            int              `json:"canceled"`
-	RailReleaseRequired []SubscriptionID `json:"rail_release_required,omitempty"`
-	Warning             string           `json:"warning,omitempty"`
-}
-
 // PreviewPlanMigration classifies the affected subscriptions without writing.
-func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigrationRequest, requestOptions ...RequestOption) (*PlanMigrationResult, error) {
-	if err := request.requirePrices(); err != nil {
+func (c *Client) PreviewPlanMigration(ctx context.Context, request billing.PlanMigrationRequest, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error) {
+	if err := requirePlanMigrationPrices(request); err != nil {
 		return nil, err
 	}
-	var out PlanMigrationResult
+	var out billing.PlanMigrationResult
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/preview", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -86,19 +23,19 @@ func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigration
 }
 
 // CreatePlanMigration schedules the migration and records its batch.
-func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationRequest, requestOptions ...RequestOption) (*PlanMigrationResult, error) {
-	if err := request.requirePrices(); err != nil {
+func (c *Client) CreatePlanMigration(ctx context.Context, request billing.PlanMigrationRequest, requestOptions ...RequestOption) (*billing.PlanMigrationResult, error) {
+	if err := requirePlanMigrationPrices(request); err != nil {
 		return nil, err
 	}
-	var out PlanMigrationResult
+	var out billing.PlanMigrationResult
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// requirePrices is the server's first check, applied before any I/O.
-func (r PlanMigrationRequest) requirePrices() error {
+// requirePlanMigrationPrices is the server's first check, applied before any I/O.
+func requirePlanMigrationPrices(r billing.PlanMigrationRequest) error {
 	if strings.TrimSpace(r.SourcePrice) == "" || strings.TrimSpace(r.TargetPrice) == "" {
 		return invalidErr("source_price and target_price required")
 	}
@@ -106,12 +43,12 @@ func (r PlanMigrationRequest) requirePrices() error {
 }
 
 // CancelPlanMigration cancels the batch's still-scheduled subscriptions.
-func (c *Client) CancelPlanMigration(ctx context.Context, batchID uuid.UUID, requestOptions ...RequestOption) (*PlanMigrationCancelResult, error) {
+func (c *Client) CancelPlanMigration(ctx context.Context, batchID uuid.UUID, requestOptions ...RequestOption) (*billing.PlanMigrationCancelResult, error) {
 	batch, err := requireUUID("batch_id", batchID)
 	if err != nil {
 		return nil, err
 	}
-	var out PlanMigrationCancelResult
+	var out billing.PlanMigrationCancelResult
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/"+batch+"/cancel", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}

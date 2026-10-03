@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"net/http"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -62,7 +62,7 @@ func takeoverRefusal(status int, code, format string, args ...any) error {
 }
 
 func ineligible(format string, args ...any) error {
-	return takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverIneligible, format, args...)
+	return takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverIneligible, format, args...)
 }
 
 type NMIEngineTakeoverPayload struct {
@@ -140,12 +140,12 @@ func (h *NMIEngineTakeover) freeze(ctx context.Context, d *db.DB, sub *models.Su
 	case sub.CurrentPeriodEndsAt == nil:
 		return p, ineligible("subscription has no paid-through date")
 	case sub.PaymentMethodID == nil:
-		return p, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement, "subscription has no saved payment method")
+		return p, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverNoAgreement, "subscription has no saved payment method")
 	}
 	anchor := sub.CurrentPeriodEndsAt.UTC()
 	cutoff := anchor.Add(-EngineTakeoverMargin)
 	if !now.Before(cutoff) {
-		return p, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose, "NMI bills the period starting %s; take over at least %s before it", anchor.Format(time.RFC3339), EngineTakeoverMargin)
+		return p, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverBoundaryTooClose, "NMI bills the period starting %s; take over at least %s before it", anchor.Format(time.RFC3339), EngineTakeoverMargin)
 	}
 	q := d.Gen(ctx)
 	method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *sub.PaymentMethodID})
@@ -154,10 +154,10 @@ func (h *NMIEngineTakeover) freeze(ctx context.Context, d *db.DB, sub *models.Su
 	}
 	instrument := charge.FreezeInstrument(method)
 	if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.Custodian != models.CustodianPSP {
-		return p, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement, "saved payment method is not this subscription's NMI vault card")
+		return p, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverNoAgreement, "saved payment method is not this subscription's NMI vault card")
 	}
 	if err := charge.ValidateEngineInstrument(method.Rail, instrument, nil, true); err != nil {
-		return p, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement, "no verified recurring stored-credential agreement: %v", err)
+		return p, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverNoAgreement, "no verified recurring stored-credential agreement: %v", err)
 	}
 	price, err := catalog.NewPriceService(d).GetByID(ctx, sub.PriceID)
 	if err != nil {
@@ -215,7 +215,7 @@ func sameLegacy(sub *models.Subscription, p NMIEngineTakeoverPayload) bool {
 		sub.ScheduledPriceID == nil && sub.DeletionScheduledAt == nil
 }
 
-func (h *NMIEngineTakeover) Preview(ctx context.Context, id uuid.UUID) (*openrails.EngineTakeover, error) {
+func (h *NMIEngineTakeover) Preview(ctx context.Context, id uuid.UUID) (*billing.EngineTakeover, error) {
 	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ func (h *NMIEngineTakeover) Preview(ctx context.Context, id uuid.UUID) (*openrai
 
 func takeoverKey(key string) (string, error) {
 	if key == "" || key != strings.TrimSpace(key) || len(key) > 200 || strings.ContainsAny(key, "\r\n\t") {
-		return "", openrails.ErrInvalid
+		return "", billing.ErrInvalid
 	}
 	return TypeNMIEngineTakeover + ":" + key, nil
 }
@@ -252,7 +252,7 @@ func (h *NMIEngineTakeover) admit(ctx context.Context, runner *Runner, id uuid.U
 		old, err := store.GetByIdempotencyKey(ctx, key)
 		if err == nil {
 			if old.IntentType != TypeNMIEngineTakeover || old.SubscriptionID == nil || *old.SubscriptionID != id {
-				return takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverConflict, "idempotency key was used for another operation")
+				return takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverConflict, "idempotency key was used for another operation")
 			}
 			in = old
 			return nil
@@ -269,7 +269,7 @@ func (h *NMIEngineTakeover) admit(ctx context.Context, runner *Runner, id uuid.U
 			return err
 		}
 		if busy {
-			return takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverInFlight, "subscription has an unresolved provider operation")
+			return takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverInFlight, "subscription has an unresolved provider operation")
 		}
 		p, err := h.freeze(ctx, d, sub, h.now())
 		if err != nil {
@@ -282,7 +282,7 @@ func (h *NMIEngineTakeover) admit(ctx context.Context, runner *Runner, id uuid.U
 	return in, err
 }
 
-func (h *NMIEngineTakeover) result(in gen.OpenrailsRailIntent) (*openrails.EngineTakeover, error) {
+func (h *NMIEngineTakeover) result(in gen.OpenrailsRailIntent) (*billing.EngineTakeover, error) {
 	p, g, err := DecodeNMIEngineTakeover(in)
 	if err != nil {
 		return nil, err
@@ -292,7 +292,7 @@ func (h *NMIEngineTakeover) result(in gen.OpenrailsRailIntent) (*openrails.Engin
 
 // Submit admits and runs one takeover now (held by the destructive switch or
 // breaker, it stays pending and the executor resumes it).
-func (h *NMIEngineTakeover) Submit(ctx context.Context, runner *Runner, id uuid.UUID, key string, origin Origin) (*openrails.EngineTakeover, error) {
+func (h *NMIEngineTakeover) Submit(ctx context.Context, runner *Runner, id uuid.UUID, key string, origin Origin) (*billing.EngineTakeover, error) {
 	k, err := takeoverKey(key)
 	if err != nil {
 		return nil, err
@@ -315,7 +315,7 @@ func (h *NMIEngineTakeover) Submit(ctx context.Context, runner *Runner, id uuid.
 // Batch admits takeovers for eligible legacy NMI subscriptions, earliest
 // boundary first. Admitted operations drain through the executor, whose
 // destructive switch and volume breaker cap how many run.
-func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req openrails.EngineTakeoverBatchRequest) (*openrails.EngineTakeoverBatchResult, error) {
+func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req billing.EngineTakeoverBatchRequest) (*billing.EngineTakeoverBatchResult, error) {
 	limit := req.MaxSubscriptions
 	if limit <= 0 || limit > EngineTakeoverBatchMax {
 		return nil, takeoverRefusal(http.StatusBadRequest, "invalid_param", "max_subscriptions must be 1..%d", EngineTakeoverBatchMax)
@@ -326,7 +326,7 @@ func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req openr
 	}
 	var price *uuid.UUID
 	if strings.TrimSpace(req.PriceID) != "" {
-		pid, err := openrails.ParsePriceID(req.PriceID)
+		pid, err := billing.ParsePriceID(req.PriceID)
 		if err != nil || pid.IsZero() {
 			return nil, takeoverRefusal(http.StatusBadRequest, "invalid_param", "invalid price_id")
 		}
@@ -348,17 +348,17 @@ func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req openr
 	for _, row := range rows {
 		candidates = append(candidates, candidate{id: row.ID, end: *row.CurrentPeriodEndsAt})
 	}
-	out := &openrails.EngineTakeoverBatchResult{Admitted: []openrails.EngineTakeover{}, Refused: []openrails.EngineTakeoverRefusal{}}
+	out := &billing.EngineTakeoverBatchResult{Admitted: []billing.EngineTakeover{}, Refused: []billing.EngineTakeoverRefusal{}}
 	for _, c := range candidates {
 		key := fmt.Sprintf("%s:batch:%s:%d", TypeNMIEngineTakeover, c.id, c.end.UTC().Unix())
 		in, err := h.admit(ctx, runner, c.id, key, OriginSystem, "bulk engine billing takeover")
 		var refusal *EngineTakeoverRefusal
 		switch {
 		case errors.As(err, &refusal):
-			out.Refused = append(out.Refused, openrails.EngineTakeoverRefusal{SubscriptionID: openrails.SubscriptionID(c.id), Code: refusal.Code, Reason: refusal.Message})
+			out.Refused = append(out.Refused, billing.EngineTakeoverRefusal{SubscriptionID: billing.SubscriptionID(c.id), Code: refusal.Code, Reason: refusal.Message})
 			continue
 		case errors.Is(err, ErrRateCeilingTripped):
-			out.Refused = append(out.Refused, openrails.EngineTakeoverRefusal{SubscriptionID: openrails.SubscriptionID(c.id), Code: openrails.CodeEngineTakeoverRateLimited, Reason: err.Error()})
+			out.Refused = append(out.Refused, billing.EngineTakeoverRefusal{SubscriptionID: billing.SubscriptionID(c.id), Code: billing.CodeEngineTakeoverRateLimited, Reason: err.Error()})
 			return out, nil
 		case err != nil:
 			return nil, err
@@ -382,7 +382,7 @@ func (h *NMIEngineTakeover) latest(ctx context.Context, id uuid.UUID) (gen.Openr
 		MerchantID: mid.UUID(), IntentType: TypeNMIEngineTakeover, SubscriptionID: id,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.OpenrailsRailIntent{}, takeoverRefusal(http.StatusNotFound, openrails.CodeEngineTakeoverNotFound, "no engine takeover for this subscription")
+		return gen.OpenrailsRailIntent{}, takeoverRefusal(http.StatusNotFound, billing.CodeEngineTakeoverNotFound, "no engine takeover for this subscription")
 	}
 	if err != nil {
 		return gen.OpenrailsRailIntent{}, err
@@ -390,7 +390,7 @@ func (h *NMIEngineTakeover) latest(ctx context.Context, id uuid.UUID) (gen.Openr
 	return NewStore(h.DB).Get(ctx, opID)
 }
 
-func (h *NMIEngineTakeover) Get(ctx context.Context, id uuid.UUID) (*openrails.EngineTakeover, error) {
+func (h *NMIEngineTakeover) Get(ctx context.Context, id uuid.UUID) (*billing.EngineTakeover, error) {
 	in, err := h.latest(ctx, id)
 	if err != nil {
 		return nil, err
@@ -401,7 +401,7 @@ func (h *NMIEngineTakeover) Get(ctx context.Context, id uuid.UUID) (*openrails.E
 // Abandon ends a takeover that has sent nothing to NMI; the legacy
 // subscription stays NMI-billed. Once the schedule delete was submitted the
 // takeover can only complete.
-func (h *NMIEngineTakeover) Abandon(ctx context.Context, id uuid.UUID) (*openrails.EngineTakeover, error) {
+func (h *NMIEngineTakeover) Abandon(ctx context.Context, id uuid.UUID) (*billing.EngineTakeover, error) {
 	in, err := h.latest(ctx, id)
 	if err != nil {
 		return nil, err
@@ -414,9 +414,9 @@ func (h *NMIEngineTakeover) Abandon(ctx context.Context, id uuid.UUID) (*openrai
 	case g.Abandoned:
 		return h.result(in)
 	case g.DeleteSubmitted || in.Status == StatusSucceeded:
-		return nil, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverCommitted, "the NMI schedule delete was already submitted; the takeover can only complete")
+		return nil, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverCommitted, "the NMI schedule delete was already submitted; the takeover can only complete")
 	case in.Status == StatusInFlight || in.Status == StatusUnknownNeedsVerify:
-		return nil, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverInFlight, "the takeover is executing; read it again")
+		return nil, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverInFlight, "the takeover is executing; read it again")
 	case OperationTerminal(in.Status):
 		return h.result(in)
 	}
@@ -426,13 +426,13 @@ func (h *NMIEngineTakeover) Abandon(ctx context.Context, id uuid.UUID) (*openrai
 		return nil, err
 	}
 	if n != 1 {
-		return nil, takeoverRefusal(http.StatusConflict, openrails.CodeEngineTakeoverInFlight, "the takeover changed state; read it again")
+		return nil, takeoverRefusal(http.StatusConflict, billing.CodeEngineTakeoverInFlight, "the takeover changed state; read it again")
 	}
 	return h.Get(ctx, id)
 }
 
-func takeoverResult(in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, g engineTakeoverProgress) *openrails.EngineTakeover {
-	r := &openrails.EngineTakeover{ID: in.ID, SubscriptionID: openrails.SubscriptionID(p.LegacySubscriptionID), RailSubscriptionID: p.RailSubscriptionID,
+func takeoverResult(in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, g engineTakeoverProgress) *billing.EngineTakeover {
+	r := &billing.EngineTakeover{ID: in.ID, SubscriptionID: billing.SubscriptionID(p.LegacySubscriptionID), RailSubscriptionID: p.RailSubscriptionID,
 		Anchor: p.Anchor, Cutoff: p.Cutoff, Amount: p.Agreement.Amount, Currency: p.Agreement.Currency, Status: in.Status, Stage: "pending"}
 	if in.LastFailureReason != nil {
 		r.Reason = *in.LastFailureReason
@@ -442,7 +442,7 @@ func takeoverResult(in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, g en
 		r.Stage = "ready"
 	case in.Status == StatusSucceeded:
 		r.Stage = "completed"
-		successor := openrails.SubscriptionID(p.Agreement.SubscriptionID)
+		successor := billing.SubscriptionID(p.Agreement.SubscriptionID)
 		r.SuccessorSubscriptionID = &successor
 	case g.Abandoned:
 		r.Stage = "abandoned"
@@ -478,7 +478,7 @@ func (h *NMIEngineTakeover) notExecuted(ctx context.Context, in gen.OpenrailsRai
 
 func (h *NMIEngineTakeover) drift(ctx context.Context, in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, detail map[string]any) Outcome {
 	detail["rail_subscription_id"] = p.RailSubscriptionID
-	detail["subscription_id"] = openrails.SubscriptionID(p.LegacySubscriptionID).String()
+	detail["subscription_id"] = billing.SubscriptionID(p.LegacySubscriptionID).String()
 	raw, _ := json.Marshal(detail)
 	action := "The NMI schedule no longer matches the local subscription; reconcile it before taking it over"
 	if _, err := h.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: in.MerchantID, FindingType: EngineTakeoverDriftFinding,

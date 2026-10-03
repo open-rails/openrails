@@ -3,7 +3,7 @@ package handlers
 import (
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
@@ -32,7 +32,7 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 }
 
 func ListOffersForEntitlements(r *httprequest.Request) {
-	var body openrails.OfferLookupRequest
+	var body billing.OfferLookupRequest
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -40,7 +40,7 @@ func ListOffersForEntitlements(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	result, err := svc.ListOffersForEntitlements(r.Request.Context(), body.Entitlements, openrails.OfferListParams{Kind: body.Kind, PreferredCurrency: body.PreferredCurrency, Limit: body.PageSize, Cursors: body.Cursors})
+	result, err := svc.ListOffersForEntitlements(r.Request.Context(), body.Entitlements, billing.OfferListParams{Kind: body.Kind, PreferredCurrency: body.PreferredCurrency, Limit: body.PageSize, Cursors: body.Cursors})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -23,14 +23,14 @@ const (
 	InvoiceAdminRetryCollection = money.InvoiceAdminRetryCollection
 )
 
-type MerchantInvoiceDTO = openrails.MerchantInvoiceDTO
+type MerchantInvoiceDTO = billing.MerchantInvoiceDTO
 
 func merchantInvoiceDTO(invoice *models.Invoice) (MerchantInvoiceDTO, error) {
 	decimals, ok := moneyutil.CurrencyScale(invoice.Currency)
 	if !ok {
 		return MerchantInvoiceDTO{}, fmt.Errorf("invoice currency is not registered")
 	}
-	return MerchantInvoiceDTO{InvoiceDTO: invoiceToDTO(invoice), CustomerID: (openrails.CustomerID(invoice.CustomerID)).String(), UnitDecimals: decimals, AvailableActions: money.InvoiceAdminActions(invoice)}, nil
+	return MerchantInvoiceDTO{InvoiceDTO: invoiceToDTO(invoice), CustomerID: (billing.CustomerID(invoice.CustomerID)).String(), UnitDecimals: decimals, AvailableActions: money.InvoiceAdminActions(invoice)}, nil
 }
 
 func (s *Service) ListMerchantInvoices(ctx context.Context, filter MerchantInvoiceFilter, limit, offset int) ([]MerchantInvoiceDTO, int64, error) {

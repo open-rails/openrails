@@ -9,7 +9,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/service"
@@ -114,5 +114,5 @@ func TestHostTransactionsBindRuntimeMerchant(t *testing.T) {
 	_, err = host.bind(merchant.WithID(context.Background(), bound))
 	require.NoError(t, err)
 	_, err = host.bind(merchant.WithID(context.Background(), other))
-	require.ErrorIs(t, err, openrails.ErrConflict)
+	require.ErrorIs(t, err, billing.ErrConflict)
 }

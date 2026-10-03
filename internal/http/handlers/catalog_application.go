@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/catalog"
 )
@@ -54,5 +54,5 @@ func MerchantCatalogRevision(r *httprequest.Request) {
 		return
 	}
 	_, allowed := adminCatalogOwnership(r)
-	r.JSON(http.StatusOK, openrails.CatalogRevision{Revision: revision, WritesAllowed: allowed})
+	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision, WritesAllowed: allowed})
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/credential"
@@ -28,13 +28,13 @@ func serviceIdempotencyConflict(r *httprequest.Request, err error) bool {
 	return true
 }
 
-type serviceDepositRequest = openrails.DepositCreditsRequest
+type serviceDepositRequest = billing.DepositCreditsRequest
 
-type serviceCaptureRequest = openrails.CaptureRequest
+type serviceCaptureRequest = billing.CaptureRequest
 
 // servicePayer converts a typed wire customer id to the engine's payer
 // identity; the zero id is nil (absent).
-func servicePayer(id openrails.CustomerID) *billingidentity.CustomerID {
+func servicePayer(id billing.CustomerID) *billingidentity.CustomerID {
 	if id.IsZero() {
 		return nil
 	}
@@ -44,10 +44,10 @@ func servicePayer(id openrails.CustomerID) *billingidentity.CustomerID {
 
 // customerIDParam reads a plain-UUID customer id from a path or query value;
 // anything unparseable is the zero id, which callers refuse.
-func customerIDParam(raw string) openrails.CustomerID {
-	id, err := openrails.ParseCustomerID(raw)
+func customerIDParam(raw string) billing.CustomerID {
+	id, err := billing.ParseCustomerID(raw)
 	if err != nil {
-		return openrails.CustomerID{}
+		return billing.CustomerID{}
 	}
 	return id
 }
@@ -132,7 +132,7 @@ func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
 
 // serviceBalanceResponse is the customer balance snapshot served by
 // GET /v1/merchant/credits/balance (issue #235/#247).
-type serviceBalanceResponse = openrails.CreditAccount
+type serviceBalanceResponse = billing.CreditAccount
 
 // ServiceGetCreditsBalance returns the customer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
@@ -165,7 +165,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		CustomerID:            openrails.CustomerID(snap.CustomerID).String(),
+		CustomerID:            billing.CustomerID(snap.CustomerID).String(),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceAmount:         snap.BalanceAmount,
@@ -197,14 +197,14 @@ type serviceTxnResponse struct {
 }
 
 type serviceUsageRollupRequest struct {
-	CustomerID openrails.CustomerID `json:"customer_id"`
-	Currency   string               `json:"currency"`
-	From       time.Time            `json:"from" binding:"required"` // RFC3339, inclusive
-	To         time.Time            `json:"to" binding:"required"`   // RFC3339, exclusive
-	GroupBy    string               `json:"group_by" binding:"required"`
+	CustomerID billing.CustomerID `json:"customer_id"`
+	Currency   string             `json:"currency"`
+	From       time.Time          `json:"from" binding:"required"` // RFC3339, inclusive
+	To         time.Time          `json:"to" binding:"required"`   // RFC3339, exclusive
+	GroupBy    string             `json:"group_by" binding:"required"`
 }
 
-type serviceRecordUsageRequest = openrails.UsageReport
+type serviceRecordUsageRequest = billing.UsageReport
 
 // ServiceRecordUsage records one host-reported metered usage event (#797): a
 // usage_events row (plus a ledger debit for a non-zero amount) that the
@@ -299,7 +299,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	for _, x := range rows {
 		total += x.Amount
 	}
-	r.SuccessJSON(openrails.ResourceRevenueResponse{Currency: currency, RevenueAmount: total, Daily: rows})
+	r.SuccessJSON(billing.ResourceRevenueResponse{Currency: currency, RevenueAmount: total, Daily: rows})
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a customer over a

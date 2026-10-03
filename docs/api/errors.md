@@ -12,7 +12,7 @@ human diagnostic that may change. `request_id`, `param` and `metadata` are optio
 Batch admission places the same error object inside each unsuccessful item's
 `error` field; an ordinary admission denial instead returns its complete decision.
 
-The Go client returns `*openrails.StatusError` with the full `ErrorDetails`, HTTP
+The Go client returns `*billing.StatusError` with the full `ErrorDetails`, HTTP
 `Status`, and `RetryAfter` response header. `errors.Is` classifies by status and
 machine code, never by message text. In particular, `idempotency_key_reused` means
 changed operation terms, and `insufficient_credits` means insufficient credit;
@@ -23,13 +23,13 @@ request ID takes precedence, with `X-Request-ID` as a fallback.
 ## Payment refusals
 
 A checkout the provider refused returns HTTP 402 and `errors.Is(err,
-openrails.ErrPaymentRefused)`; nothing was charged and the customer may try again
+billing.ErrPaymentRefused)`; nothing was charged and the customer may try again
 with another instrument in a new checkout session. The code says what happened,
 `metadata` says why:
 
 | Code | Type | Status | Meaning | Metadata |
 | --- | --- | --- | --- | --- |
-| `card_declined` | `card_error` | 402 | the provider declined the presented card | `decline_reason` (an `openrails.DeclineReason`: `insufficient_funds`, `do_not_honor`, `expired_card`, `incorrect_cvc`, `incorrect_zip`, `stop_recurring`, ...; Go hosts read it with `DeclineReasonFrom`), `failure` (the buyer-facing `PaymentFailure` with OpenRails' message; `PaymentFailureFrom`), `failure_code` (provider's verbatim code) |
+| `card_declined` | `card_error` | 402 | the provider declined the presented card | `decline_reason` (an `billing.DeclineReason`: `insufficient_funds`, `do_not_honor`, `expired_card`, `incorrect_cvc`, `incorrect_zip`, `stop_recurring`, ...; Go hosts read it with `DeclineReasonFrom`), `failure` (the buyer-facing `PaymentFailure` with OpenRails' message; `PaymentFailureFrom`), `failure_code` (provider's verbatim code) |
 | `payment_method_stale` | `card_error` | 402 | the saved payment method named by the request can no longer be charged for this customer and processor; collect the card again | — |
 | `payment_method_required` | `invalid_request_error` | 400 | the charge named neither a saved `payment_method_id` nor a new card `payment_token`; OpenRails never charges an implied card such as the default | `param`: `payment_method_id` |
 | `payment_provider_rejected` | `api_error` | 502 | the provider rejected the charge for a gateway or merchant-configuration reason; another card will not help | `decline_reason`, `failure_code` |
@@ -40,13 +40,13 @@ changes. `insufficient_credits` (402) remains the payer-balance denial.
 Refusals the transport answers before a handler runs use the same envelope:
 a request body over the deployment's cap (1 MiB in every deployment, the
 in-process embedded Client included) is `413` with code `request_body_too_large`
-(`openrails.ErrRequestBodyTooLarge`); an unreadable body is `400
+(`billing.ErrRequestBodyTooLarge`); an unreadable body is `400
 invalid_request_body`; an unauthenticated request on a host-authenticated
 route is `401 unauthorized`.
 
 Reassigning a subscription to a saved method vaulted by a different provider
 account (`PUT .../subscriptions/{id}/payment-method`) is `409
-payment_method_psp_mismatch` (`openrails.ErrPaymentMethodPSPMismatch`, also
+payment_method_psp_mismatch` (`billing.ErrPaymentMethodPSPMismatch`, also
 `ErrConflict`): provider vault references are account-scoped, nothing was sent to
 the provider, and the card must be collected again on the subscription's active
 account. The same code answers whether the mismatch is seen at the HTTP

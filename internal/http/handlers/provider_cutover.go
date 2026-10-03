@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -21,7 +21,7 @@ func PreviewMyProviderCutover(r *httprequest.Request) { providerCutover(r, true,
 
 func providerCutover(r *httprequest.Request, owned, preview bool) {
 	ctx := r.Request.Context()
-	sid, err := openrails.ParseSubscriptionID(r.Param("id"))
+	sid, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || sid.IsZero() {
 		cutoverRefusal(r, http.StatusBadRequest, "invalid_param", "invalid subscription ID", "subscription_id")
 		return
@@ -63,11 +63,11 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 			return
 		}
 	}
-	var out *openrails.ProviderCutover
+	var out *billing.ProviderCutover
 	if r.Request.Method == http.MethodGet {
 		out, err = r.State.ProviderCutovers.Get(ctx, id, r.Query("idempotency_key"))
 	} else {
-		var body openrails.ProviderCutoverRequest
+		var body billing.ProviderCutoverRequest
 		if !r.BindJSON(&body) {
 			return
 		}
@@ -95,7 +95,7 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 	}
 	if err != nil {
 		switch {
-		case errors.Is(err, openrails.ErrInvalid):
+		case errors.Is(err, billing.ErrInvalid):
 			cutoverRefusal(r, 400, "invalid_param", "invalid cutover request", "")
 		case errors.Is(err, providerqualification.ErrUnqualified), errors.Is(err, providerqualification.ErrInvalid):
 			cutoverRefusal(r, http.StatusConflict, "provider_cutover_unqualified", "both provider accounts require explicit cutover qualification", "")

@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -23,12 +23,12 @@ const takeoverDrift = "life.engine_takeover.schedule_drift"
 // card carries the verified recurring agreement a takeover charges under.
 func importTakeoverLegacy(t *testing.T, w *world, tp topology) *legacy {
 	t.Helper()
-	return importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
+	return importLegacy(t, w, "nmi", tp, func(book *billing.DeclaredBilling) {
 		book.PaymentMethods[0].RecurringTransactionID = book.Transactions[0].TransactionID
 	})
 }
 
-func (l *legacy) takeover(key string) *openrails.EngineTakeover {
+func (l *legacy) takeover(key string) *billing.EngineTakeover {
 	l.w.t.Helper()
 	out, err := l.w.client[l.tp].TakeOverBilling(l.w.t.Context(), l.sub, key)
 	require.NoError(l.w.t, err)
@@ -36,7 +36,7 @@ func (l *legacy) takeover(key string) *openrails.EngineTakeover {
 	return out
 }
 
-func (l *legacy) takeoverState() *openrails.EngineTakeover {
+func (l *legacy) takeoverState() *billing.EngineTakeover {
 	l.w.t.Helper()
 	out, err := l.w.client[l.tp].GetEngineTakeover(l.w.t.Context(), l.sub)
 	require.NoError(l.w.t, err)
@@ -128,14 +128,14 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			// The book names no recurring agreement and no sale of the schedule,
 			// so there is no anchor to take over (or to dun) with.
 			w.waive("recorded", "the book's only sale is declared without its schedule, so it is not attributed to the membership")
-			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
+			l := importLegacy(t, w, "nmi", tp, func(book *billing.DeclaredBilling) {
 				book.Transactions[0].RailSubscriptionID = ""
 			})
 			require.Contains(t, w.openFindings("life.import.no_recurring_anchor"), l.railSub)
 			_, err := w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
-			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverNoAgreement)
+			requireCode(t, err, http.StatusConflict, billing.CodeEngineTakeoverNoAgreement)
 			_, err = w.client[tp].GetEngineTakeover(t.Context(), l.sub)
-			requireCode(t, err, http.StatusNotFound, openrails.CodeEngineTakeoverNotFound)
+			requireCode(t, err, http.StatusNotFound, billing.CodeEngineTakeoverNotFound)
 			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 		})
 		t.Run(string(tp)+"/boundary_too_close", func(t *testing.T) {
@@ -145,9 +145,9 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			l := importTakeoverLegacy(t, w, tp)
 			w.advance(l.periodEnd().Sub(w.clock.Now()) - 23*time.Hour)
 			_, err := w.client[tp].PreviewEngineTakeover(t.Context(), l.sub)
-			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose)
+			requireCode(t, err, http.StatusConflict, billing.CodeEngineTakeoverBoundaryTooClose)
 			_, err = w.client[tp].TakeOverBilling(t.Context(), l.sub, "k-"+uuid.NewString())
-			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverBoundaryTooClose)
+			requireCode(t, err, http.StatusConflict, billing.CodeEngineTakeoverBoundaryTooClose)
 			require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 			require.Equal(t, "nmi_schedule", w.subscription(tp, l.sub).CollectionPolicy)
 		})
@@ -158,7 +158,7 @@ func TestNMIEngineTakeoverRefusals(t *testing.T) {
 			l := importTakeoverLegacy(t, w, tp)
 			require.Equal(t, "completed", l.takeover("k-"+uuid.NewString()).Stage)
 			_, err := w.client[tp].AbandonEngineTakeover(t.Context(), l.sub)
-			requireCode(t, err, http.StatusConflict, openrails.CodeEngineTakeoverCommitted)
+			requireCode(t, err, http.StatusConflict, billing.CodeEngineTakeoverCommitted)
 			require.Equal(t, 1, w.nmi.ScheduleDeletes(l.railSub))
 		})
 	}
@@ -255,7 +255,7 @@ func TestNMIEngineTakeoverCrashDuringDelete(t *testing.T) {
 	g := w.nmi.hold(newGate(func(r *http.Request) bool {
 		return r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/v5/subscriptions/")
 	}, true))
-	batch, err := w.client[embedded].TakeOverBillingBatch(t.Context(), openrails.EngineTakeoverBatchRequest{MaxSubscriptions: 1})
+	batch, err := w.client[embedded].TakeOverBillingBatch(t.Context(), billing.EngineTakeoverBatchRequest{MaxSubscriptions: 1})
 	require.NoError(t, err)
 	require.Len(t, batch.Admitted, 1)
 	promoteCtx, stopPromoting := context.WithCancel(t.Context())
@@ -296,33 +296,33 @@ func importLegacyBook(t *testing.T, w *world, n int) []*legacy {
 	t.Helper()
 	client := w.client[embedded]
 	ent := "content:legacy-book"
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "book-" + uuid.NewString()[:8], DisplayName: "Legacy book", EntitlementsSpec: map[string]*int{ent: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "book-" + uuid.NewString()[:8], DisplayName: "Legacy book", EntitlementsSpec: map[string]*int{ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	plan := "legacy_plan_" + uuid.NewString()[:8]
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(price.ID)
+	priceID, err := billing.ParsePriceID(price.ID)
 	require.NoError(t, err)
-	book := openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"}}
+	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"}}
 	var out []*legacy
 	for i := range n {
 		c := w.newCustomer()
-		customerID, err := openrails.ParseCustomerID(c.id)
+		customerID, err := billing.ParseCustomerID(c.id)
 		require.NoError(t, err)
 		start := w.clock.Now().Add(-10*day + time.Duration(i)*time.Minute)
 		end := start.Add(monthHours * time.Hour)
 		vault := w.nmi.AddVault(visa)
 		railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: plan, Amount: "9.99", NextBilling: end})
 		tx := w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID
-		ref := openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
-		book.Customers = append(book.Customers, openrails.DeclaredCustomer{Customer: customerID})
-		book.PaymentMethods = append(book.PaymentMethods, openrails.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef,
+		ref := billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}
+		book.Customers = append(book.Customers, billing.DeclaredCustomer{Customer: customerID})
+		book.PaymentMethods = append(book.PaymentMethods, billing.DeclaredPaymentMethod{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: ref.RailMethodRef,
 			InitialTransactionID: tx, RecurringTransactionID: tx, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"})
-		book.Subscriptions = append(book.Subscriptions, openrails.DeclaredSubscription{SourceID: fmt.Sprintf("book-%d-%s", i, railSub), Customer: customerID, Price: priceID,
+		book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: fmt.Sprintf("book-%d-%s", i, railSub), Customer: customerID, Price: priceID,
 			Rail: "nmi", RailSubscriptionID: railSub, StartedAt: start, PaidThrough: &end, PaymentMethod: &ref})
-		book.Transactions = append(book.Transactions, openrails.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: tx, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start})
+		book.Transactions = append(book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: tx, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start})
 		out = append(out, &legacy{w: w, rail: "nmi", tp: embedded, c: c, railSub: railSub, railCust: vault, ent: ent})
 	}
 	result, err := client.ImportBilling(t.Context(), book)
@@ -330,7 +330,7 @@ func importLegacyBook(t *testing.T, w *world, n int) []*legacy {
 	require.Len(t, result.Imported, n, "%+v", result)
 	w.settle()
 	for _, l := range out {
-		subs, err := client.ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: l.c.id})
+		subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
 		require.NoError(t, err)
 		require.Len(t, subs.Data, 1)
 		l.sub = subs.Data[0].ID
@@ -349,9 +349,9 @@ func TestNMIEngineTakeoverBulk(t *testing.T) {
 	w := newWorld(t)
 	w.armDestructive()
 	book := importLegacyBook(t, w, n)
-	_, err := w.client[remote].TakeOverBillingBatch(t.Context(), openrails.EngineTakeoverBatchRequest{MaxSubscriptions: 1000})
+	_, err := w.client[remote].TakeOverBillingBatch(t.Context(), billing.EngineTakeoverBatchRequest{MaxSubscriptions: 1000})
 	requireCode(t, err, http.StatusBadRequest, "invalid_param")
-	batch, err := w.client[remote].TakeOverBillingBatch(t.Context(), openrails.EngineTakeoverBatchRequest{MaxSubscriptions: n})
+	batch, err := w.client[remote].TakeOverBillingBatch(t.Context(), billing.EngineTakeoverBatchRequest{MaxSubscriptions: n})
 	require.NoError(t, err)
 	require.Len(t, batch.Admitted, n, "%+v", batch.Refused)
 	w.settle()
@@ -379,7 +379,7 @@ func TestNMIEngineTakeoverBulk(t *testing.T) {
 	require.NotEmpty(t, w.openFindings("life.provider_intent.held_bulk"))
 	require.Zero(t, len(w.nmi.Attempts()))
 
-	again, err := w.client[embedded].TakeOverBillingBatch(t.Context(), openrails.EngineTakeoverBatchRequest{MaxSubscriptions: n})
+	again, err := w.client[embedded].TakeOverBillingBatch(t.Context(), billing.EngineTakeoverBatchRequest{MaxSubscriptions: n})
 	require.NoError(t, err)
 	require.Empty(t, again.Admitted, "in-flight and completed takeovers are not admitted again")
 	w.settle()

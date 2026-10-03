@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/merchant"
 
@@ -30,7 +30,7 @@ type MerchantDeclaration struct {
 	Config MerchantConfig
 	PSPs   []PSPDeclaration
 	// MetadataApplication applies an explicitly versioned metadata update after identity binding.
-	MetadataApplication *openrails.MerchantConfigurationApplyParams
+	MetadataApplication *billing.MerchantConfigurationApplyParams
 }
 
 func validateMerchantDeclaration(declaration *MerchantDeclaration) error {

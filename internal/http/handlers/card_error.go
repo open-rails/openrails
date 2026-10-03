@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/decline"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -12,25 +12,25 @@ import (
 )
 
 // writePaymentMethodError renders a provider refusal as the shared payment
-// refusal contract (openrails.CodeCardDeclined / CodePaymentProviderRejected).
+// refusal contract (billing.CodeCardDeclined / CodePaymentProviderRejected).
 // Classification uses the provider's code and AVS/CVV results; processor text
 // stays in server-side logs and the caller receives safe actionable copy.
 func writePaymentMethodError(r *httprequest.Request, pmErr *paymentmethods.PaymentMethodError) {
 	r.APIError(railPaymentRefusalError(pmErr.Rail, strings.TrimSpace(pmErr.LocalizationID), pmErr.Reason))
 }
 
-// writePaymentMethodStale renders openrails.CodePaymentMethodStale: the saved
+// writePaymentMethodStale renders billing.CodePaymentMethodStale: the saved
 // instrument the request named can no longer be charged; collect it again.
 func writePaymentMethodStale(r *httprequest.Request) {
-	r.APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, openrails.CodePaymentMethodStale,
+	r.APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, billing.CodePaymentMethodStale,
 		"This saved payment method can no longer be used. Add the card again."))
 }
 
-// writePaymentMethodRequired renders openrails.CodePaymentMethodRequired: a
+// writePaymentMethodRequired renders billing.CodePaymentMethodRequired: a
 // charge must name its payment method; none is implied.
 func writePaymentMethodRequired(r *httprequest.Request) {
 	param := "payment_method_id"
-	e := api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, openrails.CodePaymentMethodRequired,
+	e := api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, billing.CodePaymentMethodRequired,
 		"Choose a payment method: name a saved payment_method_id or send a new card payment_token.")
 	e.Param = &param
 	r.APIError(e)
@@ -47,7 +47,7 @@ func paymentRefusalError(failureCode string) *api.APIError {
 // railPaymentRefusalError renders a refusal: reason, when set, was classified
 // with the refusal's full evidence; otherwise failureCode is classified in
 // rail's vocabulary.
-func railPaymentRefusalError(rail, failureCode string, reason openrails.DeclineReason) *api.APIError {
+func railPaymentRefusalError(rail, failureCode string, reason billing.DeclineReason) *api.APIError {
 	if rail == "" {
 		rail = "nmi"
 	}
@@ -61,10 +61,10 @@ func railPaymentRefusalError(rail, failureCode string, reason openrails.DeclineR
 	}
 	switch {
 	case decline.ProviderFault(reason):
-		return api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, openrails.CodePaymentProviderRejected,
+		return api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, billing.CodePaymentProviderRejected,
 			"The payment processor could not complete this payment. Please try again later.").WithMetadata(metadata)
 	default:
-		return api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, openrails.CodeCardDeclined,
+		return api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, billing.CodeCardDeclined,
 			failure.Message).WithMetadata(metadata)
 	}
 }

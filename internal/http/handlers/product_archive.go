@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -56,7 +56,7 @@ type productArchiveOperation struct {
 	ID             uuid.UUID
 	ProductID      uuid.UUID
 	ProductKey     string
-	Action         openrails.PurchaseAction
+	Action         billing.PurchaseAction
 	PurchasedSince *time.Time
 	Reason         string
 	CreatedAt      time.Time
@@ -101,16 +101,16 @@ func (req *productArchiveRequest) validate() *api.APIError {
 	}
 	req.Purchases.Action = strings.ToLower(strings.TrimSpace(req.Purchases.Action))
 	if req.Purchases.Action == "" {
-		req.Purchases.Action = string(openrails.PurchaseActionNone)
+		req.Purchases.Action = string(billing.PurchaseActionNone)
 	}
 	windowed := req.Purchases.PurchasedSince != nil || strings.TrimSpace(req.Purchases.Window) != ""
-	switch openrails.PurchaseAction(req.Purchases.Action) {
-	case openrails.PurchaseActionNone:
+	switch billing.PurchaseAction(req.Purchases.Action) {
+	case billing.PurchaseActionNone:
 		if windowed {
 			return invalid("purchases.action none takes no purchase window")
 		}
 		return nil
-	case openrails.PurchaseActionRefund, openrails.PurchaseActionReview:
+	case billing.PurchaseActionRefund, billing.PurchaseActionReview:
 	default:
 		return invalid(`purchases.action must be "none", "refund" or "review"`)
 	}
@@ -204,7 +204,7 @@ func loadProductArchiveByID(ctx context.Context, d *db.DB, id uuid.UUID) (produc
 	if err != nil {
 		return productArchiveOperation{}, err
 	}
-	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: openrails.PurchaseAction(row.PurchaseAction),
+	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: billing.PurchaseAction(row.PurchaseAction),
 		PurchasedSince: row.PurchasedSince, Reason: row.Reason, CreatedAt: row.CreatedAt}, nil
 }
 
@@ -217,7 +217,7 @@ func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (product
 	if err != nil {
 		return productArchiveOperation{}, nil, err
 	}
-	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: openrails.PurchaseAction(row.PurchaseAction),
+	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: billing.PurchaseAction(row.PurchaseAction),
 		PurchasedSince: row.PurchasedSince, Reason: row.Reason, CreatedAt: row.CreatedAt}, row.RequestSha256, nil
 }
 
@@ -251,7 +251,7 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req produ
 		}
 		var product gen.OpenrailsProduct
 		if raw := strings.TrimSpace(req.ProductID); raw != "" {
-			typed, perr := openrails.ParseProductID(raw)
+			typed, perr := billing.ParseProductID(raw)
 			if perr != nil || typed.IsZero() {
 				refusal = productArchiveError(http.StatusBadRequest, "invalid_request", "invalid product_id")
 				return nil
@@ -296,7 +296,7 @@ func archiveProductRow(ctx context.Context, r *httprequest.Request, productID uu
 	if err != nil {
 		return err
 	}
-	current, err := svc.GetProduct(ctx, openrails.ProductID(productID))
+	current, err := svc.GetProduct(ctx, billing.ProductID(productID))
 	if err != nil {
 		return err
 	}
@@ -304,7 +304,7 @@ func archiveProductRow(ctx context.Context, r *httprequest.Request, productID uu
 		return nil
 	}
 	archived := true
-	_, err = svc.UpdateProduct(ctx, openrails.ProductID(productID), openrails.UpdateProductRequest{Archived: &archived})
+	_, err = svc.UpdateProduct(ctx, billing.ProductID(productID), billing.UpdateProductRequest{Archived: &archived})
 	return err
 }
 
@@ -318,7 +318,7 @@ type qualifyingPurchase struct {
 }
 
 func qualifyingPurchases(ctx context.Context, d *db.DB, op productArchiveOperation) ([]qualifyingPurchase, error) {
-	if op.Action == openrails.PurchaseActionNone || op.PurchasedSince == nil {
+	if op.Action == billing.PurchaseActionNone || op.PurchasedSince == nil {
 		return nil, nil
 	}
 	mid, err := merchant.Require(ctx)
@@ -340,11 +340,11 @@ func productArchiveRefundKey(op productArchiveOperation) string {
 	return "product_archive:" + op.ID.String()
 }
 
-func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op productArchiveOperation, act bool) (*openrails.ProductArchive, error) {
-	out := &openrails.ProductArchive{
-		ID: op.ID.String(), Object: "product_archive", ProductID: openrails.ProductID(op.ProductID), ProductKey: op.ProductKey,
+func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op productArchiveOperation, act bool) (*billing.ProductArchive, error) {
+	out := &billing.ProductArchive{
+		ID: op.ID.String(), Object: "product_archive", ProductID: billing.ProductID(op.ProductID), ProductKey: op.ProductKey,
 		Action: op.Action, PurchasedSince: op.PurchasedSince, Reason: op.Reason, CreatedAt: op.CreatedAt,
-		Complete: true, Purchases: []openrails.ArchivedPurchase{},
+		Complete: true, Purchases: []billing.ArchivedPurchase{},
 	}
 	purchases, err := qualifyingPurchases(ctx, r.State.DB, op)
 	if err != nil {
@@ -356,7 +356,7 @@ func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op prod
 		if err != nil {
 			return nil, err
 		}
-		if item.Outcome == openrails.ArchivedPurchaseNotStarted {
+		if item.Outcome == billing.ArchivedPurchaseNotStarted {
 			out.Complete = false
 		}
 		out.Purchases = append(out.Purchases, item)
@@ -364,21 +364,21 @@ func evaluateProductArchive(ctx context.Context, r *httprequest.Request, op prod
 	return out, nil
 }
 
-func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op productArchiveOperation, purchase qualifyingPurchase, act bool, budget *int) (openrails.ArchivedPurchase, error) {
-	item := openrails.ArchivedPurchase{
-		PaymentID: openrails.PaymentID(purchase.ID), CustomerID: purchase.CustomerID.String(),
+func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op productArchiveOperation, purchase qualifyingPurchase, act bool, budget *int) (billing.ArchivedPurchase, error) {
+	item := billing.ArchivedPurchase{
+		PaymentID: billing.PaymentID(purchase.ID), CustomerID: purchase.CustomerID.String(),
 		Amount: purchase.Amount, Currency: purchase.Currency, PurchasedAt: purchase.PurchasedAt,
 	}
 	paymentService := payments.NewPaymentService(r.State.DB, r.Clock)
-	if op.Action == openrails.PurchaseActionRefund {
+	if op.Action == billing.PurchaseActionRefund {
 		refund, err := paymentService.GetRefundByAdminIdempotencyKey(ctx, purchase.ID, productArchiveRefundKey(op))
 		switch {
 		case err == nil && !strings.EqualFold(refund.Status, payments.PaymentStatusFailedValue):
-			id := openrails.PaymentID(refund.ID)
+			id := billing.PaymentID(refund.ID)
 			item.RefundID = &id
-			item.Outcome = openrails.ArchivedPurchaseRefunded
+			item.Outcome = billing.ArchivedPurchaseRefunded
 			if !payments.PaymentStatusCompleted(refund.Status) {
-				item.Outcome = openrails.ArchivedPurchaseRefundPending
+				item.Outcome = billing.ArchivedPurchaseRefundPending
 			}
 			return item, nil
 		case err == nil:
@@ -398,17 +398,17 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 		return item, err
 	}
 	if purchase.Amount-refunded <= 0 {
-		item.Outcome = openrails.ArchivedPurchaseAlreadyRefunded
+		item.Outcome = billing.ArchivedPurchaseAlreadyRefunded
 		return item, nil
 	}
-	if op.Action == openrails.PurchaseActionReview {
+	if op.Action == billing.PurchaseActionReview {
 		return reviewArchivedPurchase(ctx, r, op, purchase, item, "", act)
 	}
 	if purchase.MoneyMovement != string(models.MoneyMovementRail) {
 		return reviewArchivedPurchase(ctx, r, op, purchase, item, "off-rail purchase; refund it out of band", act)
 	}
 	if !act || *budget <= 0 {
-		item.Outcome = openrails.ArchivedPurchaseNotStarted
+		item.Outcome = billing.ArchivedPurchaseNotStarted
 		return item, nil
 	}
 	*budget--
@@ -424,21 +424,21 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 		}
 		return reviewArchivedPurchase(ctx, r, op, purchase, item, "automatic refund refused: "+refusal.Message, act)
 	}
-	id := openrails.PaymentID(refund.ID)
+	id := billing.PaymentID(refund.ID)
 	item.RefundID = &id
-	item.Outcome = openrails.ArchivedPurchaseRefunded
+	item.Outcome = billing.ArchivedPurchaseRefunded
 	if status == http.StatusAccepted {
-		item.Outcome = openrails.ArchivedPurchaseRefundPending
+		item.Outcome = billing.ArchivedPurchaseRefundPending
 	}
 	return item, nil
 }
 
-func reviewArchivedPurchase(ctx context.Context, r *httprequest.Request, op productArchiveOperation, purchase qualifyingPurchase, item openrails.ArchivedPurchase, detail string, act bool) (openrails.ArchivedPurchase, error) {
+func reviewArchivedPurchase(ctx context.Context, r *httprequest.Request, op productArchiveOperation, purchase qualifyingPurchase, item billing.ArchivedPurchase, detail string, act bool) (billing.ArchivedPurchase, error) {
 	if !act {
 		if review, found, err := loadPurchaseReview(ctx, r.State.DB, purchase.ID); err != nil || found {
 			return applyReviewOutcome(item, review), err
 		}
-		item.Outcome = openrails.ArchivedPurchaseNotStarted
+		item.Outcome = billing.ArchivedPurchaseNotStarted
 		return item, nil
 	}
 	review, err := recordPurchaseReview(ctx, r.State.DB, op, purchase, detail)
@@ -448,81 +448,81 @@ func reviewArchivedPurchase(ctx context.Context, r *httprequest.Request, op prod
 	return applyReviewOutcome(item, review), nil
 }
 
-func applyReviewOutcome(item openrails.ArchivedPurchase, review openrails.PurchaseReview) openrails.ArchivedPurchase {
+func applyReviewOutcome(item billing.ArchivedPurchase, review billing.PurchaseReview) billing.ArchivedPurchase {
 	// The review keeps the reason recorded when it was opened, so every
 	// projection of the operation reports the same detail.
 	item.ReviewID = review.ID
 	item.Detail = review.Detail
 	switch review.Status {
-	case openrails.PurchaseReviewRefunded:
-		item.Outcome = openrails.ArchivedPurchaseReviewRefunded
+	case billing.PurchaseReviewRefunded:
+		item.Outcome = billing.ArchivedPurchaseReviewRefunded
 		item.RefundID = review.RefundID
-	case openrails.PurchaseReviewDismissed:
-		item.Outcome = openrails.ArchivedPurchaseReviewDismissed
+	case billing.PurchaseReviewDismissed:
+		item.Outcome = billing.ArchivedPurchaseReviewDismissed
 	default:
-		item.Outcome = openrails.ArchivedPurchaseReviewOpen
+		item.Outcome = billing.ArchivedPurchaseReviewOpen
 	}
 	return item
 }
 
 // recordPurchaseReview inserts one open finding per payment. It never reopens
 // a finding the merchant already resolved.
-func recordPurchaseReview(ctx context.Context, d *db.DB, op productArchiveOperation, purchase qualifyingPurchase, detail string) (openrails.PurchaseReview, error) {
+func recordPurchaseReview(ctx context.Context, d *db.DB, op productArchiveOperation, purchase qualifyingPurchase, detail string) (billing.PurchaseReview, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return openrails.PurchaseReview{}, err
+		return billing.PurchaseReview{}, err
 	}
-	payment := openrails.PaymentID(purchase.ID)
+	payment := billing.PaymentID(purchase.ID)
 	evidence := map[string]any{
 		recommend.EvidenceKey: recommend.Recommendation{Action: recommend.ActionCancelAndRefund, Params: map[string]any{
 			"refund_payment_id": payment.String(), "revoke_access": true,
 		}}.Map(),
 		"local": map[string]any{
-			"product_archive_id": op.ID.String(), "product_id": openrails.ProductID(op.ProductID).String(), "product_key": op.ProductKey,
+			"product_archive_id": op.ID.String(), "product_id": billing.ProductID(op.ProductID).String(), "product_key": op.ProductKey,
 			"payment_id": payment.String(), "customer_id": purchase.CustomerID.String(), "amount": fmt.Sprint(purchase.Amount),
 			"currency": purchase.Currency, "purchased_at": purchase.PurchasedAt.UTC().Format(time.RFC3339Nano), "detail": detail,
 		},
 	}
 	raw, err := json.Marshal(evidence)
 	if err != nil {
-		return openrails.PurchaseReview{}, err
+		return billing.PurchaseReview{}, err
 	}
 	if err := d.Gen(ctx).InsertPurchaseReview(ctx, gen.InsertPurchaseReviewParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType,
 		SubjectKey: purchase.ID.String(), RecommendedAction: "Refund or dismiss a purchase of an archived product", Evidence: raw}); err != nil {
-		return openrails.PurchaseReview{}, fmt.Errorf("record purchase review: %w", err)
+		return billing.PurchaseReview{}, fmt.Errorf("record purchase review: %w", err)
 	}
 	review, _, err := loadPurchaseReview(ctx, d, purchase.ID)
 	return review, err
 }
 
-func loadPurchaseReview(ctx context.Context, d *db.DB, paymentID uuid.UUID) (openrails.PurchaseReview, bool, error) {
+func loadPurchaseReview(ctx context.Context, d *db.DB, paymentID uuid.UUID) (billing.PurchaseReview, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return openrails.PurchaseReview{}, false, err
+		return billing.PurchaseReview{}, false, err
 	}
 	row, err := d.Gen(ctx).GetPurchaseReviewBySubject(ctx, gen.GetPurchaseReviewBySubjectParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, SubjectKey: paymentID.String()})
 	if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
-		return openrails.PurchaseReview{}, false, nil
+		return billing.PurchaseReview{}, false, nil
 	}
 	if err != nil {
-		return openrails.PurchaseReview{}, false, err
+		return billing.PurchaseReview{}, false, err
 	}
 	return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt), true, nil
 }
 
-func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *string, created time.Time, resolved *time.Time) openrails.PurchaseReview {
+func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *string, created time.Time, resolved *time.Time) billing.PurchaseReview {
 	var evidence struct {
 		Local      map[string]string `json:"local"`
 		Resolution map[string]any    `json:"resolution"`
 	}
 	_ = json.Unmarshal(raw, &evidence)
 	local := evidence.Local
-	review := openrails.PurchaseReview{
+	review := billing.PurchaseReview{
 		ID: id.String(), Object: "purchase_review", ProductArchiveID: local["product_archive_id"], ProductKey: local["product_key"],
 		CustomerID: local["customer_id"], Currency: local["currency"], Detail: local["detail"], CreatedAt: created, ResolvedAt: resolved,
 	}
-	review.ProductID, _ = openrails.ParseProductID(local["product_id"])
-	review.PaymentID, _ = openrails.ParsePaymentID(local["payment_id"])
+	review.ProductID, _ = billing.ParseProductID(local["product_id"])
+	review.PaymentID, _ = billing.ParsePaymentID(local["payment_id"])
 	fmt.Sscan(local["amount"], &review.Amount)
 	review.PurchasedAt, _ = time.Parse(time.RFC3339Nano, local["purchased_at"])
 	if notes != nil {
@@ -530,17 +530,17 @@ func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *s
 	}
 	switch status {
 	case "fixed":
-		review.Status = openrails.PurchaseReviewRefunded
+		review.Status = billing.PurchaseReviewRefunded
 		if refundID, ok := evidence.Resolution["refund_id"].(string); ok {
 			if parsed, err := uuid.Parse(refundID); err == nil {
-				typed := openrails.PaymentID(parsed)
+				typed := billing.PaymentID(parsed)
 				review.RefundID = &typed
 			}
 		}
 	case "ignored":
-		review.Status = openrails.PurchaseReviewDismissed
+		review.Status = billing.PurchaseReviewDismissed
 	default:
-		review.Status = openrails.PurchaseReviewOpen
+		review.Status = billing.PurchaseReviewOpen
 	}
 	return review
 }
@@ -555,8 +555,8 @@ func ListPurchaseReviews(r *httprequest.Request) {
 	}
 	ctx := r.Request.Context()
 	statuses := map[string][]string{
-		"": {"requires_review", "reconcile_required"}, openrails.PurchaseReviewOpen: {"requires_review", "reconcile_required"},
-		openrails.PurchaseReviewRefunded: {"fixed"}, openrails.PurchaseReviewDismissed: {"ignored"},
+		"": {"requires_review", "reconcile_required"}, billing.PurchaseReviewOpen: {"requires_review", "reconcile_required"},
+		billing.PurchaseReviewRefunded: {"fixed"}, billing.PurchaseReviewDismissed: {"ignored"},
 	}
 	findingStatuses, ok := statuses[strings.TrimSpace(r.Query("status"))]
 	if !ok {
@@ -583,11 +583,11 @@ func ListPurchaseReviews(r *httprequest.Request) {
 		r.InternalError("purchase reviews could not be listed", err)
 		return
 	}
-	reviews := make([]openrails.PurchaseReview, 0, len(rows))
+	reviews := make([]billing.PurchaseReview, 0, len(rows))
 	for _, row := range rows {
 		reviews = append(reviews, purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt))
 	}
-	r.JSON(http.StatusOK, openrails.Page[openrails.PurchaseReview]{Object: "list", Data: reviews, Total: total, Limit: limit, Offset: offset, HasMore: int64(offset+len(reviews)) < total})
+	r.JSON(http.StatusOK, billing.Page[billing.PurchaseReview]{Object: "list", Data: reviews, Total: total, Limit: limit, Offset: offset, HasMore: int64(offset+len(reviews)) < total})
 }
 
 // ResolvePurchaseReview refunds (approve) or dismisses (ignore) one review
@@ -605,16 +605,16 @@ func ResolvePurchaseReview(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid purchase review id")
 		return
 	}
-	var req openrails.ResolvePurchaseReviewParams
+	var req billing.ResolvePurchaseReviewParams
 	if !r.BindJSON(&req) {
 		return
 	}
 	var outcome, want string
 	switch req.Decision {
-	case openrails.PurchaseReviewDecisionRefund:
-		outcome, want = "approve", openrails.PurchaseReviewRefunded
-	case openrails.PurchaseReviewDecisionDismiss:
-		outcome, want = "ignore", openrails.PurchaseReviewDismissed
+	case billing.PurchaseReviewDecisionRefund:
+		outcome, want = "approve", billing.PurchaseReviewRefunded
+	case billing.PurchaseReviewDecisionDismiss:
+		outcome, want = "ignore", billing.PurchaseReviewDismissed
 	default:
 		r.ErrorJSON(http.StatusBadRequest, `decision must be "refund" or "dismiss"`)
 		return
@@ -646,14 +646,14 @@ func ResolvePurchaseReview(r *httprequest.Request) {
 	r.JSON(http.StatusOK, review)
 }
 
-func loadPurchaseReviewByID(ctx context.Context, d *db.DB, id uuid.UUID) (openrails.PurchaseReview, error) {
+func loadPurchaseReviewByID(ctx context.Context, d *db.DB, id uuid.UUID) (billing.PurchaseReview, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return openrails.PurchaseReview{}, err
+		return billing.PurchaseReview{}, err
 	}
 	row, err := d.Gen(ctx).GetPurchaseReviewByID(ctx, gen.GetPurchaseReviewByIDParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, ID: id})
 	if err != nil {
-		return openrails.PurchaseReview{}, err
+		return billing.PurchaseReview{}, err
 	}
 	return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt), nil
 }

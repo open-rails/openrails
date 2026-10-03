@@ -16,7 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/crypto"
@@ -304,7 +304,7 @@ func (s *CheckoutSessionService) renderPaymentMethodSetup(ctx context.Context, s
 	}
 	response := s.sessionToResponse(session)
 	if state.PaymentMethodID != uuid.Nil {
-		method := openrails.PaymentMethodID(state.PaymentMethodID)
+		method := billing.PaymentMethodID(state.PaymentMethodID)
 		response.PaymentMethodID = &method
 	}
 	if session.Status != models.CheckoutSessionStatusRequiresAction {
@@ -331,7 +331,7 @@ func (s *CheckoutSessionService) renderPaymentMethodSetup(ctx context.Context, s
 	if !s.now().Before(state.ExpiresAt) {
 		return nil, ErrCheckoutSessionExpired
 	}
-	response.Capture = &openrails.CustodianCaptureAction{Kind: models.CustodianHyperSwitch, CustodianID: state.CustodianID, SessionID: state.VendorSessionID, CustomerID: state.VendorCustomerID, APIBaseURL: state.APIBaseURL, SDKURL: state.SDKURL, PublicAPIKey: state.PublicAPIKey, SDKAuthorization: string(secret), ExpiresAt: state.ExpiresAt}
+	response.Capture = &billing.CustodianCaptureAction{Kind: models.CustodianHyperSwitch, CustodianID: state.CustodianID, SessionID: state.VendorSessionID, CustomerID: state.VendorCustomerID, APIBaseURL: state.APIBaseURL, SDKURL: state.SDKURL, PublicAPIKey: state.PublicAPIKey, SDKAuthorization: string(secret), ExpiresAt: state.ExpiresAt}
 	return response, nil
 }
 

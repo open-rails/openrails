@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -52,7 +52,7 @@ type checkoutSessionCreateRequest struct {
 	PriceID        string                       `json:"price_id,omitempty" binding:"omitempty"`
 	PriceKey       string                       `json:"price_key,omitempty" binding:"omitempty"`
 	Entitlement    string                       `json:"entitlement,omitempty" binding:"omitempty"`
-	OfferKind      openrails.OfferKind          `json:"offer_kind,omitempty"`
+	OfferKind      billing.OfferKind            `json:"offer_kind,omitempty"`
 	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription solana_cancel solana_tier_change payment_method"`
 	Payment        checkoutSessionPaymentParams `json:"payment" binding:"required"`
 	Metadata       map[string]string            `json:"metadata,omitempty"`
@@ -76,10 +76,10 @@ type checkoutSessionCreateRequest struct {
 
 type checkoutSessionConfirmRequest struct {
 	Payment struct {
-		Capture   *openrails.CustodianCaptureReference `json:"capture,omitempty"`
-		Rail      string                               `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi stripe"`
-		Signature string                               `json:"signature,omitempty"`
-		Wallet    string                               `json:"wallet,omitempty"`
+		Capture   *billing.CustodianCaptureReference `json:"capture,omitempty"`
+		Rail      string                             `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi stripe"`
+		Signature string                             `json:"signature,omitempty"`
+		Wallet    string                             `json:"wallet,omitempty"`
 	} `json:"payment" binding:"required"`
 }
 
@@ -170,7 +170,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
@@ -214,7 +214,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
@@ -256,7 +256,7 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		writeCardAttemptsBlocked(r, blocked.RetryAfter)
 		return
 	}
-	if errors.Is(err, openrails.ErrIdempotencyKeyReused) {
+	if errors.Is(err, billing.ErrIdempotencyKeyReused) {
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "idempotency_key_reused", "idempotency key reused with different checkout session parameters"))
 		return
 	}

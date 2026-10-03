@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -29,15 +29,15 @@ type adminUserPath struct {
 // per-section endpoints. Every section is the shared Client DTO the dedicated
 // route serves.
 type adminUserBillingProfile struct {
-	CustomerID     openrails.CustomerID           `json:"customer_id"`
-	Email          *string                        `json:"email,omitempty"`
-	TrustLevel     string                         `json:"trust_level,omitempty"`
-	Subscriptions  []openrails.Subscription       `json:"subscriptions"`
-	Entitlements   []openrails.EntitlementRecord  `json:"entitlements"`
-	Payments       []openrails.Payment            `json:"payments"`
-	PaymentMethods []paymentMethodResponse        `json:"payment_methods"`
-	CreditBalance  []adminCreditBalanceResponse   `json:"credit_balance"`
-	ProductAccess  []openrails.ProductAccessGrant `json:"product_access"`
+	CustomerID     billing.CustomerID           `json:"customer_id"`
+	Email          *string                      `json:"email,omitempty"`
+	TrustLevel     string                       `json:"trust_level,omitempty"`
+	Subscriptions  []billing.Subscription       `json:"subscriptions"`
+	Entitlements   []billing.EntitlementRecord  `json:"entitlements"`
+	Payments       []billing.Payment            `json:"payments"`
+	PaymentMethods []paymentMethodResponse      `json:"payment_methods"`
+	CreditBalance  []adminCreditBalanceResponse `json:"credit_balance"`
+	ProductAccess  []billing.ProductAccessGrant `json:"product_access"`
 }
 
 // adminCreditBalanceResponse is one currency's balance on the profile; the
@@ -61,7 +61,7 @@ type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
 
-type adminCancelSubscriptionRequest = openrails.CancelSubscriptionRequest
+type adminCancelSubscriptionRequest = billing.CancelSubscriptionRequest
 
 func GetAdminUserBillingProfile(r *httprequest.Request) {
 	var path adminUserPath
@@ -82,13 +82,13 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	now := r.Clock.Now()
 	profile := adminUserBillingProfile{
-		CustomerID:     openrails.CustomerID(customerID),
-		Subscriptions:  []openrails.Subscription{},
-		Entitlements:   []openrails.EntitlementRecord{},
-		Payments:       []openrails.Payment{},
+		CustomerID:     billing.CustomerID(customerID),
+		Subscriptions:  []billing.Subscription{},
+		Entitlements:   []billing.EntitlementRecord{},
+		Payments:       []billing.Payment{},
 		PaymentMethods: []paymentMethodResponse{},
 		CreditBalance:  []adminCreditBalanceResponse{},
-		ProductAccess:  []openrails.ProductAccessGrant{},
+		ProductAccess:  []billing.ProductAccessGrant{},
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -263,7 +263,7 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	out := make([]openrails.Subscription, 0, len(subscriptions))
+	out := make([]billing.Subscription, 0, len(subscriptions))
 	for _, sub := range subscriptions {
 		out = append(out, subscriptionView(sub, r.Clock.Now()))
 	}
@@ -276,7 +276,7 @@ func GetAdminSubscription(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(path.SubscriptionID)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(path.SubscriptionID)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return
@@ -296,7 +296,7 @@ func GetAdminSubscription(r *httprequest.Request) {
 }
 
 func AdminCancelSubscription(r *httprequest.Request) {
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return
@@ -315,7 +315,7 @@ func AdminCancelSubscription(r *httprequest.Request) {
 }
 
 func AdminResumeSubscription(r *httprequest.Request) {
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return

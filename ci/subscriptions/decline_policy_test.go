@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // #1109: a card whose security code does not match is refused at
@@ -20,18 +20,18 @@ func TestHostedNewCardSecurityCodeMismatch(t *testing.T) {
 	w := newWorld(t)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: w.membership("content:members", 9_990_000).ID}
 
-	_, err := h.pay("pay-cvc", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
-	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
-	var status *openrails.StatusError
+	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
+	require.ErrorIs(t, err, billing.ErrPaymentRefused)
+	var status *billing.StatusError
 	require.True(t, errors.As(err, &status))
-	require.Equal(t, openrails.CodeCardDeclined, status.Code)
-	failure, ok := openrails.PaymentFailureFrom(err)
+	require.Equal(t, billing.CodeCardDeclined, status.Code)
+	failure, ok := billing.PaymentFailureFrom(err)
 	require.True(t, ok)
 	require.Equal(t, "incorrect_cvc", failure.Reason)
 	require.Equal(t, "cvc", failure.Field)
-	reason, ok := openrails.DeclineReasonFrom(err)
+	reason, ok := billing.DeclineReasonFrom(err)
 	require.True(t, ok)
-	require.Equal(t, openrails.DeclineIncorrectCVC, reason, "decline_reason carries the AVS/CVV evidence too")
+	require.Equal(t, billing.DeclineIncorrectCVC, reason, "decline_reason carries the AVS/CVV evidence too")
 	require.Equal(t, reason.Failure(), *failure)
 	require.Empty(t, h.subscriptions())
 	require.Empty(t, h.methods())

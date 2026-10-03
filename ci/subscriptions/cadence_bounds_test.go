@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
@@ -45,7 +45,7 @@ func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 		require.Less(t, window, period, "the dunning window ends inside one cycle")
 
 		w := newWorld(t)
-		require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), openrails.MerchantSettings{DunningPolicy: &openrails.DunningPolicy{AccessWhileRenewalHeld: openrails.DunningAccessSuspend}}))
+		require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessWhileRenewalHeld: billing.DunningAccessSuspend}}))
 		e := enrollEvery(t, w, "nmi", embedded, hours)
 		end := e.periodEnd()
 		w.cfg = func(c *config.Config) { c.EngineAdmissionHold = true }
@@ -163,7 +163,7 @@ func TestUnknownCadenceFailsClosed(t *testing.T) {
 	w.armDestructive()
 	l := importLegacy(t, w, "nmi", embedded)
 	w.converge()
-	priceID, err := openrails.ParsePriceID(l.price.ID)
+	priceID, err := billing.ParsePriceID(l.price.ID)
 	require.NoError(t, err)
 	schema := pgx.Identifier{w.schema}.Sanitize()
 	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE id = $1`, uuid.UUID(priceID))

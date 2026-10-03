@@ -12,7 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -349,7 +349,7 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 		return
 	}
 	overdue := exposure.OverdueAmount
-	data := openrails.NotificationData{
+	data := billing.NotificationData{
 		Currency: t.Currency, OverdueAmount: &overdue, OverdueInvoices: exposure.OverdueInvoices,
 		FromState: t.From.String(), ToState: t.To.String(),
 	}

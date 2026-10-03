@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
@@ -83,24 +83,24 @@ func TestExactIntegerMoneyBoundaries(t *testing.T) {
 func TestMoneyJSONPreservesInt64(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, 0, 9007199254740993, math.MaxInt64} {
 		t.Run(strconv.FormatInt(amount, 10), func(t *testing.T) {
-			request := openrails.PriceCreateParams{UnitAmount: amount}
+			request := billing.PriceCreateParams{UnitAmount: amount}
 			raw, err := json.Marshal(request)
 			require.NoError(t, err)
 			var wire map[string]any
 			require.NoError(t, json.Unmarshal(raw, &wire))
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["unit_amount"])
-			var read openrails.PriceCreateParams
+			var read billing.PriceCreateParams
 			require.NoError(t, json.Unmarshal(raw, &read))
 			require.Equal(t, amount, read.UnitAmount)
 
-			response := openrails.Payment{Amount: amount, AmountRefunded: amount, Price: &openrails.PublicPrice{UnitAmount: amount}}
+			response := billing.Payment{Amount: amount, AmountRefunded: amount, Price: &billing.PublicPrice{UnitAmount: amount}}
 			raw, err = json.Marshal(response)
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(raw, &wire))
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["amount"])
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["amount_refunded"])
 			require.Equal(t, strconv.FormatInt(amount, 10), wire["price"].(map[string]any)["unit_amount"])
-			var payment openrails.Payment
+			var payment billing.Payment
 			require.NoError(t, json.Unmarshal(raw, &payment))
 			require.Equal(t, amount, payment.Amount)
 			require.Equal(t, amount, payment.AmountRefunded)
@@ -108,7 +108,7 @@ func TestMoneyJSONPreservesInt64(t *testing.T) {
 		})
 	}
 	for _, value := range []string{`9007199254740993`, `"1.5"`, `"1e3"`, `"9223372036854775808"`, `"-9223372036854775809"`} {
-		var request openrails.PriceCreateParams
+		var request billing.PriceCreateParams
 		require.Error(t, json.Unmarshal([]byte(`{"unit_amount":`+value+`}`), &request), value)
 	}
 }

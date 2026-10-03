@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Multi-replica exactly-once rebilling (#1075). Every scenario runs N
@@ -504,14 +504,14 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 	}
 	afterFence := func(f *fleet, e *engineCase) (func(*http.Request) bool, bool) { return submission(e.rail), true }
 	cancel := func(t *testing.T, f *fleet, r *world, e *engineCase) {
-		require.NoError(t, r.client[remote].CancelSubscription(t.Context(), e.sub, openrails.CancelSubscriptionRequest{Reason: "member left"}))
+		require.NoError(t, r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionRequest{Reason: "member left"}))
 	}
 	refund := func(t *testing.T, f *fleet, r *world, e *engineCase) {
-		page, err := r.client[remote].ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: e.c.id, PageOptions: openrails.PageOptions{Limit: 10}})
+		page, err := r.client[remote].ListPayments(t.Context(), billing.PaymentFilter{CustomerID: e.c.id, PageOptions: billing.PageOptions{Limit: 10}})
 		require.NoError(t, err)
 		paid := completed(page.Data)
 		require.Len(t, paid, 1)
-		_, err = r.client[remote].RefundPayment(t.Context(), paid[0].ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + paid[0].ID.String()})
+		_, err = r.client[remote].RefundPayment(t.Context(), paid[0].ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + paid[0].ID.String()})
 		require.NoError(t, err)
 	}
 	races := []race{
@@ -551,7 +551,7 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 				}
 				require.Len(t, f.charges(e), want)
 				require.Equal(t, want, f.submissions(e), "nothing is sent after the cancel")
-				page, err := f.any().client[embedded].ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: e.c.id, PageOptions: openrails.PageOptions{Limit: 10}})
+				page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentFilter{CustomerID: e.c.id, PageOptions: billing.PageOptions{Limit: 10}})
 				require.NoError(t, err)
 				charged := 0
 				for _, p := range completed(page.Data) {
@@ -612,7 +612,7 @@ func TestReplicasProviderOwned(t *testing.T) {
 	t.Run("nmi/nmi_schedule", func(t *testing.T) {
 		t.Parallel()
 		f := newFleet(t, 3)
-		l := importLegacy(t, f.replicas[0], "nmi", embedded, func(book *openrails.DeclaredBilling) {
+		l := importLegacy(t, f.replicas[0], "nmi", embedded, func(book *billing.DeclaredBilling) {
 			declareRecurringAnchor(book)
 		})
 		f.replicas[1].converge()

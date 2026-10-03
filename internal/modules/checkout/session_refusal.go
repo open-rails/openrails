@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -108,7 +108,7 @@ func admitForSession(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, check
 	if checkoutSessionID == "" {
 		return nil
 	}
-	id, err := openrails.ParseCheckoutSessionID(checkoutSessionID)
+	id, err := billing.ParseCheckoutSessionID(checkoutSessionID)
 	if err != nil {
 		return fmt.Errorf("%w: invalid checkout session", ErrCheckoutSessionValidation)
 	}

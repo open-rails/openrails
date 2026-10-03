@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // CCBill is a retained legacy cohort: OpenRails never enrolls a new CCBill
@@ -43,31 +43,31 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	t.Helper()
 	l := &legacy{w: w, rail: "ccbill", tp: embedded, ent: "content:ccbill", c: w.newCustomer()}
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
-	l.price, err = client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	l.price, err = client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 
 	start := w.clock.Now().Add(-10 * day)
 	end := start.Add(monthHours * time.Hour)
-	customerID, err := openrails.ParseCustomerID(l.c.id)
+	customerID, err := billing.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(l.price.ID)
+	priceID, err := billing.ParsePriceID(l.price.ID)
 	require.NoError(t, err)
 	l.railSub = ccbillNumericID()
 	m := &ccbillMember{legacy: l, paidThrough: end, saleTxn: ccbillNumericID()}
-	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{
-		AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "ccbill"},
-		Customers:     []openrails.DeclaredCustomer{{Customer: customerID}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "ccbill", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end}},
-		Transactions:  []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{
+		AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
+		Customers:     []billing.DeclaredCustomer{{Customer: customerID}},
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "ccbill", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end}},
+		Transactions:  []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: l.c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 1)
 	l.sub = subs.Data[0].ID
@@ -153,7 +153,7 @@ func endOfDay(t time.Time) time.Time {
 	return time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.UTC)
 }
 
-func (m *ccbillMember) payment(txn string) *openrails.Payment {
+func (m *ccbillMember) payment(txn string) *billing.Payment {
 	for _, p := range m.w.payments(embedded, m.c.id) {
 		if p.TransactionID == txn {
 			return &p
@@ -339,7 +339,7 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 	body := w.deliverCCBill("NewSaleSuccess", sale(ccbillNumericID(), txn))
 	require.Equal(t, "refused", body["status"], "%v", body)
 	require.Equal(t, "ccbill_new_subscription_unsupported", body["code"], "%v", body)
-	subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: stranger.id})
+	subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: stranger.id})
 	require.NoError(t, err)
 	require.Empty(t, subs.Data, "no CCBill agreement is enrolled")
 	require.False(t, stranger.entitled(m.ent))
@@ -352,7 +352,7 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 	// A replayed sale for a membership OpenRails already holds changes nothing.
 	body = w.deliverCCBill("NewSaleSuccess", sale(m.railSub, m.saleTxn))
 	require.Equal(t, "accepted", body["status"], "%v", body)
-	subs, err = w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: m.c.id})
+	subs, err = w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: m.c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 1)
 	require.Equal(t, "active", subs.Data[0].Status)

@@ -21,7 +21,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/db"
@@ -78,8 +78,8 @@ type runtimeOverrides struct {
 	DB               *db.DB
 	Redis            *redis.Client
 	Clock            clockwork.Clock
-	UserDirectory    openrails.UserDirectory
-	UsernameResolver openrails.UsernameResolver
+	UserDirectory    billing.UserDirectory
+	UsernameResolver billing.UsernameResolver
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -224,8 +224,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Endpoint:    cfg.SandboxSolanaRPCURL(),
 	}
 
-	var userDirectory openrails.UserDirectory
-	var usernameResolver openrails.UsernameResolver
+	var userDirectory billing.UserDirectory
+	var usernameResolver billing.UsernameResolver
 	if overrides != nil {
 		userDirectory = overrides.UserDirectory
 		usernameResolver = overrides.UsernameResolver
@@ -659,7 +659,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
-func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
+func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver billing.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime

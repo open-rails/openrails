@@ -30,10 +30,10 @@ as an exact signed int64 decimal string of `plan.currency`'s native unit, and
 currency and scale. A JSON number, a decimal point, a value outside int64, or
 a missing `unit_decimals` fails schema validation and the session is
 unavailable; the package never assumes a scale. Hosts take the scale from
-OpenRails' currency registry (`openrails.LookupCurrency`, the same table as
+OpenRails' currency registry (`billing.LookupCurrency`, the same table as
 `GET /v1/currencies`) by building the plan with
-`openrails.NewHostedCheckoutPlan(product, price)`; the Go shape is
-`openrails.HostedCheckoutSession` and its canonical fixture
+`billing.NewHostedCheckoutPlan(product, price)`; the Go shape is
+`billing.HostedCheckoutSession` and its canonical fixture
 (`testdata/wire/hosted_checkout_session.json`) is decoded by this package's
 tests.
 

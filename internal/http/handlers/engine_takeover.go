@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -18,7 +18,7 @@ func AbandonEngineTakeover(r *httprequest.Request) { engineTakeover(r, "abandon"
 
 func engineTakeover(r *httprequest.Request, action string) {
 	ctx := r.Request.Context()
-	sid, err := openrails.ParseSubscriptionID(r.Param("id"))
+	sid, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || sid.IsZero() {
 		cutoverRefusal(r, http.StatusBadRequest, "invalid_param", "invalid subscription ID", "subscription_id")
 		return
@@ -28,7 +28,7 @@ func engineTakeover(r *httprequest.Request, action string) {
 		cutoverRefusal(r, http.StatusServiceUnavailable, "engine_takeover_unavailable", "engine takeover unavailable", "")
 		return
 	}
-	var out *openrails.EngineTakeover
+	var out *billing.EngineTakeover
 	switch action {
 	case "preview":
 		out, err = h.Preview(ctx, sid.UUID())
@@ -56,7 +56,7 @@ func EngineTakeoverBatch(r *httprequest.Request) {
 		cutoverRefusal(r, http.StatusServiceUnavailable, "engine_takeover_unavailable", "engine takeover unavailable", "")
 		return
 	}
-	var body openrails.EngineTakeoverBatchRequest
+	var body billing.EngineTakeoverBatchRequest
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -73,7 +73,7 @@ func writeEngineTakeoverError(r *httprequest.Request, err error) {
 	switch {
 	case errors.As(err, &refusal):
 		cutoverRefusal(r, refusal.Status, refusal.Code, refusal.Message, "")
-	case errors.Is(err, openrails.ErrInvalid):
+	case errors.Is(err, billing.ErrInvalid):
 		cutoverRefusal(r, http.StatusBadRequest, "invalid_param", "canonical idempotency key of 1..200 bytes required", "idempotency_key")
 	case errors.Is(err, intents.ErrRateCeilingTripped):
 		r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded, "Destructive operation rate limit reached; try again later"))

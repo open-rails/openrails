@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,11 +25,11 @@ var ErrInvalidMerchantSettings = errors.New("invalid merchant settings")
 type merchantSettingsDocument struct {
 	config   models.MerchantConfiguration
 	policies map[string]models.BillingPolicy
-	bindings []openrails.BillingPolicyBindingInput
+	bindings []billing.BillingPolicyBindingInput
 }
 
 // normalizeMerchantSettings validates the complete declaration before any write.
-func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.MerchantSettings) (merchantSettingsDocument, error) {
+func (s *Service) normalizeMerchantSettings(ctx context.Context, in billing.MerchantSettings) (merchantSettingsDocument, error) {
 	doc := merchantSettingsDocument{policies: make(map[string]models.BillingPolicy)}
 	declaredWindows, err := merchantconfig.NormalizeBudgetWindows("merchant settings", "delegated_invoker_wasted_spend_limits", budgetScopeWindowModels(in.DelegatedInvokerWastedSpendLimits))
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.Me
 // SetMerchantSettings atomically replaces the declarative merchant document.
 // Customer-specific policy bindings remain runtime state. A policy
 // referenced by such a binding cannot be removed by replacing the document.
-func (s *Service) SetMerchantSettings(ctx context.Context, in openrails.MerchantSettings) error {
+func (s *Service) SetMerchantSettings(ctx context.Context, in billing.MerchantSettings) error {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return err
@@ -141,7 +141,7 @@ func (s *Service) SetMerchantSettings(ctx context.Context, in openrails.Merchant
 
 // GetMerchantSettings reads one complete declaration while excluding a concurrent
 // replacement. Runtime customer segmentation is deliberately not enumerated.
-func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.MerchantSettings, err error) {
+func (s *Service) GetMerchantSettings(ctx context.Context) (out billing.MerchantSettings, err error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return out, err
@@ -162,7 +162,7 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 		if err != nil {
 			return err
 		}
-		out = openrails.MerchantSettings{
+		out = billing.MerchantSettings{
 			InvoiceCollectionThreshold: cfg.InvoiceCollectionThreshold,
 			InvoiceMonthlyFloor:        cfg.InvoiceMonthlyFloor, InvoiceBillingBoundary: cfg.InvoiceBillingBoundary, AlertEmail: cfg.AlertEmail,
 			RepriceNoticeWindowDays: cfg.RepriceNoticeWindowDays, RenewalReceiptMinIntervalHours: cfg.RenewalReceiptMinIntervalHours, ProviderRefundAccess: cfg.ProviderRefundAccess, ArrearsGraceDays: cfg.ArrearsGraceDays,
@@ -170,10 +170,10 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 			DunningPolicy: cfg.DunningPolicy,
 		}
 		if cfg.Profile != nil {
-			out.Profile = &openrails.MerchantProfileInput{DisplayName: cfg.Profile.DisplayName, LogoURL: cfg.Profile.LogoURL, FromEmail: cfg.Profile.FromEmail, SupportURL: cfg.Profile.SupportURL, SignupURL: cfg.Profile.SignupURL}
+			out.Profile = &billing.MerchantProfileInput{DisplayName: cfg.Profile.DisplayName, LogoURL: cfg.Profile.LogoURL, FromEmail: cfg.Profile.FromEmail, SupportURL: cfg.Profile.SupportURL, SignupURL: cfg.Profile.SignupURL}
 		}
 		for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
-			out.DelegatedInvokerWastedSpendLimits = append(out.DelegatedInvokerWastedSpendLimits, openrails.BudgetWindowInput{Key: w.Key, WindowSeconds: int64(w.Window / time.Second), Limit: w.Limit, Currency: w.Currency})
+			out.DelegatedInvokerWastedSpendLimits = append(out.DelegatedInvokerWastedSpendLimits, billing.BudgetWindowInput{Key: w.Key, WindowSeconds: int64(w.Window / time.Second), Limit: w.Limit, Currency: w.Currency})
 		}
 		out.BillingPolicies, err = view.ListBillingPolicies(ctx)
 		if err != nil {

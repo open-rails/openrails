@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -20,10 +20,10 @@ import (
 // ProductAccessGrantResponse is the application-facing view of a durable product
 // access grant (issue #250), enriched with product metadata so host apps can
 // build a purchased-library view without querying the catalog or payment history.
-type ProductAccessGrantResponse = openrails.ProductAccessGrant
+type ProductAccessGrantResponse = billing.ProductAccessGrant
 
 type productAccessPath struct {
-	ProductID openrails.ProductID `uri:"product_id" binding:"required"`
+	ProductID billing.ProductID `uri:"product_id" binding:"required"`
 }
 
 type adminUserProductAccessPath struct {
@@ -36,8 +36,8 @@ type adminProductAccessGrantPath struct {
 }
 
 type grantProductAccessRequest struct {
-	ProductID openrails.ProductID `json:"product_id"`
-	EndsAt    *string             `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
+	ProductID billing.ProductID `json:"product_id"`
+	EndsAt    *string           `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
 }
 
 // productAccessResponses enriches grants with product metadata from one batched
@@ -54,10 +54,10 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 		g := grants[i]
 		resp := ProductAccessGrantResponse{
 			ID:         g.ID.String(),
-			CustomerID: openrails.CustomerID(g.CustomerID).String(),
-			ProductID:  openrails.ProductID(g.ProductID).String(),
+			CustomerID: billing.CustomerID(g.CustomerID).String(),
+			ProductID:  billing.ProductID(g.ProductID).String(),
 			SourceType: string(g.SourceType),
-			SourceID:   openrails.SourceRef(string(g.SourceType), g.SourceID),
+			SourceID:   billing.SourceRef(string(g.SourceType), g.SourceID),
 			Status:     string(g.Status),
 			StartsAt:   g.StartsAt,
 			EndsAt:     g.EndsAt,
@@ -66,7 +66,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 			UpdatedAt:  g.UpdatedAt,
 		}
 		if g.PaymentID != nil {
-			pid := openrails.PaymentID(*g.PaymentID).String()
+			pid := billing.PaymentID(*g.PaymentID).String()
 			resp.PaymentID = &pid
 		}
 		if g.RevokeReason != nil {
@@ -138,8 +138,8 @@ func GetMyProductAccess(r *httprequest.Request) {
 	r.JSON(http.StatusOK, newProductAccessCheck(productID, user.ID, has))
 }
 
-func newProductAccessCheck(productID uuid.UUID, userID string, has bool) openrails.ProductAccessCheck {
-	return openrails.ProductAccessCheck{CustomerID: openrails.CustomerID(identity.CustomerIDFromString(userID)).String(), ProductID: openrails.ProductID(productID).String(), HasAccess: has}
+func newProductAccessCheck(productID uuid.UUID, userID string, has bool) billing.ProductAccessCheck {
+	return billing.ProductAccessCheck{CustomerID: billing.CustomerID(identity.CustomerIDFromString(userID)).String(), ProductID: billing.ProductID(productID).String(), HasAccess: has}
 }
 
 // --- API-key service (GET /v1/merchant/customers/:user_id/product-access) ---
@@ -148,7 +148,7 @@ func newProductAccessCheck(productID uuid.UUID, userID string, has bool) openrai
 // server-to-server (API-key) caller. Optional ?product_id=... narrows to a single
 // has-access check.
 func ServiceGetUserProductAccess(r *httprequest.Request) {
-	user, err := openrails.ParseCustomerID(r.Param("user_id"))
+	user, err := billing.ParseCustomerID(r.Param("user_id"))
 	if err != nil || user.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
@@ -176,15 +176,15 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 			return
 		}
 		decision := decisions[key]
-		out := openrails.ProductAccessCheck{CustomerID: userID, ProductKey: key, HasAccess: decision.HasAccess}
+		out := billing.ProductAccessCheck{CustomerID: userID, ProductKey: key, HasAccess: decision.HasAccess}
 		if decision.ProductID != uuid.Nil {
-			out.ProductID = openrails.ProductID(decision.ProductID).String()
+			out.ProductID = billing.ProductID(decision.ProductID).String()
 		}
 		r.JSON(http.StatusOK, out)
 		return
 	}
 	if productIDStr := r.Query("product_id"); query.Has("product_id") {
-		typedProductID, err := openrails.ParseProductID(productIDStr)
+		typedProductID, err := billing.ParseProductID(productIDStr)
 		if err != nil || typedProductID.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
 			return
@@ -306,7 +306,7 @@ func listAccessibleProductsPage(r *httprequest.Request, svc *productaccess.Servi
 	limit := 25
 	if raw := r.Query("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > openrails.ProductAccessMaxPageSize {
+		if err != nil || parsed < 1 || parsed > billing.ProductAccessMaxPageSize {
 			r.ErrorJSON(http.StatusBadRequest, "limit must be between 1 and 100")
 			return
 		}
@@ -326,7 +326,7 @@ func listAccessibleProductsPage(r *httprequest.Request, svc *productaccess.Servi
 		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
 		return
 	}
-	page := openrails.ProductAccessList{Data: productAccessResponses(r, grants), HasMore: more}
+	page := billing.ProductAccessList{Data: productAccessResponses(r, grants), HasMore: more}
 	if more && len(grants) > 0 {
 		page.NextCursor = grants[len(grants)-1].ID.String()
 	}
@@ -334,7 +334,7 @@ func listAccessibleProductsPage(r *httprequest.Request, svc *productaccess.Servi
 }
 
 func ServiceCheckUserProductAccess(r *httprequest.Request) {
-	user, err := openrails.ParseCustomerID(r.Param("user_id"))
+	user, err := billing.ParseCustomerID(r.Param("user_id"))
 	if err != nil || user.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
@@ -350,7 +350,7 @@ func ServiceCheckUserProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "exactly one of product_ids and product_keys is required")
 		return
 	}
-	if len(body.ProductIDs)+len(body.ProductKeys) > openrails.ProductAccessMaxPageSize {
+	if len(body.ProductIDs)+len(body.ProductKeys) > billing.ProductAccessMaxPageSize {
 		r.ErrorJSON(http.StatusBadRequest, "at most 100 products are allowed")
 		return
 	}
@@ -362,7 +362,7 @@ func ServiceCheckUserProductAccess(r *httprequest.Request) {
 	}
 	products := make([]uuid.UUID, 0, len(body.ProductIDs))
 	for _, raw := range body.ProductIDs {
-		product, err := openrails.ParseProductID(raw)
+		product, err := billing.ParseProductID(raw)
 		if err != nil || product.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
 			return
@@ -396,7 +396,7 @@ func ServiceCheckUserProductAccess(r *httprequest.Request) {
 	}
 	access := make(map[string]bool, len(decisions))
 	for id, has := range decisions {
-		access[openrails.ProductID(id).String()] = has
+		access[billing.ProductID(id).String()] = has
 	}
 	r.JSON(http.StatusOK, struct {
 		Access map[string]bool `json:"access"`

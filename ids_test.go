@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // Each typed id has one wire spelling (prefix + canonical UUID); the zero id is "".
@@ -17,16 +19,16 @@ func TestTypedIDsHaveOneWireSpelling(t *testing.T) {
 		parse  func(string) (wireID, error)
 		of     func(uuid.UUID) wireID
 	}{
-		{CatalogIDPrefix, func(s string) (wireID, error) { return ParseCatalogID(s) }, func(u uuid.UUID) wireID { return CatalogID(u) }},
-		{ProductIDPrefix, func(s string) (wireID, error) { return ParseProductID(s) }, func(u uuid.UUID) wireID { return ProductID(u) }},
-		{PriceIDPrefix, func(s string) (wireID, error) { return ParsePriceID(s) }, func(u uuid.UUID) wireID { return PriceID(u) }},
-		{SubscriptionIDPrefix, func(s string) (wireID, error) { return ParseSubscriptionID(s) }, func(u uuid.UUID) wireID { return SubscriptionID(u) }},
-		{PaymentIDPrefix, func(s string) (wireID, error) { return ParsePaymentID(s) }, func(u uuid.UUID) wireID { return PaymentID(u) }},
-		{PaymentMethodIDPrefix, func(s string) (wireID, error) { return ParsePaymentMethodID(s) }, func(u uuid.UUID) wireID { return PaymentMethodID(u) }},
-		{CheckoutSessionIDPrefix, func(s string) (wireID, error) { return ParseCheckoutSessionID(s) }, func(u uuid.UUID) wireID { return CheckoutSessionID(u) }},
-		{PaymentAttemptIDPrefix, func(s string) (wireID, error) { return ParsePaymentAttemptID(s) }, func(u uuid.UUID) wireID { return PaymentAttemptID(u) }},
-		{RebillCycleIDPrefix, func(s string) (wireID, error) { return ParseRebillCycleID(s) }, func(u uuid.UUID) wireID { return RebillCycleID(u) }},
-		{"", func(s string) (wireID, error) { return ParseCustomerID(s) }, func(u uuid.UUID) wireID { return CustomerID(u) }},
+		{billing.CatalogIDPrefix, func(s string) (wireID, error) { return billing.ParseCatalogID(s) }, func(u uuid.UUID) wireID { return billing.CatalogID(u) }},
+		{billing.ProductIDPrefix, func(s string) (wireID, error) { return billing.ParseProductID(s) }, func(u uuid.UUID) wireID { return billing.ProductID(u) }},
+		{billing.PriceIDPrefix, func(s string) (wireID, error) { return billing.ParsePriceID(s) }, func(u uuid.UUID) wireID { return billing.PriceID(u) }},
+		{billing.SubscriptionIDPrefix, func(s string) (wireID, error) { return billing.ParseSubscriptionID(s) }, func(u uuid.UUID) wireID { return billing.SubscriptionID(u) }},
+		{billing.PaymentIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentID(s) }, func(u uuid.UUID) wireID { return billing.PaymentID(u) }},
+		{billing.PaymentMethodIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentMethodID(s) }, func(u uuid.UUID) wireID { return billing.PaymentMethodID(u) }},
+		{billing.CheckoutSessionIDPrefix, func(s string) (wireID, error) { return billing.ParseCheckoutSessionID(s) }, func(u uuid.UUID) wireID { return billing.CheckoutSessionID(u) }},
+		{billing.PaymentAttemptIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentAttemptID(s) }, func(u uuid.UUID) wireID { return billing.PaymentAttemptID(u) }},
+		{billing.RebillCycleIDPrefix, func(s string) (wireID, error) { return billing.ParseRebillCycleID(s) }, func(u uuid.UUID) wireID { return billing.RebillCycleID(u) }},
+		{"", func(s string) (wireID, error) { return billing.ParseCustomerID(s) }, func(u uuid.UUID) wireID { return billing.CustomerID(u) }},
 	}
 	for _, kind := range kinds {
 		id := kind.of(u)
@@ -58,21 +60,21 @@ func TestTypedIDsHaveOneWireSpelling(t *testing.T) {
 func TestTypedIDsJSON(t *testing.T) {
 	u := uuid.MustParse("0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e")
 	type doc struct {
-		Price    PriceID         `json:"price_id"`
-		Optional SubscriptionID  `json:"subscription_id,omitzero"`
-		Nullable *PaymentID      `json:"payment_id"`
-		Method   PaymentMethodID `json:"payment_method_id"`
+		Price    billing.PriceID         `json:"price_id"`
+		Optional billing.SubscriptionID  `json:"subscription_id,omitzero"`
+		Nullable *billing.PaymentID      `json:"payment_id"`
+		Method   billing.PaymentMethodID `json:"payment_method_id"`
 	}
-	raw, err := json.Marshal(doc{Price: PriceID(u)})
+	raw, err := json.Marshal(doc{Price: billing.PriceID(u)})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"price_id":"price_`+u.String()+`","payment_id":null,"payment_method_id":""}`, string(raw))
 	var back doc
 	require.NoError(t, json.Unmarshal(raw, &back))
-	require.Equal(t, doc{Price: PriceID(u)}, back)
+	require.Equal(t, doc{Price: billing.PriceID(u)}, back)
 	for _, bad := range []string{`{"price_id":"prod_` + u.String() + `"}`, `{"price_id":"` + u.String() + `"}`, `{"price_id":7}`} {
 		require.Error(t, json.Unmarshal([]byte(bad), &back), bad)
 	}
-	raw, err = json.Marshal(map[CustomerID][]string{CustomerID(u): {"pro"}})
+	raw, err = json.Marshal(map[billing.CustomerID][]string{billing.CustomerID(u): {"pro"}})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"`+u.String()+`":["pro"]}`, string(raw))
 }
@@ -80,10 +82,10 @@ func TestTypedIDsJSON(t *testing.T) {
 func TestSourceRefSpellsTheSourceKind(t *testing.T) {
 	u := uuid.New()
 	for sourceType, want := range map[string]string{
-		"subscription": SubscriptionID(u).String(), "grace": SubscriptionID(u).String(),
-		"one_off": PaymentID(u).String(), "purchase": PaymentID(u).String(), "admin": u.String(),
+		"subscription": billing.SubscriptionID(u).String(), "grace": billing.SubscriptionID(u).String(),
+		"one_off": billing.PaymentID(u).String(), "purchase": billing.PaymentID(u).String(), "admin": u.String(),
 	} {
-		require.Equal(t, want, SourceRef(sourceType, u.String()), sourceType)
+		require.Equal(t, want, billing.SourceRef(sourceType, u.String()), sourceType)
 	}
-	require.Equal(t, "host-grant-7", SourceRef("subscription", "host-grant-7"))
+	require.Equal(t, "host-grant-7", billing.SourceRef("subscription", "host-grant-7"))
 }

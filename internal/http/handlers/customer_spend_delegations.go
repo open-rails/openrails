@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -27,7 +27,7 @@ type customerSpendDelegationsDocument struct {
 // customerSpendDelegation is the shared Client wire type with strict decoding.
 // A per-delegation customer_id is an unknown field: the payer comes from the
 // path scope.
-type customerSpendDelegation openrails.SpendDelegationInput
+type customerSpendDelegation billing.SpendDelegationInput
 
 // UnmarshalJSON keeps the delegation wire shape strict. or#893 deleted the
 // role_id alias for scope_key — one representation, {scope:"role",
@@ -314,9 +314,9 @@ func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []cust
 }
 
 func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpendDelegation {
-	windows := make([]openrails.SpendLimitWindow, 0, len(row.Windows))
+	windows := make([]billing.SpendLimitWindow, 0, len(row.Windows))
 	for _, window := range row.Windows {
-		windows = append(windows, openrails.SpendLimitWindow{
+		windows = append(windows, billing.SpendLimitWindow{
 			Key: window.Key, WindowSeconds: window.WindowSeconds, Limit: window.Limit, Currency: window.Currency,
 		})
 	}

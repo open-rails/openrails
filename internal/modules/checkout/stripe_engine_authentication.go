@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -14,10 +14,10 @@ import (
 )
 
 type StripeEngineAuthentication struct {
-	Operation               openrails.PaymentOperation `json:"operation"`
-	PaymentIntentID         string                     `json:"payment_intent_id,omitempty"`
-	ClientSecret            string                     `json:"client_secret,omitempty"`
-	ProviderPaymentMethodID string                     `json:"provider_payment_method_id,omitempty"`
+	Operation               billing.PaymentOperation `json:"operation"`
+	PaymentIntentID         string                   `json:"payment_intent_id,omitempty"`
+	ClientSecret            string                   `json:"client_secret,omitempty"`
+	ProviderPaymentMethodID string                   `json:"provider_payment_method_id,omitempty"`
 }
 
 func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.OpenrailsRailIntent, error) {
@@ -51,7 +51,7 @@ func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uu
 	if err != nil {
 		return StripeEngineAuthentication{}, err
 	}
-	out := StripeEngineAuthentication{Operation: openrails.PaymentOperation{ID: in.ID, Status: in.Status}}
+	out := StripeEngineAuthentication{Operation: billing.PaymentOperation{ID: in.ID, Status: in.Status}}
 	if in.Status == intents.StatusSucceeded || in.Status == intents.StatusFailedTerminal {
 		return out, nil
 	}
@@ -92,20 +92,20 @@ func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uu
 
 // ConfirmStripePaymentAuthentication ignores browser outcome assertions and
 // drives the existing verifier against the original provider payment identity.
-func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (openrails.PaymentOperation, error) {
+func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (billing.PaymentOperation, error) {
 	in, err := s.ownedStripeEngineOperation(ctx, id, principal)
 	if err != nil {
-		return openrails.PaymentOperation{}, err
+		return billing.PaymentOperation{}, err
 	}
 	verifier, ok := s.Intents.(interface {
 		VerifyByID(context.Context, uuid.UUID) (gen.OpenrailsRailIntent, error)
 	})
 	if !ok {
-		return openrails.PaymentOperation{}, errors.New("payment verifier unavailable")
+		return billing.PaymentOperation{}, errors.New("payment verifier unavailable")
 	}
 	current, err := verifier.VerifyByID(ctx, in.ID)
 	if err != nil {
-		return openrails.PaymentOperation{}, err
+		return billing.PaymentOperation{}, err
 	}
-	return openrails.PaymentOperation{ID: current.ID, Status: current.Status}, nil
+	return billing.PaymentOperation{ID: current.ID, Status: current.Status}, nil
 }

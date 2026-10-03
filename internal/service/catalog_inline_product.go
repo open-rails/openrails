@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -34,10 +34,10 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 	if data.Key == "" || data.DisplayName == "" {
 		return nil, apperr.Invalidf("product_data requires key and display_name")
 	}
-	requested := openrails.CatalogID{}
+	requested := billing.CatalogID{}
 	if data.CatalogID != "" {
 		var err error
-		requested, err = openrails.ParseCatalogID(data.CatalogID)
+		requested, err = billing.ParseCatalogID(data.CatalogID)
 		if err != nil || requested.IsZero() {
 			return nil, apperr.Invalidf("invalid product_data.catalog_id")
 		}

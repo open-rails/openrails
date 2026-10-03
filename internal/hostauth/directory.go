@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // IdentityClient is the AuthKit directory surface this adapter needs;
@@ -25,8 +25,8 @@ type IdentityClient interface {
 // the optional CCBill username bridge.
 type Directory struct{ client IdentityClient }
 
-var _ openrails.UserDirectory = (*Directory)(nil)
-var _ openrails.UsernameResolver = (*Directory)(nil)
+var _ billing.UserDirectory = (*Directory)(nil)
+var _ billing.UsernameResolver = (*Directory)(nil)
 
 func NewDirectory(client IdentityClient) *Directory {
 	if client == nil {

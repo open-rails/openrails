@@ -4,7 +4,6 @@
 *.dll
 *.so
 *.dylib
-/billing
 /billing-server
 *.test
 

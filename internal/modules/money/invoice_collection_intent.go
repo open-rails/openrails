@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -713,7 +713,7 @@ func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail st
 // transaction; no external message is sent here.
 func queueInvoiceCollectionOutcome(ctx context.Context, database *db.DB, invoice *models.Invoice, action collection.Action, failureCode string, now time.Time) error {
 	amountDue := invoice.AmountDue
-	data := openrails.NotificationData{
+	data := billing.NotificationData{
 		InvoiceID: invoice.ID, Currency: invoice.Currency, AmountDue: &amountDue,
 		FailureCode: failureCode, DeclineOutcome: action.Decline.Action.String(),
 	}

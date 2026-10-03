@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -352,7 +352,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       openrails.NotificationData{Reason: string(PremiumEndReasonAdmin)},
+		Data:       billing.NotificationData{Reason: string(PremiumEndReasonAdmin)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
@@ -430,7 +430,7 @@ func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, u
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		EventType:  eventType,
-		Data:       openrails.NotificationData{Message: message, Source: "admin_manual"},
+		Data:       billing.NotificationData{Message: message, Source: "admin_manual"},
 	}
 
 	return s.NotificationService.Create(ctx, notification)

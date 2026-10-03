@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -151,7 +151,7 @@ type PaymentMethodError struct {
 	Rail string
 	// Reason is the decline reason classified with the refusal's full
 	// evidence (AVS/CVV); empty means classify LocalizationID.
-	Reason openrails.DeclineReason
+	Reason billing.DeclineReason
 }
 
 // CardRefused reports whether the provider refused the card: a verification

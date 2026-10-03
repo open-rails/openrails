@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
@@ -1823,7 +1823,7 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 		if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("record CCBill retry date for %s: %w", sub.ID, err)
 		}
-		notes = append(notes, ccbillNotice{data: openrails.NotificationData{Rail: string(models.RailCCBill), RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed))
+		notes = append(notes, ccbillNotice{data: billing.NotificationData{Rail: string(models.RailCCBill), RailSubscriptionID: railSubID, TransactionID: transactionID, FailureCode: data.FailureCode, FailureReason: data.FailureReason}}.build(sub, lifecycle.NoticePaymentFailed))
 		return s.recordCCBillAttempt(ctx, d, sub, period, transactionID, false, decline.Evidence{Code: strings.TrimSpace(data.FailureCode), Text: strings.TrimSpace(data.FailureReason)})
 	})
 	if err != nil {

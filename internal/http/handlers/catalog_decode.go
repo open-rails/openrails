@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
@@ -34,7 +34,7 @@ func bindCatalogJSON(r *httprequest.Request, out any) bool {
 func catalogDecodeError(err error) *api.APIError {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
-		return api.NewAPIError(http.StatusRequestEntityTooLarge, api.ErrorTypeInvalidRequest, openrails.CodeRequestBodyTooLarge, "request body too large")
+		return api.NewAPIError(http.StatusRequestEntityTooLarge, api.ErrorTypeInvalidRequest, billing.CodeRequestBodyTooLarge, "request body too large")
 	}
 	if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
 		field = strings.Trim(field, `"`)

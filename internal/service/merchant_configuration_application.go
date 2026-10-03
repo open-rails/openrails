@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -23,11 +23,11 @@ import (
 
 // ApplyMerchantMetadata is the trusted startup entry to the same application
 // boundary used by the authorized Client. It does not select a merchant.
-func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params openrails.MerchantConfigurationApplyParams) (*openrails.MerchantConfigurationReceipt, error) {
+func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params billing.MerchantConfigurationApplyParams) (*billing.MerchantConfigurationReceipt, error) {
 	return (&Service{rt: &app.Runtime{DB: database}}).ApplyMerchantConfiguration(ctx, params)
 }
 
-func (s *Service) merchantConfigurationState(ctx context.Context) (*openrails.MerchantConfigurationState, error) {
+func (s *Service) merchantConfigurationState(ctx context.Context) (*billing.MerchantConfigurationState, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (s *Service) merchantConfigurationState(ctx context.Context) (*openrails.Me
 		}
 		return a.PolicyName < b.PolicyName
 	})
-	state := &openrails.MerchantConfigurationState{DisplayName: directory.DisplayName, APIHost: directory.ApiHost, Settings: settings}
+	state := &billing.MerchantConfigurationState{DisplayName: directory.DisplayName, APIHost: directory.ApiHost, Settings: settings}
 	body, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (s *Service) merchantConfigurationState(ctx context.Context) (*openrails.Me
 	return state, nil
 }
 
-func (s *Service) GetMerchantConfigurationState(ctx context.Context) (state *openrails.MerchantConfigurationState, err error) {
+func (s *Service) GetMerchantConfigurationState(ctx context.Context) (state *billing.MerchantConfigurationState, err error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (s *Service) GetMerchantConfigurationState(ctx context.Context) (state *ope
 	return state, err
 }
 
-func merchantApplicationDigest(params openrails.MerchantConfigurationApplyParams) ([32]byte, error) {
+func merchantApplicationDigest(params billing.MerchantConfigurationApplyParams) ([32]byte, error) {
 	// JSON omitempty otherwise erases the distinction between an omitted list
 	// and an explicitly empty list that clears declarative policy.
 	presence := struct{ Policies, Bindings, Windows bool }{}
@@ -89,13 +89,13 @@ func merchantApplicationDigest(params openrails.MerchantConfigurationApplyParams
 		presence.Windows = params.Settings.DelegatedInvokerWastedSpendLimits != nil
 	}
 	body, err := json.Marshal(struct {
-		Params   openrails.MerchantConfigurationApplyParams
+		Params   billing.MerchantConfigurationApplyParams
 		Presence any
 	}{params, presence})
 	return sha256.Sum256(body), err
 }
 
-func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrails.MerchantConfigurationApplyParams) (receipt *openrails.MerchantConfigurationReceipt, err error) {
+func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing.MerchantConfigurationApplyParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
 	params.ApplicationID = strings.TrimSpace(params.ApplicationID)
 	if params.ApplicationID == "" || len(params.ApplicationID) > 128 || params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
 		return nil, apperr.Invalidf("application_id and expected_revision are required")
@@ -128,7 +128,7 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 			if !bytes.Equal(previous.RequestSha256, digest[:]) {
 				return apperr.New(409, "merchant_configuration_application_conflict", "application_id was already committed with different content")
 			}
-			receipt = &openrails.MerchantConfigurationReceipt{}
+			receipt = &billing.MerchantConfigurationReceipt{}
 			if err := json.Unmarshal(previous.Result, receipt); err != nil {
 				return err
 			}
@@ -174,7 +174,7 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 		if err != nil {
 			return err
 		}
-		receipt = &openrails.MerchantConfigurationReceipt{ApplicationID: params.ApplicationID, Revision: current.Revision}
+		receipt = &billing.MerchantConfigurationReceipt{ApplicationID: params.ApplicationID, Revision: current.Revision}
 		body, err := json.Marshal(receipt)
 		if err != nil {
 			return err
@@ -191,9 +191,9 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params openrai
 	return receipt, nil
 }
 
-func mergeMerchantSettings(current, patch openrails.MerchantSettings) openrails.MerchantSettings {
+func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.MerchantSettings {
 	if patch.Profile != nil {
-		p := openrails.MerchantProfileInput{}
+		p := billing.MerchantProfileInput{}
 		if current.Profile != nil {
 			p = *current.Profile
 		}

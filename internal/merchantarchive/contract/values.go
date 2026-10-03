@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -50,7 +50,7 @@ func ValidateValues(p Profile, values []*string) error {
 			return fmt.Errorf("invalid catalog application digest")
 		}
 		catalogID := value(p, values, "catalog_id")
-		parsed, err := openrails.ParseCatalogID(receipt.CatalogID)
+		parsed, err := billing.ParseCatalogID(receipt.CatalogID)
 		if err != nil || catalogID == nil || parsed.UUID().String() != *catalogID {
 			return fmt.Errorf("catalog application receipt target mismatch")
 		}

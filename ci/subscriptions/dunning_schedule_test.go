@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // The same soft decline on an engine and an NMI-owned renewal, the NMI one
@@ -21,7 +21,7 @@ func TestDunningScheduleParity(t *testing.T) {
 		t.Run(owner, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
-			var sub openrails.SubscriptionID
+			var sub billing.SubscriptionID
 			if owner == "engine" {
 				e := enroll(t, w, "nmi", embedded)
 				e.setDecline(visa.Last4, "insufficient_funds", "202")

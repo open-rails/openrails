@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/embedoperator"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -25,53 +25,53 @@ type legacy struct {
 	rail     string
 	tp       topology
 	c        *customer
-	price    *openrails.Price
+	price    *billing.Price
 	railSub  string
-	sub      openrails.SubscriptionID
+	sub      billing.SubscriptionID
 	ent      string
 	railCust string
 }
 
 // importLegacy creates a provider subscription at the fake provider and
 // lands it through ImportBilling, the documented legacy-book entry point.
-func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ...func(*openrails.DeclaredBilling)) *legacy {
+func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ...func(*billing.DeclaredBilling)) *legacy {
 	t.Helper()
 	l := &legacy{w: w, rail: rail, tp: tp, ent: "content:legacy", c: w.newCustomer()}
 	client := w.client[tp]
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	links := map[string]map[string]string{"stripe": {"price_id": "price_legacy_" + uuid.NewString()[:8]}}
 	if rail == "nmi" {
 		links = map[string]map[string]string{"nmi": {"plan_id": "legacy_plan_" + uuid.NewString()[:8]}}
 	}
-	l.price, err = client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: links})
+	l.price, err = client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: links})
 	require.NoError(t, err)
 
 	start := w.clock.Now().Add(-10 * day)
 	end := start.Add(monthHours * time.Hour)
-	customerID, err := openrails.ParseCustomerID(l.c.id)
+	customerID, err := billing.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(l.price.ID)
+	priceID, err := billing.ParsePriceID(l.price.ID)
 	require.NoError(t, err)
-	book := openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: rail}, Customers: []openrails.DeclaredCustomer{{Customer: customerID}}}
+	book := billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: rail}, Customers: []billing.DeclaredCustomer{{Customer: customerID}}}
 	switch rail {
 	case "stripe":
 		l.railCust = "cus_legacy" + uuid.NewString()[:8]
 		method := "pm_legacy" + uuid.NewString()[:8]
 		l.railSub = w.stripe.legacySubscription(l.railCust, method, links["stripe"]["price_id"], 999, start, end)
-		book.PaymentMethods = []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
-		book.Subscriptions = []openrails.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "stripe", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
-			PaymentMethod: &openrails.PaymentMethodRef{Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method}}}
-		book.Transactions = []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.latestCharge(l.railSub), Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
+		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
+		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "stripe", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
+			PaymentMethod: &billing.PaymentMethodRef{Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method}}}
+		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.latestCharge(l.railSub), Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
 	case "nmi":
 		vault := w.nmi.AddVault(visa)
 		l.railCust = vault
 		l.railSub = w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: links["nmi"]["plan_id"], Amount: "9.99", NextBilling: end})
-		book.PaymentMethods = []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
-		book.Subscriptions = []openrails.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
-			PaymentMethod: &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}}
-		book.Transactions = []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
+		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
+		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
+			PaymentMethod: &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}}
+		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
 	}
 	for _, apply := range configure {
 		apply(&book)
@@ -88,7 +88,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: l.c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 1)
 	l.sub = subs.Data[0].ID
@@ -115,7 +115,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	require.Equal(t, charges, l.engineCharges(), "import replay never charges")
 	if rail == "nmi" && book.PaymentMethods[0].RecurringTransactionID != "" {
 		conflict := book
-		conflict.PaymentMethods = append([]openrails.DeclaredPaymentMethod(nil), book.PaymentMethods...)
+		conflict.PaymentMethods = append([]billing.DeclaredPaymentMethod(nil), book.PaymentMethods...)
 		conflict.PaymentMethods[0].RecurringTransactionID = "another-recurring-agreement"
 		_, err := client.ImportBilling(t.Context(), conflict)
 		require.Error(t, err, "reimport cannot replace an accepted recurring agreement")
@@ -246,7 +246,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.armDestructive()
 			l := importLegacy(t, w, rail, tp)
 			w.converge()
-			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "member asked"}))
+			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionRequest{Reason: "member asked"}))
 			w.settle()
 			w.advance(time.Hour)
 			w.wake()
@@ -288,7 +288,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.runRenewals()
 			require.Equal(t, charges, l.engineCharges(), "OpenRails leaves the provider's dunning alone")
 			// The host's account-deletion callback cancels what it finds.
-			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "Account deletion evt_2", AccountDeletion: true}))
+			require.NoError(t, w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionRequest{Reason: "Account deletion evt_2", AccountDeletion: true}))
 			require.NotNil(t, w.subscription(tp, l.sub).CancelledAt)
 			w.advance(time.Hour)
 			w.wake()
@@ -325,7 +325,7 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 		t.Run(string(tp), func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
-			l := importLegacy(t, w, "nmi", tp, func(book *openrails.DeclaredBilling) {
+			l := importLegacy(t, w, "nmi", tp, func(book *billing.DeclaredBilling) {
 				declareRecurringAnchor(book)
 			})
 			w.converge()
@@ -386,10 +386,10 @@ func TestNMIProviderScheduleOpenRailsDunning(t *testing.T) {
 func TestNMIProviderDunningImportRetainsRetryHistory(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	importLegacy(t, w, "nmi", remote, func(book *openrails.DeclaredBilling) {
+	importLegacy(t, w, "nmi", remote, func(book *billing.DeclaredBilling) {
 		last := w.clock.Now().Add(-2 * time.Hour)
 		declareRecurringAnchor(book)
-		book.Subscriptions[0].Dunning = &openrails.DunningEvidence{Retries: 2, LastRetryAt: &last, ScheduleLive: true}
+		book.Subscriptions[0].Dunning = &billing.DunningEvidence{Retries: 2, LastRetryAt: &last, ScheduleLive: true}
 	})
 	require.Zero(t, len(w.nmi.Attempts()))
 }
@@ -401,7 +401,7 @@ func TestNMIProviderDunningImportRetainsRetryHistory(t *testing.T) {
 func TestDunningStallResumesOnSchedule(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	dunning := func(book *openrails.DeclaredBilling) { declareRecurringAnchor(book) }
+	dunning := func(book *billing.DeclaredBilling) { declareRecurringAnchor(book) }
 	stalled := importLegacy(t, w, "nmi", embedded, dunning)
 	lapsed := importLegacy(t, w, "nmi", embedded, dunning)
 	stripeOwned := importLegacy(t, w, "stripe", embedded)
@@ -449,7 +449,7 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
-	l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
+	l := importLegacy(t, w, "nmi", embedded, func(book *billing.DeclaredBilling) {
 		declareRecurringAnchor(book)
 	})
 	w.converge()
@@ -478,6 +478,6 @@ func TestNMIProviderDunningLapseWithoutDeclineNeverCharged(t *testing.T) {
 
 // declareRecurringAnchor declares the NMI card's recurring agreement: the
 // schedule's signup sale.
-func declareRecurringAnchor(book *openrails.DeclaredBilling) {
+func declareRecurringAnchor(book *billing.DeclaredBilling) {
 	book.PaymentMethods[0].RecurringTransactionID = book.Transactions[0].TransactionID
 }

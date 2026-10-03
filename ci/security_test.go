@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 )
@@ -53,18 +53,18 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	client, err := runtime.Client()
 	require.NoError(t, err)
 
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key: "refund-" + uuid.NewString()[:8], DisplayName: "Refunded post", EntitlementsSpec: map[string]*int{"content:refunded": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	userID := uuid.NewString()
 	_, err = client.EnsureCustomer(t.Context(), userID)
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "refund@example.test"}, PriceID: price.ID,
-		Entitlement: "content:refunded", OfferKind: openrails.OfferPermanent, PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+	_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "refund@example.test"}, PriceID: price.ID,
+		Entitlement: "content:refunded", OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "security-" + uuid.NewString(), SuccessURL: "https://example.test/success", CancelURL: "https://example.test/cancel",
 	})
 	require.NoError(t, err)
@@ -109,10 +109,10 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutSessionID, metadataUserID, metadataPriceID, now.Add(time.Duration(i+2)*time.Second).Unix()))
 		require.False(t, entitled(), "%s after the refund must not grant again", kind)
 	}
-	access, err := client.ProductAccess.Check(t.Context(), &openrails.ProductAccessCheckParams{CustomerID: userID, ProductID: product.ID})
+	access, err := client.ProductAccess.Check(t.Context(), &billing.ProductAccessCheckParams{CustomerID: userID, ProductID: product.ID})
 	require.NoError(t, err)
 	require.False(t, access.HasAccess, "the refunded product is not owned")
-	payments, err := client.ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: userID})
+	payments, err := client.ListPayments(t.Context(), billing.PaymentFilter{CustomerID: userID})
 	require.NoError(t, err)
 	var charged int
 	for _, p := range payments.Data {
