@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 

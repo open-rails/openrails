@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	handlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // RegisterOwnedCatalogRoutes exposes only creator product/price operations.

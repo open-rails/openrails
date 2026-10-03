@@ -1,0 +1,245 @@
+package openrails
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/open-rails/authkit"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/operator"
+)
+
+// Control-plane operations, for hosted products running the engine with
+// Config.ControlPlane: merchant provisioning and names, the merchant
+// directory, fleet aggregates and retirement. They are local to the process:
+// a remote Client refuses them with ErrRemoteClient.
+
+// ErrNoControlPlane refuses a control-plane operation on an engine built
+// without Config.ControlPlane.
+var ErrNoControlPlane = errors.New("openrails: no control plane; set Config.ControlPlane")
+
+func (c *Client) controlPlane() (*app.App, *controlplane.ControlPlane, error) {
+	e, err := c.embedded()
+	if err != nil {
+		return nil, nil, err
+	}
+	cp := operator.Get(e.App)
+	if cp == nil {
+		return nil, nil, ErrNoControlPlane
+	}
+	return e.App, cp, nil
+}
+
+// AuthKit is the control plane's AuthKit client, nil without one.
+func (c *Client) AuthKit() *authkit.Client {
+	if _, cp, err := c.controlPlane(); err == nil {
+		return cp.Core()
+	}
+	return nil
+}
+
+// AuthenticateUser verifies a control-plane user session on r in process.
+func (c *Client) AuthenticateUser(r *http.Request) (Identity, error) {
+	a, cp, err := c.controlPlane()
+	if err != nil {
+		return Identity{}, err
+	}
+	authenticator := cp.UserAuthenticator()
+	if authenticator == nil {
+		return Identity{}, ErrUnauthenticated
+	}
+	user, err := authenticator.Authenticate(r.Context(), r)
+	if err != nil {
+		return Identity{}, err
+	}
+	return Identity{
+		Kind: billingauth.User, Issuer: a.Config.ControlPlane.Auth.Issuer, SubjectID: user.UserID, CustomerID: user.UserID,
+		CredentialClass: billingauth.CredentialClassUserSession, Email: user.Email, EmailVerified: user.EmailVerified,
+		Username: user.Username, SessionID: user.SessionID,
+	}, nil
+}
+
+// ProvisionMerchant returns the merchant a name resolves to, or creates one
+// claiming it, bound to a new merchant permission group owned by
+// req.OwnerUserID. A user claim answers to Config.ControlPlane.MerchantCreation.
+func (c *Client) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantRequest) (*billing.ProvisionMerchantResult, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	return operator.ProvisionMerchant(ctx, a, req)
+}
+
+// RenameMerchant renames a merchant as the operator. The former name keeps
+// forwarding to it and stays unclaimable by others under the naming policy.
+func (c *Client) RenameMerchant(ctx context.Context, id billing.MerchantID, name string) error {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return err
+	}
+	return operator.RenameMerchant(ctx, a, id, name)
+}
+
+// SetMerchantDisplayName sets a live merchant's human-readable name.
+func (c *Client) SetMerchantDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return err
+	}
+	return operator.SetMerchantDisplayName(ctx, a, id, displayName)
+}
+
+// SetMerchantAPIHost sets the host name requests resolve to this merchant
+// from; empty clears it.
+func (c *Client) SetMerchantAPIHost(ctx context.Context, id billing.MerchantID, apiHost string) error {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return err
+	}
+	return operator.SetMerchantAPIHost(ctx, a, id, apiHost)
+}
+
+// GetMerchantAPIHost returns the merchant's API host, empty when unset.
+func (c *Client) GetMerchantAPIHost(ctx context.Context, id billing.MerchantID) (string, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return "", err
+	}
+	return operator.GetMerchantAPIHost(ctx, a, id)
+}
+
+// ListUserMerchants returns the live merchants userID holds a role in, by
+// name, with the user's highest role in each.
+func (c *Client) ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	return operator.ListUserMerchants(ctx, a, userID)
+}
+
+// ListMerchantsForSubject returns the live merchants where subject is a
+// customer.
+func (c *Client) ListMerchantsForSubject(ctx context.Context, subject string) ([]billing.MerchantRef, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	return operator.ListMerchantsForSubject(ctx, a, subject)
+}
+
+// ListActiveMerchantIDs pages the merchant directory for host background work.
+func (c *Client) ListActiveMerchantIDs(ctx context.Context, limit, offset int) ([]billing.MerchantID, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	return operator.ListActiveMerchantIDs(ctx, a, limit, offset)
+}
+
+// ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole
+// merchant when empty), then checks live that the user r authenticates as
+// holds permission on it. The slug is display metadata; carry the ID.
+func (c *Client) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, ref, permission string) (billing.MerchantID, string, error) {
+	_, cp, err := c.controlPlane()
+	if err != nil {
+		return billing.MerchantID{}, "", err
+	}
+	return cp.ResolveAuthorizedMerchant(ctx, r, ref, permission)
+}
+
+// ResolveMerchantForGroup captures the merchant ID and canonical slug behind a
+// group reference, without an authority check.
+func (c *Client) ResolveMerchantForGroup(ctx context.Context, ref string) (billing.MerchantID, string, error) {
+	_, cp, err := c.controlPlane()
+	if err != nil {
+		return billing.MerchantID{}, "", err
+	}
+	return cp.ResolveMerchantForGroup(ctx, ref)
+}
+
+// HasRootPermission checks live whether the user r authenticates as holds
+// permission in the root group.
+func (c *Client) HasRootPermission(ctx context.Context, r *http.Request, permission string) (bool, error) {
+	_, cp, err := c.controlPlane()
+	if err != nil {
+		return false, err
+	}
+	return cp.HasRootPermission(ctx, r, permission)
+}
+
+// EnsureCustomerPermissionGroup idempotently creates the customer's portal
+// group (its ID is customerID) owned by ownerSubject and returns its ID.
+func (c *Client) EnsureCustomerPermissionGroup(ctx context.Context, customerID, ownerSubject string) (string, error) {
+	_, cp, err := c.controlPlane()
+	if err != nil {
+		return "", err
+	}
+	return cp.EnsureCustomerPermissionGroup(ctx, customerID, ownerSubject)
+}
+
+// SubjectHasVaultedPaymentMethod reports whether subject has a usable vaulted
+// payment method with vaultMerchant; a host implements
+// Deps.HasVaultedPaymentMethod with it.
+func (c *Client) SubjectHasVaultedPaymentMethod(ctx context.Context, vaultMerchant billing.MerchantID, subject string) (bool, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return false, err
+	}
+	return operator.SubjectHasVaultedPaymentMethod(ctx, a, vaultMerchant, subject)
+}
+
+// FleetAnalytics returns cross-merchant aggregates over the last windowDays
+// (1..365, else 30), excluding one merchant. The caller gates and audits it.
+func (c *Client) FleetAnalytics(ctx context.Context, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	return operator.FleetAnalytics(ctx, a, exclude, windowDays)
+}
+
+// FleetTimeseries returns the weekly fleet trend (4..52 weeks, else 12),
+// excluding one merchant. The caller gates and audits it.
+func (c *Client) FleetTimeseries(ctx context.Context, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return nil, err
+	}
+	return operator.FleetTimeseries(ctx, a, exclude, weeks)
+}
+
+// ListMerchantRetirementCandidates pages unreserved live merchants with their
+// activity facts; the host owns the dormancy policy over them.
+func (c *Client) ListMerchantRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidatesRequest) (billing.MerchantRetirementCandidatePage, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return billing.MerchantRetirementCandidatePage{}, err
+	}
+	return operator.ListMerchantRetirementCandidates(ctx, a, req)
+}
+
+// RetireUnusedMerchant retires an inactive merchant still bound to groupID and
+// releases its group; refusals are reported in the result.
+func (c *Client) RetireUnusedMerchant(ctx context.Context, id billing.MerchantID, groupID string) (billing.MerchantRetirement, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return billing.MerchantRetirement{}, err
+	}
+	return operator.RetireUnusedMerchant(ctx, a, id, groupID)
+}
+
+// CompletePendingMerchantRetirements retries group releases of committed
+// retirements, up to limit, and reports how many completed.
+func (c *Client) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error) {
+	a, _, err := c.controlPlane()
+	if err != nil {
+		return 0, err
+	}
+	return operator.CompletePendingMerchantRetirements(ctx, a, limit)
+}

@@ -3,8 +3,8 @@ package credential
 
 import (
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"strings"
 )

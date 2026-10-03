@@ -10,14 +10,14 @@ OpenRails-SaaS, not the engine.
 | Surface | Embedded application | Standalone or SaaS server |
 | --- | --- | --- |
 | Go business client | In-process application authority | API key or registered service JWT |
-| Browser self-service | Host `DelegatedAuthenticator` maps the normal user credential to the bound merchant | Sender-bound delegated token from the merchant issuer |
-| User billing routes | Host `Authenticator` | Local AuthKit user credential |
-| Merchant operations | Host `Gate` | Verified credential plus current merchant permission |
+| Browser self-service | `Deps.Authenticate` maps the normal user credential to its paying customer | Sender-bound delegated token from the merchant issuer |
+| User billing routes | `Deps.Authenticate` | Local AuthKit user credential |
+| Merchant operations | `Deps.Authorize`, live per operation | Verified credential plus current merchant permission |
 | Platform operations | Owned by the host | Local human operator plus current root permission |
 
-Embedded applications supply `billingauth.NewIntegration` with a provider-neutral
-request verifier and explicit customer/permission mappings. AuthKit hosts pass
-their existing verifier directly; live admission is an explicit host policy.
+Embedded applications supply `Deps.Authenticate`, `Deps.Authorize` and
+`Deps.RecentSignIn` over their own request verifier, with explicit customer and
+permission mappings; live admission is an explicit host policy.
 Remote JWKS verification cannot independently observe a remote user's ban.
 The normal local host-user adapter remains distinct from the wire delegated
 profile: a local user has `sub`, while a delegated caller has `delegated_sub`.
@@ -54,8 +54,7 @@ signing application's authority.
 ## Cookies and local account admission
 
 Billing HTTP mounts ignore ambient cookies by default. A cookie-based host
-must explicitly wrap its billing mount in
-`billingauth.CookieAuthentication("https://merchant.example")`. Every unsafe
+sets `Config.HTTP.CookieOrigin` to `"https://merchant.example"`. Every unsafe
 cookie request must carry that exact Origin, including bodyless POSTs. Missing,
 opaque, cross-origin and sibling origins are refused. Explicit Authorization
 never falls back to an attached cookie. AuthKit's own `/auth` transport keeps

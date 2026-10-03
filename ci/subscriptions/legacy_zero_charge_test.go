@@ -23,8 +23,8 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -301,7 +301,7 @@ func (w *world) promoteUntil(done <-chan struct{}, what string) {
 // replica is a second process of the same deployment: its own runtime,
 // River fleet and HTTP server over the same database and providers.
 type replica struct {
-	rt     *embed.Runtime
+	rt     *openrails.Client
 	jobs   *river.Client[pgx.Tx]
 	server *httptest.Server
 }
@@ -328,7 +328,7 @@ func (w *world) duePassEverywhere(other *replica) {
 	w.t.Helper()
 	var ids []int64
 	for _, jobs := range []*river.Client[pgx.Tx]{w.jobs, other.jobs} {
-		res, err := jobs.Insert(w.t.Context(), dunningPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+		res, err := jobs.Insert(w.t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 		require.NoError(w.t, err)
 		ids = append(ids, res.Job.ID)
 	}

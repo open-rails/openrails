@@ -10,21 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-// PSPDeclaration identifies a payment-service-provider account without
-// configuring credentials. Hosts use this only for imported facts from a host-owned or synthetic provider.
-// Existing aliases, archive state, custody and configuration are preserved.
-type PSPDeclaration struct {
-	Key       string
-	Rail      string
-	AccountID string
-}
 
 // DeclarePSP idempotently records a PSP identity for an embedded host. It does
 // not write secrets or arm the PSP for checkout; those remain the payment-
@@ -34,7 +25,7 @@ type PSPDeclaration struct {
 // the row receives the same deterministic natural-key ID as every other PSP
 // writer. This is the public precursor to ImportBilling when the declared book
 // attributes its rows with a PSPRef.
-func DeclarePSP(ctx context.Context, application *app.App, merchantID merchant.ID, declaration PSPDeclaration) (uuid.UUID, error) {
+func DeclarePSP(ctx context.Context, application *app.App, merchantID merchant.ID, declaration billing.PSPDeclaration) (uuid.UUID, error) {
 	if application == nil || application.Runtime == nil || application.Runtime.DB == nil {
 		return uuid.Nil, fmt.Errorf("embedded billing: runtime not initialized")
 	}

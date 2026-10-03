@@ -12,8 +12,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

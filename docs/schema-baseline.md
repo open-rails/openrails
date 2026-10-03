@@ -2,7 +2,7 @@
 
 OpenRails installs one baseline, `internal/migrate/postgres/0001_schema.up.sql`.
 AuthKit and River retain independent schemas and migration ownership. All
-OpenRails SQL is authored in `billing`, the default `db.schema`, and runs there
+OpenRails SQL is authored in `billing`, the default `schema`, and runs there
 verbatim; another schema is reached by one token-aware rewrite (see
 docs/runtime-configuration.md). Managed River defaults to `public`. The role that applies the migrations owns every object and is the
 role OpenRails runs as; libraries create no roles and issue no grants. The owner

@@ -7,12 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/merchantbootstrap"
-
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -68,7 +66,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	mctx := merchant.WithID(ctx, mid)
 
 	// merchants.display_name is the canonical merchant name (#041), NULL -> slug.
-	mt := MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: slug}}
+	mt := MerchantConfig{MerchantDeclaration: config.MerchantDeclaration{DisplayName: slug}}
 	if displayName != nil && strings.TrimSpace(*displayName) != "" {
 		mt.DisplayName = *displayName
 	}

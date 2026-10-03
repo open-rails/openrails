@@ -9,8 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/hosttools"
 )
 
 // A convergence pass that runs at any point of an NMI engine takeover (before
@@ -32,7 +33,7 @@ func TestNMIEngineTakeoverConvergesMidFlight(t *testing.T) {
 				if s.Point != point || s.Subscription != legacy || s.Kind != "nmi_engine_takeover" {
 					return nil
 				}
-				res, err := embedoperator.New(w.rt).Converge(context.Background(), w.client[embedded].MerchantID())
+				res, err := hosttools.Converge(context.Background(), engine.Graph(w.rt), w.client[embedded].MerchantID())
 				if err != nil {
 					t.Errorf("mid-takeover converge: %v", err)
 				}

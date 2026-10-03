@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/embed"
 )
 
 // billingIDs is the vault's billing entries at NMI, primary first.
@@ -106,7 +105,7 @@ func TestNMIRefreshRacingCardSave(t *testing.T) {
 	g := w.nmi.hold(newGate(func(r *http.Request) bool {
 		return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v5/subscriptions")
 	}, false))
-	res, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	select {
 	case <-g.arrived:

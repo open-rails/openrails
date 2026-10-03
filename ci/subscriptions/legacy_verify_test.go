@@ -12,11 +12,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/embed"
 )
 
 // rowStates is every NMI subscription's status and period end, by schedule.
@@ -231,7 +230,7 @@ func readBody(r *http.Request) string {
 // pullWithin is pull for a large book: it waits up to d for the pass.
 func (w *world) pullWithin(d time.Duration) {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	require.Eventually(w.t, func() bool {
 		job, err := w.jobs.JobGet(w.t.Context(), res.Job.ID)

@@ -11,39 +11,20 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type (
-	MerchantRetirementCursor            = merchants.RetirementCursor
-	MerchantRetirementCandidatesRequest = merchants.RetirementCandidatesRequest
-	MerchantRetirementCandidate         = merchants.RetirementCandidate
-	MerchantRetirementCandidatePage     = merchants.RetirementCandidatePage
-	MerchantRetirementRefusal           = merchants.RetirementRefusal
-	RetireUnusedMerchantResult          = merchants.RetireResult
-)
-
-const (
-	MerchantRetirementRefusedNotLive       = merchants.RetirementRefusedNotLive
-	MerchantRetirementRefusedGroupMismatch = merchants.RetirementRefusedGroupMismatch
-	MerchantRetirementRefusedReserved      = merchants.RetirementRefusedReserved
-	MerchantRetirementRefusedActive        = merchants.RetirementRefusedActive
-)
-
-// ErrMerchantGroupReleasePending reports a committed retirement whose AuthKit
-// group release has not completed; CompletePendingMerchantRetirements retries it.
-var ErrMerchantGroupReleasePending = merchants.ErrGroupReleasePending
-
 // ListMerchantRetirementCandidates pages live, group-bound merchants created
 // before req.CreatedBefore, excluding the deployment's reserved slugs, each with
 // its current activity fact.
-func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req MerchantRetirementCandidatesRequest) (MerchantRetirementCandidatePage, error) {
+func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req billing.MerchantRetirementCandidatesRequest) (billing.MerchantRetirementCandidatePage, error) {
 	cp, dir, err := retirementDirectory(a)
 	if err != nil {
-		return MerchantRetirementCandidatePage{}, err
+		return billing.MerchantRetirementCandidatePage{}, err
 	}
 	return dir.ListRetirementCandidates(ctx, req, cp.ReservedMerchantSlugs())
 }
@@ -51,10 +32,10 @@ func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req Merch
 // RetireUnusedMerchant retires a live, unreserved merchant with no activity that
 // is still bound to groupID, then deletes exactly that AuthKit group with its
 // slug released. Refusals are reported in the result, not as errors.
-func RetireUnusedMerchant(ctx context.Context, a *app.App, merchantID merchant.ID, groupID string) (RetireUnusedMerchantResult, error) {
+func RetireUnusedMerchant(ctx context.Context, a *app.App, merchantID merchant.ID, groupID string) (billing.MerchantRetirement, error) {
 	cp, dir, err := retirementDirectory(a)
 	if err != nil {
-		return RetireUnusedMerchantResult{}, err
+		return billing.MerchantRetirement{}, err
 	}
 	return dir.RetireUnused(ctx, merchantID, groupID, cp.ReservedMerchantSlugs(), groupReleaser(cp))
 }

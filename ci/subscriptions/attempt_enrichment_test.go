@@ -7,10 +7,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/embed"
 )
 
 type enrichmentPass struct{}
@@ -20,7 +19,7 @@ func (enrichmentPass) Kind() string { return "openrails.attempt_enrichment" }
 // enrichAttempts runs the NMI attempt enrichment pass once (#1114).
 func (w *world) enrichAttempts() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), enrichmentPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(w.t.Context(), enrichmentPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	w.waitJob(res.Job.ID)
 }

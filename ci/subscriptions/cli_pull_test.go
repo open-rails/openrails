@@ -10,9 +10,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
 // armedAtWorldClock dates the destructive arming and this deployment's first
@@ -32,9 +33,9 @@ func (w *world) cliPull(provider string, overwrite bool) {
 	cfg := &config.Config{
 		TestMode:          config.CredentialPostureSandbox,
 		ProviderWriteMode: config.ProviderWriteModeFull,
-		DB:                &config.DBConfig{URL: w.dsn, Schema: w.schema},
+		DB:                &config.DBConfig{URL: w.dsn}, Schema: w.schema,
 	}
-	manifest := &hosttools.BillingConfig{Merchants: map[string]embed.MerchantConfig{
+	manifest := &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{
 		w.slug: {DisplayName: w.slug, PSPs: w.psps},
 	}}
 	var out strings.Builder

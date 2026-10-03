@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -142,7 +142,7 @@ func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessio
 // list and routing's fallback classes (or#288) — one place decides, so the
 // advertised list and the routed choice can never disagree. Which sale kinds a
 // rail supports is the rail registry's capability, never a list here (#1078).
-func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.PSPConfig, mode models.CheckoutSessionMode) string {
+func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.CheckoutSessionMode) string {
 	price = priceForCheckoutTarget(price, target)
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed

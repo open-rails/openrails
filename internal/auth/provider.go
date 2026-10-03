@@ -10,8 +10,8 @@ import (
 	"github.com/open-rails/authkit/verify"
 	helpersauth "github.com/open-rails/helpers/auth"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // Authenticator is the framework-neutral user authenticator over the control

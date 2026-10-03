@@ -46,7 +46,7 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 	}
 	if r.hostRiver != host {
 		r.riverCompositionMu.Unlock()
-		return refuse(fmt.Errorf("host composition requires RiverFromHost ownership"))
+		return refuse(fmt.Errorf("host composition requires RiverHostOwned"))
 	}
 	r.riverCompositionSealed = true
 	components := slices.Clone(r.riverContributions)

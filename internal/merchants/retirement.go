@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -23,63 +24,10 @@ const maxRetirementCandidatePage = 500
 // released, returning nil when that group is already gone so recovery converges.
 type GroupReleaser func(ctx context.Context, groupID string) error
 
-// ErrGroupReleasePending reports a committed retirement whose group release has
-// not completed or not been recorded; CompletePendingGroupReleases retries it
-// by UUID.
-var ErrGroupReleasePending = errors.New("merchants: retired merchant group release pending")
-
-// RetirementCursor is the keyset position after a candidate.
-type RetirementCursor struct {
-	CreatedAt  time.Time
-	MerchantID merchant.ID
-}
-
-// RetirementCandidatesRequest pages live, group-bound, unreserved merchants
-// created before CreatedBefore, oldest first.
-type RetirementCandidatesRequest struct {
-	CreatedBefore time.Time
-	After         *RetirementCursor
-	// Limit is the page size, 1..500.
-	Limit int
-}
-
-// RetirementCandidate is one merchant plus its current activity fact.
-type RetirementCandidate struct {
-	MerchantID merchant.ID
-	Slug       string
-	GroupID    string
-	CreatedAt  time.Time
-	// Used reports any retirement-blocking activity (MerchantHasActivity).
-	Used bool
-}
-
-// RetirementCandidatePage is one keyset page; Next is nil at the end.
-type RetirementCandidatePage struct {
-	Candidates []RetirementCandidate
-	Next       *RetirementCursor
-}
-
-// RetirementRefusal names why a merchant was not retired.
-type RetirementRefusal string
-
-const (
-	RetirementRefusedNotLive       RetirementRefusal = "not_live"
-	RetirementRefusedGroupMismatch RetirementRefusal = "group_mismatch"
-	RetirementRefusedReserved      RetirementRefusal = "reserved"
-	RetirementRefusedActive        RetirementRefusal = "active"
-)
-
-// RetireResult reports one retirement attempt. Retired means the tombstone is
-// committed; Refusal is set otherwise.
-type RetireResult struct {
-	Retired bool
-	Refusal RetirementRefusal
-}
-
 // ListRetirementCandidates returns one page of candidates. Activity is probed
 // per merchant inside its own scope.
-func (s *Service) ListRetirementCandidates(ctx context.Context, req RetirementCandidatesRequest, reservedSlugs []string) (RetirementCandidatePage, error) {
-	var page RetirementCandidatePage
+func (s *Service) ListRetirementCandidates(ctx context.Context, req billing.MerchantRetirementCandidatesRequest, reservedSlugs []string) (billing.MerchantRetirementCandidatePage, error) {
+	var page billing.MerchantRetirementCandidatePage
 	if s == nil || s.pool == nil {
 		return page, errors.New("merchants: retirement candidates require a DB pool")
 	}
@@ -89,7 +37,7 @@ func (s *Service) ListRetirementCandidates(ctx context.Context, req RetirementCa
 	if req.Limit <= 0 || req.Limit > maxRetirementCandidatePage {
 		return page, fmt.Errorf("merchants: retirement candidate limit %d outside 1..%d", req.Limit, maxRetirementCandidatePage)
 	}
-	after := RetirementCursor{}
+	after := billing.MerchantRetirementCursor{}
 	if req.After != nil {
 		after = *req.After
 	}
@@ -113,13 +61,13 @@ func (s *Service) ListRetirementCandidates(ctx context.Context, req RetirementCa
 		}); err != nil {
 			return page, fmt.Errorf("merchants: probe activity for %s: %w", mid, err)
 		}
-		page.Candidates = append(page.Candidates, RetirementCandidate{
+		page.Candidates = append(page.Candidates, billing.MerchantRetirementCandidate{
 			MerchantID: mid, Slug: row.Slug, GroupID: row.GroupID, CreatedAt: row.CreatedAt, Used: used,
 		})
 	}
 	if len(rows) == req.Limit {
 		last := page.Candidates[len(page.Candidates)-1]
-		page.Next = &RetirementCursor{CreatedAt: last.CreatedAt, MerchantID: last.MerchantID}
+		page.Next = &billing.MerchantRetirementCursor{CreatedAt: last.CreatedAt, MerchantID: last.MerchantID}
 	}
 	return page, nil
 }
@@ -129,8 +77,8 @@ func (s *Service) ListRetirementCandidates(ctx context.Context, req RetirementCa
 // (every blocker references it), so the activity check and the irreversible
 // tombstone commit together. Any failure after that commit returns Retired
 // with ErrGroupReleasePending.
-func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID string, reservedSlugs []string, release GroupReleaser) (RetireResult, error) {
-	var res RetireResult
+func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID string, reservedSlugs []string, release GroupReleaser) (billing.MerchantRetirement, error) {
+	var res billing.MerchantRetirement
 	if s == nil || s.pool == nil {
 		return res, errors.New("merchants: retirement requires a DB pool")
 	}
@@ -146,7 +94,7 @@ func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID str
 		q := gen.New(tx)
 		state, err := q.LockMerchantRetirementState(ctx, mid.UUID())
 		if errors.Is(err, pgx.ErrNoRows) {
-			res.Refusal = RetirementRefusedNotLive
+			res.Refusal = billing.MerchantRetirementRefusedNotLive
 			return nil
 		}
 		if err != nil {
@@ -154,13 +102,13 @@ func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID str
 		}
 		switch {
 		case !state.Live:
-			res.Refusal = RetirementRefusedNotLive
+			res.Refusal = billing.MerchantRetirementRefusedNotLive
 			return nil
 		case state.PermissionGroupID == nil || *state.PermissionGroupID != groupID:
-			res.Refusal = RetirementRefusedGroupMismatch
+			res.Refusal = billing.MerchantRetirementRefusedGroupMismatch
 			return nil
 		case containsSlug(reserved, state.Slug):
-			res.Refusal = RetirementRefusedReserved
+			res.Refusal = billing.MerchantRetirementRefusedReserved
 			return nil
 		}
 		used, err := q.MerchantHasActivity(ctx, mid.UUID())
@@ -168,7 +116,7 @@ func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID str
 			return err
 		}
 		if used {
-			res.Refusal = RetirementRefusedActive
+			res.Refusal = billing.MerchantRetirementRefusedActive
 			return nil
 		}
 		if err := q.MarkMerchantRetired(ctx, gen.MarkMerchantRetiredParams{ID: mid.UUID(), RetiredAt: time.Now().UTC()}); err != nil {
@@ -178,7 +126,7 @@ func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID str
 		return nil
 	})
 	if err != nil {
-		return RetireResult{}, fmt.Errorf("merchants: retire %s: %w", mid, err)
+		return billing.MerchantRetirement{}, fmt.Errorf("merchants: retire %s: %w", mid, err)
 	}
 	if !res.Retired {
 		return res, nil
@@ -216,12 +164,12 @@ func (s *Service) CompletePendingGroupReleases(ctx context.Context, limit int, r
 
 func (s *Service) releaseRetiredGroup(ctx context.Context, mid merchant.ID, groupID string, release GroupReleaser) error {
 	if err := release(ctx, groupID); err != nil {
-		return fmt.Errorf("%w: merchant %s group %s: %w", ErrGroupReleasePending, mid, groupID, err)
+		return fmt.Errorf("%w: merchant %s group %s: %w", billing.ErrMerchantGroupReleasePending, mid, groupID, err)
 	}
 	if err := s.pool.MerchantTx(ctx, mid, func(ctx context.Context, tx pgx.Tx) error {
 		return gen.New(tx).CompleteMerchantGroupRelease(ctx, gen.CompleteMerchantGroupReleaseParams{ID: mid.UUID(), GroupID: groupID})
 	}); err != nil {
-		return fmt.Errorf("%w: merchant %s group %s released but not recorded: %w", ErrGroupReleasePending, mid, groupID, err)
+		return fmt.Errorf("%w: merchant %s group %s released but not recorded: %w", billing.ErrMerchantGroupReleasePending, mid, groupID, err)
 	}
 	return nil
 }

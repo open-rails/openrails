@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -163,7 +163,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return ManagedStripeWebhookResult{}, fmt.Errorf("credential backend cannot retain generated webhook secret: declare webhook_signing_secret and register endpoint %s out-of-band", webhookURL)
 	}
 
-	rails := railresolve.FixedSet{"stripe": &config.PSPConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
+	rails := railresolve.FixedSet{"stripe": &config.ResolvedPSP{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
 	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
 	var publish func(context.Context, string, string) error
 	if writable {

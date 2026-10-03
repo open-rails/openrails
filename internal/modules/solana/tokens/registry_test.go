@@ -8,7 +8,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 )
 

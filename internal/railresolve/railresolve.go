@@ -20,7 +20,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -47,13 +47,13 @@ type Source interface {
 	// the ACTIVE account for new work; non-empty pins a declared account
 	// (inbound webhook routing #641 — may address archived accounts).
 	// Returns ErrRailNotArmed (wrapped) when nothing is armed.
-	RailConfig(ctx context.Context, rail string, accountID string) (*config.PSPConfig, error)
+	RailConfig(ctx context.Context, rail string, accountID string) (*config.ResolvedPSP, error)
 	// CustodianConfig resolves a declared custodian by its VENDOR identity
 	// (kind + custodian-native account id) for the ctx merchant (or#880).
 	// Custody is not a rail, so a custodian's own webhooks cannot resolve
 	// through RailConfig — and one custodian may back several PSPs, so
 	// picking "the" PSP was never a well-defined answer.
-	CustodianConfig(ctx context.Context, kind string, accountID string) (*config.CustodianConfig, error)
+	CustodianConfig(ctx context.Context, kind string, accountID string) (*config.ResolvedCustodian, error)
 }
 
 // MerchantsSource is the production Source: scope rows via merchants.Service
@@ -176,7 +176,7 @@ func (s *MerchantsSource) requireSecret(ctx context.Context, mid merchant.ID, sc
 	return value, nil
 }
 
-func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string) (*config.PSPConfig, error) {
+func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string) (*config.ResolvedPSP, error) {
 	mid, scope, ok, err := s.scope(ctx, rail, accountID)
 	if err != nil {
 		return nil, err
@@ -184,7 +184,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 	if !ok {
 		return nil, fmt.Errorf("rail %s account %q: %w", rail, accountID, ErrRailNotArmed)
 	}
-	out := &config.PSPConfig{
+	out := &config.ResolvedPSP{
 		ID:        scope.ID,
 		Key:       scope.Key,
 		Rail:      models.Rail(scope.Rail),
@@ -281,7 +281,7 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 // custodian that cannot be fully armed is a fail-closed error, never a silent
 // downgrade to "no custody" — that would charge the card as though the gateway
 // held it, which is the wrong charge and not a degraded one.
-func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*config.CustodianConfig, error) {
+func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*config.ResolvedCustodian, error) {
 	// or#880: an inline custody block on a PSP is a retired shape. It must
 	// fail here too, not only at manifest push: a stored settings blob is an
 	// ingestion plane of its own (mode 2).
@@ -313,7 +313,7 @@ func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, s
 // registry-validated settings plus its private credentials from the secret
 // store. Shared by PSP resolution and by custodian-routed webhooks, so both
 // arm from exactly the same row and the same secret names.
-func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, custodian merchants.CustodianScope) (*config.CustodianConfig, error) {
+func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, custodian merchants.CustodianScope) (*config.ResolvedCustodian, error) {
 	d, err := custodians.Require(custodian.Kind)
 	if err != nil {
 		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
@@ -322,7 +322,7 @@ func (s *MerchantsSource) custodianConfig(ctx context.Context, mid merchant.ID, 
 	if err != nil {
 		return nil, fmt.Errorf("custodian %q: %w", custodian.Key, err)
 	}
-	out := &config.CustodianConfig{
+	out := &config.ResolvedCustodian{
 		Key:                         custodian.Key,
 		Custodian:                   d.Kind,
 		AccountID:                   custodian.AccountID,
@@ -377,7 +377,7 @@ func (s *MerchantsSource) custodianSecret(ctx context.Context, mid merchant.ID, 
 // only handle an inbound custodian webhook has (a Basis Theory event carries a
 // tenant id, no merchant and no PSP). The ctx merchant must already be pinned
 // by the cross-merchant directory lookup.
-func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID string) (*config.CustodianConfig, error) {
+func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID string) (*config.ResolvedCustodian, error) {
 	svc := s.service()
 	if svc == nil {
 		return nil, fmt.Errorf("resolve custodian %s: merchants service is not armed: %w", kind, ErrRailNotArmed)
@@ -431,7 +431,7 @@ func (f FixedSet) Armed(_ context.Context, rail string) (bool, error) {
 	return proc != nil, nil
 }
 
-func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config.PSPConfig, error) {
+func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config.ResolvedPSP, error) {
 	set := config.PSPSet(f)
 	railType := models.Rail(strings.ToLower(strings.TrimSpace(rail)))
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
@@ -455,7 +455,7 @@ func (f FixedSet) RailConfig(_ context.Context, rail, accountID string) (*config
 // CustodianConfig finds the declared custodian by vendor identity among the
 // set's PSPs. In production one custodians row backs them all; in a FixedSet
 // the same *CustodianConfig is simply shared by each PSP that references it.
-func (f FixedSet) CustodianConfig(_ context.Context, kind, accountID string) (*config.CustodianConfig, error) {
+func (f FixedSet) CustodianConfig(_ context.Context, kind, accountID string) (*config.ResolvedCustodian, error) {
 	kind = custodians.Normalize(kind)
 	accountID = strings.TrimSpace(accountID)
 	for _, proc := range config.PSPSet(f) {
@@ -475,7 +475,7 @@ func (f FixedSet) CustodianConfig(_ context.Context, kind, accountID string) (*c
 
 // withPSPKey returns a copy of proc carrying its resolved PSP key (the set's
 // map name), matching MerchantsSource's scope.Key population.
-func withPSPKey(proc *config.PSPConfig, key string) *config.PSPConfig {
+func withPSPKey(proc *config.ResolvedPSP, key string) *config.ResolvedPSP {
 	out := *proc
 	out.Key = strings.ToLower(strings.TrimSpace(key))
 	if out.ID == uuid.Nil {

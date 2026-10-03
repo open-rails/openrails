@@ -2,11 +2,12 @@ package hosttools
 
 import (
 	"context"
+
 	"github.com/jonboulle/clockwork"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
 )

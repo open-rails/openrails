@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -47,9 +47,9 @@ func MerchantRename(svc MerchantRenamer) func(*httprequest.Request) {
 			r.SetHeader("Retry-After", strconv.Itoa(int(time.Until(tooSoon.NextRenameAt).Seconds())+1))
 			r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeInvalidRequest, "rename_too_soon",
 				"the next rename is allowed at "+tooSoon.NextRenameAt.UTC().Format(time.RFC3339)))
-		case errors.Is(err, merchants.ErrMerchantNameTaken):
+		case errors.Is(err, billing.ErrMerchantNameTaken):
 			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "name_taken", "that merchant name is taken"))
-		case errors.Is(err, controlplane.ErrMerchantSlugReserved):
+		case errors.Is(err, billing.ErrMerchantSlugReserved):
 			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "name_reserved", "that merchant name is reserved"))
 		case errors.Is(err, merchants.ErrRenamesDisabled):
 			r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeInvalidRequest, "renames_disabled", "merchant renames are disabled"))

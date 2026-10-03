@@ -23,7 +23,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -53,7 +54,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -71,7 +71,7 @@ type Runtime struct {
 	// stored Solana identity.
 	signerIdentity dependencyState
 	// ApproveSolanaSigner, set by the embedded constructor, accepts the
-	// identity a changed Transit signer now reports (internal/embedoperator).
+	// identity a changed Transit signer now reports (hosttools.ApproveSolanaSigner).
 	ApproveSolanaSigner func(ctx context.Context, merchantID merchant.ID, key string) error
 	// posturePending counts loaded PSPs whose verdict is not yet known; -1
 	// until StartProviderPosture's first pass completes.
@@ -449,64 +449,67 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	return err
 }
 
-// RunWorkers starts River workers (and other background loops) and blocks until ctx is done.
-//
-// If a host River client was bound, this only starts
-// non-River background loops (e.g., Solana Pay poller). The host is responsible for
-// starting the shared River client.
+// RunWorkers runs StartWorkers until ctx is done.
 func (r *Runtime) RunWorkers(ctx context.Context) error {
-	if r == nil {
-		return fmt.Errorf("runtime is nil")
+	stop, err := r.StartWorkers(ctx)
+	if err != nil {
+		return err
 	}
+	<-ctx.Done()
+	stop()
+	return ctx.Err()
+}
 
+// StartWorkers starts the managed River client and the non-River loops (the
+// Solana Pay poller) and returns once they run. With host-owned River only the
+// loops start; the host starts its fleet. ctx bounds the workers' lifetime;
+// stop joins the loops so the host can then stop its fleet and close pools.
+func (r *Runtime) StartWorkers(ctx context.Context) (stop func(), err error) {
+	if r == nil {
+		return nil, fmt.Errorf("runtime is nil")
+	}
 	if r.riverClosed.Load() {
-		return fmt.Errorf("runtime is closed")
+		return nil, fmt.Errorf("runtime is closed")
 	}
 	if r.hostRiver && !r.hostRiverBound.Load() {
-		return fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverhelpers.New")
+		return nil, fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverhelpers.New")
 	}
-
-	// Join core-owned non-River work before RunWorkers returns. The host can
-	// then stop its shared fleet before closing dependent runtimes and pools.
 	loopCtx, stopLoops := context.WithCancel(ctx)
 	var pollerDone chan struct{}
 	if r.SolanaPayPoller != nil {
 		pollerDone = make(chan struct{})
 		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
 	}
-	defer func() {
+	joinLoops := func() {
 		stopLoops()
 		if pollerDone != nil {
 			<-pollerDone
 		}
-	}()
-
-	// If external client, don't start River workers - host is responsible
+	}
 	if r.externalRiverClient {
 		log.Info("External River client configured - skipping River worker startup")
-		// Block until context is cancelled
-		<-ctx.Done()
-		return ctx.Err()
+		return joinLoops, nil
 	}
-
 	if err := r.InitRiver(ctx); err != nil {
-		return err
+		joinLoops()
+		return nil, err
 	}
 	if r.RiverClient == nil {
-		return fmt.Errorf("river client not initialized")
+		joinLoops()
+		return nil, fmt.Errorf("river client not initialized")
 	}
-
 	r.riverStarted = true
 	log.Info("Starting River background workers")
 	if err := r.RiverClient.Start(ctx); err != nil {
 		r.riverStarted = false
-		return err
+		joinLoops()
+		return nil, err
 	}
 	r.workerConsumerRunning.Store(true)
-	defer r.workerConsumerRunning.Store(false)
-
-	<-ctx.Done()
-	return ctx.Err()
+	return func() {
+		r.workerConsumerRunning.Store(false)
+		joinLoops()
+	}, nil
 }
 
 // GetBillingPeriodicJobs returns billing's periodic jobs for external River client setup.
@@ -530,15 +533,13 @@ func (r *Runtime) riverSchemaOrDefault() string {
 	if r.riverSchema != "" {
 		return r.riverSchema
 	}
-	return config.RiverSchema
+	return config.DefaultRiverSchema
 }
 
-// HasExternalRiverClient returns true if an external River client was configured.
-func (r *Runtime) HasExternalRiverClient() bool {
-	if r == nil {
-		return false
-	}
-	return r.hostRiverBound.Load()
+// HostRiverBound reports whether the host's River composer bound this
+// runtime's jobs.
+func (r *Runtime) HostRiverBound() bool {
+	return r != nil && r.hostRiverBound.Load()
 }
 
 // SetSolanaCranker injects the recurring Solana cranker built once the merchant

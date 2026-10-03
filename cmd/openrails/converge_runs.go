@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -60,7 +60,7 @@ func convergeOpenDB(cmd *cobra.Command, merchantSlug string) (*db.DB, merchant.I
 	if cfg == nil || cfg.DB == nil {
 		return nil, merchant.ID{}, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(cmd.Context(), cfg.DB)
+	database, err := db.NewDB(cmd.Context(), cfg)
 	if err != nil {
 		return nil, merchant.ID{}, fmt.Errorf("open postgres: %w", err)
 	}

@@ -43,7 +43,7 @@ func TestContractGateDetectsCoveredMutations(t *testing.T) {
 
 	for _, m := range []mutation{
 		{"removed public Go method", inDir("."), goEdit(removeExportedMethod), "go_api . removed: func"},
-		{"changed public Go signature", inDir("embed"), goEdit(addParameter), "go_api embed added: func"},
+		{"changed public Go signature", inDir("adapters/gin"), goEdit(addParameter), "go_api adapters/gin added: func"},
 		{"changed public JSON tag", inDir("billing"), goEdit(renameJSONTag), "go_api billing changed: type"},
 		{"changed internal wire field type", under("internal/modules/"), goEdit(retypeJSONField), "wire_types internal/modules/"},
 		{"changed custom JSON codec", under("internal/modules/"), goEdit(editJSONCodec), "wire_types internal/modules/"},

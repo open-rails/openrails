@@ -7,10 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/hosttools"
 )
 
 // newSolanaPayCmd groups the Solana Pay operator commands.
@@ -46,16 +45,16 @@ func newSolanaPayResolveCmd() *cobra.Command {
 }
 
 func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, signature, resolution string) error {
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
-	if err != nil {
-		return fmt.Errorf("bootstrap application: %w", err)
-	}
-	defer func() { _ = rt.Close(context.Background()) }()
-	mid, err := resolveCLIMerchant(ctx, app.HostGraph(rt).Runtime.DB, merchantSlug)
+	client, graph, err := openEngine(ctx, cfg, openrails.Deps{}, false)
 	if err != nil {
 		return err
 	}
-	if err := embedoperator.New(rt).ResolveSolanaPayReview(ctx, mid, signature, resolution); err != nil {
+	defer func() { _ = client.Close(context.Background()) }()
+	mid, err := resolveCLIMerchant(ctx, graph.Runtime.DB, merchantSlug)
+	if err != nil {
+		return err
+	}
+	if err := hosttools.ResolveSolanaPayReview(ctx, graph, mid, signature, resolution); err != nil {
 		return err
 	}
 	fmt.Printf("resolved Solana Pay review %s for merchant %s\n", signature, mid)

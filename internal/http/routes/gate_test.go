@@ -13,14 +13,14 @@ import (
 
 	auth "github.com/open-rails/helpers/auth"
 
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -54,12 +54,12 @@ func (m *membership) ResolveAuthorizedMerchant(_ context.Context, _ *http.Reques
 	}
 	if ref == "" {
 		if ref = m.inferred; ref == "" {
-			return merchant.ID{}, "", authpolicy.ErrMerchantUnresolved
+			return merchant.ID{}, "", billing.ErrMerchantUnresolved
 		}
 	}
 	id, ok := m.granted[ref]
 	if !ok {
-		return merchant.ID{}, "", authpolicy.ErrPermissionRequired
+		return merchant.ID{}, "", billing.ErrPermissionRequired
 	}
 	return id, ref, nil
 }

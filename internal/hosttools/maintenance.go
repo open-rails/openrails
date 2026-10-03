@@ -1,0 +1,192 @@
+package hosttools
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+// Local maintenance over an owned engine graph: process ownership is the
+// authority, so none of these is reachable through a Client or HTTP route.
+
+func initialized(a *app.App) error {
+	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
+		return fmt.Errorf("openrails: engine is not initialized")
+	}
+	return nil
+}
+
+// Converge runs one merchant-wide convergence pass now: the engine the
+// scheduled sweep uses, so grants and entitlements derive right after an import.
+func Converge(ctx context.Context, a *app.App, merchantID merchant.ID) (ConvergeMerchantResult, error) {
+	if err := initialized(a); err != nil {
+		return ConvergeMerchantResult{}, err
+	}
+	return ConvergeMerchant(ctx, ConvergeMerchantOptions{
+		Config: a.Config, PGXPool: a.Runtime.DB.Pool(), MerchantID: merchantID, Clock: a.Runtime.Clock,
+	})
+}
+
+// PullProviderRun configures one provider pull. Bare calls are dry-run; local
+// writes require Insert, Overwrite or Prune, and a prune writes only with
+// PruneExpectRows matching what the pass found.
+type PullProviderRun struct {
+	MerchantID      merchant.ID
+	Providers       []string
+	PSP             string
+	Since           string
+	Until           string
+	Format          string
+	LogDir          string
+	Insert          bool
+	Overwrite       bool
+	Prune           bool
+	PruneExpectRows *int
+	PruneActor      string
+	Out             io.Writer
+	// MerchantManifest is the manifest the host boots from; nil reads
+	// MerchantManifestPath (or the conventional path).
+	MerchantManifest     *merchantbootstrap.BillingConfig
+	MerchantManifestPath string
+	// Endpoints overrides provider base URLs (a test seam for fake providers).
+	Endpoints reconcile.ProviderEndpoints
+}
+
+// Pull pulls provider-observed state into the merchant's local mirror.
+func Pull(ctx context.Context, a *app.App, run PullProviderRun) error {
+	if err := initialized(a); err != nil {
+		return err
+	}
+	return PullProvider(ctx, PullProviderOptions{
+		StripeClients: a.Runtime.StripeClients,
+		PGXPool:       a.Runtime.DB.Pool(), Config: a.Config,
+		MerchantID: run.MerchantID, Providers: run.Providers, PSP: run.PSP, Since: run.Since, Until: run.Until,
+		Format: run.Format, LogDir: run.LogDir, Insert: run.Insert, Overwrite: run.Overwrite, Prune: run.Prune,
+		Out: run.Out, PruneExpectRows: run.PruneExpectRows, PruneActor: run.PruneActor,
+		MerchantManifest: run.MerchantManifest, MerchantManifestPath: run.MerchantManifestPath, Endpoints: run.Endpoints,
+	})
+}
+
+// ResolveMerchant captures the immutable merchant ID and current name behind a
+// public name. Carry the ID, never the name, into later operations.
+func ResolveMerchant(ctx context.Context, a *app.App, name string) (merchant.ID, string, error) {
+	if err := initialized(a); err != nil {
+		return merchant.ID{}, "", err
+	}
+	if a.Runtime.Merchants == nil {
+		return merchant.ID{}, "", fmt.Errorf("openrails: merchant directory is not armed")
+	}
+	selected, err := a.Runtime.Merchants.GetBySlug(ctx, name)
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	return selected.ID, selected.Slug, nil
+}
+
+// ApplyCatalogAsOperator applies a catalog to one explicitly selected merchant
+// with operator authority; ordinary Client writes remain governed by
+// AllowCatalogUpdates.
+func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID merchant.ID, params *billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
+	if err := initialized(a); err != nil {
+		return nil, err
+	}
+	if merchantID.IsZero() || params == nil {
+		return nil, fmt.Errorf("merchant and catalog application are required")
+	}
+	svc, err := service.New(a.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	return svc.ApplyCatalog(catalogpolicy.OperatorContext(merchant.WithID(ctx, merchantID)), *params)
+}
+
+// RegisterMerchantForRestore registers a preserved merchant UUID for a host
+// without a control plane, then binds the engine to it. Call during startup,
+// before serving or starting workers. It registers no PSPs or credentials.
+func RegisterMerchantForRestore(ctx context.Context, a *app.App, id merchant.ID, slug string) (merchant.ID, error) {
+	if err := initialized(a); err != nil {
+		return merchant.ID{}, err
+	}
+	if a.ControlPlane != nil {
+		return merchant.ID{}, fmt.Errorf("openrails: an attached control plane restores through ProvisionMerchantForRestore with destination group authority")
+	}
+	if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() && bound != id {
+		return merchant.ID{}, merchants.ErrMerchantRestoreConflict
+	}
+	directory, err := merchants.NewDirectoryService(a.Runtime.DB.DataPool())
+	if err != nil {
+		return merchant.ID{}, err
+	}
+	m, _, err := directory.RegisterForRestore(ctx, id, slug)
+	if err != nil {
+		return merchant.ID{}, err
+	}
+	a.Runtime.SetConfiguredMerchant(m.ID)
+	return m.ID, nil
+}
+
+// ResolveSolanaPayReview closes a Solana Pay review receipt (a second, late,
+// short or unreadable transfer, or an overpayment's excess) once its money was
+// settled outside OpenRails. Unresolved reviews hold the billing archive back.
+func ResolveSolanaPayReview(ctx context.Context, a *app.App, merchantID merchant.ID, signature, resolution string) error {
+	if err := initialized(a); err != nil {
+		return err
+	}
+	if a.Runtime.CheckoutSessionService == nil {
+		return fmt.Errorf("openrails: this engine has no checkout sessions")
+	}
+	return a.Runtime.CheckoutSessionService.ResolveSolanaPayReview(merchant.WithID(ctx, merchantID), signature, resolution)
+}
+
+// ApproveSolanaSigner accepts the Solana identity a Vault Transit signer key
+// now reports after it changed. Until then the Solana rail refuses and the
+// openrails_solana_signer_identity probe fails. Verify the new public key
+// (in the ERROR log and the probe) before calling.
+func ApproveSolanaSigner(ctx context.Context, a *app.App, merchantID merchant.ID, key string) error {
+	if err := initialized(a); err != nil {
+		return err
+	}
+	if a.Runtime.ApproveSolanaSigner == nil {
+		return fmt.Errorf("openrails: this engine cannot approve Solana signers")
+	}
+	return a.Runtime.ApproveSolanaSigner(ctx, merchantID, key)
+}
+
+// TransitionProviderCredentials moves one account's credential custody from
+// source to target, two owned engines. It preserves source material. A target
+// snapshot must already hold every current and overlap credential under its
+// stable CredentialSnapshotID, and every later restart must supply it.
+func TransitionProviderCredentials(ctx context.Context, target, source *app.App, id merchant.ID, rail string, params merchants.CredentialTransitionRequest) (*billing.PaymentProviderConfig, error) {
+	for _, a := range []*app.App{target, source} {
+		if err := initialized(a); err != nil {
+			return nil, err
+		}
+		if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() && bound != id {
+			return nil, fmt.Errorf("credential transition merchant differs from the engine binding")
+		}
+		if a.Runtime.Merchants == nil {
+			return nil, fmt.Errorf("credential transition requires initialized merchant services")
+		}
+	}
+	if id.IsZero() {
+		return nil, fmt.Errorf("credential transition requires a merchant")
+	}
+	if config.ExpectedProviderEnvironment(target.Config.IsTestMode()) != config.ExpectedProviderEnvironment(source.Config.IsTestMode()) {
+		return nil, fmt.Errorf("credential transition requires matching provider environments")
+	}
+	result, err := target.Runtime.Merchants.TransitionProviderCredentials(ctx, id, rail, params, source.Runtime.Merchants.Secrets())
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

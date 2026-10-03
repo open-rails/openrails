@@ -10,7 +10,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanatransit "github.com/open-rails/openrails/internal/integrations/solana"

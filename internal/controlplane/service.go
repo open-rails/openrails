@@ -16,11 +16,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
 	userauth "github.com/open-rails/openrails/internal/auth"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/hostconfig"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -30,7 +29,7 @@ import (
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is
-// fatal. Embedded hosts opt in via internal/embedcontrolplane.Attach.
+// fatal. Embedded hosts opt in with Config.ControlPlane.
 type ControlPlane struct {
 	client *authkit.Client
 	hosted bool
@@ -78,7 +77,7 @@ type Option func(*options)
 
 // WithHostedPosture opens AuthKit registration and mounts the full AuthKit API.
 // Standalone never passes this; hosted products opt in through
-// internal/embedcontrolplane.
+// Config.ControlPlane.
 func WithHostedPosture() Option {
 	return func(o *options) { o.hosted = true }
 }
@@ -172,7 +171,7 @@ func newOptions(opts []Option) options {
 // override config, direct-peer excludes proxy lists, and an undeclared posture
 // refuses to boot rather than sharing one rate-limit bucket behind an unknown
 // proxy.
-func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options options) (authkit.HTTPConfig, error) {
+func clientIPPosture(cfg *config.Config, auth *config.AuthConfig, options options) (authkit.HTTPConfig, error) {
 	proxies := cfg.TrustedProxies
 	if len(options.trustedProxies) > 0 {
 		proxies = options.trustedProxies
@@ -194,7 +193,7 @@ func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options op
 // Registration policy (#469): standalone is closed and verifies nothing;
 // hosted posture opens registration and requires verified contacts, so it
 // needs a sender.
-func registration(options options, auth *hostconfig.AuthConfig) authkit.RegistrationConfig {
+func registration(options options, auth *config.AuthConfig) authkit.RegistrationConfig {
 	reg := authkit.RegistrationConfig{
 		NativeUserMode:               iam.RegistrationModeClosed,
 		Verification:                 iam.RegistrationVerificationNone,
@@ -211,7 +210,7 @@ func registration(options options, auth *hostconfig.AuthConfig) authkit.Registra
 // inlineKeySource is the signing key from inline PEM (AUTHKIT_ACTIVE_KEY_ID /
 // AUTHKIT_ACTIVE_PRIVATE_KEY_PEM / AUTHKIT_PUBLIC_KEYS, read once at
 // hostconfig.Load, #712/or#917), or nil to resolve auth.keys_path.
-func inlineKeySource(auth *hostconfig.AuthConfig) (keys.Source, error) {
+func inlineKeySource(auth *config.AuthConfig) (keys.Source, error) {
 	activeKeyID := strings.TrimSpace(auth.ActiveKeyID)
 	activePrivateKeyPEM := strings.TrimSpace(auth.ActivePrivateKeyPEM)
 	if activeKeyID == "" && activePrivateKeyPEM == "" {
@@ -250,7 +249,7 @@ func usernames(p merchant.NamingPolicy) authkit.UsernameConfig {
 }
 
 // authConfig is the AuthKit configuration of the control plane.
-func authConfig(auth *hostconfig.AuthConfig, options options, naming merchant.NamingPolicy, httpCfg *authkit.HTTPConfig) authkit.Config {
+func authConfig(auth *config.AuthConfig, options options, naming merchant.NamingPolicy, httpCfg *authkit.HTTPConfig) authkit.Config {
 	return authkit.Config{
 		Token: authkit.TokenConfig{
 			Issuer:                  strings.TrimSpace(auth.Issuer),
@@ -278,7 +277,7 @@ func authConfig(auth *hostconfig.AuthConfig, options options, naming merchant.Na
 //
 // The control plane is mandatory in standalone mode (#469): every input is
 // required and a failure here is a boot failure, never a silent downgrade.
-func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
+func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
 	if cfg == nil || auth == nil {
 		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
 	}
@@ -321,7 +320,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	cp := &ControlPlane{
 		hosted: options.hosted, merchantCreation: options.merchantCreation,
 		merchantCreationPattern: pattern, naming: naming,
-		pool: db.WrapPool(pool, cfg.DB.SchemaName()), authPrefix: authPrefix(auth.Issuer),
+		pool: db.WrapPool(pool, cfg.SchemaName()), authPrefix: authPrefix(auth.Issuer),
 	}
 	httpCfg, err := clientIPPosture(cfg, auth, options)
 	if err != nil {

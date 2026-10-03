@@ -31,8 +31,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 )
 
 // A fleet is N host processes embedding OpenRails over one database and one
@@ -160,7 +160,7 @@ func (e *replicaEnv) application(schema string) string {
 
 func (e *replicaEnv) configureRiver(c *river.Config) {
 	c.ID = e.id
-	c.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 2}
+	c.Queues[openrails.QueueBilling] = river.QueueConfig{MaxWorkers: 2}
 	c.Queues[e.queue] = river.QueueConfig{MaxWorkers: 1}
 }
 

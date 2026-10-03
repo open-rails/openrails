@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/migratekit"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/stretchr/testify/require"
 )

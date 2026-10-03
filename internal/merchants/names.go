@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -18,10 +19,6 @@ import (
 // expires. The database guard (guard_merchant_name) keeps live names and
 // unexpired aliases one namespace and releases both when a merchant leaves the
 // directory. Every time is the database's now().
-
-// ErrMerchantNameTaken reports a name held by another live merchant or by
-// another merchant's unexpired former name.
-var ErrMerchantNameTaken = errors.New("merchants: merchant name is taken")
 
 // ErrInvalidName reports a name that is not a legal merchant name.
 var ErrInvalidName = errors.New("merchants: invalid merchant name")
@@ -108,7 +105,7 @@ func nameClaimError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
 		(pgErr.ConstraintName == "uq_merchants_live_slug" || pgErr.ConstraintName == "merchant_slug_aliases_pkey") {
-		return fmt.Errorf("%w: %w", ErrMerchantNameTaken, err)
+		return fmt.Errorf("%w: %w", billing.ErrMerchantNameTaken, err)
 	}
 	return err
 }

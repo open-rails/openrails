@@ -1,7 +1,7 @@
 package app
 
 import (
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"

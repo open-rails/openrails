@@ -12,10 +12,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
-	"github.com/open-rails/openrails/internal/hostconfig"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -29,26 +27,19 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 		"http://127.0.0.1":             "/auth/v1",
 		"http://127.0.0.1/" + f.schema: "/" + f.schema + "/v1",
 	} {
-		rt, err := embed.New(t.Context(), embed.Options{
-			Config: &config.Config{
-				TestMode:          config.CredentialPostureSandbox,
-				ProviderWriteMode: config.ProviderWriteModeReadOnly,
-				DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-				ReturnOrigins:     []string{"https://e2e.test"},
-				AdminConsole:      &config.AdminConsoleConfig{Enabled: true},
-			},
-			ConsoleAssets: fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}},
-			PGXPool:       f.pool,
-			River:         embed.RiverManagedByOpenRails(f.schema),
-		})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		cp, err := embedcontrolplane.Attach(t.Context(), rt, embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
+		cfg := f.config()
+		cfg.AllowCatalogUpdates = false
+		cfg.AdminConsole = &openrails.AdminConsoleConfig{Enabled: true}
+		cfg.ControlPlane = &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{
 			Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true,
 			AllowMemory: true, AllowMissingSenders: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
-		}})
+		}}
+		cp, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
 		require.NoError(t, err, issuer)
-		handler, err := cp.Handler()
+		t.Cleanup(func() { _ = cp.Close(context.Background()) })
+		// A stand-in console build: web/admin's dist is not built for go test.
+		engine.Graph(cp).ConsoleAssets = fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}
+		handler, err := standaloneHandler(cp)
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()

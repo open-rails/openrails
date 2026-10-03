@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	billing "github.com/open-rails/openrails/config"
+	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -44,7 +44,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	cfg, err := Load("")
 	require.NoError(t, err)
 	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
-	require.Equal(t, billing.DefaultSchema, cfg.DB.Schema)
+	require.Equal(t, billing.DefaultSchema, cfg.Schema)
 	require.NotEmpty(t, cfg.DB.URL, "the DSN is assembled from the atomic parts")
 	require.NotNil(t, cfg.Auth)
 	require.Empty(t, cfg.Auth.Issuer, "no URL setting supplies an issuer fallback")
@@ -65,7 +65,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, [3]string{"example.com", "user", "pass"}, [3]string{cfg.DB.Host, cfg.DB.Username, cfg.DB.Password})
 	require.True(t, cfg.DB.SQLTrace)
-	require.Equal(t, "custom_billing", cfg.DB.Schema)
+	require.Equal(t, "custom_billing", cfg.Schema)
 	require.Contains(t, cfg.DB.URL, "@example.com:")
 	require.True(t, cfg.Vault.Enabled)
 	require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
@@ -167,13 +167,13 @@ func TestLoadSourcePrecedence(t *testing.T) {
 func TestLoadDatabaseIgnoresServerConfiguration(t *testing.T) {
 	bootEnv(t)
 	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"),
-		"db:\n  url: postgres://file.invalid/db\n  schema: Archive_Test\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n")
+		"schema: Archive_Test\ndb:\n  url: postgres://file.invalid/db\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n")
 	t.Setenv("DB_URL", "postgres://env.invalid/db")
 	unsetenv(t, "TEST_MODE")
 	cfg, err := LoadDatabase(path)
 	require.NoError(t, err)
 	require.Equal(t, "postgres://env.invalid/db", cfg.DB.URL)
-	require.Equal(t, "archive_test", cfg.DB.Schema)
+	require.Equal(t, "archive_test", cfg.Schema)
 	require.Nil(t, cfg.Auth, "never a server configuration")
 	require.Nil(t, cfg.Redis)
 	cfg, err = LoadDatabase(path, WithOverride("db.url", "postgres://flag.invalid/db"))
@@ -237,7 +237,7 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 // Sandbox posture never relaxes auth transport; only the explicit loopback
 // exception admits HTTP, and only to a loopback host.
 func TestAuthTransportIsExplicit(t *testing.T) {
-	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &AuthConfig{}}
+	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &billing.AuthConfig{}}
 	cfg.TestMode, cfg.ProviderWriteMode = billing.CredentialPostureSandbox, billing.ProviderWriteModeFull
 	cfg.DB.URL = cfg.DB.GetConnectionString()
 	require.NoError(t, Validate(cfg))

@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

@@ -8,10 +8,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
 )
 
 // Users create merchants through OpenRails' own route (#1106): the name claim,
@@ -19,15 +18,11 @@ import (
 func TestMerchantCreationRoute(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.attachControlPlane(t, func(rt *embed.Runtime) embedcontrolplane.Options {
-		admission, err := embedcontrolplane.MerchantCreationAdmission(rt, embedcontrolplane.MerchantCreationPolicy{
-			FreeAllowance:           1,
-			HasVaultedPaymentMethod: func(context.Context, string) (bool, error) { return false, nil },
-		})
-		require.NoError(t, err)
-		return embedcontrolplane.Options{MerchantCreation: &embedcontrolplane.MerchantCreationConfig{ReservedSlugs: []string{reserved}, Admission: admission}}
+	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
+		cfg.ControlPlane.MerchantCreation = &openrails.MerchantCreationConfig{ReservedSlugs: []string{reserved}, FreeAllowance: 1}
+		deps.HasVaultedPaymentMethod = func(context.Context, string) (bool, error) { return false, nil }
 	})
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	owner, ownerToken := newUser(t, cp)
 	other, otherToken := newUser(t, cp)
@@ -58,7 +53,7 @@ func TestMerchantCreationRoute(t *testing.T) {
 	mine, err := cp.ListUserMerchants(t.Context(), owner)
 	require.NoError(t, err)
 	require.Len(t, mine, 1)
-	require.Equal(t, []embedcontrolplane.UserMerchant{{ID: mine[0].ID, Slug: shop, DisplayName: "Shop One", Role: "owner"}}, mine)
+	require.Equal(t, []billing.UserMerchant{{ID: mine[0].ID, Slug: shop, DisplayName: "Shop One", Role: "owner"}}, mine)
 	require.Equal(t, created.ID, mine[0].ID.String())
 	w := call(t, handler, ownerToken, http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

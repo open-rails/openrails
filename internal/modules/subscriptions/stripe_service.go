@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
@@ -23,7 +23,7 @@ import (
 // RequireStripeSecretKey resolves the ctx merchant's armed Stripe account —
 // the psps row plus scoped secrets (Layer C, #788). It never
 // reads a boot-config artifact; an unarmed rail fails closed.
-func RequireStripeSecretKey(ctx context.Context, src railresolve.Source) (*config.PSPConfig, string, error) {
+func RequireStripeSecretKey(ctx context.Context, src railresolve.Source) (*config.ResolvedPSP, string, error) {
 	if src == nil {
 		return nil, "", fmt.Errorf("stripe configuration is not available")
 	}

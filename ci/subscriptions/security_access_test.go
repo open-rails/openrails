@@ -18,9 +18,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // callAt sends one customer request with token to a mounted server.
@@ -225,8 +223,8 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	// A host's own customer authenticator classifies credentials; "auto-"
 	// subjects are the customer's API automation.
 	merchantID := w.client[embedded].MerchantID().String()
-	hostAuth := billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-		p, err := w.auth.AuthenticateRequest(ctx, r)
+	hostAuth := func(r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+		p, err := w.auth.AuthenticateRequest(r.Context(), r)
 		if err != nil {
 			return nil, err
 		}
@@ -235,8 +233,8 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 			subject, class = id, billingauth.CredentialClassAutomation
 		}
 		return &billingauth.DelegatedPrincipal{MerchantID: merchantID, MerchantSlug: w.slug, SubjectID: subject, CredentialClass: class, Issuer: issuer}, nil
-	})
-	self := w.peer(w.slug, embed.CustomerSelfService, w.auth, w.declaredPSPs(), hostAuth)
+	}
+	self := w.peer(w.slug, openrails.CustomerSelfService, w.auth, w.declaredPSPs(), hostAuth)
 	group := "g" + uuid.NewString()[:8]
 	basic := w.tierPrice(group, 1, 1000, monthHours, false)
 	plus := w.tierPrice(group, 2, 2000, monthHours, false)
@@ -306,21 +304,20 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 	t.Run("live Stripe key through an injected transport", func(t *testing.T) {
 		recorder := newStripeFake()
 		slug := "live-" + uuid.NewString()[:8]
-		rt, err := embed.New(t.Context(), embed.Options{
-			Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug, PSPs: map[string]embed.PSPConfig{
+		rt, err := openrails.New(t.Context(), openrails.Config{
+			Schema: w.schema, River: openrails.RiverHostOwned,
+			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
+			DB: &openrails.DBConfig{URL: w.dsn},
+			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
 				"stripe": {"stripe": {AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}},
-			}}},
-			Config: &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, AllowCatalogUpdates: true,
-				DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}},
-			PGXPool: w.pool, River: embed.RiverFromHost(), StripeTransport: recorder, Clock: w.clock,
-		})
+			}},
+		}, openrails.Deps{Postgres: w.pool, StripeTransport: recorder, Clock: w.clock})
 		if err != nil {
 			t.Logf("refused at construction: %v", err)
 			return
 		}
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		client, err := rt.Client()
-		require.NoError(t, err)
+		client := rt
 		product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", EntitlementsSpec: map[string]*int{"content:live": nil}})
 		require.NoError(t, err)
 		price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
@@ -339,9 +336,9 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 	})
 
 	t.Run("merchant-configured Collect.js origin", func(t *testing.T) {
-		psps := map[string]embed.PSPConfig{"nmi": {"nmi": {AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
+		psps := map[string]openrails.PSPConfig{"nmi": {"nmi": {AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}}
-		r := w.peer("script-"+uuid.NewString()[:8], embed.CustomerBillingManagement, w.auth, psps)
+		r := w.peer("script-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, w.auth, psps)
 		cfg, err := r.client.GetCheckoutConfig(t.Context())
 		require.NoError(t, err)
 		found := false

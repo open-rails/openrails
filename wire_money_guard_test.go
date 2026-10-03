@@ -22,7 +22,7 @@ var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit
 // package and everything a handler, worker or the shared Client can encode.
 // Generated SQLC output is the storage layer and is skipped.
 var (
-	wireRoots    = []string{".", "billing", "pkg", "internal", "embed", "config", "permissions"}
+	wireRoots    = []string{".", "billing", "pkg", "internal", "permissions"}
 	skippedTrees = map[string]bool{"internal/db/gen": true}
 )
 
@@ -34,8 +34,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/http/handlers/service_commerce.go:func ServiceCreateCheckoutSession.NewPriceID new_price_id":                                           "not money: rejected legacy price reference; any presence fails before executing checkout",
 	"internal/intents/nmi_provider_cutover.go:nmiCutoverPayload.Amount amount":                                                                       notHTTPIntentPayload,
 	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":                            "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
-	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,
-	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                            notMoneyCount,
+	"billing/control_plane.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                                      notMoneyCount,
+	"billing/control_plane.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                                        notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                                            notHTTPToolArgs,
 	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                                              notHTTPToolArgs,
 	"internal/modules/money/enterprise.go:PendingCharge.Amount amount":                                                                               notHTTPPendingCharges,
@@ -53,7 +53,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                   notHTTPStoredPayload,
 	"internal/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                               notHTTPStoredPayload,
 	"internal/intents/collection_payload.go:InvoiceCollectionPayload.Amount amount":                                                                  notHTTPIntentPayload,
-	"embed/river.go:InvoiceSweepArgs.CollectionThresholdAmount collection_threshold_amount":                                                          notHTTPJobArgs,
+	"embedded.go:InvoiceSweepArgs.CollectionThresholdAmount collection_threshold_amount":                                                             notHTTPJobArgs,
 	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                                             notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":                                       notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.DelinquencyAmountFloor delinquency_amount_floor":                                             notHTTPStorageRow,

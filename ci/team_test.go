@@ -15,13 +15,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
-	"github.com/open-rails/openrails/internal/hostconfig"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -41,28 +39,20 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
 			slug := "team-" + uuid.NewString()[:8]
-			rt, err := embed.New(ctx, embed.Options{
-				Config: &config.Config{
-					TestMode:          config.CredentialPostureSandbox,
-					ProviderWriteMode: config.ProviderWriteModeReadOnly,
-					DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-					ReturnOrigins:     []string{"https://e2e.test"},
-				},
-				PGXPool: f.pool,
-				River:   embed.RiverManagedByOpenRails(f.schema),
-			})
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = rt.Close(context.Background()) })
-			opts := embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
+			cfg := f.config()
+			cfg.AllowCatalogUpdates = false
+			cfg.ControlPlane = &openrails.ControlPlaneConfig{HostedPosture: hosted, Auth: openrails.AuthConfig{
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
+			deps := openrails.Deps{Postgres: f.pool}
 			if hosted {
-				opts.HostedPosture, opts.EmailSender = true, new(authtest.Outbox).Email()
+				deps.EmailSender = new(authtest.Outbox).Email()
 			}
-			cp, err := embedcontrolplane.Attach(ctx, rt, opts)
+			cp, err := openrails.New(ctx, cfg, deps)
 			require.NoError(t, err)
-			require.NoError(t, app.HostGraph(rt).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
-			core := cp.Core()
+			t.Cleanup(func() { _ = cp.Close(context.Background()) })
+			require.NoError(t, engine.Graph(cp).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
+			core := cp.AuthKit()
 			account := func(verified bool) iam.User {
 				id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 				u, err := core.CreateUser(ctx, iam.NewUser{Email: "team-" + id + "@e2e.test", Username: "team_" + id, EmailVerified: verified})
@@ -73,9 +63,9 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			email := "owner-" + id + "@e2e.test"
 			owner, err := core.CreateUser(ctx, iam.NewUser{Email: email, Username: "owner_" + id, Password: authtest.Password, EmailVerified: true})
 			require.NoError(t, err)
-			_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
+			_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
 			require.NoError(t, err)
-			handler, err := cp.Handler()
+			handler, err := standaloneHandler(cp)
 			require.NoError(t, err)
 			server := httptest.NewServer(handler)
 			t.Cleanup(server.Close)

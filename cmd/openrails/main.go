@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,24 +14,24 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/buildinfo"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hostconfig"
-	"github.com/open-rails/openrails/internal/migrate"
-	"github.com/open-rails/openrails/internal/standalonedb"
-	"github.com/open-rails/openrails/web/admin"
+	"github.com/open-rails/openrails/internal/operator"
 )
 
-type standaloneAuthKey struct{}
-
-func standaloneAuth(ctx context.Context) *hostconfig.AuthConfig {
-	auth, _ := ctx.Value(standaloneAuthKey{}).(*hostconfig.AuthConfig)
-	return auth
+// standaloneAuth is the control plane's identity configuration, nil for
+// database-only commands.
+func standaloneAuth(ctx context.Context) *config.AuthConfig {
+	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
+	if cfg == nil || cfg.ControlPlane == nil {
+		return nil
+	}
+	return &cfg.ControlPlane.Auth
 }
 
 func main() {
@@ -78,8 +77,11 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			ctx := context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config)
-			cmd.SetContext(context.WithValue(ctx, standaloneAuthKey{}, cfg.Auth))
+			// The standalone server always runs the control plane (#469).
+			if cfg.Auth != nil {
+				cfg.Config.ControlPlane = &config.ControlPlaneConfig{Auth: *cfg.Auth}
+			}
+			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config))
 			return nil
 		},
 		Long:    "Standalone OpenRails server for payments, credits, usage, and subscriptions",
@@ -173,15 +175,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 	bootCtx, stopBoot := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopBoot()
 
-	// ConsoleAssets is nil unless web/admin/dist was built before go build
-	// (#754: `task admin-build` / Dockerfile / goreleaser).
-	embeddedApp, err := embed.New(bootCtx, embed.Options{
-		Config:        cfg,
-		ConsoleAssets: admin.FS(),
-		// Standalone keeps self-provisioning (#895): OpenRails builds and runs
-		// its own River client in RunWorkers. The declaration is now explicit.
-		River: embed.RiverManagedByOpenRails(),
-	})
+	// The standalone binary builds its engine like any host, with the
+	// OpenRails-owned control plane (mandatory here, #469) and OpenRails-managed
+	// River (#895). The admin console is web/admin's build, when present.
+	client, err := openrails.New(bootCtx, *cfg, openrails.Deps{})
 	if err != nil {
 		if bootCtx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
@@ -193,21 +190,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	cleanupOnError := true
 	defer func() {
 		if cleanupOnError {
-			if err := embeddedApp.Close(context.Background()); err != nil {
+			if err := client.Close(context.Background()); err != nil {
 				log.WithError(err).Error("Application cleanup failed")
 			}
 		}
 	}()
-
-	// Attach the OpenRails-owned AuthKit control plane (#284). MANDATORY in
-	// standalone mode (#469): construction failure exits non-zero — there is no
-	// verifier-only downgrade.
-	cp, err := embedcontrolplane.Attach(context.Background(), embeddedApp, embedcontrolplane.Options{Auth: standaloneAuth(cmd.Context())})
-	if err != nil {
-		cleanupOnError = true
-		return fmt.Errorf("attach control plane: %w", err)
-	}
-	graph := app.HostGraph(embeddedApp)
+	graph := engine.Graph(client)
 
 	// Startup bootstrap (#327/#531): if the conventional bootstrap manifest is
 	// mounted, apply control-plane authority on first run only. Catalog
@@ -224,7 +212,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), cfg, graph, manifestPath, bootNMIProbeV5BaseURL); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), graph.Config, graph, manifestPath, bootNMIProbeV5BaseURL); err != nil {
 		cleanupOnError = true
 		return err
 	}
@@ -242,10 +230,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Public API server (user/admin JWT auth). The full standalone surface is
 	// the framework-neutral net/http stack (#670) — the same stack embedded
 	// hosts mount.
-	publicHandler, err := cp.Handler()
+	publicServer, err := operator.StandaloneServer(graph)
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}
+	publicHandler := publicServer.Handler()
 	// xs-007 row 37: no request-wide WriteTimeout. It was set before the
 	// handler knew its work, and at 30 s it sat below a route's own 50 s
 	// budget: a payment-method replacement committed at the provider and the
@@ -277,46 +266,16 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	var (
-		workerDone   chan struct{}
-		workerCancel context.CancelFunc
-		workerErr    atomic.Pointer[error]
-	)
+	// HTTP must not serve webhook and async billing APIs when the workers
+	// cannot start.
+	var workerErr error
 	if startWorkers {
-		workerCtx, cancel := context.WithCancel(cmd.Context())
-		workerCancel = cancel
-		workerDone = make(chan struct{})
-		go func() {
-			defer close(workerDone)
-			log.Info("Starting billing background workers")
-			err := embeddedApp.RunWorkers(workerCtx)
-			errCopy := err
-			workerErr.Store(&errCopy)
-
-			switch {
-			case err == nil:
-				log.Warn("Background workers exited without error; shutting down HTTP servers")
-			case err == context.Canceled:
-				// Normal shutdown path.
-			default:
-				log.WithError(err).Error("Background workers stopped unexpectedly; shutting down HTTP servers")
-			}
-		}()
-	}
-
-	// Wait for interrupt signal or worker termination. HTTP must not continue
-	// serving webhook/async billing APIs after workers fail to start or stop
-	// unexpectedly.
-	workerStopped := false
-	if workerDone != nil {
-		select {
-		case <-sigChan:
-			log.Info("Shutdown signal received, shutting down server...")
-		case <-workerDone:
-			workerStopped = true
-			log.Error("Background workers stopped; shutting down server...")
+		log.Info("Starting billing background workers")
+		if workerErr = client.Start(cmd.Context()); workerErr != nil {
+			log.WithError(workerErr).Error("Background workers failed to start; shutting down server...")
 		}
-	} else {
+	}
+	if workerErr == nil {
 		<-sigChan
 		log.Info("Shutdown signal received, shutting down server...")
 	}
@@ -324,32 +283,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	if workerCancel != nil {
-		workerCancel()
-	}
 	if err := publicSrv.Shutdown(shutdownCtx); err != nil {
 		log.WithError(err).Error("Public server forced to shutdown")
 	}
 
-	if err := embeddedApp.Close(shutdownCtx); err != nil {
+	if err := client.Close(shutdownCtx); err != nil {
 		log.WithError(err).Error("Application shutdown encountered issues")
 	}
 
-	if workerDone != nil {
-		select {
-		case <-workerDone:
-		case <-shutdownCtx.Done():
-			log.Warn("Timed out waiting for background workers to stop")
-		}
+	if workerErr != nil {
+		return workerErr
 	}
-
-	if p := workerErr.Load(); p != nil && *p != nil && *p != context.Canceled {
-		return *p
-	}
-	if workerStopped {
-		return fmt.Errorf("background workers stopped")
-	}
-
 	log.Info("Billing service shutdown complete")
 	return nil
 }
@@ -365,7 +309,9 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	application, err := serverboot.NewWorker(bootCtx, cfg, &serverboot.Options{Auth: standaloneAuth(cmd.Context()), MerchantManifestPath: manifestPath, NMIProbeV5BaseURL: bootNMIProbeV5BaseURL})
+	// The same engine as run-server, without a listener: the control plane
+	// contributes its AuthKit jobs to the fleet.
+	client, err := openrails.New(bootCtx, *cfg, openrails.Deps{})
 	if err != nil {
 		if bootCtx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
@@ -374,75 +320,37 @@ func runWorker(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
 	stopBoot()
-	cleanupOnError := true
 	defer func() {
-		if cleanupOnError {
-			if err := application.Close(context.Background()); err != nil {
-				log.WithError(err).Error("Application cleanup failed")
-			}
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+		if err := client.Close(shutdownCtx); err != nil {
+			log.WithError(err).Error("Application shutdown encountered issues")
 		}
 	}()
+	graph := engine.Graph(client)
+	if err := serverboot.ReconcileBootMerchantManifest(cmd.Context(), graph.Config, graph, manifestPath, bootNMIProbeV5BaseURL); err != nil {
+		return err
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	cleanupOnError = false
-
-	// Start only background workers (no HTTP server). Fail fast if River cannot start.
-	workerCtx, cancel := context.WithCancel(cmd.Context())
-	workerDone := make(chan struct{})
-	var workerErr atomic.Pointer[error]
-	go func() {
-		defer close(workerDone)
-		err := application.Runtime.RunWorkers(workerCtx)
-		errCopy := err
-		workerErr.Store(&errCopy)
-	}()
-
-	select {
-	case <-workerDone:
-		if p := workerErr.Load(); p != nil && *p != nil && *p != context.Canceled {
-			cancel()
-			if err := application.Close(context.Background()); err != nil {
-				log.WithError(err).Error("Application cleanup failed")
-			}
-			return *p
-		}
-		log.Warn("Background workers exited without error; waiting for shutdown signal")
-		<-sigChan
-		log.Info("Shutdown signal received, stopping workers...")
-		cancel()
-	case <-sigChan:
-		log.Info("Shutdown signal received, stopping workers...")
-		cancel()
+	// Background workers only (no HTTP server); fail fast if River cannot start.
+	if err := client.Start(cmd.Context()); err != nil {
+		return err
 	}
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := application.Close(shutdownCtx); err != nil {
-		log.WithError(err).Error("Application shutdown encountered issues")
-	}
-
-	<-workerDone
-	if p := workerErr.Load(); p != nil && *p != nil && *p != context.Canceled {
-		return *p
-	}
-
+	<-sigChan
+	log.Info("Shutdown signal received, stopping workers...")
 	log.Info("Billing service workers shutdown complete")
 	return nil
 }
 
-// The CLI is the standalone composition root: billing and AuthKit initialize
-// independently through their owning libraries, as the role the server runs as.
+// applyStandaloneMigrations migrates like any host (openrails.Migrate): billing,
+// managed River and, with the control plane, AuthKit.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
 	pool, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}
 	defer pool.Close()
-	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: cfg.DB.SchemaName()}); err != nil {
-		return err
-	}
-	return standalonedb.ApplyAuthKit(ctx, pool)
+	return openrails.Migrate(ctx, pool, *cfg)
 }

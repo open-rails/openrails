@@ -18,10 +18,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
-	"github.com/open-rails/openrails/internal/hostconfig"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -33,27 +31,22 @@ import (
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
-	attach := func(auth hostconfig.AuthConfig) (*embedcontrolplane.ControlPlane, error) {
+	attach := func(auth openrails.AuthConfig) (*openrails.Client, error) {
 		t.Helper()
-		rt, err := embed.New(t.Context(), embed.Options{
-			Config: &config.Config{
-				TestMode:          config.CredentialPostureSandbox,
-				ProviderWriteMode: config.ProviderWriteModeReadOnly,
-				DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-				ReturnOrigins:     []string{"https://e2e.test"},
-			},
-			PGXPool: f.pool,
-			River:   embed.RiverManagedByOpenRails(f.schema),
-		})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		auth.Issuer = "http://127.0.0.1/" + f.schema
 		auth.AllowMemory, auth.AllowMissingSenders, auth.AllowLoopbackHTTP, auth.DirectPeerIP = true, true, true, true
-		return embedcontrolplane.Attach(t.Context(), rt, embedcontrolplane.Options{Auth: &auth})
+		cfg := f.config()
+		cfg.AllowCatalogUpdates = false
+		cfg.ControlPlane = &openrails.ControlPlaneConfig{Auth: auth}
+		client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+		if err == nil {
+			t.Cleanup(func() { _ = client.Close(context.Background()) })
+		}
+		return client, err
 	}
-	methods := func(cp *embedcontrolplane.ControlPlane) []string {
+	methods := func(cp *openrails.Client) []string {
 		t.Helper()
-		handler, err := cp.Handler()
+		handler, err := standaloneHandler(cp)
 		require.NoError(t, err)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+f.schema+"/v1/capabilities", nil))
@@ -68,7 +61,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	keys := t.TempDir()
-	signing := hostconfig.AuthConfig{
+	signing := config.AuthConfig{
 		ActiveKeyID:         "e2e",
 		ActivePrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})),
 		KeysPath:            keys,
@@ -84,7 +77,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	require.Contains(t, methods(cp), "totp")
 
 	dev := t.TempDir()
-	cp, err = attach(hostconfig.AuthConfig{AllowEphemeralSigningKey: true, KeysPath: dev})
+	cp, err = attach(config.AuthConfig{AllowEphemeralSigningKey: true, KeysPath: dev})
 	require.NoError(t, err, "a disposable TOTP key beside a disposable signing key")
 	require.Contains(t, methods(cp), "totp")
 	require.FileExists(t, filepath.Join(dev, "totp.key"))

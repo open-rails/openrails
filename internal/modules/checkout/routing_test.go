@@ -3,14 +3,15 @@ package checkout
 import (
 	"context"
 	"errors"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -323,9 +324,9 @@ func TestListCheckoutRailOptions(t *testing.T) {
 
 // One readiness verdict backs both the option list and routing (or#288).
 func TestCheckoutRailSkipReason(t *testing.T) {
-	stripeCfg := &config.PSPConfig{Stripe: &config.StripeRailConfig{SecretKey: "sk_test"}}
-	nmiCfg := &config.PSPConfig{NMI: &config.NMIRailConfig{SecurityKey: "key"}}
-	solanaCfg := &config.PSPConfig{Solana: &config.SolanaRailConfig{Tokens: map[string]config.TokenConfig{"USDC": {Mint: "mint"}}}}
+	stripeCfg := &config.ResolvedPSP{Stripe: &config.StripeRailConfig{SecretKey: "sk_test"}}
+	nmiCfg := &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "key"}}
+	solanaCfg := &config.ResolvedPSP{Solana: &config.SolanaRailConfig{Tokens: map[string]config.TokenConfig{"USDC": {Mint: "mint"}}}}
 	sub := recurringPrice()
 	trial := recurringPrice()
 	trial.TrialUnitAmount = new(int64(0))
@@ -344,15 +345,15 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 		name  string
 		rail  string
 		price *models.Price
-		cfg   *config.PSPConfig
+		cfg   *config.ResolvedPSP
 		mode  models.CheckoutSessionMode
 		want  string
 	}{
 		{"stripe engine subscription needs no provider catalog", "stripe", sub, stripeCfg, S, ""},
 		{"nmi engine subscription", "nmi", sub, nmiCfg, S, ""},
-		{"stripe missing key", "stripe", sub, &config.PSPConfig{}, S, models.CheckoutRoutingSkipCredentialsMissing},
-		{"nmi blank key", "nmi", sub, &config.PSPConfig{NMI: &config.NMIRailConfig{SecurityKey: "  "}}, S, models.CheckoutRoutingSkipCredentialsMissing},
-		{"ccbill new enrollment", "ccbill", sub, &config.PSPConfig{CCBill: &config.CCBillRailConfig{}}, S, models.CheckoutRoutingSkipModeUnsupported},
+		{"stripe missing key", "stripe", sub, &config.ResolvedPSP{}, S, models.CheckoutRoutingSkipCredentialsMissing},
+		{"nmi blank key", "nmi", sub, &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "  "}}, S, models.CheckoutRoutingSkipCredentialsMissing},
+		{"ccbill new enrollment", "ccbill", sub, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, S, models.CheckoutRoutingSkipModeUnsupported},
 		{"solana subscription without a published plan", "solana", sub, solanaCfg, S, models.CheckoutRoutingSkipLinkMissing},
 		{"solana plan without recurring services", "solana", solanaPlan, solanaCfg, S, models.CheckoutRoutingSkipServiceUnavailable},
 		{"trial terms", "stripe", trial, stripeCfg, S, models.CheckoutRoutingSkipModeUnsupported},
@@ -360,12 +361,12 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 		{"zero amount", "nmi", free, nmiCfg, S, models.CheckoutRoutingSkipModeUnsupported},
 		{"stripe one-off is inline, no link", "stripe", oneOff, stripeCfg, O, ""},
 		{"nmi one-off needs no plan (#1055)", "nmi", oneOff, nmiCfg, O, ""},
-		{"nmi one-off missing key", "nmi", oneOff, &config.PSPConfig{}, O, models.CheckoutRoutingSkipCredentialsMissing},
-		{"ccbill one-off", "ccbill", oneOff, &config.PSPConfig{CCBill: &config.CCBillRailConfig{}}, O, models.CheckoutRoutingSkipModeUnsupported},
-		{"solana without tokens", "solana", solanaLinked, &config.PSPConfig{Solana: &config.SolanaRailConfig{}}, O, models.CheckoutRoutingSkipCredentialsMissing},
+		{"nmi one-off missing key", "nmi", oneOff, &config.ResolvedPSP{}, O, models.CheckoutRoutingSkipCredentialsMissing},
+		{"ccbill one-off", "ccbill", oneOff, &config.ResolvedPSP{CCBill: &config.CCBillRailConfig{}}, O, models.CheckoutRoutingSkipModeUnsupported},
+		{"solana without tokens", "solana", solanaLinked, &config.ResolvedPSP{Solana: &config.SolanaRailConfig{}}, O, models.CheckoutRoutingSkipCredentialsMissing},
 		{"solana without link", "solana", oneOff, solanaCfg, O, models.CheckoutRoutingSkipLinkMissing},
 		{"solana without pay services", "solana", solanaLinked, solanaCfg, O, models.CheckoutRoutingSkipServiceUnavailable},
-		{"unknown rail", "paypal", oneOff, &config.PSPConfig{}, O, models.CheckoutRoutingSkipUnknownSelector},
+		{"unknown rail", "paypal", oneOff, &config.ResolvedPSP{}, O, models.CheckoutRoutingSkipUnknownSelector},
 		{"no provider config", "stripe", oneOff, nil, O, models.CheckoutRoutingSkipNotArmed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

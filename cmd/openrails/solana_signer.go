@@ -7,11 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 )
 
@@ -48,19 +46,15 @@ func newSolanaSignerApproveCmd() *cobra.Command {
 }
 
 func runSolanaSignerApprove(ctx context.Context, cfg *config.Config, merchantSlug, key, manifestPath string) error {
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	client, graph, err := openEngine(ctx, cfg, openrails.Deps{}, true)
 	if err != nil {
-		return fmt.Errorf("bootstrap application: %w", err)
+		return err
 	}
-	defer func() { _ = rt.Close(context.Background()) }()
-	if _, err := embedcontrolplane.Attach(ctx, rt, embedcontrolplane.Options{Auth: standaloneAuth(ctx)}); err != nil {
-		return fmt.Errorf("attach control plane: %w", err)
-	}
-	graph := app.HostGraph(rt)
+	defer func() { _ = client.Close(context.Background()) }()
 	if err := graph.Runtime.MerchantSecretBackend.Await(ctx, merchantsecrets.AwaitTimeout); err != nil {
 		return err
 	}
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, cfg, graph, manifestPath, ""); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, manifestPath, ""); err != nil {
 		return err
 	}
 	mid, err := resolveCLIMerchant(ctx, graph.Runtime.DB, merchantSlug)

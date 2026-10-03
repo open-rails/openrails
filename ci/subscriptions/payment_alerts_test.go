@@ -7,10 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/embed"
 )
 
 // attemptSeed is a batch of recorded answers: the alerting reads what the
@@ -164,7 +163,7 @@ func TestPaymentAttemptRetention(t *testing.T) {
 		WHERE id = (SELECT id FROM billing.payment_attempts WHERE attempted_at < $2 ORDER BY attempted_at LIMIT 1)`), now, now.AddDate(0, -25, 0))
 	require.NoError(t, err)
 
-	res, err := w.jobs.Insert(t.Context(), cleanupPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(t.Context(), cleanupPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(res.Job.ID)
 	count := func(table string) int {

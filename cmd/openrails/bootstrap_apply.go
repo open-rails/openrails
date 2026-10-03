@@ -13,9 +13,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
+	"github.com/open-rails/openrails/internal/config"
 	embcp "github.com/open-rails/openrails/internal/operator"
 )
 

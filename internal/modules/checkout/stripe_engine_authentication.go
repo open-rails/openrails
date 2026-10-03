@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

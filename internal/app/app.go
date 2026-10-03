@@ -14,8 +14,8 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/cache"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -32,7 +32,7 @@ type App struct {
 	// identity capabilities are supplied by standalone composition; the billing
 	// runtime only owns its cleanup.
 	ControlPlane interface{ Close() }
-	// ConsoleAssets is the host-built admin console SPA (#754), served by the
+	// ConsoleAssets is the admin console SPA (#754, web/admin), served by the
 	// standalone surface when admin_console is enabled.
 	ConsoleAssets fs.FS
 
@@ -121,7 +121,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	var dbOverride *db.DB
 	if opts != nil && opts.PGXPool != nil {
-		dbo, err := db.NewWithPGXPool(opts.PGXPool, cfg.DB.SchemaName())
+		dbo, err := db.NewWithPGXPool(opts.PGXPool, cfg.SchemaName())
 		if err != nil {
 			return nil, fmt.Errorf("use pgx pool: %w", err)
 		}
@@ -215,7 +215,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	// The OpenRails-owned AuthKit control plane (#224) is no longer built here
 	// (#284): the core stays AuthKit-free. The standalone/opt-in path builds it and
-	// attaches via SetControlPlane (see internal/embedcontrolplane.Attach).
+	// attaches via SetControlPlane (see internal/operator.AttachWithOptions).
 
 	return app, nil
 }
@@ -297,8 +297,3 @@ func monitorRedis(client *redis.Client, switchable *cache.SwitchableCache, fallb
 	}()
 	return cancel
 }
-
-// HostGraph returns the application graph behind a public runtime handle
-// (*embed.Runtime). Package embed registers it at init so operator packages
-// reach the graph without the runtime exporting internal types.
-var HostGraph func(runtime any) *App

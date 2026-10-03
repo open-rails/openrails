@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -92,7 +92,7 @@ type custodianInstrumentStore interface {
 // custodialPSP is the resolved arrangement one custodian sale charges through:
 // the PSP's own gateway credentials plus the custodian that holds the card.
 type custodialPSP struct {
-	Custody            *config.CustodianConfig
+	Custody            *config.ResolvedCustodian
 	GatewaySecurityKey string
 	// The charging PSP's exact identity and declared credential set (#1055).
 	MerchantID merchant.ID

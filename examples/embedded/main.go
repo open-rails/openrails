@@ -1,10 +1,12 @@
-// Command embedded runs OpenRails inside a host process. The host owns the
-// database pool, the River client and HTTP serving; billing code uses the same
-// *openrails.Client a remote deployment uses.
+// Command embedded runs OpenRails inside a host process, as the README's
+// "How to Install (Embedded)" does: the host owns the Postgres pool, the River
+// fleet and HTTP serving, and billing code uses the same *openrails.Client a
+// remote deployment uses.
 //
-// Apply migrations first (openrails migrate) and connect with the runtime
-// login. OPENRAILS_DATABASE_URL and OPENRAILS_MERCHANT are required;
-// OPENRAILS_EXAMPLE_ADDR serves the mounted checkout and webhook routes.
+// OPENRAILS_DATABASE_URL is required. OPENRAILS_EXAMPLE_ADDR serves the
+// mounted routes under /billing until interrupted; without it the command
+// checks the engine and exits. Authentication here is a stand-in: the bearer
+// token is the user's UUID. Use your identity provider instead.
 package main
 
 import (
@@ -14,19 +16,32 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/billing"
 )
+
+const catalog = `schema_version: 1
+products:
+  - key: premium
+    display_name: Premium
+    entitlements_spec: {premium: null}
+    prices:
+      - key: premium-monthly
+        currency: USD
+        unit_amount: 9990000
+        access_duration_hours: 720
+        auto_renew: true
+`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -36,92 +51,97 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, getenv func(string) string) (runErr error) {
-	dsn, slug := getenv("OPENRAILS_DATABASE_URL"), getenv("OPENRAILS_MERCHANT")
-	if dsn == "" || slug == "" {
-		return errors.New("OPENRAILS_DATABASE_URL and OPENRAILS_MERCHANT are required")
+func run(ctx context.Context, getenv func(string) string) error {
+	dsn := getenv("OPENRAILS_DATABASE_URL")
+	if dsn == "" {
+		return errors.New("OPENRAILS_DATABASE_URL is required")
 	}
-	pool, err := pgxpool.New(ctx, dsn)
+	db, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	defer db.Close()
 
-	// River is mandatory: renewals, dunning, invoices and reconciliation run
-	// there. Compose components before binding; extend the supplied config.
-	runtime, err := embed.New(ctx, embed.Options{
-		Merchant: &embed.MerchantDeclaration{Slug: slug},
-		Auth: &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
-			return billingauth.Identity{}, billingauth.ErrUnauthenticated
-		})},
-		HTTP: &embed.HTTPConfig{Checkout: true},
-		Config: &config.Config{
-			ProviderWriteMode: config.ProviderWriteModeReadOnly,
-			TestMode:          config.CredentialPostureSandbox,
-			DB:                &config.DBConfig{URL: dsn},
+	cfg := openrails.Config{
+		Schema:              "billing",
+		TestMode:            openrails.Sandbox,
+		ProviderWriteMode:   openrails.ProviderWritesReadOnly,
+		AllowCatalogUpdates: true,
+		Merchant:            openrails.MerchantDeclaration{Slug: "example"},
+		HTTP: &openrails.HTTPConfig{
+			Checkout:       true,
+			CustomerRoutes: []openrails.CustomerRoutesConfig{{Scope: openrails.CustomerSelfService}},
 		},
-		PGXPool: pool,
-		River:   embed.RiverFromHost(),
-	})
+		River: openrails.RiverHostOwned,
+	}
+	if err := openrails.Migrate(ctx, db, cfg); err != nil {
+		return err
+	}
+	bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db, Authenticate: authenticate})
 	if err != nil {
 		return err
 	}
-	defer runtime.Close(context.WithoutCancel(ctx))
-	jobs, err := riverhelpers.New(ctx, pool, &river.Config{Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}}}, runtime.RiverJobs())
-	if err != nil {
-		return err
-	}
-	defer jobs.StopAndCancel(context.WithoutCancel(ctx))
-	if err := jobs.Start(ctx); err != nil {
-		return err
-	}
-	loopsCtx, cancelLoops := context.WithCancel(ctx)
-	loopsDone := make(chan error, 1)
-	go func() {
-		loopsDone <- runtime.RunWorkers(loopsCtx)
-		cancelLoops() // a worker failure also stops HTTP
-	}()
-	defer func() {
-		cancelLoops()
-		if err := <-loopsDone; err != nil && !errors.Is(err, context.Canceled) {
-			runErr = errors.Join(runErr, err)
-		}
-	}()
+	defer bill.Close(context.WithoutCancel(ctx))
 
-	client, err := runtime.Client(openrails.WithCurrency("USD"))
+	params, err := billing.ParseCatalogApplicationYAML([]byte(catalog))
 	if err != nil {
 		return err
 	}
-	if err := client.Verify(ctx); err != nil {
+	if _, err := bill.Catalog.Apply(ctx, params); err != nil {
 		return err
 	}
-	if err := runtime.Ready(ctx); err != nil {
+
+	// One River fleet runs the host's jobs and OpenRails' (and AuthKit's, when
+	// the host runs AuthKit). A host-owned fleet migrates River itself.
+	if err := riverhelpers.ApplyMigrations(ctx, db, ""); err != nil {
 		return err
 	}
-	if _, err := client.GetMerchantSettings(ctx); err != nil {
+	workers, err := riverhelpers.New(ctx, db, &river.Config{}, bill.RiverJobs())
+	if err != nil {
 		return err
 	}
-	log.Printf("embedded OpenRails ready for merchant %s", client.MerchantID())
+	if err := workers.Start(ctx); err != nil {
+		return err
+	}
+	defer workers.StopAndCancel(context.WithoutCancel(ctx))
+	if err := bill.Start(ctx); err != nil {
+		return err
+	}
+	if err := bill.Ready(ctx); err != nil {
+		return err
+	}
+
+	mux := http.NewServeMux()
+	if err := openrailshttp.Mount(mux, bill, "/billing"); err != nil {
+		return err
+	}
+	premium, err := bill.HasEntitlement(ctx, uuid.NewString(), "premium", time.Now())
+	if err != nil {
+		return err
+	}
+	log.Printf("embedded OpenRails ready for merchant %s (a new user has premium: %t)", bill.MerchantID(), premium)
 
 	addr := getenv("OPENRAILS_EXAMPLE_ADDR")
 	if addr == "" {
 		return nil
 	}
-	routes, err := openrailshttp.Routes(runtime)
-	if err != nil {
-		return err
-	}
-	handler := http.NewServeMux()
-	if err := routes.Mount(handler, "/billing"); err != nil {
-		return err
-	}
-	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		<-loopsCtx.Done()
+		<-ctx.Done()
 		_ = server.Shutdown(context.WithoutCancel(ctx))
 	}()
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
+}
+
+// authenticate is a stand-in for the host's identity provider: the bearer
+// token is the user's UUID, and each user pays for themselves.
+func authenticate(r *http.Request) (openrails.Identity, error) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if _, err := uuid.Parse(token); !ok || err != nil {
+		return openrails.Identity{}, openrails.ErrUnauthenticated
+	}
+	return openrails.Identity{Kind: openrails.User, Issuer: "https://example.invalid", SubjectID: token, CustomerID: token}, nil
 }

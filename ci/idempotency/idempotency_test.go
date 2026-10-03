@@ -20,7 +20,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -65,7 +65,7 @@ func newEnv(t *testing.T) *env {
 		_, _ = admin.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{e.schema}.Sanitize()+" CASCADE")
 		admin.Close()
 	})
-	require.NoError(t, embed.ApplyMigrations(t.Context(), admin, embed.MigrationOptions{Schema: e.schema, River: embed.RiverFromHost()}))
+	require.NoError(t, openrails.Migrate(t.Context(), admin, openrails.Config{Schema: e.schema, River: openrails.RiverHostOwned}))
 	e.merchant = e.newMerchant()
 	for i := range e.replicas {
 		config, err := pgxpool.ParseConfig(dsn)

@@ -55,11 +55,11 @@ var (
 		"internal/migrate/postgres/",
 		"permissions/",
 		"internal/api/",
-		"pkg/billingauth/",
+		"internal/billingauth/",
 		"testdata/wire/",
 	}
 	boundaryFiles    = map[string]bool{"billing/errors.go": true}
-	authorityImports = map[string]bool{Module + "/permissions": true, Module + "/pkg/billingauth": true, Module + "/internal/auth/policy": true}
+	authorityImports = map[string]bool{Module + "/permissions": true, Module + "/internal/billingauth": true, Module + "/internal/auth/policy": true}
 	nonPublicRoots   = map[string]bool{"cmd": true, "internal": true, "scripts": true, "tests": true, "tools": true}
 	wireCodecMethods = map[string]bool{"MarshalJSON": true, "UnmarshalJSON": true, "MarshalText": true, "UnmarshalText": true}
 	ErrContractDrift = errors.New("reviewed release contract drifted")

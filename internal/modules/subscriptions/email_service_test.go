@@ -13,7 +13,7 @@ import (
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 func sendgridAt(t *testing.T, h http.HandlerFunc) *EmailService {

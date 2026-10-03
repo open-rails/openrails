@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/auth/policy"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -14,16 +13,11 @@ import (
 // ErrMerchantNotFound indicates that no active merchant matched the requested
 // directory update.
 var ErrMerchantNotFound = merchants.ErrMerchantNotFound
-var ErrPermissionRequired = policy.ErrPermissionRequired
-var ErrMerchantUnresolved = policy.ErrMerchantUnresolved
-
-// UserMerchant is a live merchant a user holds a role in.
-type UserMerchant = controlplane.UserMerchant
 
 // ListUserMerchants returns the live merchants userID holds a role in, with its
 // highest role in each: the "my merchants" read. This is a privileged host
 // seam; callers pass the authenticated user.
-func ListUserMerchants(ctx context.Context, a *app.App, userID string) ([]UserMerchant, error) {
+func ListUserMerchants(ctx context.Context, a *app.App, userID string) ([]billing.UserMerchant, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("control plane list user merchants: no control plane attached (call Attach first)")

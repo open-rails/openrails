@@ -6,7 +6,7 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -22,13 +22,13 @@ func (c *ControlPlane) merchantGroup(ctx context.Context, mid merchant.ID) (iam.
 	}
 	row, err := directory.Get(ctx, mid)
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
-		return iam.GroupRef{}, policy.ErrMerchantUnresolved
+		return iam.GroupRef{}, billing.ErrMerchantUnresolved
 	}
 	if err != nil {
 		return iam.GroupRef{}, err
 	}
 	if row.PermissionGroupID == "" || row.Status != merchants.StatusActive {
-		return iam.GroupRef{}, policy.ErrMerchantUnresolved
+		return iam.GroupRef{}, billing.ErrMerchantUnresolved
 	}
 	return iam.GroupByID(row.PermissionGroupID), nil
 }

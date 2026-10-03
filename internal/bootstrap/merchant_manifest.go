@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -156,15 +156,15 @@ func mergeMerchantConfigManifest(dst, src *BillingConfig) {
 }
 
 func mergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
-	merchantbootstrap.MergeMerchantConfig(&dst.MerchantConfig, src.MerchantConfig)
+	merchantbootstrap.MergeMerchantConfig(&dst.MerchantDeclaration, src.MerchantDeclaration)
 	if src.RemoteApplication != nil {
 		dst.RemoteApplication = src.RemoteApplication
 	}
 }
 
 type MerchantConfig struct {
-	merchantbootstrap.MerchantConfig `yaml:",inline" koanf:",squash"`
-	RemoteApplication                *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
+	config.MerchantDeclaration `yaml:",inline" koanf:",squash"`
+	RemoteApplication          *RemoteApplicationConfig `yaml:"remote_application,omitempty" koanf:"remote_application"`
 }
 
 // RemoteApplicationConfig declares the host-app remote_application trusted for a
@@ -342,7 +342,7 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
-	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantConfig); err != nil {
+	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {
 		return nil, err
 	}
 	database := req.Database
@@ -421,7 +421,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		mt.BillingPolicies = nil
 		mt.BillingPolicyBindings = nil
 	}
-	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt.MerchantConfig, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
+	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt.MerchantDeclaration, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
 	}
 	return tn, nil
@@ -577,21 +577,21 @@ var mergeInvoiceConfig = merchantbootstrap.MergeInvoiceConfig
 var mergeCustodianAccountConfig = merchantbootstrap.MergeCustodianAccountConfig
 var mergeProviderRailAccountConfig = merchantbootstrap.MergeProviderRailAccountConfig
 
-type BillingPolicyConfig = merchantbootstrap.BillingPolicyConfig
-type BillingPolicyBindingConfig = merchantbootstrap.BillingPolicyBindingConfig
-type CheckoutRoutingRuleConfig = merchantbootstrap.CheckoutRoutingRuleConfig
-type CheckoutRoutingMatchConfig = merchantbootstrap.CheckoutRoutingMatchConfig
+type BillingPolicyConfig = config.BillingPolicyConfig
+type BillingPolicyBindingConfig = config.BillingPolicyBindingConfig
+type CheckoutRoutingRuleConfig = config.CheckoutRoutingRuleConfig
+type CheckoutRoutingMatchConfig = config.CheckoutRoutingMatchConfig
 
 var checkoutRoutingRules = merchantbootstrap.CheckoutRoutingRules
 
-type InvoiceConfig = merchantbootstrap.InvoiceConfig
-type BudgetWindowConfig = merchantbootstrap.BudgetWindowConfig
-type MerchantProfileConfig = merchantbootstrap.MerchantProfileConfig
-type PSPConfig = merchantbootstrap.PSPConfig
-type CustodianConfig = merchantbootstrap.CustodianConfig
-type CustodianAccountConfig = merchantbootstrap.CustodianAccountConfig
-type ProviderRailAccountConfig = merchantbootstrap.ProviderRailAccountConfig
-type PSPSignerConfig = merchantbootstrap.PSPSignerConfig
+type InvoiceConfig = config.InvoiceConfig
+type BudgetWindowConfig = config.BudgetWindowConfig
+type MerchantProfileConfig = config.MerchantProfileConfig
+type PSPConfig = config.PSPConfig
+type CustodianConfig = config.CustodianConfig
+type CustodianAccountConfig = config.CustodianAccountConfig
+type ProviderRailAccountConfig = config.ProviderRailAccountConfig
+type PSPSignerConfig = config.PSPSignerConfig
 type MerchantManifestReconcileOptions = merchantbootstrap.MerchantManifestReconcileOptions
 type ManifestProviderIdentityResolver = merchantbootstrap.ManifestProviderIdentityResolver
 type manifestProviderIdentity = merchantbootstrap.ManifestProviderIdentity
@@ -621,7 +621,7 @@ type resolvedManifestRailAccount = merchantbootstrap.ResolvedManifestRailAccount
 var resolveManifestRailAccount = merchantbootstrap.ResolveManifestRailAccount
 
 func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, id merchant.ID, mt MerchantConfig, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
-	return merchantbootstrap.SeedMerchantManifestSecretPlane(ctx, cfg, id, mt.MerchantConfig, store, transit)
+	return merchantbootstrap.SeedMerchantManifestSecretPlane(ctx, cfg, id, mt.MerchantDeclaration, store, transit)
 }
 
 var reconcileManifestPSP = merchantbootstrap.ReconcileManifestPSP
