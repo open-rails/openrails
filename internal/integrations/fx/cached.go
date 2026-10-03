@@ -21,7 +21,7 @@ type CachedProvider struct {
 }
 
 type cachedQuote struct {
-	quote     *Quote
+	quote     Quote
 	expiresAt time.Time
 }
 
@@ -52,12 +52,8 @@ func (p *CachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency str
 	cached, ok := p.cache[key]
 	p.mu.RUnlock()
 	if ok && p.now().Before(cached.expiresAt) && !staleRate(cached.quote.AsOf, p.now()) {
-		return &Quote{
-			FromCurrency: cached.quote.FromCurrency,
-			ToCurrency:   cached.quote.ToCurrency,
-			Rate:         cached.quote.Rate,
-			AsOf:         cached.quote.AsOf,
-		}, nil
+		quote := cached.quote
+		return &quote, nil
 	}
 	return p.flights.do(ctx, key, func(ctx context.Context) (*Quote, error) {
 		quote, err := p.provider.Quote(ctx, fromCurrency, toCurrency)
@@ -68,7 +64,7 @@ func (p *CachedProvider) Quote(ctx context.Context, fromCurrency, toCurrency str
 			return nil, fmt.Errorf("upstream rate %s -> %s is stale (as of %s)", fromCurrency, toCurrency, quote.AsOf.Format(time.RFC3339))
 		}
 		p.mu.Lock()
-		p.cache[key] = &cachedQuote{quote: quote, expiresAt: p.now().Add(p.ttl)}
+		p.cache[key] = &cachedQuote{quote: *quote, expiresAt: p.now().Add(p.ttl)}
 		p.mu.Unlock()
 		return quote, nil
 	})

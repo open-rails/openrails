@@ -72,7 +72,12 @@ func (f *flights) do(ctx context.Context, key string, fetch func(context.Context
 	f.mu.Unlock()
 	select {
 	case <-call.done:
-		return call.quote, call.err
+		if call.err != nil {
+			return nil, call.err
+		}
+		// Each waiter owns its result; other waiters still read the flight.
+		quote := *call.quote
+		return &quote, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
