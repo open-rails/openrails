@@ -13,10 +13,9 @@ own permissions. Off by default.
 
 Two independent requirements, both needed (#740/#754):
 
-1. **Assets in the binary.** The engine ships no frontend bytes — `go:embed`
-   cannot cross module boundaries, so whoever builds the binary owns the embed
-   and hands the engine an `fs.FS` rooted at `index.html`. Built `dist` is
-   never committed; Node/pnpm is a build-time dependency only.
+1. **Assets in the binary.** `web/admin` go:embeds its `dist` build, which is
+   never committed: the binary carries a console only when `web/admin/dist`
+   was built before `go build`. Node/pnpm is a build-time dependency only.
 2. **Config.** `admin_console.enabled: true`.
 
 | assets | `admin_console.enabled` | result |
@@ -50,48 +49,14 @@ task build-console-binary  # admin-build + go build ./cmd/openrails
 Release archives and Docker images always carry the console (still
 config-gated at runtime): goreleaser and the Dockerfile build `web/admin` first.
 
-**Embedded hosts.** The host repo owns a tiny embed package over a
-**gitignored** dist its build pipeline produces:
-
-```go
-// internal/consoleassets/assets.go
-package consoleassets
-
-import "embed"
-
-//go:embed all:dist
-var FS embed.FS
-```
-
-Build the dist straight from the openrails module cache (no vendoring; invoke
-via `bash` — module-cache files are not executable — and the script copies the
-read-only source to a temp dir before `pnpm install`):
-
-```sh
-bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
-```
-
-Then hand the FS to the engine:
-
-```go
-sub, _ := fs.Sub(consoleassets.FS, "dist")
-opts.ConsoleAssets = sub
-rt, err := embed.New(ctx, opts)
-```
-
-`ConsoleAssets` feeds the standalone surface (`controlplane.Attach(...).Handler()`),
-which mounts `/admin/` per the table above. The embedded mount surface
-(`rt.Handler` / `rt.Client()`) does NOT serve `/admin` — hosts
-that mount billing under their own mux serve the console themselves by mounting
-`adminconsole.Handler(cfg, assets)` (package `pkg/adminconsole`), gated on
-`adminconsole.Present(assets)`, with `APIBaseURL` set to their billing mount
-(e.g. `/billing/v1`) and `AuthBaseURL` to their AuthKit JSON API (`/api/v1` by default).
+**Embedded hosts.** The engine serves the console from web/admin's build
+through the control plane's standalone surface (`Config.ControlPlane`, mounted
+from `Client.Routes`). A module fetched into the Go module cache carries only
+`web/admin/dist/.gitkeep`, so a host building from it has no console; one
+building from an OpenRails checkout runs `task admin-build` first.
 
 Fail-loud behaviors, verified: enabled without assets refuses boot
-(`admin_console.enabled is set but no console assets were provided: …`);
-a host `go:embed` of a missing dist is a compile error; mounting
-`adminconsole.Handler` with no build answers every request 503 naming the
-build step. Opt-out is doing nothing.
+(`admin_console.enabled is set but web/admin holds no console build: …`). Opt-out is doing nothing.
 
 ### Security posture
 

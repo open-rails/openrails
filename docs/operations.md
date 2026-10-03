@@ -218,7 +218,7 @@ Rules:
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
   Archive by id: `POST /v1/merchant/payment-providers/{rail}/accounts/{psp_id}/archive`
-  (`internal/embedcontrolplane`: `ArchivePaymentProviderAccount`) makes no provider
+  (`internal/operator`: `ArchivePaymentProviderAccount`) makes no provider
   call, so it works when the old provider is terminated or unreachable. The
   rail-level `DELETE` refuses (`provider_accounts_ambiguous`) while two
   accounts are active, and `PUT … {"enabled": false}` live-probes the stored
@@ -229,7 +229,7 @@ Rules:
   no rebind command.
 - **Per-subscriber cutover off an archived PSP is report-only (#657).**
   `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
-  `internal/embedcontrolplane` reads the subscription, the card the subscriber
+  `internal/operator` reads the subscription, the card the subscriber
   re-entered (`ReplacementPaymentMethodID`) and/or a `TargetPSPID` (default:
   the card's PSP), and both PSP rows, and writes nothing. `Executable` is true
   only for the durable payment-source update: an NMI subscription that is

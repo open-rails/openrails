@@ -22,9 +22,9 @@ has exactly one PSP armed on it (ambiguous kinds 400, naming the armed keys). Om
 ### Authentication
 
 Embedded applications use their normal user credential through the host's
-AuthKit request verifier. Cookie-based hosts must explicitly wrap the billing
-mount with `billingauth.CookieAuthentication("https://merchant.example")`.
-The default mount strips ambient cookies. The wrapper admits unsafe cookie
+AuthKit request verifier. Cookie-based hosts set `Config.HTTP.CookieOrigin` to
+`"https://merchant.example"`; by default the mount strips ambient cookies.
+Admission accepts unsafe cookie
 requests only from that exact configured origin, including bodyless POSTs;
 missing, opaque, cross-origin and sibling origins are refused. Do not wrap
 AuthKit's own auth routes, which own their refresh/CSRF cookie protocol.

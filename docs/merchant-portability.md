@@ -106,7 +106,7 @@ openrails --config destination.yaml --provider-write-mode readonly \
 ```
 
 Go hosts can perform the same explicit preparation before binding their client:
-`embedoperator.New(rt).RegisterMerchantForRestore(ctx, merchantID, slug)` for an unbound engine, or
+`openrails billing prepare-target --unbound-merchants` for an unbound engine, or
 `cp.ProvisionMerchantForRestore(ctx, controlplane.ProvisionMerchantForRestoreRequest{MerchantID: merchantID, Slug: slug, ExistingGroupID: groupID, OwnerUserID: ownerID})`
 for an attached control plane. Neither method imports billing data or provider
 credentials. Repeating the same identity preparation is safe; conflicting
