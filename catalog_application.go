@@ -10,8 +10,10 @@ import (
 
 type CatalogClient struct{ client *Client }
 
-// Apply commits one authorized batch; retries must keep the original identity
-// and payload. A new application ID deliberately applies the declaration again.
+// Apply commits one authorized batch. A declarative document (no application
+// ID or expected revision) converges the catalog to its contents and replays
+// while nothing has changed since. A guarded one replays by ID and applies only
+// at its expected revision; a new ID deliberately applies it again.
 func (c *CatalogClient) Apply(ctx context.Context, params *billing.CatalogApplyParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
 	if c.client.ownCatalog {
 		return nil, fmt.Errorf("catalog batch applications require merchant catalog authority")

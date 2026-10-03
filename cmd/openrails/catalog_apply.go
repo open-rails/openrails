@@ -13,8 +13,8 @@ import (
 
 const defaultCatalogManifestPath = "/etc/openrails/catalog.yaml"
 
-// catalogOptions selects the operator file and merchant; mutation intent is in
-// the application document, including its durable identity and precondition.
+// catalogOptions selects the operator file and merchant; mutation intent,
+// including any identity and precondition, is in the application document.
 type catalogOptions struct {
 	file             string
 	merchant         string
@@ -28,9 +28,10 @@ func newApplyCatalogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply-catalog",
 		Short: "Apply one idempotent catalog batch to an explicitly selected merchant",
-		Long: "Loads a catalog application with application_id and expected_revision, applies it atomically, " +
-			"and prints its receipt. Omitted items are preserved unless the document explicitly sets prune: true. " +
-			"Retry the same document to recover a lost response; a new intended application needs a new identity.",
+		Long: "Loads a catalog application, applies it atomically, and prints its receipt. Without application_id " +
+			"and expected_revision the document is declarative: rerun it on every boot; it replays while the catalog " +
+			"is unchanged and otherwise converges the catalog to the file. With both, it is a guarded one-off change. " +
+			"Omitted items are preserved unless the document explicitly sets prune: true.",
 		Args: validateCatalogArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runApplyCatalog(cmd, opts)
