@@ -1,9 +1,7 @@
 # Example merchant: host-three. Select the merchant outside this payload.
 # Amounts are integer USD micros. These are illustrative prices, not current quotes.
-# Reuse ID/revision only for retries; a new intent needs a new ID and current revision.
+# Declarative (no application_id/expected_revision); see catalog.example.yaml.
 schema_version: 1
-application_id: example-host-three-initial-v1
-expected_revision: 0
 
 products:
   - key: novice

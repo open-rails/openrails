@@ -32,32 +32,49 @@ type catalogReferenceCheck struct {
 }
 type catalogApplicationPreparation struct {
 	replay   *billing.CatalogApplicationReceipt
+	revision int64
 	links    map[string]map[string]map[string]string
 	accounts map[uuid.UUID]gen.BillingPsp
 	checks   []catalogReferenceCheck
 }
 
-func (s *Service) catalogApplicationReplay(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte) (*billing.CatalogApplicationReceipt, error) {
+// catalogApplicationGate runs under the merchant lock. A guarded application
+// replays by its ID and otherwise requires its expected revision. A declarative
+// one replays only while the catalog is still at the revision it produced;
+// after any other authored write it applies again, so the document wins.
+func (s *Service) catalogApplicationGate(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	previous, err := s.catalogDatabase().Gen(ctx).GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: params.ApplicationID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+	q := s.catalogDatabase().Gen(ctx)
+	revision, err := q.GetCatalogRevision(ctx, mid.UUID())
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	if !bytes.Equal(previous.RequestSha256, digest[:]) {
-		return nil, apperr.New(409, "catalog_application_conflict", "application_id already committed with different content")
+	id := params.ApplicationID
+	if params.Declarative() {
+		id = declarativeApplicationID(digest, revision)
 	}
-	var receipt billing.CatalogApplicationReceipt
-	if err := json.Unmarshal(previous.Result, &receipt); err != nil {
-		return nil, err
+	previous, err := q.GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: id})
+	if err == nil {
+		if !bytes.Equal(previous.RequestSha256, digest[:]) {
+			return 0, nil, apperr.New(409, "catalog_application_conflict", "application_id already committed with different content")
+		}
+		var receipt billing.CatalogApplicationReceipt
+		if err := json.Unmarshal(previous.Result, &receipt); err != nil {
+			return 0, nil, err
+		}
+		receipt.Replayed = true
+		return revision, &receipt, nil
 	}
-	receipt.Replayed = true
-	return &receipt, nil
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil, err
+	}
+	if !params.Declarative() && revision != *params.ExpectedRevision {
+		return 0, nil, apperr.New(409, "catalog_revision_conflict", fmt.Sprintf("catalog revision is %d; expected %d", revision, *params.ExpectedRevision))
+	}
+	return revision, nil, nil
 }
 
 // Prepare only observes remote references. Snapshot collection and the final
@@ -65,11 +82,11 @@ func (s *Service) catalogApplicationReplay(ctx context.Context, params billing.C
 // A committed retry returns before resolving targets or contacting a provider.
 func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
-		replay, err := scoped.catalogApplicationReplay(ctx, params, digest)
+		revision, replay, err := scoped.catalogApplicationGate(ctx, params, digest)
 		if err != nil {
 			return nil, err
 		}
-		out := &catalogApplicationPreparation{replay: replay, links: map[string]map[string]map[string]string{}, accounts: map[uuid.UUID]gen.BillingPsp{}}
+		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[string]map[string]map[string]string{}, accounts: map[uuid.UUID]gen.BillingPsp{}}
 		if replay != nil {
 			return out, nil
 		}
@@ -78,13 +95,6 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.
 			return nil, err
 		}
 		q := scoped.catalogDatabase().Gen(ctx)
-		revision, err := q.GetCatalogRevision(ctx, mid.UUID())
-		if err != nil {
-			return nil, err
-		}
-		if revision != *params.ExpectedRevision {
-			return nil, apperr.New(409, "catalog_revision_conflict", fmt.Sprintf("catalog revision is %d; expected %d", revision, *params.ExpectedRevision))
-		}
 		var target uuid.UUID
 		if params.CatalogID != "" {
 			id, err := billing.ParseCatalogID(params.CatalogID)

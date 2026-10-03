@@ -27,12 +27,8 @@ import (
 func (w *world) applyCatalog(prices string) (string, error) {
 	w.t.Helper()
 	client := w.client[embedded]
-	revision, err := client.Catalog.Revision(w.t.Context())
-	require.NoError(w.t, err)
 	key := "rails-" + uuid.NewString()[:8]
 	doc := fmt.Sprintf(`schema_version: 1
-application_id: gf-%s
-expected_revision: %d
 products:
 - key: %s
   display_name: Rails
@@ -40,7 +36,7 @@ products:
 %s
   entitlements_spec:
     %s: null
-`, key, revision.Revision, key, strings.ReplaceAll(prices, "{key}", key), key)
+`, key, strings.ReplaceAll(prices, "{key}", key), key)
 	params, err := billing.ParseCatalogApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)
 	_, err = client.Catalog.Apply(w.t.Context(), params)

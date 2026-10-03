@@ -90,7 +90,7 @@ manifest and secret files before it can use those providers.
 - External configuration routes require explicit publication; exposing a route
   does not make the credential backend writable.
 - Catalog writes independently require `allow_catalog_updates: true`. Trusted
-  operator catalog applications retain their own durable identity contract.
+  operator catalog applications are declarative or guarded by their document.
 - `openrails dump-merchant-config` exports redacted metadata with snapshot or
   managed credentials. Plaintext credential export is not supported.
 - Managed DB secrets require encryption in sandbox and live deployments.

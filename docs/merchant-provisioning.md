@@ -22,8 +22,8 @@ Three file-backed push surfaces (example shapes in `config/bootstrap.example.yam
 - `openrails push-merchant-config` — merchants: identity, profile, invoice
   policy, issuer-as-owner, PSPs (rail accounts + secrets). Default file
   `/etc/openrails/merchants.yaml`.
-- `openrails apply-catalog --merchant NAME --file PATH` — one catalog application
-  with a durable application ID and expected revision in the document.
+- `openrails apply-catalog --merchant NAME --file PATH` — one catalog application;
+  a declarative document is safe to rerun on every boot.
 
 Catalog application uses its document contract, with `prune: false` by default.
 Merchant startup initialization uses `push-merchant-config --insert` (or `--seed`)

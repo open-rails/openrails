@@ -17,10 +17,18 @@ The database is the catalog. Authorized clients can edit individual records when
 `allow_catalog_updates: true`, or submit a JSON/YAML batch of changes. The flag
 defaults false; a trusted local operator can still apply bootstrap documents.
 
-Each batch has an application ID and an expected merchant catalog revision.
-Reusing an applied ID and identical contents returns the original receipt without
-repeating changes, even after later API edits. A new ID intentionally applies the
-document again against its pinned revision. Omitted records survive unless
+A batch is declarative or guarded:
+
+- **Declarative** (no `application_id`, no `expected_revision`) — the document is
+  the desired state; apply it on every boot. Unchanged, it replays its receipt.
+  Edited, or after any other catalog edit (console, API), it applies again and the
+  file wins for everything it declares.
+- **Guarded** (both fields) — a one-off change that must not overwrite concurrent
+  editors, as the admin console sends. Reusing an applied ID with identical
+  contents returns the original receipt, even after later edits; the same ID with
+  different contents, or a stale revision, is a conflict.
+
+Supplying only one of the two fields is rejected. Omitted records survive unless
 `prune: true`; explicit `archived: true` retires a known record independently.
 
 Products have stable keys. Prices have immutable financial terms; changing terms
@@ -38,14 +46,15 @@ admin grants, and grace. See [Entitlements](#entitlements).
 Use `client.Catalog.Apply(ctx, params)` for embedded and remote Clients. Decode
 YAML with `billing.ParseCatalogApplicationYAML`; both encodings share the same
 validation and authorization as individual writes. The HTTP operation is
-`POST /v1/merchant/catalog/applications`; read the required base revision through
-`client.Catalog.Revision(ctx)` or `GET /v1/merchant/catalog/revision`.
+`POST /v1/merchant/catalog/applications`; a guarded application reads its base
+revision through `client.Catalog.Revision(ctx)` or `GET /v1/merchant/catalog/revision`.
 
 The server commits local products, prices, related definitions, history and the
 application receipt atomically. Unsupported provider changes fail before mutation;
 supported external work is durable and reported separately. Retry an uncertain
-response with exactly the same ID and contents. A changed revision is a conflict,
-not permission to silently refresh the precondition and overwrite intervening edits.
+response with exactly the same document. For a guarded application a changed
+revision is a conflict, not permission to refresh the precondition and overwrite
+intervening edits; overwriting them is what a declarative document is for.
 
 The default target is the merchant-owned catalog. An explicit catalog ID must be
 inside the authenticated merchant and caller's authority; pruning never implicitly
@@ -58,16 +67,15 @@ with trusted local authority. Runtime has no catalog business methods.
 ### Authoring the catalog
 
 One application selects one authorized merchant outside the document and includes
-`schema_version`, `application_id`, `expected_revision`, optional `catalog_id`,
-`prune`, `products` and supported `meters`. See `config/catalog.example.yaml`.
+`schema_version`, optional `catalog_id`, `prune`, `products` and supported
+`meters`, plus `application_id` and `expected_revision` together for a guarded
+application. See `config/catalog.example.yaml`.
 
 **A tiered subscription** — `tier_group` + `tier_rank` make products an ordered plan
 family, which is what enables upgrade/downgrade between them:
 
 ```yaml
 schema_version: 1
-application_id: membership-launch-1
-expected_revision: 0
 prune: false
 products:
   - key: novice
@@ -158,10 +166,10 @@ manifest path is used. Managed DB/Vault deployments read their configured backen
 and fail if it is unavailable. Recurring Solana references use public account and
 chain reads; catalog application does not construct a signer or submit a plan.
 
-Application identity, expected revision and prune belong in the document, not
-CLI mutation flags. Keep the same artifact across restarts; review current state
-before authoring a new application ID. The returned receipt proves what committed,
-not that no one has edited the catalog since.
+Identity, expected revision and prune belong in the document, not CLI mutation
+flags. A declarative receipt's `application_id` is derived:
+`sha256:<content digest>@<applied revision>`. The returned receipt proves what
+committed, not that no one has edited the catalog since.
 
 Catalog exports are inspection snapshots; author explicit application identity and
 revision before applying changes from an export.

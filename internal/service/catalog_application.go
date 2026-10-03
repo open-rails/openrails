@@ -48,30 +48,50 @@ func (s *Service) applyCatalog(ctx context.Context, params billing.CatalogApplyP
 	if err != nil {
 		return nil, err
 	}
-	prepared, err := s.prepareCatalogApplication(ctx, params, digest, verify)
-	if err != nil {
-		return nil, err
+	for attempt := 1; ; attempt++ {
+		prepared, err := s.prepareCatalogApplication(ctx, params, digest, verify)
+		if err != nil {
+			return nil, err
+		}
+		if prepared.replay != nil {
+			return prepared.replay, nil
+		}
+		receipt, err := s.commitCatalogApplication(ctx, params, digest, prepared)
+		if !errors.Is(err, errCatalogSnapshotMoved) {
+			return receipt, err
+		}
+		if attempt == maxCatalogSnapshotAttempts {
+			return nil, apperr.New(409, "catalog_revision_conflict", "catalog kept changing during the declarative application; retry")
+		}
 	}
-	if prepared.replay != nil {
-		return prepared.replay, nil
-	}
+}
+
+// Only a declarative application can observe this; a guarded one pins the
+// revision its preparation read.
+var errCatalogSnapshotMoved = errors.New("catalog changed after preparation")
+
+const maxCatalogSnapshotAttempts = 3
+
+// declarativeApplicationID names a declarative application by its content and
+// the revision it produces, so an unchanged catalog replays it.
+func declarativeApplicationID(digest [32]byte, revision int64) string {
+	return fmt.Sprintf("%s%x@%d", catalogwire.DeclarativeIDPrefix, digest, revision)
+}
+
+func (s *Service) commitCatalogApplication(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte, prepared *catalogApplicationPreparation) (*billing.CatalogApplicationReceipt, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.CatalogApplicationReceipt, error) {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
 		q := scoped.catalogDatabase().Gen(ctx)
-		if replay, err := scoped.catalogApplicationReplay(ctx, params, digest); err != nil {
-			return nil, err
-		} else if replay != nil {
-			return replay, nil
+		revision, replay, err := scoped.catalogApplicationGate(ctx, params, digest)
+		if err != nil || replay != nil {
+			return replay, err
 		}
-		revision, err := q.GetCatalogRevision(ctx, mid.UUID())
-		if err != nil {
-			return nil, err
-		}
-		if revision != *params.ExpectedRevision {
-			return nil, apperr.New(409, "catalog_revision_conflict", fmt.Sprintf("catalog revision is %d; expected %d", revision, *params.ExpectedRevision))
+		// Prepared links and accounts describe the snapshot at that revision.
+		if revision != prepared.revision {
+			return nil, errCatalogSnapshotMoved
 		}
 		if err := scoped.revalidateCatalogApplicationProviders(ctx, prepared); err != nil {
 			return nil, err
@@ -119,11 +139,14 @@ func (s *Service) applyCatalog(ctx context.Context, params billing.CatalogApplyP
 		if err != nil {
 			return nil, err
 		}
+		if params.Declarative() {
+			receipt.ApplicationID = declarativeApplicationID(digest, receipt.AppliedRevision)
+		}
 		result, err := json.Marshal(receipt)
 		if err != nil {
 			return nil, err
 		}
-		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: params.ApplicationID, CatalogID: target.ID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
+		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, CatalogID: target.ID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
 		if err != nil {
 			return nil, err
 		}

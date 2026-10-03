@@ -24,8 +24,7 @@ func TestExampleCatalogApplicationsParse(t *testing.T) {
 		application, err := catalog.ParseApplicationYAML(raw)
 		require.NoError(t, err, name)
 		require.Len(t, application.Products, products, name)
-		require.NotEmpty(t, application.ApplicationID, name)
-		require.NotNil(t, application.ExpectedRevision, name)
+		require.True(t, application.Declarative(), "a boot-time example applies declaratively: %s", name)
 		require.False(t, application.Prune, "an example never deletes omitted items: %s", name)
 		if name == "catalog.example.yaml" {
 			metered = application

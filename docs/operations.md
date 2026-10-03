@@ -24,8 +24,9 @@ exactly four ways the system diverges, each with its own mechanism:
 ## Mutation Flags
 
 Provider pull and merchant-configuration commands use mutation flags. Catalog
-application instead carries `application_id`, `expected_revision` and optional
-`prune` in its document; it has no insert/overwrite flags. For commands that use
+application instead carries optional `prune` (and, for a guarded change,
+`application_id` + `expected_revision`) in its document; it has no
+insert/overwrite flags. For commands that use
 mutation flags:
 
 - no mutation flags: plan/report only
@@ -49,7 +50,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
-| `apply-catalog --merchant NAME --file PATH` | atomic local catalog application with durable replay identity |
+| `apply-catalog --merchant NAME --file PATH` | atomic local catalog application; declarative by default, guarded with `application_id` + `expected_revision` |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |

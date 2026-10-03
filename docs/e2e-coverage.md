@@ -12,7 +12,7 @@ All provider traffic here is fake; no result certifies a live merchant account.
 | Functionality | Current focused coverage | Remaining important cases |
 | --- | --- | --- |
 | Exact money and currency units | Decimal parsing, signed integer bounds, rounding, USD/JPY rail conversion, unknown currency rejection and JSON string amounts beyond JavaScript's exact integer range | More currencies, tax/discount calculations where supported, every outgoing provider money field |
-| Products, prices and offers | Create, retrieve, list, ensure/replay, entitlement-to-offer lookup | Atomic catalog applications, revisions, archive/reprice offer history, cursor pagination, creator catalog boundaries |
+| Products, prices and offers | Create, retrieve, list, ensure/replay, entitlement-to-offer lookup; declarative catalog applications (replay, edited file, file wins after a console edit) and guarded ID/revision conflicts | Archive/reprice offer history, cursor pagination, creator catalog boundaries |
 | Merchant and customer separation | Foreign product read refused, merchant lists separated, entitlement lookup isolated | Adversarial writes and customer impersonation across every privileged surface |
 | One-time checkout | Hosted Stripe session, replay without another create, conflicting request rejection, unpaid access absent | Saved-card NMI/Stripe one-time completion, account selection, uncertain sale recovery |
 | Paid access and entitlements | Signed paid webhook creates access; subscription periods and declines affect access | Bundles, partial ownership, revocation sources, paginated purchased-product history |

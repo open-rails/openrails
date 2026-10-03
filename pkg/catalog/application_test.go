@@ -96,6 +96,9 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 		"negative money":       head + `,"products":[{"key":"a","prices":[{"key":"p","unit_amount":"-1"}]}]}`,
 		"schema version 2":     `{"schema_version":2,"application_id":"op","expected_revision":0}`,
 		"missing revision":     `{"schema_version":1,"application_id":"op"}`,
+		"missing id":           `{"schema_version":1,"expected_revision":0}`,
+		"reserved id":          `{"schema_version":1,"application_id":"sha256:op","expected_revision":0}`,
+		"missing schema":       `{"products":[]}`,
 		"oversized document":   head + `,"catalog_id":"` + strings.Repeat("x", MaxApplicationBytes) + `"}`,
 		"duplicate price keys": head + `,"products":[{"key":"a","prices":[{"key":"p"}]},{"key":"b","prices":[{"key":"p"}]}]}`,
 	} {
@@ -118,6 +121,9 @@ func TestApplicationValidateBounds(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*Application){
 		"negative revision":     func(a *Application) { a.ExpectedRevision = rev(-1) },
+		"id without revision":   func(a *Application) { a.ExpectedRevision = nil },
+		"revision without id":   func(a *Application) { a.ApplicationID = "" },
+		"reserved id prefix":    func(a *Application) { a.ApplicationID = DeclarativeIDPrefix + "op" },
 		"padded application id": func(a *Application) { a.ApplicationID = " op" },
 		"long application id":   func(a *Application) { a.ApplicationID = strings.Repeat("a", 129) },
 		"empty product key":     func(a *Application) { a.Products = []ApplyProduct{{}} },
@@ -160,6 +166,37 @@ func TestApplicationValidateBounds(t *testing.T) {
 	nullable.Products = []ApplyProduct{{Key: "p", TierGroup: Null[string](), Prices: []ApplyPrice{{Key: "x", TrialUnitAmount: Null[int64](), AccessDurationHours: Null[int]()}}}}
 	if err := nullable.Validate(); err != nil {
 		t.Fatalf("explicit null on nullable fields rejected: %v", err)
+	}
+}
+
+// Without identity fields the document itself is the application: its JSON
+// omits them, and its digest is its content alone.
+func TestDeclarativeApplication(t *testing.T) {
+	a, err := ParseApplicationYAML([]byte("schema_version: 1\nproducts: [{key: a, display_name: A}]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Declarative() {
+		t.Fatal("an application without identity fields is declarative")
+	}
+	raw, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "application_id") || strings.Contains(string(raw), "expected_revision") {
+		t.Fatalf("declarative wire form carries identity fields: %s", raw)
+	}
+	same, err := ParseApplicationJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digest(t, *a) != digest(t, *same) {
+		t.Fatal("YAML and JSON forms of one document disagree")
+	}
+	guarded := *a
+	guarded.ApplicationID, guarded.ExpectedRevision = "op", rev(0)
+	if guarded.Declarative() || digest(t, guarded) == digest(t, *a) {
+		t.Fatal("identity fields select the guarded form")
 	}
 }
 
