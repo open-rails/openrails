@@ -12,9 +12,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // httpRuntime is a database-free runtime: route materialization and every

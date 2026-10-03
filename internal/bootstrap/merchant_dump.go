@@ -12,7 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"

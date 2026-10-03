@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )

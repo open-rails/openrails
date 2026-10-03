@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/migratekit"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"

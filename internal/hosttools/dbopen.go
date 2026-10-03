@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 )
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	billing "github.com/open-rails/openrails/config"
+	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )

@@ -14,8 +14,8 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/cache"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/pkg/merchant"

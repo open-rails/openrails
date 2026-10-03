@@ -11,12 +11,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 type routeSource struct {

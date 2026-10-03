@@ -56,7 +56,7 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 

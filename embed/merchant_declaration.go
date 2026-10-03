@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/merchant"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/merchants"

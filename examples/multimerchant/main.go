@@ -14,8 +14,8 @@ import (
 	"syscall"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

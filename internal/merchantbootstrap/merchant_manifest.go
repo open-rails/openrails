@@ -19,8 +19,8 @@ import (
 	"github.com/knadh/koanf/v2"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"

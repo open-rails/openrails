@@ -23,10 +23,10 @@ import (
 
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	corecp "github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/providerqualification"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

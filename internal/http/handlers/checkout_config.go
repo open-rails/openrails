@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"

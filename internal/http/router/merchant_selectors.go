@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

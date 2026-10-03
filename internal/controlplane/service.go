@@ -16,11 +16,11 @@ import (
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
 	userauth "github.com/open-rails/openrails/internal/auth"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/hostconfig"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

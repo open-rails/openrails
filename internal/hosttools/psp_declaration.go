@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"

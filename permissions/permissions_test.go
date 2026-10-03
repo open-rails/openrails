@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func TestForRolesPresetTiers(t *testing.T) {

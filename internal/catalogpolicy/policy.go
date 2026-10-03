@@ -6,7 +6,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 

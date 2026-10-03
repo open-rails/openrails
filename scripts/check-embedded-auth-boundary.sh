@@ -2,7 +2,7 @@
 # A package graph fence: standalone composition may use AuthKit; billing may not.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-packages=(. ./config ./embed ./internal/embedoperator ./pkg/billingauth ./adapters/http ./adapters/gin ./adapters/fiber)
+packages=(. ./internal/config ./embed ./internal/embedoperator ./internal/billingauth ./adapters/http ./adapters/gin ./adapters/fiber)
 deps="$(go list -deps "${packages[@]}")"
 if forbidden="$(printf '%s\n' "$deps" | grep -E '^github.com/open-rails/authkit(/|$)')"; then
   printf 'Embedded billing imports AuthKit:\n%s\n' "$forbidden" >&2
@@ -31,7 +31,7 @@ import (
  "github.com/open-rails/openrails/embed"
  gin "github.com/open-rails/openrails/adapters/gin"
  fiber "github.com/open-rails/openrails/adapters/fiber"
- "github.com/open-rails/openrails/pkg/billingauth"
+ "github.com/open-rails/openrails/internal/billingauth"
 )
 type provider struct{}
 type principal struct{}

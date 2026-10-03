@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	billing "github.com/open-rails/openrails/config"
+	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/money"

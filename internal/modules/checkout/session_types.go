@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 var (

@@ -11,10 +11,10 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // RootPermissionChecker authorizes the user r authenticates as against the

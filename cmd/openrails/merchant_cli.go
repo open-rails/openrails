@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"

@@ -50,7 +50,7 @@ func TestRootPackageStaysLight(t *testing.T) {
 // TestCorePackagesStayFrameworkNeutral keeps framework implementations inside
 // their opt-in adapters. A shared module does not make them engine dependencies.
 func TestCorePackagesStayFrameworkNeutral(t *testing.T) {
-	out, err := exec.Command("go", "list", "-deps", "./config", "./embed", "./pkg/billingauth", "./adapters/http").CombinedOutput()
+	out, err := exec.Command("go", "list", "-deps", "./internal/config", "./embed", "./internal/billingauth", "./adapters/http").CombinedOutput()
 	if err != nil {
 		t.Fatalf("list core package dependencies: %v\n%s", err, out)
 	}

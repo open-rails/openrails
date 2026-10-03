@@ -15,8 +15,8 @@ import (
 
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // SEC-25: a refunded purchase stays refunded. After the provider reports a

@@ -19,9 +19,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -30,7 +31,6 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 )

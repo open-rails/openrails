@@ -3,7 +3,7 @@ package tokens
 import (
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 const (

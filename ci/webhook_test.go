@@ -24,8 +24,8 @@ import (
 	"github.com/google/uuid"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

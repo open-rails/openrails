@@ -3,10 +3,10 @@ package routes
 import (
 	"net/http"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 )

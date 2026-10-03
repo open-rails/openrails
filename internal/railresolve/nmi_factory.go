@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"

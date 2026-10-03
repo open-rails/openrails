@@ -18,9 +18,9 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // callAt sends one customer request with token to a mounted server.

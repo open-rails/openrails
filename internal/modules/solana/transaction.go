@@ -10,7 +10,7 @@ import (
 	chainrpc "github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"

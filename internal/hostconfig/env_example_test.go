@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/joho/godotenv"
-	billing "github.com/open-rails/openrails/config"
+	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

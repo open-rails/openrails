@@ -5,7 +5,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"net/http"
 
-	"github.com/open-rails/openrails/pkg/adminconsole"
+	"github.com/open-rails/openrails/internal/adminconsole"
 )
 
 // registerAdminConsoleRoutes mounts the merchant admin console SPA (#740) at

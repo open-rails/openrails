@@ -19,7 +19,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
 

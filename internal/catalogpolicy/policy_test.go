@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

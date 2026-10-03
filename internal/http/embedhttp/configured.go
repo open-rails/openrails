@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // HTTPConfig declares externally accessible HTTP capabilities. Nil Options.HTTP

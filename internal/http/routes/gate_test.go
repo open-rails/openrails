@@ -14,13 +14,13 @@ import (
 	auth "github.com/open-rails/helpers/auth"
 
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

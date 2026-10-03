@@ -14,7 +14,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 

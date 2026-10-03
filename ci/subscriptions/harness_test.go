@@ -32,11 +32,11 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const (

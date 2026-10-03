@@ -23,7 +23,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -53,7 +54,6 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

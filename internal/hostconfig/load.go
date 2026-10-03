@@ -11,7 +11,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
-	billing "github.com/open-rails/openrails/config"
+	billing "github.com/open-rails/openrails/internal/config"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"path/filepath"

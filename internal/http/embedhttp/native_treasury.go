@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func nativeTreasury(authenticate router.Middleware, auth *billingauth.Integration) router.Middleware {

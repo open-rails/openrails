@@ -11,8 +11,8 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
 	"github.com/open-rails/openrails/internal/hostconfig"

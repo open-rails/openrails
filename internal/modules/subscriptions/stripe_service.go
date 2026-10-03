@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )

@@ -12,8 +12,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

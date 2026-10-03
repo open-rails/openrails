@@ -7,7 +7,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"

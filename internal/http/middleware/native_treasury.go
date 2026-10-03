@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const nativeTreasuryKey = "openrails.native_treasury"

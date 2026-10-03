@@ -12,10 +12,10 @@ import (
 	"github.com/open-rails/authkit/verify"
 	helpersauth "github.com/open-rails/helpers/auth"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/requestauth"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

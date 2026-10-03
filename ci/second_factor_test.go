@@ -18,8 +18,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/standalonedb"

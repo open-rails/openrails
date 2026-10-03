@@ -21,8 +21,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 type fixture struct {

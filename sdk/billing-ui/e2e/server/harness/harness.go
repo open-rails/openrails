@@ -15,11 +15,11 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
-	openrailsconfig "github.com/open-rails/openrails/config"
 	openrailsembed "github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/billingauth"
+	openrailsconfig "github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
-	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 const (

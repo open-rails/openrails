@@ -8,7 +8,7 @@ import (
 
 	"github.com/open-rails/migratekit"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // PostgresStatus reports the embedded chain against the database's ledger:

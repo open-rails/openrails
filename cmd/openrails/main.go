@@ -15,12 +15,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/buildinfo"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/migrate"

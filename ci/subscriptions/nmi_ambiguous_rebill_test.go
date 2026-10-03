@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // A dunning recovery of an NMI-scheduled subscription refused as a duplicate

@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/integrations/vault"

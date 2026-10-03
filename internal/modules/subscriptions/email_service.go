@@ -14,7 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/identity"

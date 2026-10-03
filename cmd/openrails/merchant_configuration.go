@@ -10,8 +10,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/router"
