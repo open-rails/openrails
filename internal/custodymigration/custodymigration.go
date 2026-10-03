@@ -6,7 +6,7 @@
 // that just terminated the relationship. Cards held by a neutral custodian
 // (or#880) are portable — the custodian exports them to any PCI-AoC
 // destination. The card book that is stuck is exactly the `custodian='psp'`
-// half of openrails.payment_methods.
+// half of billing.payment_methods.
 //
 // WHAT IS OPERATIONAL, WHAT IS MECHANISM. Getting the cards out is an
 // OPERATIONAL act performed by humans and vendors: the merchant obtains a PCI
@@ -33,7 +33,7 @@
 // FOUR PROPERTIES THE FLIP MUST HAVE (they are the design, not decoration):
 //
 //  1. The old PSP vault handle is never lost. It stays on the payment_methods
-//     row (rail_customer_ref) AND is copied into openrails.custody_migrations.
+//     row (rail_customer_ref) AND is copied into billing.custody_migrations.
 //  2. Subscriptions are untouched. Same payment_method_id, no lifecycle write.
 //  3. Reversible IN RECORD, not in custody. Every field needed to re-point an
 //     instrument back at its PSP vault is recorded. That does not restore the
@@ -316,8 +316,8 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	// custodian or a PSP that charges through someone else's vault is a
 	// declaration error, and finding it on row 4000 is worthless.
 	var (
-		custodian gen.OpenrailsCustodian
-		targetPSP *gen.OpenrailsPsp
+		custodian gen.BillingCustodian
+		targetPSP *gen.BillingPsp
 	)
 	err = database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := database.Gen(ctx)
@@ -411,8 +411,8 @@ type planner struct {
 	batchID     uuid.UUID
 	sourceRail  string
 	sourcePSPID uuid.UUID
-	custodian   gen.OpenrailsCustodian
-	targetPSP   *gen.OpenrailsPsp
+	custodian   gen.BillingCustodian
+	targetPSP   *gen.BillingPsp
 	exportedAt  time.Time
 	apply       bool
 	seenSource  map[string]int
@@ -451,8 +451,8 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 	// verdict. The apply path re-decides under a row lock; that is the only
 	// difference, and it can only turn a would-be flip into a refusal.
 	var (
-		existing    *gen.OpenrailsPaymentMethod
-		tokenHolder *gen.OpenrailsPaymentMethod
+		existing    *gen.BillingPaymentMethod
+		tokenHolder *gen.BillingPaymentMethod
 	)
 	err := p.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := p.db.Gen(ctx)

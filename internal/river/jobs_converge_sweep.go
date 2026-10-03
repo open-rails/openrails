@@ -77,7 +77,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	}
 	logger := log.WithContext(ctx).WithField("worker", KindConvergeSweep)
 
-	// openrails.merchants is the global directory, so the base pool
+	// billing.merchants is the global directory, so the base pool
 	// genuinely answers this; the per-merchant work below runs inside
 	// RunInMerchantConn. Not a privilege — there is no privileged pool (or#868).
 	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)

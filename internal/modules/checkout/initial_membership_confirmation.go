@@ -66,7 +66,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err := ownsInitialMembership(prior, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID); err != nil {
 			return nil, err
 		}
-		current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.OpenrailsRailIntent) error {
+		current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.BillingRailIntent) error {
 			return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 		})
 		if err != nil {
@@ -86,7 +86,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if s.Config == nil {
 		return nil, errors.New("engine initial membership custody is not configured")
 	}
-	var operation gen.OpenrailsRailIntent
+	var operation gen.BillingRailIntent
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: accepted.CustomerID}); err != nil {
@@ -175,7 +175,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.OpenrailsRailIntent) error {
+	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.BillingRailIntent) error {
 		return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 	})
 	if err != nil {

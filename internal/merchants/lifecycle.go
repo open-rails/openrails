@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// MerchantStatus mirrors openrails.merchants.status.
+// MerchantStatus mirrors billing.merchants.status.
 type MerchantStatus string
 
 const (
@@ -25,7 +25,7 @@ const (
 	StatusDeleted MerchantStatus = "deleted"
 )
 
-// Merchant is the directory view of a row in openrails.merchants.
+// Merchant is the directory view of a row in billing.merchants.
 type Merchant struct {
 	ID                merchant.ID
 	Slug              string
@@ -45,7 +45,7 @@ type ProvisionRequest struct {
 	PermissionGroupID string
 }
 
-// ErrMerchantNotFound indicates no openrails.merchants row matched.
+// ErrMerchantNotFound indicates no billing.merchants row matched.
 var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 
 // ErrPermissionGroupRequired indicates control-plane merchant provisioning
@@ -74,7 +74,7 @@ func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) 
 }
 
 // Service is the merchant provisioning + lifecycle service (issue #225). It owns
-// the openrails.merchants directory rows (billing buckets) and per-merchant
+// the billing.merchants directory rows (billing buckets) and per-merchant
 // secrets. Control-plane callers create/resolve the AuthKit permission-group and
 // pass its id explicitly; this service never creates AuthKit authority itself.
 type Service struct {
@@ -134,7 +134,7 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
-// lookup over openrails.merchants, with no secret store and no PSP
+// lookup over billing.merchants, with no secret store and no PSP
 // environment (scoped credential lookups are unavailable). It is the lifecycle
 // slice the control-plane provisioning seam needs (#738).
 func NewDirectoryService(pool *db.Pool) (*Service, error) {

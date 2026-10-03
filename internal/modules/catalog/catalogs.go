@@ -30,12 +30,12 @@ func catalogMerchant(ctx context.Context) (merchant.ID, error) {
 }
 
 // Ensure preserves opaque subject bytes; nil selects the merchant default.
-func (r *CatalogRepo) Ensure(ctx context.Context, ownerSubject *string) (gen.OpenrailsCatalog, error) {
+func (r *CatalogRepo) Ensure(ctx context.Context, ownerSubject *string) (gen.BillingCatalog, error) {
 	mid, err := catalogMerchant(ctx)
 	if err != nil {
-		return gen.OpenrailsCatalog{}, err
+		return gen.BillingCatalog{}, err
 	}
-	var row gen.OpenrailsCatalog
+	var row gen.BillingCatalog
 	err = r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := gen.New(tx).LockCatalogRevision(ctx, mid.UUID()); err != nil {
 			return err
@@ -48,26 +48,26 @@ func (r *CatalogRepo) Ensure(ctx context.Context, ownerSubject *string) (gen.Ope
 	return row, err
 }
 
-func (r *CatalogRepo) ensure(ctx context.Context, ownerSubject *string) (gen.OpenrailsCatalog, error) {
+func (r *CatalogRepo) ensure(ctx context.Context, ownerSubject *string) (gen.BillingCatalog, error) {
 	mid, err := catalogMerchant(ctx)
 	if err != nil {
-		return gen.OpenrailsCatalog{}, err
+		return gen.BillingCatalog{}, err
 	}
 	if ownerSubject != nil {
 		if err := catalogscope.ValidateSubject(*ownerSubject); err != nil {
-			return gen.OpenrailsCatalog{}, err
+			return gen.BillingCatalog{}, err
 		}
 	}
 	if scope, ok := catalogscope.FromContext(ctx); ok {
 		if ownerSubject == nil || *ownerSubject != scope.OwnerSubject {
-			return gen.OpenrailsCatalog{}, fmt.Errorf("catalog owner does not match the verified subject")
+			return gen.BillingCatalog{}, fmt.Errorf("catalog owner does not match the verified subject")
 		}
 		row, err := r.Get(ctx, scope.CatalogID)
 		if err != nil {
 			return row, err
 		}
 		if row.OwnerSubject == nil || *row.OwnerSubject != scope.OwnerSubject {
-			return gen.OpenrailsCatalog{}, pgx.ErrNoRows
+			return gen.BillingCatalog{}, pgx.ErrNoRows
 		}
 		return row, nil
 	}
@@ -77,15 +77,15 @@ func (r *CatalogRepo) ensure(ctx context.Context, ownerSubject *string) (gen.Ope
 	return r.db.Gen(ctx).EnsureOwnedCatalog(ctx, gen.EnsureOwnedCatalogParams{MerchantID: mid.UUID(), OwnerSubject: *ownerSubject})
 }
 
-func (r *CatalogRepo) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsCatalog, error) {
+func (r *CatalogRepo) Get(ctx context.Context, id uuid.UUID) (gen.BillingCatalog, error) {
 	mid, err := catalogMerchant(ctx)
 	if err != nil {
-		return gen.OpenrailsCatalog{}, err
+		return gen.BillingCatalog{}, err
 	}
 	return r.db.Gen(ctx).GetCatalog(ctx, gen.GetCatalogParams{MerchantID: mid.UUID(), ID: id, CatalogID: catalogscope.QueryID(ctx)})
 }
 
-func (r *CatalogRepo) List(ctx context.Context, limit, offset int32) ([]gen.OpenrailsCatalog, error) {
+func (r *CatalogRepo) List(ctx context.Context, limit, offset int32) ([]gen.BillingCatalog, error) {
 	mid, err := catalogMerchant(ctx)
 	if err != nil {
 		return nil, err
@@ -100,13 +100,13 @@ func (r *CatalogRepo) List(ctx context.Context, limit, offset int32) ([]gen.Open
 }
 
 // GetByOwner is an exact, side-effect-free lookup in the authorized merchant.
-func (r *CatalogRepo) GetByOwner(ctx context.Context, subject string) (gen.OpenrailsCatalog, error) {
+func (r *CatalogRepo) GetByOwner(ctx context.Context, subject string) (gen.BillingCatalog, error) {
 	mid, err := catalogMerchant(ctx)
 	if err != nil {
-		return gen.OpenrailsCatalog{}, err
+		return gen.BillingCatalog{}, err
 	}
 	if err := catalogscope.ValidateSubject(subject); err != nil {
-		return gen.OpenrailsCatalog{}, err
+		return gen.BillingCatalog{}, err
 	}
 	return r.db.Gen(ctx).GetCatalogByOwner(ctx, gen.GetCatalogByOwnerParams{
 		MerchantID: mid.UUID(), OwnerSubject: subject, CatalogID: catalogscope.QueryID(ctx),

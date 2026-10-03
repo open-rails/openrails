@@ -266,7 +266,7 @@ func (s *BillingPolicyStore) Resolve(ctx context.Context, payer identity.Custome
 }
 
 // InvokerSpendLimitStore reads/writes per-invoker spend limits (#473/#517) —
-// {scope, scope_key, windows[]} rows in openrails.invoker_spend_limits. These are
+// {scope, scope_key, windows[]} rows in billing.invoker_spend_limits. These are
 // the payer's own caps on its delegated invokers/roles (payer-set only). The admit
 // path (LoadAll) reads every scope to compose the verdict.
 type InvokerSpendLimitStore struct {
@@ -336,7 +336,7 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 	return p, nil
 }
 
-func invokerSpendLimitFromGen(r gen.OpenrailsInvokerSpendLimit) (InvokerSpendLimit, error) {
+func invokerSpendLimitFromGen(r gen.BillingInvokerSpendLimit) (InvokerSpendLimit, error) {
 	p := InvokerSpendLimit{Scope: r.Scope, ScopeKey: r.ScopeKey, Provenance: r.Provenance}
 	if len(r.Windows) > 0 {
 		if err := json.Unmarshal(r.Windows, &p.Windows); err != nil {

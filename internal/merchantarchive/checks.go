@@ -115,7 +115,7 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 		known[t] = true
 	}
 	rows, err := tx.Query(ctx, `SELECT c.relname,a.attname IS NOT NULL FROM pg_class c LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
-		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND c.relkind IN ('r','p') AND c.relname=ANY($1) ORDER BY c.relname`, ownedTables)
+		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='billing.merchants'::regclass) AND c.relkind IN ('r','p') AND c.relname=ANY($1) ORDER BY c.relname`, ownedTables)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 			omitted[c] = true
 		}
 		rows, err := tx.Query(ctx, `SELECT a.attname,t.typname,a.atttypmod FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_type t ON t.oid=a.atttypid
-			WHERE c.relname=$1 AND c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND a.attnum>0 AND NOT a.attisdropped`, p.Name)
+			WHERE c.relname=$1 AND c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='billing.merchants'::regclass) AND a.attnum>0 AND NOT a.attisdropped`, p.Name)
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 				return err
 			}
 			if c, ok := wanted[name]; ok {
-				expected := map[string]string{"bytea": "bytea", "uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz", "openrails.payment_status": "payment_status", "openrails.subscription_status": "subscription_status"}[c.Type]
+				expected := map[string]string{"bytea": "bytea", "uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz", "billing.payment_status": "payment_status", "billing.subscription_status": "subscription_status"}[c.Type]
 				if strings.HasPrefix(c.Type, "character varying(") {
 					expected = "varchar"
 					n, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(c.Type, "character varying("), ")"), 10, 32)
@@ -213,7 +213,7 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 
 func refuseRows(ctx context.Context, tx pgx.Tx, id merchant.ID, table, predicate string) error {
 	var count int64
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM openrails."+table+" WHERE merchant_id=$1 AND ("+predicate+")", id.UUID()).Scan(&count); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table+" WHERE merchant_id=$1 AND ("+predicate+")", id.UUID()).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
@@ -266,7 +266,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	// same archive contract before writing the header, including unsafe values
 	// hidden under otherwise supported keys.
 	for _, table := range []string{"payments", "invoice_items"} {
-		rows, err := tx.Query(ctx, "SELECT metadata::text FROM openrails."+table+" WHERE merchant_id=$1 AND coalesce(metadata,'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)", id.UUID())
+		rows, err := tx.Query(ctx, "SELECT metadata::text FROM billing."+table+" WHERE merchant_id=$1 AND coalesce(metadata,'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)", id.UUID())
 		if err != nil {
 			return err
 		}
@@ -336,37 +336,37 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	// The ledger intentionally has no control-plane FKs. Archive restoration
 	// still refuses missing/cross-payer retained business references.
 	checks := []struct{ table, predicate string }{
-		{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND
+		{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
            (m.custodian='psp' AND m.psp_id=rail_intents.psp_id AND m.rail_customer_ref=rail_intents.payload->>'rail_customer_ref' AND m.rail_customer_ref<>'' AND
             (rail_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=rail_intents.payload->>'rail_method_ref'))))`},
 		{"rail_intents", `intent_type='hyperswitch_method_delete' AND
-          (NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
-           EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND
+          (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
+           EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
              (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
               (rail_intents.payload->>'detach_only'='false' AND m.custodian_id=rail_intents.custodian_id AND m.rail_method_ref=rail_intents.payload->'instrument'->>'rail_method_ref'))))`},
-		{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
-		 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
-		 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
+		{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
+		 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
+		 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
 		// Restore preserves historical denormalized tiers, but a live subscription
 		// must still agree with its product, as required by the ordinary tier
 		// derivation and product-update guards. Include remaining paid access.
 		{"subscriptions", `deleted_at IS NULL
 		 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
-		 AND EXISTS(SELECT 1 FROM openrails.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
-		{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
+		 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
+		{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
 		{"ledger_transfers", `source_id LIKE 'invoice_collection:%' AND
 		 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
-		 NOT EXISTS(SELECT 1 FROM openrails.invoice_payments a WHERE a.merchant_id=$1
+		 NOT EXISTS(SELECT 1 FROM billing.invoice_payments a WHERE a.merchant_id=$1
 		 AND a.ledger_transfer_id=ledger_transfers.id AND a.idempotency_key=ledger_transfers.source_id
 		 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
 		 AND a.currency=ledger_transfers.currency AND a.status='settled'))`},
 		{"invoice_payments", `idempotency_key LIKE 'invoice_collection:%'
-		 AND NOT EXISTS(SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=$1
+		 AND NOT EXISTS(SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=$1
 		 AND i.intent_type='invoice_collection' AND i.idempotency_key=invoice_payments.idempotency_key)`},
-		{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
-		 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))
-		 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.prices p WHERE p.merchant_id=$1 AND p.id=rail_intents.price_id))`},
+		{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
+		 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))
+		 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.prices p WHERE p.merchant_id=$1 AND p.id=rail_intents.price_id))`},
 	}
 	for _, c := range checks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {
@@ -383,7 +383,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 			return nil
 		}
 		for _, row := range rows {
-			a, operation := row.OpenrailsInvoicePayment, row.OpenrailsRailIntent
+			a, operation := row.BillingInvoicePayment, row.BillingRailIntent
 			p, err := intents.DecodeInvoiceCollectionPayload(operation)
 			if err != nil {
 				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: err}
@@ -411,7 +411,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: fmt.Errorf("encoded attempt key does not name its canonical collection outcome")}
 			}
 		}
-		next := rows[len(rows)-1].OpenrailsInvoicePayment.ID
+		next := rows[len(rows)-1].BillingInvoicePayment.ID
 		after = &next
 	}
 }

@@ -26,7 +26,7 @@ type lifeRow struct {
 func (w *world) lifeRow(sub billing.SubscriptionID) lifeRow {
 	w.t.Helper()
 	var r lifeRow
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT status::text, current_period_ends_at, next_retry_at FROM openrails.subscriptions WHERE id = $1`), sub.UUID()).
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT status::text, current_period_ends_at, next_retry_at FROM billing.subscriptions WHERE id = $1`), sub.UUID()).
 		Scan(&r.status, &r.periodEnd, &r.nextRetryAt))
 	return r
 }
@@ -34,7 +34,7 @@ func (w *world) lifeRow(sub billing.SubscriptionID) lifeRow {
 // decide stands in for another writer's lifecycle decision on the row.
 func (w *world) decide(sub billing.SubscriptionID, set string, args ...any) {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE openrails.subscriptions SET `+set+`, lifecycle_rev = lifecycle_rev + 1 WHERE id = $1`), append([]any{sub.UUID()}, args...)...)
+	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE billing.subscriptions SET `+set+`, lifecycle_rev = lifecycle_rev + 1 WHERE id = $1`), append([]any{sub.UUID()}, args...)...)
 	require.NoError(w.t, err)
 }
 
@@ -74,7 +74,7 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 			w.decide(renewed.sub, `current_period_ends_at = current_period_ends_at + interval '30 days'`)
 		case retried.sub.UUID():
 			moved[s.Subscription] = true
-			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.subscriptions SET next_retry_at = $2 WHERE id = $1`), retried.sub.UUID(), retryAt)
+			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.subscriptions SET next_retry_at = $2 WHERE id = $1`), retried.sub.UUID(), retryAt)
 			return err
 		}
 		return nil

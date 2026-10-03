@@ -52,7 +52,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 	}
 	out := billing.Page[billing.PaymentAttempt]{Object: "list", Data: make([]billing.PaymentAttempt, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
 	for _, row := range rows {
-		out.Data = append(out.Data, paymentAttemptToAPI(row.OpenrailsPaymentAttempt))
+		out.Data = append(out.Data, paymentAttemptToAPI(row.BillingPaymentAttempt))
 		out.Total = row.Total
 	}
 	out.HasMore = int64(out.Offset+len(out.Data)) < out.Total
@@ -123,7 +123,7 @@ func ListRebillCycles(r *httprequest.Request) {
 	}
 	out := billing.Page[billing.RebillCycle]{Object: "list", Data: make([]billing.RebillCycle, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
 	for _, row := range rows {
-		out.Data = append(out.Data, rebillCycleToAPI(row.OpenrailsRebillCycleFact, now))
+		out.Data = append(out.Data, rebillCycleToAPI(row.BillingRebillCycleFact, now))
 		out.Total = row.Total
 	}
 	out.HasMore = int64(out.Offset+len(out.Data)) < out.Total
@@ -179,7 +179,7 @@ func readScope(r *httprequest.Request) (uuid.UUID, bool) {
 	return mid.UUID(), true
 }
 
-func paymentAttemptToAPI(a gen.OpenrailsPaymentAttempt) billing.PaymentAttempt {
+func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 	out := billing.PaymentAttempt{
 		ID: billing.PaymentAttemptID(a.ID), Object: "payment_attempt", Kind: a.Kind, Owner: a.Owner, CardEntry: a.CardEntry,
 		Source: a.Source, ObservedVia: a.ObservedVia, Category: a.Category, Reason: billing.DeclineReason(normalize.FromPtr(a.Reason)),
@@ -212,7 +212,7 @@ func paymentAttemptToAPI(a gen.OpenrailsPaymentAttempt) billing.PaymentAttempt {
 	return out
 }
 
-func rebillCycleToAPI(c gen.OpenrailsRebillCycleFact, now time.Time) billing.RebillCycle {
+func rebillCycleToAPI(c gen.BillingRebillCycleFact, now time.Time) billing.RebillCycle {
 	out := billing.RebillCycle{
 		ID: billing.RebillCycleID(c.ID), Object: "rebill_cycle", SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
 		CustomerID: c.CustomerID.String(), PSPID: c.PspID.String(), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,

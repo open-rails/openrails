@@ -30,7 +30,7 @@ import (
 //
 // Effectively-once rests on two things, not on hope:
 //
-//   - the durable batch row (openrails.account_updater_batches) is written
+//   - the durable batch row (billing.account_updater_batches) is written
 //     BEFORE the provider is touched and records the job id the moment the
 //     create is confirmed, so a resumed attempt polls that job;
 //   - the create carries an intent-derived BT-IDEMPOTENCY-KEY, so even a
@@ -105,7 +105,7 @@ func (h *AccountUpdaterBatchHandler) now() time.Time {
 	return time.Now().UTC()
 }
 
-func decodeAccountUpdaterBatchPayload(intent gen.OpenrailsRailIntent) (AccountUpdaterBatchPayload, error) {
+func decodeAccountUpdaterBatchPayload(intent gen.BillingRailIntent) (AccountUpdaterBatchPayload, error) {
 	var p AccountUpdaterBatchPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("account updater batch intent has no payload")
@@ -121,7 +121,7 @@ func decodeAccountUpdaterBatchPayload(intent gen.OpenrailsRailIntent) (AccountUp
 
 // CheckRelevance: the submit applies while its batch is still pending. A batch
 // already submitted, completed or abandoned has moved past this intent.
-func (h *AccountUpdaterBatchHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *AccountUpdaterBatchHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
@@ -139,7 +139,7 @@ func (h *AccountUpdaterBatchHandler) CheckRelevance(ctx context.Context, intent 
 	return StillRelevant(), nil
 }
 
-func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -239,7 +239,7 @@ func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.Ope
 // to resolve: the create is idempotent per intent key and the upload is a
 // repeatable write of identical bytes, so every failure above is Retryable and
 // this never runs in practice.
-func (h *AccountUpdaterBatchHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *AccountUpdaterBatchHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -257,10 +257,10 @@ func (h *AccountUpdaterBatchHandler) Verify(ctx context.Context, intent gen.Open
 	return Retryable("account updater batch still pending; the submit is idempotent and re-runs")
 }
 
-func (h *AccountUpdaterBatchHandler) loadBatch(ctx context.Context, id uuid.UUID) (gen.OpenrailsAccountUpdaterBatch, error) {
+func (h *AccountUpdaterBatchHandler) loadBatch(ctx context.Context, id uuid.UUID) (gen.BillingAccountUpdaterBatch, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsAccountUpdaterBatch{}, err
+		return gen.BillingAccountUpdaterBatch{}, err
 	}
 	return h.DB.Gen(ctx).GetAccountUpdaterBatch(ctx, gen.GetAccountUpdaterBatchParams{
 		MerchantID: mid.UUID(), ID: id,

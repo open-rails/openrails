@@ -6,7 +6,7 @@
 -- name: EnqueueHostLifecycleEvent :execrows
 -- Idempotent on the transition's dedupe key: re-announcing a transition is a
 -- no-op, never a second instruction to the host.
-INSERT INTO openrails.host_outbox
+INSERT INTO billing.host_outbox
     (merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data, dedupe_key)
 VALUES (
     sqlc.arg(merchant_id), sqlc.arg(event_type)::text, sqlc.arg(subject_type)::text,
@@ -16,9 +16,9 @@ ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
 
 -- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
-DELETE FROM openrails.host_outbox
+DELETE FROM billing.host_outbox
 WHERE ctid IN (
-    SELECT hle.ctid FROM openrails.host_outbox hle
+    SELECT hle.ctid FROM billing.host_outbox hle
     WHERE hle.merchant_id = sqlc.arg(merchant_id)::uuid
       AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
       AND hle.delivered_at < sqlc.arg(cutoff)::timestamptz

@@ -63,7 +63,7 @@ func (e *UnknownCycleError) Is(target error) bool { return target == ErrUnknownC
 const FindingUnknownCycle = "life.cadence.unknown"
 
 type findingWriter interface {
-	UpsertReconciliationFinding(context.Context, gen.UpsertReconciliationFindingParams) (gen.OpenrailsReconciliationFinding, error)
+	UpsertReconciliationFinding(context.Context, gen.UpsertReconciliationFindingParams) (gen.BillingReconciliationFinding, error)
 }
 
 // RecordUnknownCycle raises the operator finding for subject (a subscription

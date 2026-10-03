@@ -26,7 +26,7 @@ func (w *world) storedCard(methodID string) storedCard {
 	var c storedCard
 	var last, brand *string
 	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT rail_customer_ref, rail_method_ref, last_four, card_type, stored_credential_recurring_ref
-		FROM openrails.payment_methods WHERE id = $1::uuid`), id).Scan(&c.vault, &c.billing, &last, &brand, &c.recurringRef))
+		FROM billing.payment_methods WHERE id = $1::uuid`), id).Scan(&c.vault, &c.billing, &last, &brand, &c.recurringRef))
 	if last != nil {
 		c.lastFour = *last
 	}
@@ -94,7 +94,7 @@ func TestNMISavedCardVerificationRefused(t *testing.T) {
 	require.Equal(t, "card_declined", errorCode(body))
 	require.Equal(t, before, vaults(), "the refused card's vault is removed")
 	var n int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM openrails.payment_methods WHERE customer_id = $1::uuid`), c.id).Scan(&n))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payment_methods WHERE customer_id = $1::uuid`), c.id).Scan(&n))
 	require.Zero(t, n)
 
 	funds := c.saveCard("nmi", card{Brand: "visa", Last4: "0002", Decline: "202"})
@@ -129,7 +129,7 @@ func TestNMIInPlaceCardReplacementWithoutBrand(t *testing.T) {
 	w.settle()
 	require.Contains(t, w.openFindings("life.payment_method_update.provider_data_gap"), strings.TrimPrefix(gap, "pm_"))
 	var open int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM openrails.rail_intents WHERE intent_type = 'nmi_payment_method_update'
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.rail_intents WHERE intent_type = 'nmi_payment_method_update'
 		AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`)).Scan(&open))
 	require.Zero(t, open, "a deterministic data gap is not retried")
 	require.Equal(t, visa.Last4, w.storedCard(gap).lastFour, "the local card is unchanged")
@@ -150,7 +150,7 @@ func TestTierGroupOnLiveProduct(t *testing.T) {
 		require.NotNil(t, updated.TierGroup)
 		require.Equal(t, group, *updated.TierGroup)
 		var denormalized string
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT tier_group FROM openrails.subscriptions WHERE id = $1::uuid`), e.sub.UUID()).Scan(&denormalized))
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT tier_group FROM billing.subscriptions WHERE id = $1::uuid`), e.sub.UUID()).Scan(&denormalized))
 		require.Equal(t, group, denormalized, "the membership follows its product's group")
 	}
 

@@ -38,19 +38,19 @@ func (w *world) seedAttempts(customerID string, s attemptSeed) {
 	w.t.Helper()
 	source, via := s.source()
 	if s.cycles {
-		_, err := w.pool.Exec(w.t.Context(), w.q(`WITH m AS (SELECT id FROM openrails.merchants WHERE slug = $1),
-			c AS (INSERT INTO openrails.rebill_cycles (merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
+		_, err := w.pool.Exec(w.t.Context(), w.q(`WITH m AS (SELECT id FROM billing.merchants WHERE slug = $1),
+			c AS (INSERT INTO billing.rebill_cycles (merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
 				SELECT m.id, gen_random_uuid(), $2::uuid, $3::uuid, $4, $5, $6::timestamptz - (g * interval '1 second') - interval '1 minute', 9990000, 'USD'
 				FROM m, generate_series(1, $7::int) g RETURNING id, merchant_id, subscription_id, due_at)
-			INSERT INTO openrails.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, cycle_id, subscription_id)
+			INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at, cycle_id, subscription_id)
 			SELECT c.merchant_id, $2::uuid, $3::uuid, $4, 'rebill', $5, 'saved', $11, $12, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', c.due_at + interval '1 minute', c.id, c.subscription_id FROM c`),
 			w.slug, customerID, s.psp, s.rail, s.owner, s.at, s.n, s.category, s.reason, s.code, source, via)
 		require.NoError(w.t, err)
 		return
 	}
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO openrails.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at)
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payment_attempts (merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, response_code, amount, currency, attempted_at)
 		SELECT m.id, $2::uuid, $3::uuid, $4, $5, $6, $7, $13, $14, $8, NULLIF($9, ''), NULLIF($10, ''), 9990000, 'USD', $11::timestamptz - (g * interval '1 second')
-		FROM openrails.merchants m, generate_series(1, $12::int) g WHERE m.slug = $1`),
+		FROM billing.merchants m, generate_series(1, $12::int) g WHERE m.slug = $1`),
 		w.slug, customerID, s.psp, s.rail, s.kind, s.owner, s.cardEntry, s.category, s.reason, s.code, s.at, s.n, source, via)
 	require.NoError(w.t, err)
 }
@@ -160,8 +160,8 @@ func TestPaymentAttemptRetention(t *testing.T) {
 	seed.at, seed.n = now, 2
 	w.seedAttempts(c.id, seed)
 	// An old cycle whose retry is recent stays until that retry ages out.
-	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.payment_attempts SET attempted_at = $1
-		WHERE id = (SELECT id FROM openrails.payment_attempts WHERE attempted_at < $2 ORDER BY attempted_at LIMIT 1)`), now, now.AddDate(0, -25, 0))
+	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.payment_attempts SET attempted_at = $1
+		WHERE id = (SELECT id FROM billing.payment_attempts WHERE attempted_at < $2 ORDER BY attempted_at LIMIT 1)`), now, now.AddDate(0, -25, 0))
 	require.NoError(t, err)
 
 	res, err := w.jobs.Insert(t.Context(), cleanupPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
@@ -169,7 +169,7 @@ func TestPaymentAttemptRetention(t *testing.T) {
 	w.waitJob(res.Job.ID)
 	count := func(table string) int {
 		var n int
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(fmt.Sprintf(`SELECT count(*) FROM openrails.%s`, table))).Scan(&n))
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(fmt.Sprintf(`SELECT count(*) FROM billing.%s`, table))).Scan(&n))
 		return n
 	}
 	require.Equal(t, 3, count("payment_attempts"), "the two recent attempts and the recent retry")

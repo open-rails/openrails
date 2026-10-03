@@ -12,7 +12,7 @@ import (
 )
 
 const deleteDeclarativeBillingPolicyBindings = `-- name: DeleteDeclarativeBillingPolicyBindings :exec
-DELETE FROM openrails.billing_policy_bindings WHERE merchant_id = $1 AND customer_id IS NULL
+DELETE FROM billing.billing_policy_bindings WHERE merchant_id = $1 AND customer_id IS NULL
 `
 
 func (q *Queries) DeleteDeclarativeBillingPolicyBindings(ctx context.Context, merchantID uuid.UUID) error {
@@ -21,7 +21,7 @@ func (q *Queries) DeleteDeclarativeBillingPolicyBindings(ctx context.Context, me
 }
 
 const deleteUndeclaredBillingPolicies = `-- name: DeleteUndeclaredBillingPolicies :exec
-DELETE FROM openrails.billing_policies WHERE merchant_id = $1
+DELETE FROM billing.billing_policies WHERE merchant_id = $1
 AND NOT (name = ANY(COALESCE($2::text[], '{}')))
 `
 
@@ -36,7 +36,7 @@ func (q *Queries) DeleteUndeclaredBillingPolicies(ctx context.Context, arg Delet
 }
 
 const findRemovedCustomerPolicies = `-- name: FindRemovedCustomerPolicies :many
-SELECT DISTINCT policy_name FROM openrails.billing_policy_bindings
+SELECT DISTINCT policy_name FROM billing.billing_policy_bindings
 WHERE merchant_id = $1 AND customer_id IS NOT NULL
 AND NOT (policy_name = ANY(COALESCE($2::text[], '{}')))
 ORDER BY policy_name LIMIT 1
@@ -68,7 +68,7 @@ func (q *Queries) FindRemovedCustomerPolicies(ctx context.Context, arg FindRemov
 }
 
 const lockMerchantSettings = `-- name: LockMerchantSettings :one
-SELECT id FROM openrails.merchants WHERE id = $1 FOR UPDATE
+SELECT id FROM billing.merchants WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockMerchantSettings(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
@@ -79,7 +79,7 @@ func (q *Queries) LockMerchantSettings(ctx context.Context, id uuid.UUID) (uuid.
 }
 
 const readMerchantSettingsLock = `-- name: ReadMerchantSettingsLock :one
-SELECT id FROM openrails.merchants WHERE id = $1 FOR SHARE
+SELECT id FROM billing.merchants WHERE id = $1 FOR SHARE
 `
 
 func (q *Queries) ReadMerchantSettingsLock(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {

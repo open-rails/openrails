@@ -115,7 +115,7 @@ func (s *Service) effectiveProviderCredential(ctx context.Context, id merchant.I
 func (s *Service) readPublishedProviderCredential(ctx context.Context, id merchant.ID, rail, environment, account, key, name string) (Secret, error) {
 	ref := SecretRef{Name: name}
 	if s.pool != nil {
-		var row gen.OpenrailsPsp
+		var row gen.BillingPsp
 		err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 			var err error
 			row, err = gen.New(tx).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: account})

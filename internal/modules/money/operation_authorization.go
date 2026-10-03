@@ -274,7 +274,7 @@ func validateOperationID(operationID string) error {
 	return validateOperationAuthorizationText("operation_id", operationID, operationAuthorizationMaxIDBytes)
 }
 
-func replayOperationAuthorization(row gen.OpenrailsOperationAuthorization, in OperationAuthorizationInput) (*OperationAuthorization, error) {
+func replayOperationAuthorization(row gen.BillingOperationAuthorization, in OperationAuthorizationInput) (*OperationAuthorization, error) {
 	checks := []struct {
 		field string
 		same  bool
@@ -414,7 +414,7 @@ func validatePassThroughProviderCostSettlementInput(in passThroughProviderCostSe
 	return nil
 }
 
-func replayPassThroughProviderCostSettlement(row gen.OpenrailsOperationAuthorization, in passThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
+func replayPassThroughProviderCostSettlement(row gen.BillingOperationAuthorization, in passThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
 	if row.SettlementProviderCostUsdMicros == nil || row.SettlementRatedUsdMicros == nil {
 		return nil, fmt.Errorf("settled operation authorization has incomplete settlement amounts")
 	}
@@ -559,7 +559,7 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 	return operationAuthorizationFromRow(released, false), nil
 }
 
-func operationAuthorizationFromRow(row gen.OpenrailsOperationAuthorization, replayed bool) *OperationAuthorization {
+func operationAuthorizationFromRow(row gen.BillingOperationAuthorization, replayed bool) *OperationAuthorization {
 	var digest [sha256.Size]byte
 	copy(digest[:], row.AuthorizationBodyDigest)
 	terminalReference := ""

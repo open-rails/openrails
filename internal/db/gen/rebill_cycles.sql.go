@@ -13,7 +13,7 @@ import (
 )
 
 const countOpenSubscriptionCollections = `-- name: CountOpenSubscriptionCollections :one
-SELECT count(*) FROM openrails.rail_intents
+SELECT count(*) FROM billing.rail_intents
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
   AND intent_type = 'subscription_collection' AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
 `
@@ -33,7 +33,7 @@ func (q *Queries) CountOpenSubscriptionCollections(ctx context.Context, arg Coun
 
 const cycleHasAttempt = `-- name: CycleHasAttempt :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.rebill_cycles c JOIN openrails.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
+    SELECT 1 FROM billing.rebill_cycles c JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
      WHERE c.merchant_id = $1::uuid AND c.subscription_id = $2::uuid AND c.due_at = $3::timestamptz
 )::boolean AS attempted
 `
@@ -52,12 +52,12 @@ func (q *Queries) CycleHasAttempt(ctx context.Context, arg CycleHasAttemptParams
 }
 
 const deleteRebillCyclesBefore = `-- name: DeleteRebillCyclesBefore :execrows
-DELETE FROM openrails.rebill_cycles
+DELETE FROM billing.rebill_cycles
 WHERE id IN (
-    SELECT c.id FROM openrails.rebill_cycles c
+    SELECT c.id FROM billing.rebill_cycles c
     WHERE c.merchant_id = $1::uuid
       AND c.due_at < $2::timestamptz
-      AND NOT EXISTS (SELECT 1 FROM openrails.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)
     LIMIT $3::int
 )
 `
@@ -79,7 +79,7 @@ func (q *Queries) DeleteRebillCyclesBefore(ctx context.Context, arg DeleteRebill
 }
 
 const getRebillCycle = `-- name: GetRebillCycle :one
-SELECT merchant_id, id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, missed_at, miss_reason, created_at, first_category, first_reason, first_at, won_attempt_id, won_kind, won_source, won_at, won_ordinal, first_failed, first_outcome, closed_at, recovered_by FROM openrails.rebill_cycle_facts
+SELECT merchant_id, id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, missed_at, miss_reason, created_at, first_category, first_reason, first_at, won_attempt_id, won_kind, won_source, won_at, won_ordinal, first_failed, first_outcome, closed_at, recovered_by FROM billing.rebill_cycle_facts
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -88,9 +88,9 @@ type GetRebillCycleParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetRebillCycle(ctx context.Context, arg GetRebillCycleParams) (OpenrailsRebillCycleFact, error) {
+func (q *Queries) GetRebillCycle(ctx context.Context, arg GetRebillCycleParams) (BillingRebillCycleFact, error) {
 	row := q.db.QueryRow(ctx, getRebillCycle, arg.MerchantID, arg.ID)
-	var i OpenrailsRebillCycleFact
+	var i BillingRebillCycleFact
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ID,
@@ -122,7 +122,7 @@ func (q *Queries) GetRebillCycle(ctx context.Context, arg GetRebillCycleParams) 
 }
 
 const listOverdueRebillMerchants = `-- name: ListOverdueRebillMerchants :many
-SELECT merchant_id FROM openrails.overdue_rebill_merchant_ids(
+SELECT merchant_id FROM billing.overdue_rebill_merchant_ids(
     $1::timestamptz, $2::timestamptz, $3::int)
 `
 
@@ -153,19 +153,19 @@ func (q *Queries) ListOverdueRebillMerchants(ctx context.Context, arg ListOverdu
 }
 
 const listOverdueRebills = `-- name: ListOverdueRebills :many
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy FROM openrails.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
   AND ((sub.collection_policy = 'engine' AND sub.current_period_ends_at <= $2::timestamptz)
        OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $3::timestamptz))
   -- Separate anti-joins: an EXISTS under OR plans as a hash of every merchant's attempts.
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.rebill_cycles c
+      SELECT 1 FROM billing.rebill_cycles c
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
          AND c.missed_at IS NOT NULL)
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.rebill_cycles c
-        JOIN openrails.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
+      SELECT 1 FROM billing.rebill_cycles c
+        JOIN billing.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
 ORDER BY sub.current_period_ends_at, sub.id
 LIMIT $4::int
@@ -180,7 +180,7 @@ type ListOverdueRebillsParams struct {
 
 // #1112: auto-renewing subscriptions whose period ended before its owner's
 // deadline with neither an attempt nor a recorded miss for that cycle.
-func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]OpenrailsSubscription, error) {
+func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebills,
 		arg.MerchantID,
 		arg.EngineCutoff,
@@ -191,9 +191,9 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsSubscription
+	var items []BillingSubscription
 	for rows.Next() {
-		var i OpenrailsSubscription
+		var i BillingSubscription
 		if err := rows.Scan(
 			&i.ID,
 			&i.PriceID,
@@ -245,7 +245,7 @@ func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebills
 
 const listRebillCycles = `-- name: ListRebillCycles :many
 SELECT cf.merchant_id, cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.created_at, cf.first_category, cf.first_reason, cf.first_at, cf.won_attempt_id, cf.won_kind, cf.won_source, cf.won_at, cf.won_ordinal, cf.first_failed, cf.first_outcome, cf.closed_at, cf.recovered_by, count(*) OVER () AS total
-FROM openrails.rebill_cycle_facts cf
+FROM billing.rebill_cycle_facts cf
 WHERE cf.merchant_id = $1::uuid
   AND ($2::text[] IS NULL OR cf.owner = ANY($2::text[]))
   AND ($3::text[] IS NULL OR cf.first_outcome = ANY($3::text[]))
@@ -278,8 +278,8 @@ type ListRebillCyclesParams struct {
 }
 
 type ListRebillCyclesRow struct {
-	OpenrailsRebillCycleFact OpenrailsRebillCycleFact
-	Total                    int64
+	BillingRebillCycleFact BillingRebillCycleFact
+	Total                  int64
 }
 
 // #1116: the merchant's rebill cycles as rebill_cycle_facts derives them,
@@ -308,31 +308,31 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 	for rows.Next() {
 		var i ListRebillCyclesRow
 		if err := rows.Scan(
-			&i.OpenrailsRebillCycleFact.MerchantID,
-			&i.OpenrailsRebillCycleFact.ID,
-			&i.OpenrailsRebillCycleFact.SubscriptionID,
-			&i.OpenrailsRebillCycleFact.CustomerID,
-			&i.OpenrailsRebillCycleFact.PspID,
-			&i.OpenrailsRebillCycleFact.Rail,
-			&i.OpenrailsRebillCycleFact.Owner,
-			&i.OpenrailsRebillCycleFact.DueAt,
-			&i.OpenrailsRebillCycleFact.Amount,
-			&i.OpenrailsRebillCycleFact.Currency,
-			&i.OpenrailsRebillCycleFact.MissedAt,
-			&i.OpenrailsRebillCycleFact.MissReason,
-			&i.OpenrailsRebillCycleFact.CreatedAt,
-			&i.OpenrailsRebillCycleFact.FirstCategory,
-			&i.OpenrailsRebillCycleFact.FirstReason,
-			&i.OpenrailsRebillCycleFact.FirstAt,
-			&i.OpenrailsRebillCycleFact.WonAttemptID,
-			&i.OpenrailsRebillCycleFact.WonKind,
-			&i.OpenrailsRebillCycleFact.WonSource,
-			&i.OpenrailsRebillCycleFact.WonAt,
-			&i.OpenrailsRebillCycleFact.WonOrdinal,
-			&i.OpenrailsRebillCycleFact.FirstFailed,
-			&i.OpenrailsRebillCycleFact.FirstOutcome,
-			&i.OpenrailsRebillCycleFact.ClosedAt,
-			&i.OpenrailsRebillCycleFact.RecoveredBy,
+			&i.BillingRebillCycleFact.MerchantID,
+			&i.BillingRebillCycleFact.ID,
+			&i.BillingRebillCycleFact.SubscriptionID,
+			&i.BillingRebillCycleFact.CustomerID,
+			&i.BillingRebillCycleFact.PspID,
+			&i.BillingRebillCycleFact.Rail,
+			&i.BillingRebillCycleFact.Owner,
+			&i.BillingRebillCycleFact.DueAt,
+			&i.BillingRebillCycleFact.Amount,
+			&i.BillingRebillCycleFact.Currency,
+			&i.BillingRebillCycleFact.MissedAt,
+			&i.BillingRebillCycleFact.MissReason,
+			&i.BillingRebillCycleFact.CreatedAt,
+			&i.BillingRebillCycleFact.FirstCategory,
+			&i.BillingRebillCycleFact.FirstReason,
+			&i.BillingRebillCycleFact.FirstAt,
+			&i.BillingRebillCycleFact.WonAttemptID,
+			&i.BillingRebillCycleFact.WonKind,
+			&i.BillingRebillCycleFact.WonSource,
+			&i.BillingRebillCycleFact.WonAt,
+			&i.BillingRebillCycleFact.WonOrdinal,
+			&i.BillingRebillCycleFact.FirstFailed,
+			&i.BillingRebillCycleFact.FirstOutcome,
+			&i.BillingRebillCycleFact.ClosedAt,
+			&i.BillingRebillCycleFact.RecoveredBy,
 			&i.Total,
 		); err != nil {
 			return nil, err
@@ -346,7 +346,7 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 }
 
 const markRebillCycleMissed = `-- name: MarkRebillCycleMissed :execrows
-UPDATE openrails.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text
+UPDATE billing.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text
 WHERE merchant_id = $3::uuid AND id = $4::uuid AND missed_at IS NULL
 `
 
@@ -371,7 +371,7 @@ func (q *Queries) MarkRebillCycleMissed(ctx context.Context, arg MarkRebillCycle
 }
 
 const upsertRebillCycle = `-- name: UpsertRebillCycle :one
-INSERT INTO openrails.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
+INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::uuid, $6::text, $7::text, $8::timestamptz,
     $9::bigint, $10::text)

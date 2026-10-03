@@ -12,7 +12,7 @@ import (
 )
 
 const listPendingMerchantSecretCleanups = `-- name: ListPendingMerchantSecretCleanups :many
-SELECT merchant_id,run_id FROM openrails.pending_merchant_secret_cleanups(
+SELECT merchant_id,run_id FROM billing.pending_merchant_secret_cleanups(
  $1::uuid,$2::int)
 `
 
@@ -49,7 +49,7 @@ func (q *Queries) ListPendingMerchantSecretCleanups(ctx context.Context, arg Lis
 }
 
 const lockLiveMerchantForSecretWrite = `-- name: LockLiveMerchantForSecretWrite :one
-SELECT id FROM openrails.merchants
+SELECT id FROM billing.merchants
 WHERE id=$1::uuid AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -62,8 +62,8 @@ func (q *Queries) LockLiveMerchantForSecretWrite(ctx context.Context, id uuid.UU
 }
 
 const lockMerchantSecretCleanupRun = `-- name: LockMerchantSecretCleanupRun :one
-SELECT r.id, r.merchant_id, r.kind, r.actor, r.psp_id, r.mode, r.rails, r.window_since, r.window_until, r.started_at, r.finished_at, r.status, r.dry_run, r.coverage, r.expected_rows, r.affected, r.reversed_at, r.reversed_by, r.note, r.summary, r.error, r.inventory_manifest, r.inventory_total_rows, r.run_class FROM openrails.maintenance_runs r
-JOIN openrails.merchants m ON m.id=r.merchant_id
+SELECT r.id, r.merchant_id, r.kind, r.actor, r.psp_id, r.mode, r.rails, r.window_since, r.window_until, r.started_at, r.finished_at, r.status, r.dry_run, r.coverage, r.expected_rows, r.affected, r.reversed_at, r.reversed_by, r.note, r.summary, r.error, r.inventory_manifest, r.inventory_total_rows, r.run_class FROM billing.maintenance_runs r
+JOIN billing.merchants m ON m.id=r.merchant_id
 WHERE r.merchant_id=$1::uuid AND r.id=$2::uuid
   AND r.kind='merchant_purge' AND m.deleted_at IS NOT NULL
   AND r.affected->>'database_purged'='true'
@@ -75,9 +75,9 @@ type LockMerchantSecretCleanupRunParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) LockMerchantSecretCleanupRun(ctx context.Context, arg LockMerchantSecretCleanupRunParams) (OpenrailsMaintenanceRun, error) {
+func (q *Queries) LockMerchantSecretCleanupRun(ctx context.Context, arg LockMerchantSecretCleanupRunParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, lockMerchantSecretCleanupRun, arg.MerchantID, arg.ID)
-	var i OpenrailsMaintenanceRun
+	var i BillingMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -108,7 +108,7 @@ func (q *Queries) LockMerchantSecretCleanupRun(ctx context.Context, arg LockMerc
 }
 
 const markMerchantDatabasePurged = `-- name: MarkMerchantDatabasePurged :exec
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET affected=$1::jsonb || '{"database_purged":true}'::jsonb
 WHERE merchant_id=$2::uuid AND id=$3::uuid
 `
@@ -125,7 +125,7 @@ func (q *Queries) MarkMerchantDatabasePurged(ctx context.Context, arg MarkMercha
 }
 
 const recordMerchantSecretCleanup = `-- name: RecordMerchantSecretCleanup :execrows
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status=$1::text,
     finished_at=CASE WHEN $1::text='completed' THEN now() ELSE NULL END,
     affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object(

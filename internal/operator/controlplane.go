@@ -276,7 +276,7 @@ type BootstrapResult = controlplane.BootstrapResult
 // suspected compromise is never silently re-issued a fresh one on the next
 // routine boot.
 //
-// Call it AFTER migrations have run (so openrails.merchants and profiles.* exist) and
+// Call it AFTER migrations have run (so billing.merchants and profiles.* exist) and
 // at startup. Safe to re-run. This was App.RunControlPlaneBootstrap before #284.
 func RunBootstrap(ctx context.Context, a *app.App, opts BootstrapOptions) (*BootstrapResult, error) {
 	cp := Get(a)

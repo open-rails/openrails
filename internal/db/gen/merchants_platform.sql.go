@@ -14,7 +14,7 @@ import (
 
 const countPlatformMerchants = `-- name: CountPlatformMerchants :one
 SELECT count(*)
-FROM openrails.merchants
+FROM billing.merchants
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
 `
@@ -33,7 +33,7 @@ func (q *Queries) CountPlatformMerchants(ctx context.Context, arg CountPlatformM
 
 const getPlatformMerchant = `-- name: GetPlatformMerchant :one
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
-FROM openrails.merchants
+FROM billing.merchants
 WHERE id = $1
 `
 
@@ -64,7 +64,7 @@ func (q *Queries) GetPlatformMerchant(ctx context.Context, id uuid.UUID) (GetPla
 
 const getPlatformMerchantLastPayment = `-- name: GetPlatformMerchantLastPayment :one
 SELECT created_at
-FROM openrails.payments
+FROM billing.payments
 WHERE merchant_id = $1
   AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -80,7 +80,7 @@ func (q *Queries) GetPlatformMerchantLastPayment(ctx context.Context, merchantID
 
 const listLedgerAuditMerchants = `-- name: ListLedgerAuditMerchants :many
 SELECT id, slug
-FROM openrails.merchants
+FROM billing.merchants
 ORDER BY slug
 `
 
@@ -114,7 +114,7 @@ func (q *Queries) ListLedgerAuditMerchants(ctx context.Context) ([]ListLedgerAud
 const listPlatformMerchantRailsArmed = `-- name: ListPlatformMerchantRailsArmed :many
 
 SELECT DISTINCT rail
-FROM openrails.psps
+FROM billing.psps
 WHERE merchant_id = $1 AND NOT archived
 ORDER BY rail
 `
@@ -146,7 +146,7 @@ func (q *Queries) ListPlatformMerchantRailsArmed(ctx context.Context, merchantID
 const listPlatformMerchants = `-- name: ListPlatformMerchants :many
 
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
-FROM openrails.merchants
+FROM billing.merchants
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
 ORDER BY created_at DESC, id DESC
@@ -171,7 +171,7 @@ type ListPlatformMerchantsRow struct {
 }
 
 // Platform merchant directory (#721): cross-merchant operator reads over the
-// GLOBAL openrails.merchants table, plus the directory-only
+// GLOBAL billing.merchants table, plus the directory-only
 // soft-delete/restore tombstone. Soft delete here is DIRECTORY state (list
 // exclusion + merchant-auth resolution failure); it is NOT the #225 gated purge
 // (internal/merchants/delete.go), which stays the only row-destroying path.
@@ -210,7 +210,7 @@ func (q *Queries) ListPlatformMerchants(ctx context.Context, arg ListPlatformMer
 }
 
 const restorePlatformMerchant = `-- name: RestorePlatformMerchant :one
-UPDATE openrails.merchants
+UPDATE billing.merchants
    SET status     = 'active',
        deleted_at = NULL,
        updated_at = current_timestamp
@@ -244,7 +244,7 @@ func (q *Queries) RestorePlatformMerchant(ctx context.Context, id uuid.UUID) (Re
 }
 
 const softDeletePlatformMerchant = `-- name: SoftDeletePlatformMerchant :one
-UPDATE openrails.merchants
+UPDATE billing.merchants
    SET status     = 'deleted',
        deleted_at = COALESCE(deleted_at, current_timestamp),
        updated_at = current_timestamp

@@ -161,7 +161,7 @@ func read(ctx context.Context, q *gen.Queries, mid uuid.UUID, operation, key str
 	if err != nil {
 		return nil, err
 	}
-	r := record(gen.OpenrailsIdempotencyKey{
+	r := record(gen.BillingIdempotencyKey{
 		MerchantID: row.MerchantID, Operation: row.Operation, IdempotencyKey: row.IdempotencyKey, Status: row.Status,
 		Token: row.Token, Claims: row.Claims, Result: row.Result, Error: row.Error,
 		LeaseExpiresAt: row.LeaseExpiresAt, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
@@ -181,12 +181,12 @@ func DeleteExpired(ctx context.Context, database *db.DB, limit int32) (int64, er
 	return database.GenDirectory().DeleteExpiredIdempotencyKeys(ctx, limit)
 }
 
-func (s *Store) claim(mid uuid.UUID, row gen.OpenrailsIdempotencyKey, start time.Time) *Claim {
+func (s *Store) claim(mid uuid.UUID, row gen.BillingIdempotencyKey, start time.Time) *Claim {
 	return &Claim{s: s, merchantID: mid, operation: row.Operation, key: row.IdempotencyKey, token: row.Token,
 		Reclaimed: row.Claims > 1, confirmed: start}
 }
 
-func record(row gen.OpenrailsIdempotencyKey) *Record {
+func record(row gen.BillingIdempotencyKey) *Record {
 	r := &Record{
 		Status: Status(row.Status), Result: json.RawMessage(row.Result), Claims: row.Claims,
 		LeaseExpiresAt: row.LeaseExpiresAt, ExpiresAt: row.ExpiresAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,

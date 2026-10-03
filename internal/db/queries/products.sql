@@ -1,7 +1,7 @@
--- openrails.products.
+-- billing.products.
 
 -- name: CreateProduct :execrows
-INSERT INTO openrails.products (
+INSERT INTO billing.products (
     id, merchant_id, catalog_id, key, display_name, description, entitlements_spec,
     tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
@@ -17,29 +17,29 @@ INSERT INTO openrails.products (
 );
 
 -- name: GetProductByID :one
-SELECT * FROM openrails.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetProductByKey :one
-SELECT * FROM openrails.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1;
+SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1;
 
 -- name: ListProductsByIDs :many
-SELECT * FROM openrails.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListActiveProducts :many
-SELECT * FROM openrails.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived;
+SELECT * FROM billing.products WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived;
 
 -- name: ListAllProducts :many
-SELECT * FROM openrails.products
+SELECT * FROM billing.products
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid
 ;
 
 -- name: CountProductsFiltered :one
-SELECT count(*) FROM openrails.products
+SELECT count(*) FROM billing.products
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)));
 
 -- name: ListProductsFiltered :many
-SELECT * FROM openrails.products
+SELECT * FROM billing.products
 WHERE (sqlc.narg(catalog_id)::uuid IS NULL OR products.catalog_id=sqlc.narg(catalog_id)::uuid) AND products.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
 ORDER BY created_at DESC, id DESC
@@ -47,7 +47,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: PatchProduct :one
 -- Every field is chosen at the write point, never copied from a stale read.
-UPDATE openrails.products SET
+UPDATE billing.products SET
     display_name = COALESCE(sqlc.narg(display_name)::text, display_name),
     description = CASE WHEN sqlc.arg(set_description)::boolean THEN NULLIF(sqlc.narg(description)::text, '') ELSE description END,
     entitlements_spec = CASE WHEN sqlc.arg(set_entitlements)::boolean THEN sqlc.narg(entitlements_spec)::jsonb ELSE entitlements_spec END,

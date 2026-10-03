@@ -32,7 +32,7 @@ func errNonUUIDSubject(userID string) error {
 	return fmt.Errorf("merchant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
 }
 
-// EnsureCustomerID materializes (or refreshes) the openrails.customers
+// EnsureCustomerID materializes (or refreshes) the billing.customers
 // row for a UUID subject and returns its id — which IS the subject UUID itself
 // (#317). A non-UUID userID is rejected with an error (#364). An empty userID
 // returns the zero id without touching the database (documented no-op for
@@ -86,7 +86,7 @@ func ResolveCustomerID(userID string) (uuid.UUID, error) {
 	return uid, nil
 }
 
-// EnsureCustomerRow makes sure a openrails.customers row exists for an
+// EnsureCustomerRow makes sure a billing.customers row exists for an
 // already-resolved payable customer id, which the commerce Create methods
 // call just before insert so the FK target exists (#317). customers is UUID-only
 // (#491): the row is materialized as (id, merchant_id); the ON CONFLICT makes a

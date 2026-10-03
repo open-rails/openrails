@@ -28,7 +28,7 @@ func NewStripeCollectionAdapter(database *db.DB, service *subscriptions.StripeSe
 	return &StripeCollectionAdapter{DB: database, Service: service}
 }
 
-func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
+func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
 	if a == nil || a.DB == nil || a.Service == nil {
 		return nil, fmt.Errorf("stripe collection adapter not initialized")
 	}

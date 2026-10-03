@@ -12,7 +12,7 @@ import (
 )
 
 const countUnreadMerchantNotifications = `-- name: CountUnreadMerchantNotifications :one
-SELECT count(*) FROM openrails.notifications WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id() AND read_at IS NULL
+SELECT count(*) FROM billing.notifications WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id() AND read_at IS NULL
 `
 
 func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context) (int64, error) {
@@ -24,7 +24,7 @@ func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context) (int64, 
 
 const createMerchantNotification = `-- name: CreateMerchantNotification :one
 
-INSERT INTO openrails.notifications (merchant_id, recipient_kind, event_type, severity, title, body, link, data)
+INSERT INTO billing.notifications (merchant_id, recipient_kind, event_type, severity, title, body, link, data)
 VALUES ($1::uuid, 'merchant', 'operator.alert', $2::text, $3::text, $4::text, $5::text, COALESCE($6::jsonb, '{}'::jsonb))
 RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
 `
@@ -41,7 +41,7 @@ type CreateMerchantNotificationParams struct {
 // ============================================================================
 // notifications  (in_app bell)
 // ============================================================================
-func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerchantNotificationParams) (OpenrailsNotification, error) {
+func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerchantNotificationParams) (BillingNotification, error) {
 	row := q.db.QueryRow(ctx, createMerchantNotification,
 		arg.MerchantID,
 		arg.Severity,
@@ -50,7 +50,7 @@ func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerc
 		arg.Link,
 		arg.Data,
 	)
-	var i OpenrailsNotification
+	var i BillingNotification
 	err := row.Scan(
 		&i.ID,
 		&i.EventType,
@@ -71,7 +71,7 @@ func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerc
 
 const createMerchantWebhook = `-- name: CreateMerchantWebhook :one
 
-INSERT INTO openrails.merchant_webhooks (id, merchant_id, name, destination_host, secret_version, format, enabled)
+INSERT INTO billing.merchant_webhooks (id, merchant_id, name, destination_host, secret_version, format, enabled)
 VALUES ($1::uuid, $2::uuid, $3, $4, $5::integer, $6, $7)
 RETURNING id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at
 `
@@ -89,7 +89,7 @@ type CreateMerchantWebhookParams struct {
 // ============================================================================
 // merchant_webhooks
 // ============================================================================
-func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantWebhookParams) (OpenrailsMerchantWebhook, error) {
+func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantWebhookParams) (BillingMerchantWebhook, error) {
 	row := q.db.QueryRow(ctx, createMerchantWebhook,
 		arg.ID,
 		arg.MerchantID,
@@ -99,7 +99,7 @@ func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantW
 		arg.Format,
 		arg.Enabled,
 	)
-	var i OpenrailsMerchantWebhook
+	var i BillingMerchantWebhook
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -115,7 +115,7 @@ func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantW
 }
 
 const deleteMerchantWebhook = `-- name: DeleteMerchantWebhook :execrows
-DELETE FROM openrails.merchant_webhooks WHERE merchant_webhooks.merchant_id = $2::uuid AND id = $1
+DELETE FROM billing.merchant_webhooks WHERE merchant_webhooks.merchant_id = $2::uuid AND id = $1
 `
 
 type DeleteMerchantWebhookParams struct {
@@ -132,7 +132,7 @@ func (q *Queries) DeleteMerchantWebhook(ctx context.Context, arg DeleteMerchantW
 }
 
 const getMerchantWebhook = `-- name: GetMerchantWebhook :one
-SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks WHERE merchant_webhooks.merchant_id = $2::uuid AND id = $1
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM billing.merchant_webhooks WHERE merchant_webhooks.merchant_id = $2::uuid AND id = $1
 `
 
 type GetMerchantWebhookParams struct {
@@ -140,9 +140,9 @@ type GetMerchantWebhookParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) GetMerchantWebhook(ctx context.Context, arg GetMerchantWebhookParams) (OpenrailsMerchantWebhook, error) {
+func (q *Queries) GetMerchantWebhook(ctx context.Context, arg GetMerchantWebhookParams) (BillingMerchantWebhook, error) {
 	row := q.db.QueryRow(ctx, getMerchantWebhook, arg.ID, arg.MerchantID)
-	var i OpenrailsMerchantWebhook
+	var i BillingMerchantWebhook
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -158,8 +158,8 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, arg GetMerchantWebhook
 }
 
 const listMerchantNotifications = `-- name: ListMerchantNotifications :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications
-WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id()
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications
+WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id()
   AND (NOT $1::boolean OR read_at IS NULL)
 ORDER BY created_at DESC, id
 LIMIT $2::int
@@ -170,15 +170,15 @@ type ListMerchantNotificationsParams struct {
 	RowLimit   int32
 }
 
-func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchantNotificationsParams) ([]OpenrailsNotification, error) {
+func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchantNotificationsParams) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listMerchantNotifications, arg.UnreadOnly, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsNotification
+	var items []BillingNotification
 	for rows.Next() {
-		var i OpenrailsNotification
+		var i BillingNotification
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -205,20 +205,20 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 }
 
 const listMerchantWebhooks = `-- name: ListMerchantWebhooks :many
-SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM billing.merchant_webhooks
 WHERE merchant_webhooks.merchant_id = $1::uuid
 ORDER BY created_at DESC, id
 `
 
-func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsMerchantWebhook, error) {
+func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID) ([]BillingMerchantWebhook, error) {
 	rows, err := q.db.Query(ctx, listMerchantWebhooks, merchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsMerchantWebhook
+	var items []BillingMerchantWebhook
 	for rows.Next() {
-		var i OpenrailsMerchantWebhook
+		var i BillingMerchantWebhook
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -241,9 +241,9 @@ func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID
 }
 
 const markMerchantNotificationRead = `-- name: MarkMerchantNotificationRead :execrows
-UPDATE openrails.notifications
+UPDATE billing.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id() AND id = $1
+WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id() AND id = $1
 `
 
 func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -255,7 +255,7 @@ func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, id uuid.UUID
 }
 
 const rotateMerchantWebhookURL = `-- name: RotateMerchantWebhookURL :one
-UPDATE openrails.merchant_webhooks
+UPDATE billing.merchant_webhooks
    SET destination_host = $1,
        secret_version = $2::integer,
        updated_at = current_timestamp
@@ -271,14 +271,14 @@ type RotateMerchantWebhookURLParams struct {
 	ID              uuid.UUID
 }
 
-func (q *Queries) RotateMerchantWebhookURL(ctx context.Context, arg RotateMerchantWebhookURLParams) (OpenrailsMerchantWebhook, error) {
+func (q *Queries) RotateMerchantWebhookURL(ctx context.Context, arg RotateMerchantWebhookURLParams) (BillingMerchantWebhook, error) {
 	row := q.db.QueryRow(ctx, rotateMerchantWebhookURL,
 		arg.DestinationHost,
 		arg.SecretVersion,
 		arg.MerchantID,
 		arg.ID,
 	)
-	var i OpenrailsMerchantWebhook
+	var i BillingMerchantWebhook
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,

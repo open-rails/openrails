@@ -1,16 +1,16 @@
--- openrails.usage_events: append-only metered usage (#289), idempotent on
+-- billing.usage_events: append-only metered usage (#289), idempotent on
 -- (tenant, payer, event_type, source, source_id).
 
 -- pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
 -- name: InsertUsageEvent :exec
-INSERT INTO openrails.usage_events (
+INSERT INTO billing.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at
 ) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, sqlc.arg(pricing_authority), $12, $13, $14);
 
 -- name: GetUsageEventByCoords :one
-SELECT * FROM openrails.usage_events
+SELECT * FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND event_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1;
@@ -20,7 +20,7 @@ LIMIT 1;
 SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
-FROM openrails.usage_events
+FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND occurred_at >= sqlc.arg(from_at)::timestamptz
   AND occurred_at < sqlc.arg(to_at)::timestamptz
@@ -31,7 +31,7 @@ GROUP BY event_type;
 SELECT ue.event_type,
        d.key::text AS key,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
   AND ue.currency = sqlc.arg(currency)
@@ -52,7 +52,7 @@ SELECT COALESCE(CASE sqlc.arg(group_by)::text
        ue.currency,
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
   AND ue.currency = sqlc.arg(currency)
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
@@ -68,7 +68,7 @@ ORDER BY total_amount DESC;
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
        ue.currency,
        COALESCE(SUM(ue.amount), 0)::bigint AS amount
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = sqlc.arg(currency)
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
@@ -81,6 +81,6 @@ ORDER BY 1;
 -- payer did in the last N seconds, never its history — and served by
 -- ix_usage_events_payer_time (merchant_id, customer_id, occurred_at).
 SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
-FROM openrails.usage_events
+FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND occurred_at >= sqlc.arg(since)::timestamptz;

@@ -22,7 +22,7 @@ func acuNotice(kind, vault string) obj {
 func (w *world) methodRow(method, column string) string {
 	w.t.Helper()
 	var v string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT `+column+` FROM openrails.payment_methods WHERE id = $1`), strings.TrimPrefix(method, "pm_")).Scan(&v))
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT `+column+` FROM billing.payment_methods WHERE id = $1`), strings.TrimPrefix(method, "pm_")).Scan(&v))
 	return v
 }
 
@@ -32,8 +32,8 @@ func (w *world) vaultOf(method string) string { return w.methodRow(method, "rail
 // cardUpdates is the recorded card updates of a stored card, as source/kind.
 func (w *world) cardUpdates(vault string) []string {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT u.source || '/' || u.kind FROM openrails.payment_method_updates u
-		JOIN openrails.payment_methods pm ON pm.merchant_id = u.merchant_id AND pm.id = u.payment_method_id
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT u.source || '/' || u.kind FROM billing.payment_method_updates u
+		JOIN billing.payment_methods pm ON pm.merchant_id = u.merchant_id AND pm.id = u.payment_method_id
 		WHERE pm.rail_customer_ref = $1 ORDER BY u.at, u.id`), vault)
 	require.NoError(w.t, err)
 	var out []string

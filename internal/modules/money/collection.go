@@ -22,7 +22,7 @@ import (
 // validation and request building, with at most read-only qualification.
 // The returned PreparedCharge's Submit is the provider submission.
 type CollectionAdapter interface {
-	Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error)
+	Prepare(ctx context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error)
 }
 
 // ScopedCharger validates merchant/customer/payment-method scope and resolves

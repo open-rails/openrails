@@ -13,99 +13,99 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type OpenrailsPaymentStatus string
+type BillingPaymentStatus string
 
 const (
-	OpenrailsPaymentStatusPending   OpenrailsPaymentStatus = "pending"
-	OpenrailsPaymentStatusCompleted OpenrailsPaymentStatus = "completed"
-	OpenrailsPaymentStatusFailed    OpenrailsPaymentStatus = "failed"
-	OpenrailsPaymentStatusRefunded  OpenrailsPaymentStatus = "refunded"
+	BillingPaymentStatusPending   BillingPaymentStatus = "pending"
+	BillingPaymentStatusCompleted BillingPaymentStatus = "completed"
+	BillingPaymentStatusFailed    BillingPaymentStatus = "failed"
+	BillingPaymentStatusRefunded  BillingPaymentStatus = "refunded"
 )
 
-func (e *OpenrailsPaymentStatus) Scan(src interface{}) error {
+func (e *BillingPaymentStatus) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = OpenrailsPaymentStatus(s)
+		*e = BillingPaymentStatus(s)
 	case string:
-		*e = OpenrailsPaymentStatus(s)
+		*e = BillingPaymentStatus(s)
 	default:
-		return fmt.Errorf("unsupported scan type for OpenrailsPaymentStatus: %T", src)
+		return fmt.Errorf("unsupported scan type for BillingPaymentStatus: %T", src)
 	}
 	return nil
 }
 
-type NullOpenrailsPaymentStatus struct {
-	OpenrailsPaymentStatus OpenrailsPaymentStatus
-	Valid                  bool // Valid is true if OpenrailsPaymentStatus is not NULL
+type NullBillingPaymentStatus struct {
+	BillingPaymentStatus BillingPaymentStatus
+	Valid                bool // Valid is true if BillingPaymentStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullOpenrailsPaymentStatus) Scan(value interface{}) error {
+func (ns *NullBillingPaymentStatus) Scan(value interface{}) error {
 	if value == nil {
-		ns.OpenrailsPaymentStatus, ns.Valid = "", false
+		ns.BillingPaymentStatus, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.OpenrailsPaymentStatus.Scan(value)
+	return ns.BillingPaymentStatus.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullOpenrailsPaymentStatus) Value() (driver.Value, error) {
+func (ns NullBillingPaymentStatus) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.OpenrailsPaymentStatus), nil
+	return string(ns.BillingPaymentStatus), nil
 }
 
 // or#893: the canonical LOCAL subscription lifecycle. One question: will we attempt to rebill? pending = not started; active/past_due = yes; unknown = provider must tell us (#632); cancelled = never again, with cancel_type carrying why (user|merchant|expired|chargeback). Provider vocabulary is mapped onto this set at the boundary — a remote "expired" becomes cancelled/cancel_type=expired, never a local status.
-type OpenrailsSubscriptionStatus string
+type BillingSubscriptionStatus string
 
 const (
-	OpenrailsSubscriptionStatusPending        OpenrailsSubscriptionStatus = "pending"
-	OpenrailsSubscriptionStatusActive         OpenrailsSubscriptionStatus = "active"
-	OpenrailsSubscriptionStatusPastDue        OpenrailsSubscriptionStatus = "past_due"
-	OpenrailsSubscriptionStatusAwaitingMethod OpenrailsSubscriptionStatus = "awaiting_method"
-	OpenrailsSubscriptionStatusCancelled      OpenrailsSubscriptionStatus = "cancelled"
-	OpenrailsSubscriptionStatusUnverified     OpenrailsSubscriptionStatus = "unverified"
+	BillingSubscriptionStatusPending        BillingSubscriptionStatus = "pending"
+	BillingSubscriptionStatusActive         BillingSubscriptionStatus = "active"
+	BillingSubscriptionStatusPastDue        BillingSubscriptionStatus = "past_due"
+	BillingSubscriptionStatusAwaitingMethod BillingSubscriptionStatus = "awaiting_method"
+	BillingSubscriptionStatusCancelled      BillingSubscriptionStatus = "cancelled"
+	BillingSubscriptionStatusUnverified     BillingSubscriptionStatus = "unverified"
 )
 
-func (e *OpenrailsSubscriptionStatus) Scan(src interface{}) error {
+func (e *BillingSubscriptionStatus) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = OpenrailsSubscriptionStatus(s)
+		*e = BillingSubscriptionStatus(s)
 	case string:
-		*e = OpenrailsSubscriptionStatus(s)
+		*e = BillingSubscriptionStatus(s)
 	default:
-		return fmt.Errorf("unsupported scan type for OpenrailsSubscriptionStatus: %T", src)
+		return fmt.Errorf("unsupported scan type for BillingSubscriptionStatus: %T", src)
 	}
 	return nil
 }
 
-type NullOpenrailsSubscriptionStatus struct {
-	OpenrailsSubscriptionStatus OpenrailsSubscriptionStatus
-	Valid                       bool // Valid is true if OpenrailsSubscriptionStatus is not NULL
+type NullBillingSubscriptionStatus struct {
+	BillingSubscriptionStatus BillingSubscriptionStatus
+	Valid                     bool // Valid is true if BillingSubscriptionStatus is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullOpenrailsSubscriptionStatus) Scan(value interface{}) error {
+func (ns *NullBillingSubscriptionStatus) Scan(value interface{}) error {
 	if value == nil {
-		ns.OpenrailsSubscriptionStatus, ns.Valid = "", false
+		ns.BillingSubscriptionStatus, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.OpenrailsSubscriptionStatus.Scan(value)
+	return ns.BillingSubscriptionStatus.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullOpenrailsSubscriptionStatus) Value() (driver.Value, error) {
+func (ns NullBillingSubscriptionStatus) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.OpenrailsSubscriptionStatus), nil
+	return string(ns.BillingSubscriptionStatus), nil
 }
 
 // or#795: one batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
-type OpenrailsAccountUpdaterBatch struct {
+type BillingAccountUpdaterBatch struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	CustodianID uuid.UUID
@@ -124,7 +124,7 @@ type OpenrailsAccountUpdaterBatch struct {
 }
 
 // #733 hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.
-type OpenrailsAdmissionDenialsHourly struct {
+type BillingAdmissionDenialsHourly struct {
 	MerchantID   uuid.UUID
 	CustomerID   uuid.UUID
 	DenialReason string
@@ -133,7 +133,7 @@ type OpenrailsAdmissionDenialsHourly struct {
 	UpdatedAt    time.Time
 }
 
-type OpenrailsAdmissionOperation struct {
+type BillingAdmissionOperation struct {
 	MerchantID         uuid.UUID
 	RequestID          string
 	PayerID            uuid.UUID
@@ -153,7 +153,7 @@ type OpenrailsAdmissionOperation struct {
 }
 
 // or#897: the merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
-type OpenrailsBillingPolicy struct {
+type BillingBillingPolicy struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Name       string
@@ -164,7 +164,7 @@ type OpenrailsBillingPolicy struct {
 }
 
 // or#897: which named policy applies to whom. Three rungs, most specific wins: per-customer (customer_id set) > per-tier (tier set) > merchant default (both NULL). The binding is JUST a name reference — rebinding is the merchant's runtime lever and moves no money.
-type OpenrailsBillingPolicyBinding struct {
+type BillingBillingPolicyBinding struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
@@ -176,7 +176,7 @@ type OpenrailsBillingPolicyBinding struct {
 }
 
 // SEC-30 card-testing failure counts per merchant, subject and five-minute bucket.
-type OpenrailsCardAttemptFailure struct {
+type BillingCardAttemptFailure struct {
 	MerchantID uuid.UUID
 	Subject    string
 	BucketAt   time.Time
@@ -184,7 +184,7 @@ type OpenrailsCardAttemptFailure struct {
 }
 
 // Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.
-type OpenrailsCatalog struct {
+type BillingCatalog struct {
 	ID           uuid.UUID
 	MerchantID   uuid.UUID
 	OwnerSubject *string
@@ -193,7 +193,7 @@ type OpenrailsCatalog struct {
 }
 
 // Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL.
-type OpenrailsCatalogApplication struct {
+type BillingCatalogApplication struct {
 	MerchantID      uuid.UUID
 	ApplicationID   string
 	CatalogID       uuid.UUID
@@ -205,7 +205,7 @@ type OpenrailsCatalogApplication struct {
 	AppliedAt       time.Time
 }
 
-type OpenrailsCatalogDriftEvent struct {
+type BillingCatalogDriftEvent struct {
 	ID                    uuid.UUID
 	PspID                 *uuid.UUID
 	Rail                  string
@@ -222,7 +222,7 @@ type OpenrailsCatalogDriftEvent struct {
 }
 
 // #599 billing meter registry. Meters are billed-later usage streams, distinct from #594 usage limits.
-type OpenrailsCatalogMeter struct {
+type BillingCatalogMeter struct {
 	MerchantID uuid.UUID
 	Key        string
 	CreatedAt  time.Time
@@ -239,7 +239,7 @@ type OpenrailsCatalogMeter struct {
 }
 
 // #638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON. The ONLY metered-pricing engine (#707): legacy manifest metered: price declarations are translated into rate-card rows at push time (catalog_price_metered is gone).
-type OpenrailsCatalogRateCard struct {
+type BillingCatalogRateCard struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	ProductID   *uuid.UUID
@@ -255,7 +255,7 @@ type OpenrailsCatalogRateCard struct {
 	CustomerID *uuid.UUID
 }
 
-type OpenrailsCheckoutSession struct {
+type BillingCheckoutSession struct {
 	ID             uuid.UUID
 	PriceID        *uuid.UUID
 	Mode           string
@@ -285,7 +285,7 @@ type OpenrailsCheckoutSession struct {
 	RoutingReason []byte
 }
 
-type OpenrailsCredentialPublication struct {
+type BillingCredentialPublication struct {
 	MerchantID       uuid.UUID
 	OperationID      uuid.UUID
 	Rail             string
@@ -300,7 +300,7 @@ type OpenrailsCredentialPublication struct {
 }
 
 // or#880: merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says WHO HOLDS the card, openrails.psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.
-type OpenrailsCustodian struct {
+type BillingCustodian struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// The custodian's manifest key (merchants.<slug>.custodians.<key>) — the name a PSP entry references.
@@ -321,7 +321,7 @@ type OpenrailsCustodian struct {
 }
 
 // or#297 Phase C: one row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row.
-type OpenrailsCustodyMigration struct {
+type BillingCustodyMigration struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// The operator run that produced this row. A dry-run plan writes nothing; an applied run stamps every flip with one batch id so the report and the audit agree.
@@ -349,7 +349,7 @@ type OpenrailsCustodyMigration struct {
 }
 
 // OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.
-type OpenrailsCustomer struct {
+type BillingCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
@@ -359,7 +359,7 @@ type OpenrailsCustomer struct {
 }
 
 // or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
-type OpenrailsCustomerDelinquency struct {
+type BillingCustomerDelinquency struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
@@ -377,7 +377,7 @@ type OpenrailsCustomerDelinquency struct {
 }
 
 // #798 per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
-type OpenrailsCustomerInvoiceProfile struct {
+type BillingCustomerInvoiceProfile struct {
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
 	NetTermsDays     int32
@@ -391,7 +391,7 @@ type OpenrailsCustomerInvoiceProfile struct {
 }
 
 // #741 per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query(#733 body), grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
-type OpenrailsDashboardConfig struct {
+type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
 	Layout     []byte
 	UpdatedAt  time.Time
@@ -400,7 +400,7 @@ type OpenrailsDashboardConfig struct {
 }
 
 // Global by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
-type OpenrailsDestructiveActionSwitch struct {
+type BillingDestructiveActionSwitch struct {
 	ID        uuid.UUID
 	Singleton bool
 	Enabled   bool
@@ -410,7 +410,7 @@ type OpenrailsDestructiveActionSwitch struct {
 }
 
 // or#859 tier 1: the row as it stood immediately before a destructive run overwrote it. or#858's soft-delete stamp reverses DELETEs; this reverses UPDATEs — which is the damage the empty-roster mass-cancellation actually did. One image per (run, table, row); FK-pinned to exactly one run.
-type OpenrailsDestructiveRunBeforeImage struct {
+type BillingDestructiveRunBeforeImage struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
 	DestructiveRunID uuid.UUID
@@ -424,7 +424,7 @@ type OpenrailsDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
-type OpenrailsEntitlement struct {
+type BillingEntitlement struct {
 	ID           uuid.UUID
 	Entitlement  string
 	StartAt      time.Time
@@ -446,7 +446,7 @@ type OpenrailsEntitlement struct {
 }
 
 // #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
-type OpenrailsFreeloaderEpisode struct {
+type BillingFreeloaderEpisode struct {
 	MerchantID    uuid.UUID
 	CustomerID    uuid.UUID
 	EntitlementID uuid.UUID
@@ -461,7 +461,7 @@ type OpenrailsFreeloaderEpisode struct {
 }
 
 // #514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.
-type OpenrailsGrant struct {
+type BillingGrant struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -484,7 +484,7 @@ type OpenrailsGrant struct {
 }
 
 // Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state.
-type OpenrailsHostOutbox struct {
+type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	EventType   string
@@ -502,7 +502,7 @@ type OpenrailsHostOutbox struct {
 }
 
 // #1099: one claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by openrails.idempotency_gc.
-type OpenrailsIdempotencyKey struct {
+type BillingIdempotencyKey struct {
 	MerchantID     uuid.UUID
 	Operation      string
 	IdempotencyKey string
@@ -518,7 +518,7 @@ type OpenrailsIdempotencyKey struct {
 }
 
 // Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.
-type OpenrailsInvoice struct {
+type BillingInvoice struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
@@ -567,7 +567,7 @@ type OpenrailsInvoice struct {
 }
 
 // Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
-type OpenrailsInvoiceItem struct {
+type BillingInvoiceItem struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -584,7 +584,7 @@ type OpenrailsInvoiceItem struct {
 }
 
 // Payment attempts and settled payments allocated to a specific invoice.
-type OpenrailsInvoicePayment struct {
+type BillingInvoicePayment struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
@@ -609,7 +609,7 @@ type OpenrailsInvoicePayment struct {
 }
 
 // Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
-type OpenrailsInvokerSpendLimit struct {
+type BillingInvokerSpendLimit struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -624,7 +624,7 @@ type OpenrailsInvokerSpendLimit struct {
 }
 
 // #512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
-type OpenrailsLedgerAccount struct {
+type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.
@@ -643,7 +643,7 @@ type OpenrailsLedgerAccount struct {
 }
 
 // #512 immutable double-entry transfers. Append-only (role granted SELECT,INSERT only). A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.
-type OpenrailsLedgerTransfer struct {
+type BillingLedgerTransfer struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	DebitAccountID  uuid.UUID
@@ -668,7 +668,7 @@ type OpenrailsLedgerTransfer struct {
 }
 
 // Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images.
-type OpenrailsMaintenanceRun struct {
+type BillingMaintenanceRun struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	Kind        string
@@ -700,7 +700,7 @@ type OpenrailsMaintenanceRun struct {
 }
 
 // Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. Global by design: it IS the tenant directory — the scope, not a scoped row.
-type OpenrailsMerchant struct {
+type BillingMerchant struct {
 	ID uuid.UUID
 	// The merchant's public name (#1106): unique among live rows and never equal to another merchant's unexpired former name (openrails.merchant_slug_aliases). OpenRails owns it; AuthKit groups carry no name.
 	Slug   string
@@ -722,7 +722,7 @@ type OpenrailsMerchant struct {
 }
 
 // #1107: a merchant's unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.
-type OpenrailsMerchantApiHostClaim struct {
+type BillingMerchantApiHostClaim struct {
 	MerchantID uuid.UUID
 	ApiHost    string
 	Token      string
@@ -730,7 +730,7 @@ type OpenrailsMerchantApiHostClaim struct {
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
-type OpenrailsMerchantConfiguration struct {
+type BillingMerchantConfiguration struct {
 	MerchantID uuid.UUID
 	// JSONB merchant config. delegated_invoker_wasted_spend_windows is an array of {key, window_seconds, limit}; amount values use the request currency internal precision.
 	Config    []byte
@@ -738,7 +738,7 @@ type OpenrailsMerchantConfiguration struct {
 	UpdatedAt time.Time
 }
 
-type OpenrailsMerchantConfigurationApplication struct {
+type BillingMerchantConfigurationApplication struct {
 	MerchantID    uuid.UUID
 	ApplicationID string
 	RequestSha256 []byte
@@ -747,7 +747,7 @@ type OpenrailsMerchantConfigurationApplication struct {
 }
 
 // Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.
-type OpenrailsMerchantDek struct {
+type BillingMerchantDek struct {
 	MerchantID uuid.UUID
 	// AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).
 	WrappedDek []byte
@@ -756,7 +756,7 @@ type OpenrailsMerchantDek struct {
 }
 
 // #836/#835 per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
-type OpenrailsMerchantDestructivePolicy struct {
+type BillingMerchantDestructivePolicy struct {
 	ID                        uuid.UUID
 	MerchantID                uuid.UUID
 	DestructiveActionsEnabled bool
@@ -769,7 +769,7 @@ type OpenrailsMerchantDestructivePolicy struct {
 }
 
 // DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.
-type OpenrailsMerchantSecret struct {
+type BillingMerchantSecret struct {
 	MerchantID uuid.UUID
 	Name       string
 	Value      string
@@ -779,7 +779,7 @@ type OpenrailsMerchantSecret struct {
 }
 
 // #1106: former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.
-type OpenrailsMerchantSlugAlias struct {
+type BillingMerchantSlugAlias struct {
 	Slug       string
 	MerchantID uuid.UUID
 	ExpiresAt  *time.Time
@@ -787,7 +787,7 @@ type OpenrailsMerchantSlugAlias struct {
 }
 
 // #736 operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.
-type OpenrailsMerchantWebhook struct {
+type BillingMerchantWebhook struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	Name            string
@@ -800,7 +800,7 @@ type OpenrailsMerchantWebhook struct {
 }
 
 // #672 per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.
-type OpenrailsMeteredRatingWatermark struct {
+type BillingMeteredRatingWatermark struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
@@ -815,7 +815,7 @@ type OpenrailsMeteredRatingWatermark struct {
 }
 
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in payer/invoker_spend_limits; arrears owed exposure is derived from open invoices.
-type OpenrailsMoneySetting struct {
+type BillingMoneySetting struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	BillingMode string
@@ -830,7 +830,7 @@ type OpenrailsMoneySetting struct {
 }
 
 // #1094: the in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
-type OpenrailsNmiBulkCheckpoint struct {
+type BillingNmiBulkCheckpoint struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
 	Since      time.Time
@@ -840,7 +840,7 @@ type OpenrailsNmiBulkCheckpoint struct {
 }
 
 // #1120 authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers.
-type OpenrailsNmiHistoryMonth struct {
+type BillingNmiHistoryMonth struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
 	Month          time.Time
@@ -851,14 +851,14 @@ type OpenrailsNmiHistoryMonth struct {
 }
 
 // #1120 when each NMI PSP's history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.
-type OpenrailsNmiHistoryRead struct {
+type BillingNmiHistoryRead struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
 	ReadAt     time.Time
 }
 
 // Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
-type OpenrailsNotification struct {
+type BillingNotification struct {
 	ID            uuid.UUID
 	EventType     string
 	Data          []byte
@@ -876,7 +876,7 @@ type OpenrailsNotification struct {
 }
 
 // Merchant-scoped durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
-type OpenrailsOperationAuthorization struct {
+type BillingOperationAuthorization struct {
 	OperationID         string
 	MerchantID          uuid.UUID
 	PayerID             uuid.UUID
@@ -904,7 +904,7 @@ type OpenrailsOperationAuthorization struct {
 }
 
 // #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
-type OpenrailsOrphanedEpisode struct {
+type BillingOrphanedEpisode struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	SourceType string
@@ -917,7 +917,7 @@ type OpenrailsOrphanedEpisode struct {
 }
 
 // Records of all payment transactions (formerly purchases table)
-type OpenrailsPayment struct {
+type BillingPayment struct {
 	ID            uuid.UUID
 	PriceID       uuid.UUID
 	Rail          string
@@ -925,7 +925,7 @@ type OpenrailsPayment struct {
 	Amount        int64
 	ListAmount    int64
 	Currency      string
-	Status        OpenrailsPaymentStatus
+	Status        BillingPaymentStatus
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
 	SubscriptionID           *uuid.UUID
 	RefundedPaymentID        *uuid.UUID
@@ -961,7 +961,7 @@ type OpenrailsPayment struct {
 }
 
 // #1110 one row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved.
-type OpenrailsPaymentAttempt struct {
+type BillingPaymentAttempt struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	CustomerID      uuid.UUID
@@ -1004,7 +1004,7 @@ type OpenrailsPaymentAttempt struct {
 }
 
 // Generalized payment method table supporting multiple rails.
-type OpenrailsPaymentMethod struct {
+type BillingPaymentMethod struct {
 	ID uuid.UUID
 	// Payment rail type: nmi, ccbill, stripe, etc.
 	Rail                 string
@@ -1051,7 +1051,7 @@ type OpenrailsPaymentMethod struct {
 }
 
 // #1115 changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op.
-type OpenrailsPaymentMethodUpdate struct {
+type BillingPaymentMethodUpdate struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	PaymentMethodID uuid.UUID
@@ -1065,7 +1065,7 @@ type OpenrailsPaymentMethodUpdate struct {
 }
 
 // Pricing tiers for products with rail-specific identifiers
-type OpenrailsPrice struct {
+type BillingPrice struct {
 	ID        uuid.UUID
 	ProductID uuid.UUID
 	// Price amount in row currency micros (1 major unit = 1,000,000).
@@ -1088,7 +1088,7 @@ type OpenrailsPrice struct {
 }
 
 // #774: append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).
-type OpenrailsPriceKeyMovement struct {
+type BillingPriceKeyMovement struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	Key         string
@@ -1098,7 +1098,7 @@ type OpenrailsPriceKeyMovement struct {
 	Archived    bool
 }
 
-type OpenrailsPricePspBinding struct {
+type BillingPricePspBinding struct {
 	MerchantID               uuid.UUID
 	PriceID                  uuid.UUID
 	PspID                    uuid.UUID
@@ -1111,7 +1111,7 @@ type OpenrailsPricePspBinding struct {
 }
 
 // Product definitions that can be purchased or subscribed to
-type OpenrailsProduct struct {
+type BillingProduct struct {
 	ID               uuid.UUID
 	Key              string
 	DisplayName      string
@@ -1129,7 +1129,7 @@ type OpenrailsProduct struct {
 }
 
 // #1058: immutable product archive receipts; the resolved purchase window and action are fixed at acceptance.
-type OpenrailsProductArchiveOperation struct {
+type BillingProductArchiveOperation struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
 	IdempotencyKey string
@@ -1142,7 +1142,7 @@ type OpenrailsProductArchiveOperation struct {
 }
 
 // Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
-type OpenrailsProviderBillingObservation struct {
+type BillingProviderBillingObservation struct {
 	MerchantID              uuid.UUID
 	OperationID             string
 	ObservationID           string
@@ -1163,7 +1163,7 @@ type OpenrailsProviderBillingObservation struct {
 }
 
 // OpenRails-owned th-045 post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
-type OpenrailsProviderBillingQualification struct {
+type BillingProviderBillingQualification struct {
 	MerchantID                     uuid.UUID
 	OperationID                    string
 	Provider                       string
@@ -1189,7 +1189,7 @@ type OpenrailsProviderBillingQualification struct {
 }
 
 // Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.
-type OpenrailsPsp struct {
+type BillingPsp struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Payment rail/backend such as stripe, nmi, ccbill, solana, or a future rail.
@@ -1214,7 +1214,7 @@ type OpenrailsPsp struct {
 }
 
 // customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings (or#893 supersedes #704, which dropped psp_id when no writer set it).
-type OpenrailsRailCustomerAccount struct {
+type BillingRailCustomerAccount struct {
 	ID         uuid.UUID
 	Rail       string
 	AccountID  string
@@ -1227,7 +1227,7 @@ type OpenrailsRailCustomerAccount struct {
 }
 
 // Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
-type OpenrailsRailIntent struct {
+type BillingRailIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Rail the mutation targets (e.g. 'nmi', 'stripe').
@@ -1269,7 +1269,7 @@ type OpenrailsRailIntent struct {
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence (#533). or#859 Class A: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
-type OpenrailsRailMutationLog struct {
+type BillingRailMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
@@ -1290,7 +1290,7 @@ type OpenrailsRailMutationLog struct {
 }
 
 // Durable Provider Refresh watermarks: the exclusive lower bound for the next bounded event window, per (merchant, rail, PSP, domain). A failed or partial provider read simply never advances watermark_at — the failure itself is recorded by the job, not here.
-type OpenrailsRailRefreshWatermark struct {
+type BillingRailRefreshWatermark struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Rail       string
@@ -1305,7 +1305,7 @@ type OpenrailsRailRefreshWatermark struct {
 }
 
 // #1111 one expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id.
-type OpenrailsRebillCycle struct {
+type BillingRebillCycle struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
@@ -1323,7 +1323,7 @@ type OpenrailsRebillCycle struct {
 }
 
 // #1116 each rebill cycle with its first attempt, the attempt that collected it and when it closes (collected, cancelled, or 15 days past due). A cycle is open until closed_at, lost when closed uncollected.
-type OpenrailsRebillCycleFact struct {
+type BillingRebillCycleFact struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
 	SubscriptionID uuid.UUID
@@ -1352,7 +1352,7 @@ type OpenrailsRebillCycleFact struct {
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).
-type OpenrailsReconciliationFinding struct {
+type BillingReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	FindingType string
@@ -1392,7 +1392,7 @@ type OpenrailsReconciliationFinding struct {
 }
 
 // #511 per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
-type OpenrailsReconciliationState struct {
+type BillingReconciliationState struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	SourceDomain    string
@@ -1401,7 +1401,7 @@ type OpenrailsReconciliationState struct {
 }
 
 // #773: header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.
-type OpenrailsRepriceBatch struct {
+type BillingRepriceBatch struct {
 	ID                     uuid.UUID
 	MerchantID             uuid.UUID
 	PriceKey               *string
@@ -1420,7 +1420,7 @@ type OpenrailsRepriceBatch struct {
 }
 
 // #1086: every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive.
-type OpenrailsSolanaPayReceipt struct {
+type BillingSolanaPayReceipt struct {
 	MerchantID        uuid.UUID
 	Reference         string
 	Signature         string
@@ -1440,7 +1440,7 @@ type OpenrailsSolanaPayReceipt struct {
 }
 
 // #1086: one Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then openrails.solana_pay_gc deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land.
-type OpenrailsSolanaPayReference struct {
+type BillingSolanaPayReference struct {
 	MerchantID        uuid.UUID
 	Reference         string
 	CheckoutSessionID uuid.UUID
@@ -1459,7 +1459,7 @@ type OpenrailsSolanaPayReference struct {
 	UpdatedAt         time.Time
 }
 
-type OpenrailsSolanaSubscription struct {
+type BillingSolanaSubscription struct {
 	ID                       uuid.UUID
 	MerchantID               uuid.UUID
 	SubscriptionID           uuid.UUID
@@ -1479,12 +1479,12 @@ type OpenrailsSolanaSubscription struct {
 }
 
 // Core subscription records tracking user billing relationships
-type OpenrailsSubscription struct {
+type BillingSubscription struct {
 	ID      uuid.UUID
 	PriceID *uuid.UUID
 	// Denormalized product ID for efficient user+product lookups without joining prices
 	ProductID             uuid.UUID
-	Status                OpenrailsSubscriptionStatus
+	Status                BillingSubscriptionStatus
 	Rail                  string
 	CollectionPolicy      string
 	RailSubscriptionID    string
@@ -1525,7 +1525,7 @@ type OpenrailsSubscription struct {
 }
 
 // #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).
-type OpenrailsSubscriptionReprice struct {
+type BillingSubscriptionReprice struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
@@ -1546,12 +1546,12 @@ type OpenrailsSubscriptionReprice struct {
 }
 
 // #733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.
-type OpenrailsSubscriptionStatusTransition struct {
+type BillingSubscriptionStatusTransition struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
-	FromStatus     *OpenrailsSubscriptionStatus
-	ToStatus       OpenrailsSubscriptionStatus
+	FromStatus     *BillingSubscriptionStatus
+	ToStatus       BillingSubscriptionStatus
 	// cancel_type on the subscription at transition time (meaningful for to_status=cancelled).
 	CancelType      *string
 	OccurredAt      time.Time
@@ -1561,7 +1561,7 @@ type OpenrailsSubscriptionStatusTransition struct {
 }
 
 // #1094: one row per unverified subscription, kept by trg_subscriptions_track_unverified at commit. since dates entry (the row's updated_at); reads/last_read_at record provider reads. Feeds life.unverified.backlog and the unresolved escalation.
-type OpenrailsSubscriptionVerification struct {
+type BillingSubscriptionVerification struct {
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
 	Since          time.Time
@@ -1571,7 +1571,7 @@ type OpenrailsSubscriptionVerification struct {
 }
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
-type OpenrailsUsageEvent struct {
+type BillingUsageEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -1595,7 +1595,7 @@ type OpenrailsUsageEvent struct {
 }
 
 // #678 webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.
-type OpenrailsWebhookEvent struct {
+type BillingWebhookEvent struct {
 	MerchantID uuid.UUID
 	// Dedup operation key, webhook.<rail>.<event_type> — matches the Redis key derivation.
 	Op          string
@@ -1605,7 +1605,7 @@ type OpenrailsWebhookEvent struct {
 }
 
 // #786 per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.
-type OpenrailsWebhookHealth struct {
+type BillingWebhookHealth struct {
 	MerchantID uuid.UUID
 	Rail       string
 	// last signature-VERIFIED webhook for this rail; silence age is measured from here (or created_at when nothing was ever accepted).
@@ -1616,7 +1616,7 @@ type OpenrailsWebhookHealth struct {
 }
 
 // #786 UTC-day webhook counter buckets backing the #733 webhook_rejects / webhook_drift_events windowed metrics.
-type OpenrailsWebhookHealthDaily struct {
+type BillingWebhookHealthDaily struct {
 	MerchantID uuid.UUID
 	Rail       string
 	DayAt      time.Time
@@ -1625,7 +1625,7 @@ type OpenrailsWebhookHealthDaily struct {
 }
 
 // Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
-type OpenrailsWorkerState struct {
+type BillingWorkerState struct {
 	WorkerKind       string
 	CursorMerchantID *uuid.UUID
 	// Opaque compare-and-swap token for fair-sweep cursor saves: +1 per applied save, never touched by health writes, independent of any clock.

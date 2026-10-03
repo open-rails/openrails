@@ -49,19 +49,19 @@ func testNMIClient(t *testing.T, url string, readOnly bool) *nmi.NMIClient {
 	return client
 }
 
-func refundIntent(t *testing.T, typ string, mutate func(*RefundPayload)) gen.OpenrailsRailIntent {
+func refundIntent(t *testing.T, typ string, mutate func(*RefundPayload)) gen.BillingRailIntent {
 	p := RefundPayload{Currency: "USD", OriginalPaymentID: uuid.New(), ReservationID: uuid.New(), AmountCents: 500, ProviderTarget: "txn_original"}
 	if mutate != nil {
 		mutate(&p)
 	}
 	raw, err := json.Marshal(p)
 	require.NoError(t, err)
-	return gen.OpenrailsRailIntent{ID: uuid.New(), IntentType: typ, Rail: "nmi", Payload: raw, IdempotencyKey: "the-intent-key", Origin: string(OriginAdmin), Attempts: 1, Status: StatusInFlight}
+	return gen.BillingRailIntent{ID: uuid.New(), IntentType: typ, Rail: "nmi", Payload: raw, IdempotencyKey: "the-intent-key", Origin: string(OriginAdmin), Attempts: 1, Status: StatusInFlight}
 }
 
 func TestNMIHandlersParkBeforeProviderTraffic(t *testing.T) {
 	sub, psp := uuid.New(), uuid.New()
-	deleteIntent := gen.OpenrailsRailIntent{ID: uuid.New(), IntentType: TypeNMIDeleteSubscription, Rail: "nmi", SubscriptionID: &sub, PspID: &psp,
+	deleteIntent := gen.BillingRailIntent{ID: uuid.New(), IntentType: TypeNMIDeleteSubscription, Rail: "nmi", SubscriptionID: &sub, PspID: &psp,
 		Payload: []byte(`{"rail_subscription_id":"sub-target"}`), Origin: string(OriginUser), Attempts: 1, Status: StatusInFlight}
 	unaddressed := deleteIntent
 	unaddressed.PspID = nil
@@ -69,7 +69,7 @@ func TestNMIHandlersParkBeforeProviderTraffic(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		h      Handler
-		intent gen.OpenrailsRailIntent
+		intent gen.BillingRailIntent
 		reason string
 	}{
 		{"delete: unarmed", NewNMIDeleteHandler(nil, nil, fakeNMIResolver{}, nil), deleteIntent, "not armed"},
@@ -262,10 +262,10 @@ func archiveHandler(typ string, api stripeCatalogAPI, loader catalogRowsLoader) 
 	return &StripeArchivePriceHandler{core}
 }
 
-func archiveIntent(t *testing.T, typ string, psp uuid.UUID, objectID, marker string) gen.OpenrailsRailIntent {
+func archiveIntent(t *testing.T, typ string, psp uuid.UUID, objectID, marker string) gen.BillingRailIntent {
 	payload, err := json.Marshal(StripeArchivePayload{ObjectID: objectID, MarkerKey: marker})
 	require.NoError(t, err)
-	return gen.OpenrailsRailIntent{ID: uuid.New(), PspID: &psp, Rail: "stripe", IntentType: typ, Payload: payload,
+	return gen.BillingRailIntent{ID: uuid.New(), PspID: &psp, Rail: "stripe", IntentType: typ, Payload: payload,
 		IdempotencyKey: StripeArchiveIdempotencyKey(typ, objectID), Origin: string(OriginAdmin)}
 }
 
@@ -340,7 +340,7 @@ func TestStripeArchiveSupersededOnceObjectJoinsCatalog(t *testing.T) {
 	}
 
 	rel, err := archiveHandler(TypeStripeArchiveProduct, nil, stubCatalog(nil, nil)).CheckRelevance(context.Background(),
-		gen.OpenrailsRailIntent{IntentType: TypeStripeArchiveProduct, Payload: []byte(`{}`)})
+		gen.BillingRailIntent{IntentType: TypeStripeArchiveProduct, Payload: []byte(`{}`)})
 	require.NoError(t, err)
 	assert.False(t, rel.Applicable, "malformed payload supersedes (surfaces in reconcile) instead of parking forever")
 	unaddressed := archiveIntent(t, TypeStripeArchiveProduct, psp, "prod_x", "k")
@@ -384,10 +384,10 @@ func planAccount(owner solanago.PublicKey, status uint8) []byte {
 	return blob
 }
 
-func sunsetIntent(t *testing.T, psp uuid.UUID, pda string) gen.OpenrailsRailIntent {
+func sunsetIntent(t *testing.T, psp uuid.UUID, pda string) gen.BillingRailIntent {
 	payload, err := json.Marshal(SolanaSunsetPayload{PlanPDA: pda})
 	require.NoError(t, err)
-	return gen.OpenrailsRailIntent{ID: uuid.New(), MerchantID: uuid.New(), Rail: "solana", PspID: &psp, IntentType: TypeSolanaSunsetPlan,
+	return gen.BillingRailIntent{ID: uuid.New(), MerchantID: uuid.New(), Rail: "solana", PspID: &psp, IntentType: TypeSolanaSunsetPlan,
 		Payload: payload, IdempotencyKey: SolanaSunsetIdempotencyKey(pda), Origin: string(OriginAdmin)}
 }
 

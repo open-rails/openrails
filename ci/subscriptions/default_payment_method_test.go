@@ -21,8 +21,8 @@ import (
 func (w *world) defaults(customerID string) (defaults, usable int, id string) {
 	w.t.Helper()
 	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FILTER (WHERE is_default), count(*) FILTER (WHERE park_reason = ''),
-		coalesce((SELECT id::text FROM openrails.payment_methods WHERE customer_id = $1::uuid AND is_default), '')
-		FROM openrails.payment_methods WHERE customer_id = $1::uuid`), customerID).Scan(&defaults, &usable, &id))
+		coalesce((SELECT id::text FROM billing.payment_methods WHERE customer_id = $1::uuid AND is_default), '')
+		FROM billing.payment_methods WHERE customer_id = $1::uuid`), customerID).Scan(&defaults, &usable, &id))
 	return defaults, usable, id
 }
 
@@ -65,7 +65,7 @@ func (c *customer) deleteCard(method string) {
 	require.Contains(c.w.t, []int{http.StatusNoContent, http.StatusAccepted}, status, "%v", body)
 	c.w.until(func() bool {
 		var n int
-		require.NoError(c.w.t, c.w.pool.QueryRow(c.w.t.Context(), c.w.q(`SELECT count(*) FROM openrails.payment_methods WHERE id = $1::uuid`), strings.TrimPrefix(method, "pm_")).Scan(&n))
+		require.NoError(c.w.t, c.w.pool.QueryRow(c.w.t.Context(), c.w.q(`SELECT count(*) FROM billing.payment_methods WHERE id = $1::uuid`), strings.TrimPrefix(method, "pm_")).Scan(&n))
 		return n == 0
 	}, "the card is deleted")
 }
@@ -76,7 +76,7 @@ func (c *customer) deleteCard(method string) {
 func (c *customer) removeCard(method string) {
 	c.w.t.Helper()
 	var rail, ref, stripeCustomer string
-	require.NoError(c.w.t, c.w.pool.QueryRow(c.w.t.Context(), c.w.q(`SELECT rail, rail_method_ref FROM openrails.payment_methods WHERE id = $1::uuid`), strings.TrimPrefix(method, "pm_")).Scan(&rail, &ref))
+	require.NoError(c.w.t, c.w.pool.QueryRow(c.w.t.Context(), c.w.q(`SELECT rail, rail_method_ref FROM billing.payment_methods WHERE id = $1::uuid`), strings.TrimPrefix(method, "pm_")).Scan(&rail, &ref))
 	if rail != "stripe" {
 		c.deleteCard(method)
 		return
@@ -90,7 +90,7 @@ func (c *customer) removeCard(method string) {
 	event["data"].(obj)["previous_attributes"] = obj{"customer": stripeCustomer}
 	require.Equal(c.w.t, http.StatusOK, c.w.deliver("stripe", event))
 	var parked string
-	require.NoError(c.w.t, c.w.pool.QueryRow(c.w.t.Context(), c.w.q(`SELECT park_reason FROM openrails.payment_methods WHERE id = $1::uuid`), strings.TrimPrefix(method, "pm_")).Scan(&parked))
+	require.NoError(c.w.t, c.w.pool.QueryRow(c.w.t.Context(), c.w.q(`SELECT park_reason FROM billing.payment_methods WHERE id = $1::uuid`), strings.TrimPrefix(method, "pm_")).Scan(&parked))
 	require.NotEmpty(c.w.t, parked, "the detached Stripe card is parked")
 }
 

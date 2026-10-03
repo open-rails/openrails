@@ -119,7 +119,7 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 	}, nil
 }
 
-func driftEventFromGen(r gen.OpenrailsCatalogDriftEvent) CatalogDriftEventView {
+func driftEventFromGen(r gen.BillingCatalogDriftEvent) CatalogDriftEventView {
 	view := CatalogDriftEventView{
 		ID: r.ID, Provider: r.Rail, Kind: r.Kind, OpenRailsResourceType: r.OpenrailsResourceType,
 		OpenRailsResourceID: derefText(r.OpenrailsResourceID), ExternalResourceID: derefText(r.ExternalResourceID),

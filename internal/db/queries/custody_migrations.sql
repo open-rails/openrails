@@ -1,10 +1,10 @@
--- openrails.custody_migrations + the payment_methods writes that move an
+-- billing.custody_migrations + the payment_methods writes that move an
 -- instrument between custodians (or#297 Phase C).
 
 -- name: LockPaymentMethodForCustodyRemap :one
 -- The flip is atomic per instrument: take the row lock first so a concurrent
 -- charge site reading the same instrument cannot straddle the custody change.
-SELECT * FROM openrails.payment_methods
+SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(id)::uuid
 FOR UPDATE;
@@ -18,8 +18,8 @@ FOR UPDATE;
 -- no longer describes how the charge was made. Both states clear on their own
 -- (the executor finishes, the verifier resolves), so this is a "come back
 -- later", not a failure.
-SELECT count(*)::bigint FROM openrails.rail_intents ri
-JOIN openrails.subscriptions s ON s.id = ri.subscription_id
+SELECT count(*)::bigint FROM billing.rail_intents ri
+JOIN billing.subscriptions s ON s.id = ri.subscription_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND s.deleted_at IS NULL
@@ -33,7 +33,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(
 -- in_flight is mid-attempt, unknown_needs_verify was sent. Its submission,
 -- verification and operator resolution are all judged against the custody it
 -- froze; moving custody underneath would strand them on a dead instrument.
-SELECT count(*)::bigint FROM openrails.rail_intents ri
+SELECT count(*)::bigint FROM billing.rail_intents ri
 WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
   AND ((CASE WHEN ri.intent_type='initial_membership' THEN ri.payload->'terms'->>'payment_method_id' ELSE ri.payload->>'payment_method_id' END) = sqlc.arg(payment_method_id)::uuid::text
@@ -59,7 +59,7 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
 --
 -- Guarded on the CURRENT custody so a concurrent second flip cannot apply
 -- twice: the WHERE clause is the compare-and-swap.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     custodian = sqlc.arg(to_custodian)::text,
     custodian_id = sqlc.arg(to_custodian_id)::uuid,
     rail_method_ref = sqlc.arg(to_rail_method_ref)::text,
@@ -78,7 +78,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian = sqlc.arg(from_custodian)::text;
 
 -- name: RecordCustodyMigration :one
-INSERT INTO openrails.custody_migrations (
+INSERT INTO billing.custody_migrations (
     merchant_id, batch_id, payment_method_id, rail,
     from_custodian, from_custodian_id, from_rail_customer_ref, from_rail_method_ref, from_psp_id,
     to_custodian, to_custodian_id, to_rail_method_ref, to_psp_id,
@@ -98,7 +98,7 @@ RETURNING *;
 -- export maps two source vault entries onto one token (or onto a token another
 -- instrument already holds), the second is refused rather than silently
 -- pointing two instruments at one card.
-SELECT * FROM openrails.payment_methods
+SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)::text

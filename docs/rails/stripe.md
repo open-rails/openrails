@@ -94,7 +94,7 @@ secret never verifies.
 Retiring the superseded endpoint is the only destructive step. It happens no sooner
 than 7 days after it was replaced, requires a live enabled endpoint at the current
 version, and is gated on the operator kill switch
-(`openrails.destructive_action_switch`), which is **off by default**. Until it runs,
+(`billing.destructive_action_switch`), which is **off by default**. Until it runs,
 an operator finding (`consistency.stripe_webhook_endpoint`) names every superseded
 endpoint and when it becomes retireable; it auto-resolves once the rollover drains.
 

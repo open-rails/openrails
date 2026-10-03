@@ -13,7 +13,7 @@ import (
 )
 
 const deletePayerRateCard = `-- name: DeletePayerRateCard :exec
-DELETE FROM openrails.catalog_rate_cards
+DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND meter_key = $3::text
 `
@@ -32,7 +32,7 @@ func (q *Queries) DeletePayerRateCard(ctx context.Context, arg DeletePayerRateCa
 const listPayerRateCards = `-- name: ListPayerRateCards :many
 
 SELECT meter_key, product_id, allowance, price, created_at, updated_at
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1 AND customer_id = $2 AND meter_key IS NOT NULL
 ORDER BY meter_key
 `

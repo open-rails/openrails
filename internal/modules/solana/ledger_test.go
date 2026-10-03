@@ -15,11 +15,11 @@ import (
 func TestDecide(t *testing.T) {
 	settle := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := settle.Add(d); return &v }
-	pending := gen.OpenrailsSolanaPayReference{Status: ReferencePending, SettleUntil: settle}
-	paid := gen.OpenrailsSolanaPayReference{Status: ReferenceConfirmed, SettleUntil: settle}
+	pending := gen.BillingSolanaPayReference{Status: ReferencePending, SettleUntil: settle}
+	paid := gen.BillingSolanaPayReference{Status: ReferenceConfirmed, SettleUntil: settle}
 	for _, tc := range []struct {
 		name    string
-		ref     gen.OpenrailsSolanaPayReference
+		ref     gen.BillingSolanaPayReference
 		open    bool
 		amount  uint64
 		landed  *time.Time

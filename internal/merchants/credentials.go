@@ -327,7 +327,7 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 		return pspSecretScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
 	rail = normalizeProviderSecretType(rail)
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		q := s.database.Gen(ctx)
 		count, err := q.CountActivePSPsForNewWork(ctx, gen.CountActivePSPsForNewWorkParams{
@@ -429,7 +429,7 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	if environment == "" {
 		return PSPScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var err error
 		row, err = s.database.Gen(ctx).GetActivePSPByKey(ctx, gen.GetActivePSPByKeyParams{
@@ -458,7 +458,7 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 	if environment == "" {
 		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
-	var rows []gen.OpenrailsPsp
+	var rows []gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var err error
 		rows, err = s.database.Gen(ctx).ListActivePSPsForRailEnvironment(ctx, gen.ListActivePSPsForRailEnvironmentParams{
@@ -483,7 +483,7 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 	if environment == "" {
 		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
-	var rows []gen.OpenrailsPsp
+	var rows []gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var err error
 		rows, err = s.database.Gen(ctx).ListActivePSPsForEnvironment(ctx, gen.ListActivePSPsForEnvironmentParams{
@@ -506,7 +506,7 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	}
 	rail = normalizeProviderSecretType(rail)
 	environment := s.providerEnvironment
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var err error
 		row, err = s.database.Gen(ctx).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
@@ -575,7 +575,7 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 	if environment == "" {
 		return PSPScope{}, false, fmt.Errorf("PSP environment must be live or test")
 	}
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var err error
 		row, err = s.database.Gen(ctx).GetNewestPSPForRail(ctx, gen.GetNewestPSPForRailParams{
@@ -915,7 +915,7 @@ func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailP
 
 // allMerchantIDs lists every merchant, INCLUDING soft-deleted ones — their psps
 // rows survive the tombstone and still make a deployment "live".
-// openrails.merchants is a global control-plane table, so this read is
+// billing.merchants is a global control-plane table, so this read is
 // legitimate on the base pool.
 func (s *Service) allMerchantIDs(ctx context.Context) ([]merchant.ID, error) {
 	rows, err := gen.New(s.pool).ListAllMerchantIDs(ctx)
@@ -990,11 +990,11 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 // PSPScopeFromRow is the full scope of a PSP row already read: settings,
 // credential references and custody included, exactly as every resolver
 // builds it.
-func PSPScopeFromRow(row gen.OpenrailsPsp) PSPScope {
+func PSPScopeFromRow(row gen.BillingPsp) PSPScope {
 	return pspScopeFromRow(row).exported()
 }
 
-func pspScopeFromRow(row gen.OpenrailsPsp) pspSecretScope {
+func pspScopeFromRow(row gen.BillingPsp) pspSecretScope {
 	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, custodianID: row.CustodianID}
 	if row.Key != nil {
 		scope.key = *row.Key
@@ -1006,7 +1006,7 @@ func pspScopeFromRow(row gen.OpenrailsPsp) pspSecretScope {
 	return scope
 }
 
-func pspScopesFromRows(rows []gen.OpenrailsPsp) []PSPScope {
+func pspScopesFromRows(rows []gen.BillingPsp) []PSPScope {
 	var out []PSPScope
 	for _, row := range rows {
 		out = append(out, PSPScopeFromRow(row))
@@ -1019,7 +1019,7 @@ func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.U
 	if s == nil || s.pool == nil || id.IsZero() || pspID == uuid.Nil {
 		return PSPScope{}, false, nil
 	}
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var err error
 		row, err = s.database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: id.UUID(), ID: pspID})

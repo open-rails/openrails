@@ -27,7 +27,7 @@ var ErrEngineCollectionNotDue = fmt.Errorf("%w: engine subscription is not due",
 
 // AdmitDueSubscriptionCollection freezes one due engine obligation. Existing
 // accepted work is recovered before a hold can refuse a new admission.
-func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time) (gen.OpenrailsRailIntent, error) {
+func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time) (gen.BillingRailIntent, error) {
 	in, _, err := s.admitSubscriptionCollection(ctx, subscriptionID, admittedAt, uuid.Nil, "", nil)
 	return in, err
 }
@@ -35,24 +35,24 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 // AdmitCustomerSubscriptionCollection uses the same locked obligation and
 // receipt custody as scheduled collection. A verified payer may bypass only
 // retry delay after a released attempt, never unresolved financial ownership.
-func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.OpenrailsRailIntent, bool, error) {
+func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.BillingRailIntent, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, false, err
+		return gen.BillingRailIntent{}, false, err
 	}
 	if principal.Validate() != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != payer.String() {
-		return gen.OpenrailsRailIntent{}, false, ErrCustomerSessionRequired
+		return gen.BillingRailIntent{}, false, ErrCustomerSessionRequired
 	}
 	if payer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {
-		return gen.OpenrailsRailIntent{}, false, errors.New("payer and a 1-255 byte retry key required")
+		return gen.BillingRailIntent{}, false, errors.New("payer and a 1-255 byte retry key required")
 	}
 	return s.admitSubscriptionCollection(ctx, subscriptionID, s.now(), payer, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, payer, strings.TrimSpace(key)), method)
 }
 
-func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
+func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.BillingRailIntent, bool, error) {
 	replayed := false
 
-	var accepted gen.OpenrailsRailIntent
+	var accepted gen.BillingRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return accepted, replayed, err

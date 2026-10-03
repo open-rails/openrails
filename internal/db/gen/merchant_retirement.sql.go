@@ -13,7 +13,7 @@ import (
 )
 
 const completeMerchantGroupRelease = `-- name: CompleteMerchantGroupRelease :exec
-UPDATE openrails.merchants SET group_release_completed_at=now(),updated_at=now()
+UPDATE billing.merchants SET group_release_completed_at=now(),updated_at=now()
 WHERE id=$1::uuid AND permission_group_id=$2::text
 AND retired_at IS NOT NULL AND deleted_at IS NOT NULL AND group_release_completed_at IS NULL
 `
@@ -29,7 +29,7 @@ func (q *Queries) CompleteMerchantGroupRelease(ctx context.Context, arg Complete
 }
 
 const listMerchantRetirementCandidates = `-- name: ListMerchantRetirementCandidates :many
-SELECT id,slug,created_at,permission_group_id::text AS group_id FROM openrails.merchants
+SELECT id,slug,created_at,permission_group_id::text AS group_id FROM billing.merchants
 WHERE deleted_at IS NULL AND status='active' AND permission_group_id IS NOT NULL
 AND created_at < $1::timestamptz
 AND NOT (slug = ANY($2::text[]))
@@ -84,7 +84,7 @@ func (q *Queries) ListMerchantRetirementCandidates(ctx context.Context, arg List
 }
 
 const listPendingMerchantGroupReleases = `-- name: ListPendingMerchantGroupReleases :many
-SELECT id,coalesce(permission_group_id,'')::text AS group_id FROM openrails.merchants
+SELECT id,coalesce(permission_group_id,'')::text AS group_id FROM billing.merchants
 WHERE retired_at IS NOT NULL AND deleted_at IS NOT NULL AND group_release_completed_at IS NULL
 ORDER BY retired_at,id LIMIT $1::bigint
 `
@@ -116,7 +116,7 @@ func (q *Queries) ListPendingMerchantGroupReleases(ctx context.Context, batchLim
 
 const lockMerchantRetirementState = `-- name: LockMerchantRetirementState :one
 SELECT slug,permission_group_id,coalesce(deleted_at IS NULL AND status='active',false)::boolean AS live
-FROM openrails.merchants WHERE id=$1::uuid FOR UPDATE
+FROM billing.merchants WHERE id=$1::uuid FOR UPDATE
 `
 
 type LockMerchantRetirementStateRow struct {
@@ -133,7 +133,7 @@ func (q *Queries) LockMerchantRetirementState(ctx context.Context, id uuid.UUID)
 }
 
 const markMerchantRetired = `-- name: MarkMerchantRetired :exec
-UPDATE openrails.merchants SET status='deleted',deleted_at=$1::timestamptz,
+UPDATE billing.merchants SET status='deleted',deleted_at=$1::timestamptz,
 retired_at=$1::timestamptz,updated_at=$1::timestamptz
 WHERE id=$2::uuid
 `
@@ -149,26 +149,26 @@ func (q *Queries) MarkMerchantRetired(ctx context.Context, arg MarkMerchantRetir
 }
 
 const merchantHasActivity = `-- name: MerchantHasActivity :one
-SELECT coalesce((EXISTS (SELECT 1 FROM openrails.customers WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.payments WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.subscriptions WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.ledger_accounts WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.custodians WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.webhook_events WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.rail_intents WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.host_outbox WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.merchant_webhooks WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.products WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.catalog_meters WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.catalog_rate_cards WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.billing_policies WHERE merchant_id = $1::uuid)), false)::boolean AS used
+SELECT coalesce((EXISTS (SELECT 1 FROM billing.customers WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.payments WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.subscriptions WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.ledger_accounts WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.psps WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.custodians WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.merchant_secrets WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.webhook_events WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.rail_intents WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.host_outbox WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.merchant_webhooks WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.products WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.catalog_meters WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM billing.billing_policies WHERE merchant_id = $1::uuid)), false)::boolean AS used
 `
 
 // Retirement blockers: obligations, money history
 // (including tombstones), provider connections, integrations and catalog.
-// Every table here references openrails.merchants, so the retirement row lock
+// Every table here references billing.merchants, so the retirement row lock
 // serializes concurrent inserts. Tables reached through a NOT NULL foreign key
 // from one of these are implied; the rest are classified in
 // internal/merchants/retirement_activity_integration_test.go.

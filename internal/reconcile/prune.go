@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// DestructiveRunKindPrune is this run kind's key in openrails.maintenance_runs
+// DestructiveRunKindPrune is this run kind's key in billing.maintenance_runs
 // (or#859 §5.1 — the general ledger; prune is its first user).
 const DestructiveRunKindPrune = "prune"
 

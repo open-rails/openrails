@@ -13,7 +13,7 @@ import (
 
 const hasSettledPayment = `-- name: HasSettledPayment :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.payments
+    SELECT 1 FROM billing.payments
     WHERE merchant_id = $1::uuid
       AND customer_id = $2::uuid
       AND price_id = $3::uuid

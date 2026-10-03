@@ -31,8 +31,8 @@ const (
 )
 
 // DeduplicationService dedups webhook deliveries across replicas (#1099).
-// A delivery is claimed in openrails.idempotency_keys, so exactly one replica
-// processes an event at a time. The applied fact is openrails.webhook_events
+// A delivery is claimed in billing.idempotency_keys, so exactly one replica
+// processes an event at a time. The applied fact is billing.webhook_events
 // (#678), written with the handler's effects where it can be.
 type DeduplicationService struct {
 	claims *idempotency.Store

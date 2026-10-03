@@ -12,7 +12,7 @@ import (
 )
 
 const getCustodian = `-- name: GetCustodian :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM openrails.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
 WHERE custodians.merchant_id = $2::uuid AND id = $1
 `
 
@@ -21,9 +21,9 @@ type GetCustodianParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (OpenrailsCustodian, error) {
+func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (BillingCustodian, error) {
 	row := q.db.QueryRow(ctx, getCustodian, arg.ID, arg.MerchantID)
-	var i OpenrailsCustodian
+	var i BillingCustodian
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -41,7 +41,7 @@ func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (Ope
 }
 
 const getCustodianByIdentity = `-- name: GetCustodianByIdentity :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM openrails.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid
   AND kind = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -56,14 +56,14 @@ type GetCustodianByIdentityParams struct {
 	AccountID   string
 }
 
-func (q *Queries) GetCustodianByIdentity(ctx context.Context, arg GetCustodianByIdentityParams) (OpenrailsCustodian, error) {
+func (q *Queries) GetCustodianByIdentity(ctx context.Context, arg GetCustodianByIdentityParams) (BillingCustodian, error) {
 	row := q.db.QueryRow(ctx, getCustodianByIdentity,
 		arg.MerchantID,
 		arg.Kind,
 		arg.Environment,
 		arg.AccountID,
 	)
-	var i OpenrailsCustodian
+	var i BillingCustodian
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -81,7 +81,7 @@ func (q *Queries) GetCustodianByIdentity(ctx context.Context, arg GetCustodianBy
 }
 
 const getCustodianByKey = `-- name: GetCustodianByKey :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM openrails.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid
   AND lower(key) = lower($2::text)
 LIMIT 1
@@ -92,9 +92,9 @@ type GetCustodianByKeyParams struct {
 	Key        string
 }
 
-func (q *Queries) GetCustodianByKey(ctx context.Context, arg GetCustodianByKeyParams) (OpenrailsCustodian, error) {
+func (q *Queries) GetCustodianByKey(ctx context.Context, arg GetCustodianByKeyParams) (BillingCustodian, error) {
 	row := q.db.QueryRow(ctx, getCustodianByKey, arg.MerchantID, arg.Key)
-	var i OpenrailsCustodian
+	var i BillingCustodian
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -112,20 +112,20 @@ func (q *Queries) GetCustodianByKey(ctx context.Context, arg GetCustodianByKeyPa
 }
 
 const listCustodiansForMerchant = `-- name: ListCustodiansForMerchant :many
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM openrails.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid
 ORDER BY kind, key, id
 `
 
-func (q *Queries) ListCustodiansForMerchant(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsCustodian, error) {
+func (q *Queries) ListCustodiansForMerchant(ctx context.Context, merchantID uuid.UUID) ([]BillingCustodian, error) {
 	rows, err := q.db.Query(ctx, listCustodiansForMerchant, merchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCustodian
+	var items []BillingCustodian
 	for rows.Next() {
-		var i OpenrailsCustodian
+		var i BillingCustodian
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -151,7 +151,7 @@ func (q *Queries) ListCustodiansForMerchant(ctx context.Context, merchantID uuid
 
 const resolveCustodianOwnerByIdentity = `-- name: ResolveCustodianOwnerByIdentity :one
 SELECT id, merchant_id, key, kind, environment, account_id
-FROM openrails.custodian_owner_by_identity(
+FROM billing.custodian_owner_by_identity(
     lower($1::text),
     COALESCE($2::text, 'live'),
     $3::text
@@ -193,7 +193,7 @@ func (q *Queries) ResolveCustodianOwnerByIdentity(ctx context.Context, arg Resol
 
 const upsertCustodian = `-- name: UpsertCustodian :one
 
-INSERT INTO openrails.custodians (
+INSERT INTO billing.custodians (
     merchant_id, key, kind, environment, account_id, settings, archived, credential_versions
 ) VALUES (
     $1::uuid,
@@ -212,15 +212,15 @@ ON CONFLICT (kind, environment, account_id) DO UPDATE SET
     -- or#812: a floor NEVER goes backwards. An upsert that carries no floors
     -- (the manifest plane, which seeds rather than rotates) leaves the stored
     -- ones alone rather than clearing a rotation another writer recorded.
-    credential_versions = openrails.custodians.credential_versions || COALESCE((
+    credential_versions = billing.custodians.credential_versions || COALESCE((
         SELECT jsonb_object_agg(incoming.key, greatest(
             incoming.value::bigint,
-            (openrails.custodians.credential_versions ->> incoming.key)::bigint
+            (billing.custodians.credential_versions ->> incoming.key)::bigint
         ))
         FROM jsonb_each_text(EXCLUDED.credential_versions) AS incoming
     ), '{}'::jsonb),
     updated_at = now()
-WHERE openrails.custodians.merchant_id = EXCLUDED.merchant_id
+WHERE billing.custodians.merchant_id = EXCLUDED.merchant_id
 RETURNING id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at
 `
 
@@ -235,10 +235,10 @@ type UpsertCustodianParams struct {
 	CredentialVersions []byte
 }
 
-// openrails.custodians: merchant-scoped custodian registry (or#880). A row is
+// billing.custodians: merchant-scoped custodian registry (or#880). A row is
 // one merchant-owned account with a third-party card custodian. Referenced by
 // psps.custodian_id — one custodian can back many PSPs.
-func (q *Queries) UpsertCustodian(ctx context.Context, arg UpsertCustodianParams) (OpenrailsCustodian, error) {
+func (q *Queries) UpsertCustodian(ctx context.Context, arg UpsertCustodianParams) (BillingCustodian, error) {
 	row := q.db.QueryRow(ctx, upsertCustodian,
 		arg.MerchantID,
 		arg.Key,
@@ -249,7 +249,7 @@ func (q *Queries) UpsertCustodian(ctx context.Context, arg UpsertCustodianParams
 		arg.Archived,
 		arg.CredentialVersions,
 	)
-	var i OpenrailsCustodian
+	var i BillingCustodian
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,

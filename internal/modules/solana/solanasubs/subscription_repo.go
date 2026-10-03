@@ -23,7 +23,7 @@ func NewSolanaSubscriptionRepo(d *db.DB) *SolanaSubscriptionRepo {
 	return &SolanaSubscriptionRepo{db: d}
 }
 
-func solanaSubscriptionFromGen(s gen.OpenrailsSolanaSubscription) *models.SolanaSubscription {
+func solanaSubscriptionFromGen(s gen.BillingSolanaSubscription) *models.SolanaSubscription {
 	return &models.SolanaSubscription{
 		ID:                       s.ID,
 		MerchantID:               s.MerchantID,
@@ -174,7 +174,7 @@ func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Tim
 	}
 	out := make([]*models.SolanaSubscription, 0, len(rows))
 	for _, row := range rows {
-		sub := solanaSubscriptionFromGen(row.OpenrailsSolanaSubscription)
+		sub := solanaSubscriptionFromGen(row.BillingSolanaSubscription)
 		sub.PspID = row.PspID
 		out = append(out, sub)
 	}
@@ -269,7 +269,7 @@ func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Con
 
 // ListActiveWithSignature returns active subscriptions that have recorded at
 // least one confirmed pull (last_signature set) — the rows the reconciliation
-// worker cross-checks against openrails.payments (#258). `limit` caps the batch
+// worker cross-checks against billing.payments (#258). `limit` caps the batch
 // (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
 	if _, ok := merchant.FromContext(ctx); ok {

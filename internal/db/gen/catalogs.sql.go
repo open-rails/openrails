@@ -12,16 +12,16 @@ import (
 )
 
 const ensureDefaultCatalog = `-- name: EnsureDefaultCatalog :one
-INSERT INTO openrails.catalogs (merchant_id)
+INSERT INTO billing.catalogs (merchant_id)
 VALUES ($1::uuid)
 ON CONFLICT (merchant_id) WHERE owner_subject IS NULL
-DO UPDATE SET updated_at=openrails.catalogs.updated_at
+DO UPDATE SET updated_at=billing.catalogs.updated_at
 RETURNING id, merchant_id, owner_subject, created_at, updated_at
 `
 
-func (q *Queries) EnsureDefaultCatalog(ctx context.Context, merchantID uuid.UUID) (OpenrailsCatalog, error) {
+func (q *Queries) EnsureDefaultCatalog(ctx context.Context, merchantID uuid.UUID) (BillingCatalog, error) {
 	row := q.db.QueryRow(ctx, ensureDefaultCatalog, merchantID)
-	var i OpenrailsCatalog
+	var i BillingCatalog
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -33,10 +33,10 @@ func (q *Queries) EnsureDefaultCatalog(ctx context.Context, merchantID uuid.UUID
 }
 
 const ensureOwnedCatalog = `-- name: EnsureOwnedCatalog :one
-INSERT INTO openrails.catalogs (merchant_id,owner_subject)
+INSERT INTO billing.catalogs (merchant_id,owner_subject)
 VALUES ($1::uuid,$2::text)
 ON CONFLICT (merchant_id,owner_subject) WHERE owner_subject IS NOT NULL
-DO UPDATE SET updated_at=openrails.catalogs.updated_at
+DO UPDATE SET updated_at=billing.catalogs.updated_at
 RETURNING id, merchant_id, owner_subject, created_at, updated_at
 `
 
@@ -45,9 +45,9 @@ type EnsureOwnedCatalogParams struct {
 	OwnerSubject string
 }
 
-func (q *Queries) EnsureOwnedCatalog(ctx context.Context, arg EnsureOwnedCatalogParams) (OpenrailsCatalog, error) {
+func (q *Queries) EnsureOwnedCatalog(ctx context.Context, arg EnsureOwnedCatalogParams) (BillingCatalog, error) {
 	row := q.db.QueryRow(ctx, ensureOwnedCatalog, arg.MerchantID, arg.OwnerSubject)
-	var i OpenrailsCatalog
+	var i BillingCatalog
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -59,7 +59,7 @@ func (q *Queries) EnsureOwnedCatalog(ctx context.Context, arg EnsureOwnedCatalog
 }
 
 const getCatalog = `-- name: GetCatalog :one
-SELECT id, merchant_id, owner_subject, created_at, updated_at FROM openrails.catalogs
+SELECT id, merchant_id, owner_subject, created_at, updated_at FROM billing.catalogs
 WHERE merchant_id=$1::uuid AND id=$2::uuid
   AND ($3::uuid IS NULL OR id=$3::uuid)
 `
@@ -70,9 +70,9 @@ type GetCatalogParams struct {
 	CatalogID  *uuid.UUID
 }
 
-func (q *Queries) GetCatalog(ctx context.Context, arg GetCatalogParams) (OpenrailsCatalog, error) {
+func (q *Queries) GetCatalog(ctx context.Context, arg GetCatalogParams) (BillingCatalog, error) {
 	row := q.db.QueryRow(ctx, getCatalog, arg.MerchantID, arg.ID, arg.CatalogID)
-	var i OpenrailsCatalog
+	var i BillingCatalog
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -84,7 +84,7 @@ func (q *Queries) GetCatalog(ctx context.Context, arg GetCatalogParams) (Openrai
 }
 
 const getCatalogByOwner = `-- name: GetCatalogByOwner :one
-SELECT id, merchant_id, owner_subject, created_at, updated_at FROM openrails.catalogs
+SELECT id, merchant_id, owner_subject, created_at, updated_at FROM billing.catalogs
 WHERE merchant_id=$1::uuid AND owner_subject=$2::text
   AND ($3::uuid IS NULL OR id=$3::uuid)
 `
@@ -95,9 +95,9 @@ type GetCatalogByOwnerParams struct {
 	CatalogID    *uuid.UUID
 }
 
-func (q *Queries) GetCatalogByOwner(ctx context.Context, arg GetCatalogByOwnerParams) (OpenrailsCatalog, error) {
+func (q *Queries) GetCatalogByOwner(ctx context.Context, arg GetCatalogByOwnerParams) (BillingCatalog, error) {
 	row := q.db.QueryRow(ctx, getCatalogByOwner, arg.MerchantID, arg.OwnerSubject, arg.CatalogID)
-	var i OpenrailsCatalog
+	var i BillingCatalog
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -109,7 +109,7 @@ func (q *Queries) GetCatalogByOwner(ctx context.Context, arg GetCatalogByOwnerPa
 }
 
 const listCatalogs = `-- name: ListCatalogs :many
-SELECT id, merchant_id, owner_subject, created_at, updated_at FROM openrails.catalogs
+SELECT id, merchant_id, owner_subject, created_at, updated_at FROM billing.catalogs
 WHERE merchant_id=$1::uuid
   AND ($2::uuid IS NULL OR id=$2::uuid)
 ORDER BY created_at,id
@@ -123,7 +123,7 @@ type ListCatalogsParams struct {
 	PageLimit  int32
 }
 
-func (q *Queries) ListCatalogs(ctx context.Context, arg ListCatalogsParams) ([]OpenrailsCatalog, error) {
+func (q *Queries) ListCatalogs(ctx context.Context, arg ListCatalogsParams) ([]BillingCatalog, error) {
 	rows, err := q.db.Query(ctx, listCatalogs,
 		arg.MerchantID,
 		arg.CatalogID,
@@ -134,9 +134,9 @@ func (q *Queries) ListCatalogs(ctx context.Context, arg ListCatalogsParams) ([]O
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCatalog
+	var items []BillingCatalog
 	for rows.Next() {
-		var i OpenrailsCatalog
+		var i BillingCatalog
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,

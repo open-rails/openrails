@@ -22,7 +22,7 @@ func NewCustodianProxyCollectionAdapter(charger *nmiproxy.Charger) *CustodianPro
 	return &CustodianProxyCollectionAdapter{Charger: charger}
 }
 
-func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
+func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
 	if a == nil || a.Charger == nil {
 		return nil, fmt.Errorf("custodian-proxy collection adapter not initialized")
 	}

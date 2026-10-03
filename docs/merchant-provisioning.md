@@ -42,7 +42,7 @@ Runtime construction; the issuer-as-owner path below is the standalone mechanism
 
 ## Merchant identity and names
 
-OpenRails owns merchant names (`openrails.merchants.slug`). AuthKit groups carry
+OpenRails owns merchant names (`billing.merchants.slug`). AuthKit groups carry
 authority only and are addressed by UUID; a group's AuthKit name is not the
 merchant's name. The billing merchant UUID owns payments, credits, customers and
 secrets. A non-null billing-to-group binding is immutable, including after
@@ -292,14 +292,14 @@ are never implicitly copied to a managed backend.
 
 | Operation | Behavior |
 |---|---|
-| `Provision` | Idempotently creates the `openrails.merchants` row and records `permission_group_id` for control-plane merchants. |
+| `Provision` | Idempotently creates the `billing.merchants` row and records `permission_group_id` for control-plane merchants. |
 | `TakePurgeInventory` | Records what a purge would destroy: per-table row counts, secret **names**, and an explicit `not_captured` list. **It is not a backup and restores nothing** (was `Export`, a name that implied otherwise). |
 | `Delete` | One-way gated purge. See below. |
 
 ### The purge is one-way, and the inventory is not a backup
 
 `TakePurgeInventory` copies no data. It writes counts and secret names to
-`openrails.maintenance_runs` so an operator sees the blast radius
+`billing.maintenance_runs` so an operator sees the blast radius
 before confirming — nothing more. The only way back from a purge is
 **whole-cluster Postgres point-in-time recovery** with the
 `ENCRYPTION_MASTER_KEY` and Vault alongside it (`backup-and-recovery.md`).

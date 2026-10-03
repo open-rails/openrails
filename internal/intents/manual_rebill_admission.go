@@ -21,7 +21,7 @@ import (
 // EnqueueScheduled accepts one immutable dunning attempt while holding the
 // subscription lock. The same operation owns preparation, submission, recovery
 // and lifecycle effects; there is no second dunning lease to infer ownership.
-func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscriptionID uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscriptionID uuid.UUID) (gen.BillingRailIntent, error) {
 	row, _, err := h.enqueueRebill(ctx, subscriptionID, uuid.Nil, "", nil)
 	return row, err
 }
@@ -35,18 +35,18 @@ var (
 
 // EnqueueCustomer shares the scheduled admission lock and ownership. The HTTP
 // command supplies payer only after verifying a payer-scoped customer action.
-func (h *ManualRebillHandler) EnqueueCustomer(ctx context.Context, subscriptionID, payer uuid.UUID, clientKey string, method *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
+func (h *ManualRebillHandler) EnqueueCustomer(ctx context.Context, subscriptionID, payer uuid.UUID, clientKey string, method *uuid.UUID) (gen.BillingRailIntent, bool, error) {
 	if payer == uuid.Nil || strings.TrimSpace(clientKey) == "" || len(clientKey) > 255 {
-		return gen.OpenrailsRailIntent{}, false, errors.New("payer and a 1-255 byte idempotency key required")
+		return gen.BillingRailIntent{}, false, errors.New("payer and a 1-255 byte idempotency key required")
 	}
 	if method != nil && *method == uuid.Nil {
-		return gen.OpenrailsRailIntent{}, false, errors.New("payment method is invalid")
+		return gen.BillingRailIntent{}, false, errors.New("payment method is invalid")
 	}
 	return h.enqueueRebill(ctx, subscriptionID, payer, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, payer, strings.TrimSpace(clientKey)), method)
 }
 
-func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
-	var accepted gen.OpenrailsRailIntent
+func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.BillingRailIntent, bool, error) {
+	var accepted gen.BillingRailIntent
 	replayed := false
 	customer := customerKey != ""
 	now := h.now()

@@ -14,13 +14,13 @@ import (
 
 const insertPriceKeyMovement = `-- name: InsertPriceKeyMovement :execrows
 
-INSERT INTO openrails.price_key_movements (
+INSERT INTO billing.price_key_movements (
     merchant_id, key, price_id, effective_at, archived
 ) SELECT
     $1::uuid, $2::text, $3::uuid,
     COALESCE(NULLIF($4::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), clock_timestamp()),
     (owned_price.archived OR catalog_product.archived)
-FROM openrails.prices owned_price JOIN openrails.products catalog_product
+FROM billing.prices owned_price JOIN billing.products catalog_product
   ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
 WHERE owned_price.merchant_id=$1::uuid AND owned_price.id=$3::uuid
   AND ($5::uuid IS NULL OR catalog_product.catalog_id=$5::uuid)
@@ -34,7 +34,7 @@ type InsertPriceKeyMovementParams struct {
 	CatalogID   *uuid.UUID
 }
 
-// openrails.price_key_movements (#774): pointer-movement history log.
+// billing.price_key_movements (#774): pointer-movement history log.
 func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKeyMovementParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertPriceKeyMovement,
 		arg.MerchantID,
@@ -50,9 +50,9 @@ func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKey
 }
 
 const listPriceKeyMovements = `-- name: ListPriceKeyMovements :many
-SELECT id, merchant_id, key, price_id, effective_at, created_at, archived FROM openrails.price_key_movements
+SELECT id, merchant_id, key, price_id, effective_at, created_at, archived FROM billing.price_key_movements
 WHERE ($1::uuid IS NULL OR EXISTS (
- SELECT 1 FROM openrails.prices owned_price JOIN openrails.products catalog_product
+ SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product
  ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
  WHERE owned_price.merchant_id=price_key_movements.merchant_id AND owned_price.id=price_key_movements.price_id
  AND catalog_product.catalog_id=$1::uuid))
@@ -66,15 +66,15 @@ type ListPriceKeyMovementsParams struct {
 	Key        string
 }
 
-func (q *Queries) ListPriceKeyMovements(ctx context.Context, arg ListPriceKeyMovementsParams) ([]OpenrailsPriceKeyMovement, error) {
+func (q *Queries) ListPriceKeyMovements(ctx context.Context, arg ListPriceKeyMovementsParams) ([]BillingPriceKeyMovement, error) {
 	rows, err := q.db.Query(ctx, listPriceKeyMovements, arg.CatalogID, arg.MerchantID, arg.Key)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsPriceKeyMovement
+	var items []BillingPriceKeyMovement
 	for rows.Next() {
-		var i OpenrailsPriceKeyMovement
+		var i BillingPriceKeyMovement
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,

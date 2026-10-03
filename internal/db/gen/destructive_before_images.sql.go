@@ -15,11 +15,11 @@ import (
 const captureSubscriptionBeforeImage = `-- name: CaptureSubscriptionBeforeImage :execrows
 
 
-INSERT INTO openrails.destructive_run_before_images (
+INSERT INTO billing.destructive_run_before_images (
     merchant_id, destructive_run_id, table_name, row_id, before, captured_at
 )
 SELECT s.merchant_id, $1::uuid, 'subscriptions', s.id, to_jsonb(s), $2::timestamptz
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = $3::uuid
   AND s.id = $4::uuid
   -- A pruned row is prune's to reverse (or#858), never converge's: capturing
@@ -59,11 +59,11 @@ func (q *Queries) CaptureSubscriptionBeforeImage(ctx context.Context, arg Captur
 }
 
 const captureSubscriptionEntitlementBeforeImages = `-- name: CaptureSubscriptionEntitlementBeforeImages :execrows
-INSERT INTO openrails.destructive_run_before_images (
+INSERT INTO billing.destructive_run_before_images (
     merchant_id, destructive_run_id, table_name, row_id, before, captured_at
 )
 SELECT e.merchant_id, $1::uuid, 'entitlements', e.id, to_jsonb(e), $2::timestamptz
-FROM openrails.entitlements e
+FROM billing.entitlements e
 WHERE e.merchant_id = $3::uuid
   AND e.source_type = 'subscription'
   AND e.source_id = $4::uuid
@@ -102,7 +102,7 @@ const countBeforeImagesForRun = `-- name: CountBeforeImagesForRun :one
 SELECT
     count(*) FILTER (WHERE table_name = 'subscriptions')::bigint AS subscriptions,
     count(*) FILTER (WHERE table_name = 'entitlements')::bigint AS entitlements
-FROM openrails.destructive_run_before_images
+FROM billing.destructive_run_before_images
 WHERE merchant_id = $1::uuid
   AND destructive_run_id = $2::uuid
 `
@@ -125,7 +125,7 @@ func (q *Queries) CountBeforeImagesForRun(ctx context.Context, arg CountBeforeIm
 }
 
 const disarmMerchantEnforcement = `-- name: DisarmMerchantEnforcement :exec
-INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
+INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
 VALUES ($1::uuid, false, NULL, $2::text, $3::text, now())
 ON CONFLICT (merchant_id) DO UPDATE SET
     destructive_actions_enabled = false,
@@ -152,11 +152,11 @@ func (q *Queries) DisarmMerchantEnforcement(ctx context.Context, arg DisarmMerch
 }
 
 const invalidateEntitlementsFromBeforeImages = `-- name: InvalidateEntitlementsFromBeforeImages :execrows
-UPDATE openrails.entitlements e
+UPDATE billing.entitlements e
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
-FROM openrails.destructive_run_before_images b
+FROM billing.destructive_run_before_images b
 WHERE b.merchant_id = $3::uuid
   AND b.destructive_run_id = $2::uuid
   AND b.table_name = 'entitlements'
@@ -197,7 +197,7 @@ func (q *Queries) InvalidateEntitlementsFromBeforeImages(ctx context.Context, ar
 
 const listRailIntentsForRun = `-- name: ListRailIntentsForRun :many
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
-FROM openrails.rail_intents
+FROM billing.rail_intents
 WHERE merchant_id = $1::uuid
   AND destructive_run_id = $2::uuid
 ORDER BY created_at
@@ -251,7 +251,7 @@ func (q *Queries) ListRailIntentsForRun(ctx context.Context, arg ListRailIntents
 }
 
 const markBeforeImagesRestored = `-- name: MarkBeforeImagesRestored :execrows
-UPDATE openrails.destructive_run_before_images
+UPDATE billing.destructive_run_before_images
 SET restored_at = $1::timestamptz
 WHERE merchant_id = $2::uuid
   AND destructive_run_id = $3::uuid
@@ -284,7 +284,7 @@ func (q *Queries) MarkBeforeImagesRestored(ctx context.Context, arg MarkBeforeIm
 
 const resetReconciliationStateUnproven = `-- name: ResetReconciliationStateUnproven :execrows
 
-UPDATE openrails.reconciliation_state
+UPDATE billing.reconciliation_state
 SET fully_reconciled = false, updated_at = now()
 WHERE merchant_id = $1::uuid
   AND fully_reconciled = true
@@ -305,9 +305,9 @@ func (q *Queries) ResetReconciliationStateUnproven(ctx context.Context, merchant
 
 const restoreSubscriptionsFromBeforeImages = `-- name: RestoreSubscriptionsFromBeforeImages :execrows
 
-UPDATE openrails.subscriptions s
+UPDATE billing.subscriptions s
 SET lifecycle_rev            = s.lifecycle_rev + 1,
-    status                   = (b.before->>'status')::openrails.subscription_status,
+    status                   = (b.before->>'status')::billing.subscription_status,
     current_period_starts_at = (b.before->>'current_period_starts_at')::timestamptz,
     current_period_ends_at   = (b.before->>'current_period_ends_at')::timestamptz,
     ended_at                 = (b.before->>'ended_at')::timestamptz,
@@ -320,7 +320,7 @@ SET lifecycle_rev            = s.lifecycle_rev + 1,
     cancel_feedback          = b.before->>'cancel_feedback',
     deletion_scheduled_at    = (b.before->>'deletion_scheduled_at')::timestamptz,
     updated_at               = $1::timestamptz
-FROM openrails.destructive_run_before_images b
+FROM billing.destructive_run_before_images b
 WHERE b.merchant_id = $2::uuid
   AND b.destructive_run_id = $3::uuid
   AND b.table_name = 'subscriptions'
@@ -362,7 +362,7 @@ func (q *Queries) RestoreSubscriptionsFromBeforeImages(ctx context.Context, arg 
 
 const stampRailIntentsForRun = `-- name: StampRailIntentsForRun :execrows
 
-UPDATE openrails.rail_intents
+UPDATE billing.rail_intents
 SET destructive_run_id = $1::uuid
 WHERE merchant_id = $2::uuid
   AND subscription_id = $3::uuid
@@ -397,7 +397,7 @@ func (q *Queries) StampRailIntentsForRun(ctx context.Context, arg StampRailInten
 }
 
 const supersedeUnfiredRailIntentsForRun = `-- name: SupersedeUnfiredRailIntentsForRun :many
-UPDATE openrails.rail_intents
+UPDATE billing.rail_intents
 SET status = 'superseded',
     last_failure_reason = $1::text,
     claimed_until = NULL,

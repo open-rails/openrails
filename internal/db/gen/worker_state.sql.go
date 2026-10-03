@@ -11,18 +11,18 @@ import (
 )
 
 const listWorkerHealth = `-- name: ListWorkerHealth :many
-SELECT worker_kind, cursor_merchant_id, cursor_version, registered_at, expected_period_seconds, last_success_at, last_error_at, last_error, consecutive_failures, last_alerted_at, updated_at FROM openrails.worker_state ORDER BY worker_kind
+SELECT worker_kind, cursor_merchant_id, cursor_version, registered_at, expected_period_seconds, last_success_at, last_error_at, last_error, consecutive_failures, last_alerted_at, updated_at FROM billing.worker_state ORDER BY worker_kind
 `
 
-func (q *Queries) ListWorkerHealth(ctx context.Context) ([]OpenrailsWorkerState, error) {
+func (q *Queries) ListWorkerHealth(ctx context.Context) ([]BillingWorkerState, error) {
 	rows, err := q.db.Query(ctx, listWorkerHealth)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsWorkerState
+	var items []BillingWorkerState
 	for rows.Next() {
-		var i OpenrailsWorkerState
+		var i BillingWorkerState
 		if err := rows.Scan(
 			&i.WorkerKind,
 			&i.CursorMerchantID,
@@ -47,7 +47,7 @@ func (q *Queries) ListWorkerHealth(ctx context.Context) ([]OpenrailsWorkerState,
 }
 
 const markWorkerHealthAlerted = `-- name: MarkWorkerHealthAlerted :exec
-UPDATE openrails.worker_state
+UPDATE billing.worker_state
 SET last_alerted_at = GREATEST(last_alerted_at, $2::timestamptz),
     updated_at = GREATEST(updated_at, $2::timestamptz)
 WHERE worker_kind = $1
@@ -64,22 +64,22 @@ func (q *Queries) MarkWorkerHealthAlerted(ctx context.Context, arg MarkWorkerHea
 }
 
 const recordWorkerFailure = `-- name: RecordWorkerFailure :exec
-INSERT INTO openrails.worker_state (worker_kind, last_error_at, last_error, consecutive_failures, updated_at)
+INSERT INTO billing.worker_state (worker_kind, last_error_at, last_error, consecutive_failures, updated_at)
 VALUES ($1, $2::timestamptz, $3, 1, $2::timestamptz)
 ON CONFLICT (worker_kind) DO UPDATE
 SET last_error = CASE
-        WHEN openrails.worker_state.last_error_at IS NULL
-          OR EXCLUDED.last_error_at >= openrails.worker_state.last_error_at THEN EXCLUDED.last_error
-        ELSE openrails.worker_state.last_error
+        WHEN billing.worker_state.last_error_at IS NULL
+          OR EXCLUDED.last_error_at >= billing.worker_state.last_error_at THEN EXCLUDED.last_error
+        ELSE billing.worker_state.last_error
     END,
-    last_error_at = GREATEST(openrails.worker_state.last_error_at, EXCLUDED.last_error_at),
+    last_error_at = GREATEST(billing.worker_state.last_error_at, EXCLUDED.last_error_at),
     consecutive_failures = CASE
-        WHEN openrails.worker_state.last_success_at IS NULL
-          OR EXCLUDED.last_error_at >= openrails.worker_state.last_success_at
-        THEN openrails.worker_state.consecutive_failures + 1
-        ELSE openrails.worker_state.consecutive_failures
+        WHEN billing.worker_state.last_success_at IS NULL
+          OR EXCLUDED.last_error_at >= billing.worker_state.last_success_at
+        THEN billing.worker_state.consecutive_failures + 1
+        ELSE billing.worker_state.consecutive_failures
     END,
-    updated_at = GREATEST(openrails.worker_state.updated_at, EXCLUDED.updated_at)
+    updated_at = GREATEST(billing.worker_state.updated_at, EXCLUDED.updated_at)
 `
 
 type RecordWorkerFailureParams struct {
@@ -94,16 +94,16 @@ func (q *Queries) RecordWorkerFailure(ctx context.Context, arg RecordWorkerFailu
 }
 
 const recordWorkerSuccess = `-- name: RecordWorkerSuccess :exec
-INSERT INTO openrails.worker_state (worker_kind, last_success_at, consecutive_failures, updated_at)
+INSERT INTO billing.worker_state (worker_kind, last_success_at, consecutive_failures, updated_at)
 VALUES ($1, $2::timestamptz, 0, $2::timestamptz)
 ON CONFLICT (worker_kind) DO UPDATE
-SET last_success_at = GREATEST(openrails.worker_state.last_success_at, EXCLUDED.last_success_at),
+SET last_success_at = GREATEST(billing.worker_state.last_success_at, EXCLUDED.last_success_at),
     consecutive_failures = CASE
-        WHEN openrails.worker_state.last_error_at IS NULL
-          OR EXCLUDED.last_success_at >= openrails.worker_state.last_error_at THEN 0
-        ELSE openrails.worker_state.consecutive_failures
+        WHEN billing.worker_state.last_error_at IS NULL
+          OR EXCLUDED.last_success_at >= billing.worker_state.last_error_at THEN 0
+        ELSE billing.worker_state.consecutive_failures
     END,
-    updated_at = GREATEST(openrails.worker_state.updated_at, EXCLUDED.updated_at)
+    updated_at = GREATEST(billing.worker_state.updated_at, EXCLUDED.updated_at)
 `
 
 type RecordWorkerSuccessParams struct {
@@ -118,7 +118,7 @@ func (q *Queries) RecordWorkerSuccess(ctx context.Context, arg RecordWorkerSucce
 
 const seedWorkerHealth = `-- name: SeedWorkerHealth :exec
 
-INSERT INTO openrails.worker_state (worker_kind, expected_period_seconds)
+INSERT INTO billing.worker_state (worker_kind, expected_period_seconds)
 VALUES ($1, $2)
 ON CONFLICT (worker_kind) DO UPDATE
 SET expected_period_seconds = EXCLUDED.expected_period_seconds
@@ -129,7 +129,7 @@ type SeedWorkerHealthParams struct {
 	ExpectedPeriodSeconds *int64
 }
 
-// openrails.worker_state (#689) — operator-global, no merchant scope.
+// billing.worker_state (#689) — operator-global, no merchant scope.
 //
 // Health writes are monotonic. Job completions reach the row out of order
 // (concurrent completions of one kind, a late-finishing attempt), so a write

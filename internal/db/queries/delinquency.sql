@@ -7,7 +7,7 @@
 -- the work itself (overdue receivables / already-non-current payers), so a pass
 -- costs activity, never the size of the customer table.
 -- name: ListDelinquencyWorkMerchants :many
-SELECT merchant_id FROM openrails.delinquency_work_merchant_ids(
+SELECT merchant_id FROM billing.delinquency_work_merchant_ids(
     sqlc.arg(now)::timestamptz,
     sqlc.arg(merchant_limit)::int);
 
@@ -36,14 +36,14 @@ SELECT i.customer_id,
        -- would be inferred non-null by sqlc and mis-scan.
        COALESCE(pol.grace_days, -1)::int AS grace_days,
        COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
-FROM openrails.invoices i
+FROM billing.invoices i
 LEFT JOIN LATERAL (
     SELECT (p.policy ->> 'delinquency_grace_days')::int AS grace_days,
            (p.policy ->> 'delinquency_amount_floor')::bigint AS amount_floor
-    FROM openrails.billing_policy_bindings b
-    JOIN openrails.billing_policies p
+    FROM billing.billing_policy_bindings b
+    JOIN billing.billing_policies p
       ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-    LEFT JOIN openrails.money_settings ms
+    LEFT JOIN billing.money_settings ms
       ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
     WHERE b.merchant_id = i.merchant_id
       AND (b.customer_id = i.customer_id OR b.customer_id IS NULL)
@@ -70,7 +70,7 @@ LIMIT sqlc.arg(row_limit);
 SELECT COALESCE(MIN(due_at), sqlc.arg(now)::timestamptz) AS overdue_since,
        COALESCE(SUM(amount_due), 0)::bigint AS overdue_amount,
        COUNT(*)::bigint AS overdue_invoices
-FROM openrails.invoices
+FROM billing.invoices
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
   AND currency = sqlc.arg(currency)
@@ -83,21 +83,21 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 -- The EXIT leg: payers already parked in grace/delinquent. Small by
 -- construction, and the only way a cleared debt gets noticed — an invoice that
 -- was paid no longer appears in the enter scan at all.
-SELECT * FROM openrails.customer_delinquency
+SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND state <> 'current'
 ORDER BY overdue_since, customer_id, currency
 LIMIT sqlc.arg(row_limit);
 
 -- name: GetCustomerDelinquency :one
-SELECT * FROM openrails.customer_delinquency
+SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
   AND currency = sqlc.arg(currency);
 
 -- name: ListCustomerDelinquency :many
 -- Every currency for one payer (the per-payer API read).
-SELECT * FROM openrails.customer_delinquency
+SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
 ORDER BY currency;
@@ -105,7 +105,7 @@ ORDER BY currency;
 -- name: ListDelinquentCustomers :many
 -- The operator's roster: who is overdue, worst first. `current` rows are never
 -- returned — a settled payer is not a row anyone needs to look at.
-SELECT * FROM openrails.customer_delinquency
+SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND state <> 'current'
   AND (sqlc.narg(state)::text IS NULL OR state = sqlc.narg(state)::text)
@@ -121,12 +121,12 @@ LIMIT sqlc.arg(row_limit);
 -- compute the same sequence, hence the same dedupe key, hence one event.
 WITH previous AS (
     SELECT state, entered_at, transition_seq
-    FROM openrails.customer_delinquency
+    FROM billing.customer_delinquency
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND customer_id = sqlc.arg(customer_id)::uuid
       AND currency = sqlc.arg(currency)::text
 ), upserted AS (
-    INSERT INTO openrails.customer_delinquency AS d (
+    INSERT INTO billing.customer_delinquency AS d (
         merchant_id, customer_id, currency, state, overdue_since, overdue_amount,
         overdue_invoices, entered_at, transition_seq, evaluated_at, created_at, updated_at)
     VALUES (

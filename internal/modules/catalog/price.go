@@ -108,11 +108,11 @@ func (s *PriceService) GetWithProductByIDs(ctx context.Context, ids []uuid.UUID)
 	}
 	prices := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := models.PriceFromGen(row.OpenrailsPrice)
+		price, err := models.PriceFromGen(row.BillingPrice)
 		if err != nil {
 			return nil, err
 		}
-		if price.Product, err = models.ProductFromGen(row.OpenrailsProduct); err != nil {
+		if price.Product, err = models.ProductFromGen(row.BillingProduct); err != nil {
 			return nil, err
 		}
 		prices = append(prices, price)
@@ -124,7 +124,7 @@ func (s *PriceService) GetWithProductByIDs(ctx context.Context, ids []uuid.UUID)
 	return out, nil
 }
 
-func (s *PriceService) pricesFromGen(ctx context.Context, rows []gen.OpenrailsPrice) ([]*models.Price, error) {
+func (s *PriceService) pricesFromGen(ctx context.Context, rows []gen.BillingPrice) ([]*models.Price, error) {
 	out := make([]*models.Price, 0, len(rows))
 	for _, r := range rows {
 		p, err := models.PriceFromGen(r)
@@ -177,7 +177,7 @@ func (s *PriceService) GetAllActive(ctx context.Context) ([]*models.Price, error
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+		price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +198,7 @@ func (s *PriceService) GetAll(ctx context.Context) ([]*models.Price, error) {
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+		price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +207,7 @@ func (s *PriceService) GetAll(ctx context.Context) ([]*models.Price, error) {
 	return out, s.db.LoadPricePSPBindings(ctx, out, nil)
 }
 
-func (s *PriceService) priceWithProduct(ctx context.Context, p gen.OpenrailsPrice, prod gen.OpenrailsProduct) (*models.Price, error) {
+func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice, prod gen.BillingProduct) (*models.Price, error) {
 	price, err := models.PriceFromGen(p)
 	if err != nil {
 		return nil, err
@@ -274,7 +274,7 @@ func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, li
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+		price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -334,7 +334,7 @@ func (s *PriceService) GetByCCBillPriceID(ctx context.Context, recurringBillingO
 		return nil, fmt.Errorf("ambiguous CCBill %s %q for PSP %s; supply recurring billing option identity", objectKind, ccbillPriceID, pspID)
 	}
 	row := rows[0]
-	price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+	price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID str
 	if err != nil {
 		return nil, err
 	}
-	price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+	price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
 	if err != nil {
 		return nil, err
 	}

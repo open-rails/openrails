@@ -14,19 +14,19 @@ import (
 
 const checkProductAccessKeys = `-- name: CheckProductAccessKeys :many
 SELECT candidate.product_key::text AS product_key, p.id AS product_id, EXISTS (
- SELECT 1 FROM openrails.grants g
+ SELECT 1 FROM billing.grants g
  WHERE g.merchant_id = $1::uuid
    AND g.customer_id = $2::uuid
    AND g.product_id = p.id
    AND g.kind = 'ownership' AND g.event = 'grant'
    AND g.starts_at <= $3::timestamptz
    AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
-   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   AND NOT EXISTS (SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
       AND t.event IN ('revoke','expire','supersede'))
 ) AS has_access
 FROM unnest($4::text[]) AS candidate(product_key)
-LEFT JOIN openrails.products p ON p.merchant_id = $1::uuid
+LEFT JOIN billing.products p ON p.merchant_id = $1::uuid
  AND p.key = candidate.product_key
  AND ($5::uuid IS NULL OR p.catalog_id = $5::uuid)
 `

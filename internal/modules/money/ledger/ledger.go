@@ -286,7 +286,7 @@ type Transfer struct {
 // Deprecated in favour of ApplyIdempotent, which reports whether the write
 // actually landed. Apply keeps the old shape for read-through call sites that
 // genuinely do not care; it is a thin wrapper and carries no second contract.
-func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.BillingLedgerTransfer, error) {
 	tr, _, err := l.ApplyIdempotent(ctx, t)
 	return tr, err
 }
@@ -306,11 +306,11 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 // The database checks account constraints and updates counters only after a
 // successful insert. A duplicate therefore replays even if the original
 // transfer depleted the balance; it never checks or moves the money again.
-func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.OpenrailsLedgerTransfer, applied bool, err error) {
+func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.BillingLedgerTransfer, applied bool, err error) {
 	// The coordinate is validated HERE, at the one insert every money movement
 	// funnels through, so no new spend path can post an unkeyed or ambiguous leg.
 	if err := t.Coord.Validate(); err != nil {
-		return gen.OpenrailsLedgerTransfer{}, false, err
+		return gen.BillingLedgerTransfer{}, false, err
 	}
 	tr, err = l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
 		MerchantID:             l.merchant,
@@ -337,24 +337,24 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Openra
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, found, gerr := l.transferAt(ctx, t)
 		if gerr != nil {
-			return gen.OpenrailsLedgerTransfer{}, false, gerr
+			return gen.BillingLedgerTransfer{}, false, gerr
 		}
 		if !found {
-			return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf(
+			return gen.BillingLedgerTransfer{}, false, fmt.Errorf(
 				"ledger: insert at %s conflicted but no committed row is visible", t.Coord)
 		}
 		return existing, false, nil
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && strings.Contains(pgErr.Message, "ledger_insufficient_funds") {
-		return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf("%w: %s", ErrInsufficientFunds, pgErr.Message)
+		return gen.BillingLedgerTransfer{}, false, fmt.Errorf("%w: %s", ErrInsufficientFunds, pgErr.Message)
 	}
-	return gen.OpenrailsLedgerTransfer{}, false, err
+	return gen.BillingLedgerTransfer{}, false, err
 }
 
 // transferAt resolves the row already committed at a transfer's full physical
 // identity (coordinate + lot), if any.
-func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTransfer, bool, error) {
+func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.BillingLedgerTransfer, bool, error) {
 	row, err := l.q.GetLedgerTransferAtCoordinate(ctx, gen.GetLedgerTransferAtCoordinateParams{
 		MerchantID:   l.merchant,
 		CustomerID:   t.Customer,
@@ -369,9 +369,9 @@ func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.OpenrailsLedge
 		return row, true, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.OpenrailsLedgerTransfer{}, false, nil
+		return gen.BillingLedgerTransfer{}, false, nil
 	}
-	return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf("ledger: resolve transfer at %s: %w", t.Coord, err)
+	return gen.BillingLedgerTransfer{}, false, fmt.Errorf("ledger: resolve transfer at %s: %w", t.Coord, err)
 }
 
 // Balance returns the account's maintained balance counter
@@ -385,14 +385,14 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 // Deposit credits the customer's balance from the rail-clearing account
 // (DR processor_clearing / CR customer_balance). grantID attributes the deposit
 // to its #514 credit lot (uuid.Nil for a non-lot deposit).
-func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.BillingLedgerTransfer{}, err
 	}
 	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.BillingLedgerTransfer{}, err
 	}
 	c := customer
 	t := Transfer{
@@ -411,21 +411,21 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 // balance is untouched — the debt is tracked as a pending invoice item by the
 // caller and nets out when PayOwed settles it. arrears_liability's net balance
 // (which goes negative as debt accrues) is the conserved owed exposure.
-func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	tr, _, err := l.AccrueOwedIdempotent(ctx, customer, currency, amount, coord, invoice)
 	return tr, err
 }
 
 // AccrueOwedIdempotent is AccrueOwed reporting whether the accrual actually
 // posted, or replayed a coordinate already committed.
-func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, bool, error) {
+func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, bool, error) {
 	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, false, err
+		return gen.BillingLedgerTransfer{}, false, err
 	}
 	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, false, err
+		return gen.BillingLedgerTransfer{}, false, err
 	}
 	c := customer
 	return l.ApplyIdempotent(ctx, Transfer{
@@ -440,14 +440,14 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 // is given back and the payer's liability returns toward zero. Without this the
 // invoice says "voided" and the ledger says "still owed", and since the ledger
 // is the exposure substrate the payer stays capped for a bill nobody owes.
-func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.BillingLedgerTransfer{}, err
 	}
 	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.BillingLedgerTransfer{}, err
 	}
 	c := customer
 	return l.Apply(ctx, Transfer{
@@ -458,14 +458,14 @@ func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency 
 
 // PayOwed settles accrued arrears via an external charge (DR processor_clearing /
 // CR arrears_liability), bringing the liability account back toward zero.
-func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.OpenrailsLedgerTransfer, error) {
+func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.BillingLedgerTransfer{}, err
 	}
 	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
 	if err != nil {
-		return gen.OpenrailsLedgerTransfer{}, err
+		return gen.BillingLedgerTransfer{}, err
 	}
 	c := customer
 	return l.Apply(ctx, Transfer{

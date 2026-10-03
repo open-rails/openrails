@@ -1,6 +1,6 @@
 -- name: InsertPaymentAttempt :execrows
 -- #1110: idempotent on the gateway transaction id, else on the operation step.
-INSERT INTO openrails.payment_attempts (
+INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
@@ -25,7 +25,7 @@ ON CONFLICT DO NOTHING;
 -- name: LatestPaymentCheckoutAttempt :one
 -- The buyer's most recent attempt on one checkout target since a moment.
 SELECT checkout_id::uuid AS checkout_id, kind, category
-FROM openrails.payment_attempts
+FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND checkout_target = sqlc.arg(checkout_target)::text
@@ -36,7 +36,7 @@ LIMIT 1;
 -- name: CheckoutVerifiedPaymentMethod :one
 -- Whether this checkout itself verified the card, i.e. the buyer typed it here.
 SELECT EXISTS (
-    SELECT 1 FROM openrails.payment_attempts
+    SELECT 1 FROM billing.payment_attempts
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND customer_id = sqlc.arg(customer_id)::uuid
       AND checkout_target = sqlc.arg(checkout_target)::text
@@ -46,13 +46,13 @@ SELECT EXISTS (
 )::boolean AS verified;
 
 -- name: ListUnenrichedAttemptMerchants :many
-SELECT merchant_id FROM openrails.unenriched_attempt_merchant_ids(
+SELECT merchant_id FROM billing.unenriched_attempt_merchant_ids(
     sqlc.arg(since)::timestamptz, sqlc.arg(before)::timestamptz, sqlc.arg(merchant_limit)::int);
 
 -- name: ListUnenrichedNMIAttempts :many
 -- #1114: NMI attempts in [since, before) the enrichment pass has not read.
 SELECT id, psp_id, transaction_id::text AS transaction_id, attempted_at
-FROM openrails.payment_attempts
+FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND enriched_at IS NULL AND rail = 'nmi' AND transaction_id IS NOT NULL
   AND attempted_at >= sqlc.arg(since)::timestamptz AND attempted_at < sqlc.arg(before)::timestamptz
@@ -62,7 +62,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- name: EnrichPaymentAttempt :execrows
 -- #1114: fills what the attempt's own reply lacked from the PSP's
 -- transaction read, once. A network token used replaces the token type.
-UPDATE openrails.payment_attempts SET
+UPDATE billing.payment_attempts SET
     card_bin = COALESCE(card_bin, sqlc.narg(card_bin)::text),
     card_brand = COALESCE(card_brand, sqlc.narg(card_brand)::text),
     card_last4 = COALESCE(card_last4, sqlc.narg(card_last4)::text),
@@ -78,7 +78,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 -- #1116: the merchant's attempts, newest first; every filter is optional and
 -- a text filter matches any of its values.
 SELECT sqlc.embed(a), count(*) OVER () AS total
-FROM openrails.payment_attempts a
+FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(kinds)::text[] IS NULL OR a.kind = ANY(sqlc.narg(kinds)::text[]))
   AND (sqlc.narg(owners)::text[] IS NULL OR a.owner = ANY(sqlc.narg(owners)::text[]))
@@ -101,21 +101,21 @@ ORDER BY a.attempted_at DESC, a.id DESC
 LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: GetPaymentAttempt :one
-SELECT * FROM openrails.payment_attempts
+SELECT * FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: ListCycleAttempts :many
 -- #1116: a rebill cycle's attempts, oldest first.
-SELECT * FROM openrails.payment_attempts
+SELECT * FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND cycle_id = sqlc.arg(cycle_id)::uuid
 ORDER BY attempted_at, id;
 
 -- #1118: attempts past their retention, batched: row_limit bounds one
 -- statement and the cleanup worker loops.
 -- name: DeletePaymentAttemptsBefore :execrows
-DELETE FROM openrails.payment_attempts
+DELETE FROM billing.payment_attempts
 WHERE id IN (
-    SELECT a.id FROM openrails.payment_attempts a
+    SELECT a.id FROM billing.payment_attempts a
     WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
       AND a.attempted_at < sqlc.arg(cutoff)::timestamptz
     LIMIT sqlc.arg(row_limit)::int

@@ -15,19 +15,19 @@ import (
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, $1::timestamptz)::bigint AS held,
+    billing.financial_held_amount(a.merchant_id, a.customer_id, a.currency, $1::timestamptz)::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
     -- the same O(1) point lookup. Debt is a negative arrears balance, so the
     -- exposure is (debits - credits), floored at 0.
     COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
-FROM openrails.ledger_accounts a
-LEFT JOIN openrails.money_settings s
+FROM billing.ledger_accounts a
+LEFT JOIN billing.money_settings s
   ON s.merchant_id = a.merchant_id
  AND s.customer_id = a.customer_id
  AND s.currency = a.currency
-LEFT JOIN openrails.ledger_accounts ar
+LEFT JOIN billing.ledger_accounts ar
   ON ar.merchant_id = a.merchant_id
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
@@ -79,7 +79,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
 
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -90,12 +90,12 @@ type GetMoneyAccountSettingsParams struct {
 	Currency   string
 }
 
-// openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
+// billing.money_settings: per-(tenant, payer, currency) spend policy + money-in
 // state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
 // precision. currency is a system code; the Go registry is authority.
-func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (OpenrailsMoneySetting, error) {
+func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (BillingMoneySetting, error) {
 	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsMoneySetting
+	var i BillingMoneySetting
 	err := row.Scan(
 		&i.MerchantID,
 		&i.CustomerID,
@@ -111,7 +111,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 }
 
 const insertMoneyAccountSettingsIfAbsent = `-- name: InsertMoneyAccountSettingsIfAbsent :exec
-INSERT INTO openrails.money_settings (
+INSERT INTO billing.money_settings (
     merchant_id, customer_id, currency, billing_mode, created_at, updated_at
 ) VALUES ($1, $2, $4, $3, $5, $5)
 ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING
@@ -140,18 +140,18 @@ func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg In
 const listCustomerBalanceCurrencies = `-- name: ListCustomerBalanceCurrencies :many
 SELECT currency::text AS currency
 FROM (
-    SELECT currency FROM openrails.ledger_accounts
+    SELECT currency FROM billing.ledger_accounts
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
       AND account_type = 'customer_balance'
     UNION
-    SELECT currency FROM openrails.money_settings
+    SELECT currency FROM billing.money_settings
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
     UNION
-    SELECT currency FROM openrails.invoice_items
+    SELECT currency FROM billing.invoice_items
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
       AND invoice_id IS NULL AND status = 'pending'
     UNION
-    SELECT currency FROM openrails.invoices
+    SELECT currency FROM billing.invoices
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
       AND status IN ('open', 'past_due') AND amount_due > 0
 ) currencies
@@ -185,7 +185,7 @@ func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCus
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -195,15 +195,15 @@ type ListMoneyAccountSettingsByCustomerParams struct {
 	CustomerID uuid.UUID
 }
 
-func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg ListMoneyAccountSettingsByCustomerParams) ([]OpenrailsMoneySetting, error) {
+func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg ListMoneyAccountSettingsByCustomerParams) ([]BillingMoneySetting, error) {
 	rows, err := q.db.Query(ctx, listMoneyAccountSettingsByCustomer, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsMoneySetting
+	var items []BillingMoneySetting
 	for rows.Next() {
-		var i OpenrailsMoneySetting
+		var i BillingMoneySetting
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.CustomerID,
@@ -226,7 +226,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -237,9 +237,9 @@ type LockMoneyAccountSettingsParams struct {
 	Currency   string
 }
 
-func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (OpenrailsMoneySetting, error) {
+func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAccountSettingsParams) (BillingMoneySetting, error) {
 	row := q.db.QueryRow(ctx, lockMoneyAccountSettings, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsMoneySetting
+	var i BillingMoneySetting
 	err := row.Scan(
 		&i.MerchantID,
 		&i.CustomerID,
@@ -255,7 +255,7 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 }
 
 const setMoneyAccountCollectionPaymentMethod = `-- name: SetMoneyAccountCollectionPaymentMethod :execrows
-UPDATE openrails.money_settings
+UPDATE billing.money_settings
 SET collection_payment_method_id = $3,
     updated_at = $4
 WHERE merchant_id = $1
@@ -286,7 +286,7 @@ func (q *Queries) SetMoneyAccountCollectionPaymentMethod(ctx context.Context, ar
 }
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec
-UPDATE openrails.money_settings
+UPDATE billing.money_settings
 SET credit_limit_amount = $3::bigint, updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
@@ -314,7 +314,7 @@ func (q *Queries) SetMoneyAccountCreditLimit(ctx context.Context, arg SetMoneyAc
 }
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec
-UPDATE openrails.money_settings
+UPDATE billing.money_settings
 SET tier = $3::text, updated_at = $4
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
@@ -340,7 +340,7 @@ func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTi
 }
 
 const upsertMoneyAccountSettings = `-- name: UpsertMoneyAccountSettings :exec
-INSERT INTO openrails.money_settings (
+INSERT INTO billing.money_settings (
     merchant_id, customer_id, currency, billing_mode,
     created_at, updated_at
 ) VALUES ($1, $2, $6, $3, $4, $5)

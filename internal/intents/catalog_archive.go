@@ -52,7 +52,7 @@ type StripeArchivePayload struct {
 	Label     string `json:"label,omitempty"`
 }
 
-func decodeStripeArchivePayload(intent gen.OpenrailsRailIntent) (StripeArchivePayload, error) {
+func decodeStripeArchivePayload(intent gen.BillingRailIntent) (StripeArchivePayload, error) {
 	var p StripeArchivePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("stripe archive intent has no payload")
@@ -122,7 +122,7 @@ func (h *stripeArchiveCore) stripeConfigured(ctx context.Context) bool {
 // the object has since been added/linked locally, archiving the remote copy
 // would be wrong -> superseded. Local reads only; the same extra-ness
 // definition detection uses (catalog.ExtrasIndex).
-func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.OpenrailsRailIntent, isExtra func(catalog.ExtrasIndex, StripeArchivePayload) bool) (Relevance, error) {
+func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.BillingRailIntent, isExtra func(catalog.ExtrasIndex, StripeArchivePayload) bool) (Relevance, error) {
 	p, err := decodeStripeArchivePayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
@@ -153,7 +153,7 @@ func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.Openr
 // cleanly retryable — never ambiguous.
 func (h *stripeArchiveCore) execute(
 	ctx context.Context,
-	intent gen.OpenrailsRailIntent,
+	intent gen.BillingRailIntent,
 	read func(ctx context.Context, id string) (active bool, found bool, err error),
 	write func(ctx context.Context, id, idempotencyKey string) error,
 ) Outcome {
@@ -187,7 +187,7 @@ func (h *stripeArchiveCore) execute(
 // provider means done; still active means it definitely has not happened.
 func (h *stripeArchiveCore) verify(
 	ctx context.Context,
-	intent gen.OpenrailsRailIntent,
+	intent gen.BillingRailIntent,
 	read func(ctx context.Context, id string) (active bool, found bool, err error),
 ) Outcome {
 	if !h.stripeConfigured(ctx) {
@@ -239,7 +239,7 @@ func (h *StripeArchiveProductHandler) PrunePolicy() (keepPayload, keepEvidence b
 	return false, true
 }
 
-func (h *StripeArchiveProductHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *StripeArchiveProductHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent, func(ix catalog.ExtrasIndex, p StripeArchivePayload) bool {
 		extra, _ := ix.StripeProductExtra(catalog.StripeProduct{
 			ID:       p.ObjectID,
@@ -257,14 +257,14 @@ func (h *StripeArchiveProductHandler) readProduct(ctx context.Context, id string
 	return obj.Active, true, nil
 }
 
-func (h *StripeArchiveProductHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeArchiveProductHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.execute(ctx, intent, h.readProduct, func(ctx context.Context, id, key string) error {
 		inactive := false
 		return h.Stripe.UpdateProduct(ctx, id, catalog.UpdateProductParams{Active: &inactive, IdempotencyKey: key})
 	})
 }
 
-func (h *StripeArchiveProductHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeArchiveProductHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.verify(ctx, intent, h.readProduct)
 }
 
@@ -296,7 +296,7 @@ func (h *StripeArchivePriceHandler) PrunePolicy() (keepPayload, keepEvidence boo
 	return false, true
 }
 
-func (h *StripeArchivePriceHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *StripeArchivePriceHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent, func(ix catalog.ExtrasIndex, p StripeArchivePayload) bool {
 		extra, _ := ix.StripePriceExtra(catalog.StripePrice{
 			ID:       p.ObjectID,
@@ -314,13 +314,13 @@ func (h *StripeArchivePriceHandler) readPrice(ctx context.Context, id string) (b
 	return obj.Active, true, nil
 }
 
-func (h *StripeArchivePriceHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeArchivePriceHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.execute(ctx, intent, h.readPrice, func(ctx context.Context, id, key string) error {
 		inactive := false
 		return h.Stripe.UpdatePrice(ctx, id, catalog.UpdatePriceParams{Active: &inactive, IdempotencyKey: key})
 	})
 }
 
-func (h *StripeArchivePriceHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeArchivePriceHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.verify(ctx, intent, h.readPrice)
 }

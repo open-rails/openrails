@@ -42,7 +42,7 @@ SQL="\\set ON_ERROR_STOP on
 
 \\echo '--- checkout_sessions ---'
 SELECT merchant_id, id, status, rail, price_id, transaction_id, subscription_id, payment_id, created_at
-FROM openrails.checkout_sessions
+FROM billing.checkout_sessions
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
    OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC
@@ -50,7 +50,7 @@ LIMIT 50;
 
 \\echo '--- payment_methods ---'
 SELECT merchant_id, id, customer_id, rail, rail_customer_ref, rail_method_ref, created_at
-FROM openrails.payment_methods
+FROM billing.payment_methods
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
    OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC
@@ -58,7 +58,7 @@ LIMIT 50;
 
 \\echo '--- subscriptions ---'
 SELECT merchant_id, id, customer_id, status, rail, rail_subscription_id, price_id, created_at
-FROM openrails.subscriptions
+FROM billing.subscriptions
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND gateway_response->>'e2e_run_id' = :'e2e_run_id')
    OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC
@@ -66,7 +66,7 @@ LIMIT 50;
 
 \\echo '--- payments ---'
 SELECT merchant_id, id, customer_id, rail, transaction_id, amount, currency, purchased_at
-FROM openrails.payments
+FROM billing.payments
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
    OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY purchased_at DESC

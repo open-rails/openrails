@@ -21,7 +21,7 @@ import (
 // their complete references with metadata in one SQL transaction. Unpublished
 // candidates survive interruption and are recoverable by the caller's operation
 // ID. Neither receipts nor SQL publication state contain credential values.
-func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID, rail, environment, account string, enabled bool, req UpsertPaymentProviderConfigRequest, names, keys map[string]string, validated bool, verifiedAt *time.Time, transitionSource ...credentialTransitionPublication) (gen.OpenrailsPsp, error) {
+func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID, rail, environment, account string, enabled bool, req UpsertPaymentProviderConfigRequest, names, keys map[string]string, validated bool, verifiedAt *time.Time, transitionSource ...credentialTransitionPublication) (gen.BillingPsp, error) {
 	transitionFrom := ""
 	var publication credentialTransitionPublication
 	var snapshotRefs map[string]SecretRef
@@ -31,16 +31,16 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		snapshotRefs = transitionSource[0].SnapshotRefs
 	}
 	if req.OperationID == uuid.Nil || req.ExpectedRevision == nil || *req.ExpectedRevision < 0 {
-		return gen.OpenrailsPsp{}, apperr.Invalidf("operation_id and nonnegative expected_revision are required")
+		return gen.BillingPsp{}, apperr.Invalidf("operation_id and nonnegative expected_revision are required")
 	}
 	if len(names) > 0 {
 		if !CanStageCredentials(s.secrets) && snapshotRefs == nil {
-			return gen.OpenrailsPsp{}, credentialWriteRefusal(s.secrets)
+			return gen.BillingPsp{}, credentialWriteRefusal(s.secrets)
 		}
 	}
 	custody := SecretCustodyIdentity(s.secrets)
 	if custody == "" {
-		return gen.OpenrailsPsp{}, ErrSecretBackendUnavailable
+		return gen.BillingPsp{}, ErrSecretBackendUnavailable
 	}
 	normalizedKeys := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -49,7 +49,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 	sort.Strings(normalizedKeys)
 	metadata, err := credentialPublicationMetadata(enabled, req.PublicConfig, normalizedKeys, transitionFrom, custody, publication.WebhookEndpointID, publication.RetireWebhookOverlap)
 	if err != nil {
-		return gen.OpenrailsPsp{}, err
+		return gen.BillingPsp{}, err
 	}
 	var completed []byte
 	// Committed custody state cannot be enlisted in a caller's rollback domain.
@@ -83,7 +83,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		return nil
 	})
 	if err != nil {
-		return gen.OpenrailsPsp{}, err
+		return gen.BillingPsp{}, err
 	}
 	refs := make(map[string]SecretRef, len(names))
 	sorted := make([]string, 0, len(names))
@@ -96,14 +96,14 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 			key := NormalizeCredentialVersionKey(keys[name])
 			ref, ok := snapshotRefs[key]
 			if !ok {
-				return gen.OpenrailsPsp{}, ErrSecretNotFound
+				return gen.BillingPsp{}, ErrSecretNotFound
 			}
 			secret, err := ReadSecretRef(ctx, s.secrets, id, ref)
 			if err != nil {
-				return gen.OpenrailsPsp{}, err
+				return gen.BillingPsp{}, err
 			}
 			if secret.Value != names[name] {
-				return gen.OpenrailsPsp{}, ErrCredentialOperationConflict
+				return gen.BillingPsp{}, ErrCredentialOperationConflict
 			}
 			refs[key] = ref
 			continue
@@ -111,18 +111,18 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		candidate := "credential_candidates/" + req.OperationID.String() + "/" + name
 		sec, err := stageSecret(ctx, s.secrets, id, candidate, names[name])
 		if err != nil {
-			return gen.OpenrailsPsp{}, err
+			return gen.BillingPsp{}, err
 		}
 		refs[NormalizeCredentialVersionKey(keys[name])] = SecretRef{Name: candidate, MinVersion: sec.Version, Custody: custody}
 	}
 	if len(completed) > 0 {
-		var row gen.OpenrailsPsp
+		var row gen.BillingPsp
 		if err := json.Unmarshal(completed, &row); err != nil {
 			return row, ErrSecretBackendUnavailable
 		}
 		return row, nil
 	}
-	var result gen.OpenrailsPsp
+	var result gen.BillingPsp
 	err = s.pool.CommittedMerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
@@ -320,8 +320,8 @@ func credentialPublicationMetadata(enabled bool, public map[string]string, keys 
 // replayProviderCredentialPublication checks committed custody before any provider
 // probe. Secret equality is checked privately against immutable references;
 // neither payload values nor their hashes are stored in SQL receipts.
-func (s *Service) replayProviderCredentialPublication(ctx context.Context, id merchant.ID, rail, environment, account string, req UpsertPaymentProviderConfigRequest) (gen.OpenrailsPsp, bool, error) {
-	var row gen.OpenrailsPsp
+func (s *Service) replayProviderCredentialPublication(ctx context.Context, id merchant.ID, rail, environment, account string, req UpsertPaymentProviderConfigRequest) (gen.BillingPsp, bool, error) {
+	var row gen.BillingPsp
 	var metadata, receipt []byte
 	var storedRail, storedEnv, storedAccount string
 	var revision int64

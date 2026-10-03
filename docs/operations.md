@@ -69,7 +69,7 @@ a rename error. The command imports each PSP's secrets under the canonical
 scoped name `psps/<rail>/<environment>/<account_id>/<secret_key>` into the
 backend the server reads (`secret_backend: db | vault`): Vault KV-v2 path
 `<mount>/openrails/merchants/<merchant-slug>/<name>`, or
-`openrails.merchant_secrets` envelope-encrypted under
+`billing.merchant_secrets` envelope-encrypted under
 `encryption.master_key` / `ENCRYPTION_MASTER_KEY`. Runtime checkout,
 webhooks, tokenization, provider intents, and pulls all arm per-PSP from that
 scoped name.
@@ -95,7 +95,7 @@ bootstrap is first-run only and limited to AuthKit authority.
 
 **Outbound — durability is OUR job.** Every mutation OpenRails wants to make
 against a provider must survive failure of the attempt. The mechanism is the
-**provider intent ledger** (`openrails.rail_intents`): every outbound
+**provider intent ledger** (`billing.rail_intents`): every outbound
 mutation is durably recorded with an idempotency key (re-enqueues dedupe), an
 origin (`user`/`admin`/`system`), the PSP row it was produced against, and a
 relevance window. Two scheduled workers drain it: the **executor** (every
@@ -128,7 +128,7 @@ resolved by *reading* the provider before any retry — a charge is never
 blind-retried; deletes/cancels are verify-then-execute (already-deleted =
 success); creates are content-addressed find-or-create. Stripe ops
 additionally send `Idempotency-Key`. Every attempt/outcome is appended to
-`openrails.rail_mutation_logs`.
+`billing.rail_mutation_logs`.
 
 **Several replicas.** Hosts may run any number of processes against one
 database and River schema. Exactly-once rebilling rests on the database, not
@@ -180,7 +180,7 @@ policy. `readonly` is unchanged: pure dry-run observer.
 
 ### PSP binding and credential rotation
 
-`openrails.psps` is an **operator-declared** catalog: one row per merchant
+`billing.psps` is an **operator-declared** catalog: one row per merchant
 PSP account on a rail, with an opaque declared `account_id`. There is NO
 runtime "whoami"/identity resolution — OpenRails never fetches or verifies
 the account identity behind a credential; the declaration is trusted.
@@ -250,7 +250,7 @@ Rules:
 
 ### Custodians (or#880)
 
-`openrails.custodians` is the same kind of catalog, one axis over: a row is
+`billing.custodians` is the same kind of catalog, one axis over: a row is
 one merchant-owned account with a third-party card CUSTODIAN (Basis Theory
 today). A PSP references it by `psps.custodian_id`, so one custodian can back
 several gateways — its tenant id and its private application key exist once,
@@ -452,7 +452,7 @@ anchored to source-event time; destructive repairs are gated — see below.
 
 Every finding gets one self-describing qualified type,
 `<plane>.<subject>.<shape-or-condition>`, stored in
-`openrails.reconciliation_findings.finding_type`:
+`billing.reconciliation_findings.finding_type`:
 
 | Plane | The fact checked | Authority | Repaired by |
 |---|---|---|---|
@@ -481,7 +481,7 @@ disappears. Two safety doctrines matter operationally:
   (subscriptions / payments / grants) is marked *fully reconciled* for the
   merchant — flipped automatically after a completed mutating pull whose
   fetcher proved exhaustive coverage across every declared PSP
-  (`openrails.reconciliation_state`, a ratchet). During an import, "not in
+  (`billing.reconciliation_state`, a ratchet). During an import, "not in
   the local DB" is not absence — it usually means *not imported yet*. Held
   repairs stay `reconcile_required` with the unproven domain in evidence.
 - **Stuck intents** (`life.provider_intent.stuck`): the sweep flags rail
@@ -608,7 +608,7 @@ queue, skipping merchants with no declared PSPs (#719). Three lanes:
 
 | Lane | Purpose |
 |---|---|
-| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`openrails.rail_refresh_watermarks`) |
+| Provider Event Refresh | bounded missed-event backfill for NMI, Stripe, CCBill using durable per-merchant/rail/account/domain watermarks (`billing.rail_refresh_watermarks`) |
 | Unknown-cohort Reconcile | resolves `unverified` subscriptions against provider truth: one windowed bulk pull per rail + targeted per-subscription probes for rows the bulk pull can't decide |
 | CCBill DataLink Refresh | scheduled active-member bulk refresh (CCBill has no cheap per-subscription liveness API) |
 
@@ -651,12 +651,12 @@ watermarked backfill catches their provider events.
 ## Solana Pay settlement (#1086)
 
 Solana Pay state is in PostgreSQL. A checkout attempt has one reference in
-`openrails.solana_pay_references` (`pending` → `confirmed` | `expired`). Every
+`billing.solana_pay_references` (`pending` → `confirmed` | `expired`). Every
 replica's poller claims due references with `SKIP LOCKED` and walks each
 reference's whole finalized signature history, oldest first, resuming from a
 stored cursor, so no number of transactions naming a reference can hide a
 payment. Each new signature goes to one settlement transaction under the
-reference's row lock and is recorded once in `openrails.solana_pay_receipts`;
+reference's row lock and is recorded once in `billing.solana_pay_receipts`;
 a transfer to one recipient in one mint is credited or reviewed at most once
 across all references.
 
@@ -703,7 +703,7 @@ up. "start" = RunOnStart.
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
 
-The health checker seeds `openrails.worker_state` and raises durable repair
+The health checker seeds `billing.worker_state` and raises durable repair
 alerts when a periodic kind stops completing. Its per-kind rows are written
 monotonically: job completions of one kind reach the row in any order, so a
 late write can only add what is newer (timestamps never move back, the error
@@ -846,7 +846,7 @@ exactly when a bad roster does the most damage.
 ### Stop everything, now
 
 ```sql
-UPDATE openrails.destructive_action_switch SET enabled = false,
+UPDATE billing.destructive_action_switch SET enabled = false,
        updated_by = 'you', reason = 'incident: mass cancellation observed';
 ```
 
@@ -858,18 +858,18 @@ stopped.
 
 ```sql
 -- 1. the switch itself
-SELECT enabled, updated_by, reason, updated_at FROM openrails.destructive_action_switch;
+SELECT enabled, updated_by, reason, updated_at FROM billing.destructive_action_switch;
 
 -- 2. nothing has been cancelled since the flip
-SELECT count(*) FROM openrails.subscriptions
- WHERE cancelled_at > (SELECT updated_at FROM openrails.destructive_action_switch);
+SELECT count(*) FROM billing.subscriptions
+ WHERE cancelled_at > (SELECT updated_at FROM billing.destructive_action_switch);
 
 -- 3. no entitlement has been revoked since the flip
-SELECT count(*) FROM openrails.entitlements
- WHERE revoked_at > (SELECT updated_at FROM openrails.destructive_action_switch);
+SELECT count(*) FROM billing.entitlements
+ WHERE revoked_at > (SELECT updated_at FROM billing.destructive_action_switch);
 
 -- 4. destructive provider intents are parked, not executing
-SELECT status, count(*) FROM openrails.rail_intents
+SELECT status, count(*) FROM billing.rail_intents
  WHERE intent_type = 'nmi_delete_subscription' GROUP BY status;
 ```
 
@@ -878,25 +878,25 @@ switch is OFF`.
 
 ### Arming a merchant (the #835 first-enforce gate)
 
-A merchant with no `openrails.merchant_destructive_policy` row — or one with
+A merchant with no `billing.merchant_destructive_policy` row — or one with
 `enforce_armed_at IS NULL` — pulls in **advisory** mode: findings are persisted,
 nothing is mutated, no source domain is proven, and `first_pull_completed_at` is
 stamped so you know the survey is ready.
 
 ```sql
 -- what did the first pull find?
-SELECT finding_type, status, count(*) FROM openrails.reconciliation_findings
+SELECT finding_type, status, count(*) FROM billing.reconciliation_findings
  WHERE merchant_id = :merchant GROUP BY 1, 2 ORDER BY 3 DESC;
 
 -- happy with it? arm the merchant for enforcing pulls
-INSERT INTO openrails.merchant_destructive_policy
+INSERT INTO billing.merchant_destructive_policy
        (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
 VALUES (:merchant, true, now(), 'you', 'reviewed first-pull findings')
 ON CONFLICT (merchant_id) DO UPDATE
    SET enforce_armed_at = now(), destructive_actions_enabled = true;
 
 -- and the instance switch (once, per deployment)
-UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'you';
+UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'you';
 ```
 
 Both halves must be on: the instance switch gates the fleet, the merchant row
@@ -916,7 +916,7 @@ should cancel the first 25 of them.
 
 ```sql
 SELECT subject_key, recommended_action, updated_at
-  FROM openrails.reconciliation_findings
+  FROM billing.reconciliation_findings
  WHERE finding_type = 'pull.cancellation.capped' AND status = 'requires_review';
 ```
 
@@ -932,7 +932,7 @@ resolution and Host-routed webhooks. Browser CORS is a **separate, fixed,
 engine-wide policy**, not a per-merchant setting.
 
 - **Configuring a merchant's host**: `merchants.Service.SetHostConfig(ctx,
-  merchantID, apiHost)` sets `openrails.merchants.api_host` (globally unique
+  merchantID, apiHost)` sets `billing.merchants.api_host` (globally unique
   among live merchants) — a plain row UPDATE, resolved LIVE on the next
   request; no boot-time host map, so a merchant configured on one node
   resolves immediately on every node sharing the database. Leave `api_host`

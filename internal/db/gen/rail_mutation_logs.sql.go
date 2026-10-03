@@ -12,7 +12,7 @@ import (
 )
 
 const countRailMutationLogs = `-- name: CountRailMutationLogs :one
-SELECT count(*) FROM openrails.rail_mutation_logs
+SELECT count(*) FROM billing.rail_mutation_logs
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
@@ -42,7 +42,7 @@ func (q *Queries) CountRailMutationLogs(ctx context.Context, arg CountRailMutati
 }
 
 const insertRailMutationLog = `-- name: InsertRailMutationLog :exec
-INSERT INTO openrails.rail_mutation_logs (
+INSERT INTO billing.rail_mutation_logs (
     merchant_id,
     rail,
     psp_id,
@@ -92,7 +92,7 @@ func (q *Queries) InsertRailMutationLog(ctx context.Context, arg InsertRailMutat
 
 const listRailMutationLogs = `-- name: ListRailMutationLogs :many
 
-SELECT id, merchant_id, rail, psp_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at, custodian_id FROM openrails.rail_mutation_logs
+SELECT id, merchant_id, rail, psp_id, rail_intent_id, intent_type, idempotency_key, attempt, phase, reason, evidence, created_at, custodian_id FROM billing.rail_mutation_logs
 WHERE merchant_id = $1::uuid
   AND ($2::text IS NULL OR rail = $2::text)
   AND ($3::uuid IS NULL OR rail_intent_id = $3::uuid)
@@ -113,7 +113,7 @@ type ListRailMutationLogsParams struct {
 
 // Operator read surface (#735: replaced the ClickHouse mirror; this table is
 // the durable mutation log).
-func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutationLogsParams) ([]OpenrailsRailMutationLog, error) {
+func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutationLogsParams) ([]BillingRailMutationLog, error) {
 	rows, err := q.db.Query(ctx, listRailMutationLogs,
 		arg.MerchantID,
 		arg.Rail,
@@ -126,9 +126,9 @@ func (q *Queries) ListRailMutationLogs(ctx context.Context, arg ListRailMutation
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsRailMutationLog
+	var items []BillingRailMutationLog
 	for rows.Next() {
-		var i OpenrailsRailMutationLog
+		var i BillingRailMutationLog
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,

@@ -256,7 +256,7 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 		// created_at DESC and cap at limit. For a single concrete status (or
 		// --status=all) this is exactly one round trip.
 		var total int64
-		var rows []gen.OpenrailsRailIntent
+		var rows []gen.BillingRailIntent
 		for _, statusFilter := range statusFilters {
 			n, err := q.CountRailIntents(ctx, gen.CountRailIntentsParams{
 				MerchantID: merchantID.UUID(),

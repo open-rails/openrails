@@ -12,7 +12,7 @@ import (
 
 // prepareUnscheduledCollection gives every NMI transport the same immutable
 // money and agreement posture. Custodian-specific authority stays in its adapter.
-func prepareUnscheduledCollection(method gen.OpenrailsPaymentMethod, req ChargeRequest, charger charge.Charger) (PreparedCharge, error) {
+func prepareUnscheduledCollection(method gen.BillingPaymentMethod, req ChargeRequest, charger charge.Charger) (PreparedCharge, error) {
 	currency := normalizeCurrency(req.Currency)
 	if err := moneyutil.ValidateCurrency(currency); err != nil {
 		return nil, fmt.Errorf("collection: refusing to charge without an established currency: %w", err)

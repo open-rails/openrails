@@ -3,7 +3,7 @@
 -- three-state terminal transition may update a row.
 
 -- name: InsertOperationAuthorization :one
-INSERT INTO openrails.operation_authorizations (
+INSERT INTO billing.operation_authorizations (
     operation_id,
     merchant_id,
     payer_id,
@@ -29,12 +29,12 @@ RETURNING *;
 
 -- name: GetOperationAuthorization :one
 SELECT *
-FROM openrails.operation_authorizations
+FROM billing.operation_authorizations
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text;
 
 -- name: SettleOperationAuthorizationPassThroughProviderCost :one
-UPDATE openrails.operation_authorizations
+UPDATE billing.operation_authorizations
 SET state = 'settled',
     settlement_provider_cost_usd_micros = sqlc.arg(settlement_provider_cost_usd_micros)::bigint,
     settlement_rated_usd_micros = sqlc.arg(settlement_rated_usd_micros)::bigint,
@@ -48,7 +48,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING *;
 
 -- name: ReleaseOperationAuthorization :one
-UPDATE openrails.operation_authorizations
+UPDATE billing.operation_authorizations
 SET state = 'released',
     terminal_reference = sqlc.arg(terminal_reference)::text,
     released_at = sqlc.arg(released_at)::timestamptz
@@ -57,8 +57,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND state = 'open'
   AND NOT EXISTS (
       SELECT 1
-      FROM openrails.provider_billing_qualifications qualification
-      WHERE qualification.merchant_id = openrails.operation_authorizations.merchant_id
-        AND qualification.operation_id = openrails.operation_authorizations.operation_id
+      FROM billing.provider_billing_qualifications qualification
+      WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
+        AND qualification.operation_id = billing.operation_authorizations.operation_id
   )
 RETURNING *;

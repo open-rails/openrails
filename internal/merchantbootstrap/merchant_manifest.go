@@ -425,7 +425,7 @@ type MerchantConfig struct {
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius), one rail each.
 	// merchants.<slug>. nothing else it could mean). ONE word everywhere: the
-	// DB table (openrails.psps) and the merchant-secret name prefix (`psps/…`)
+	// DB table (billing.psps) and the merchant-secret name prefix (`psps/…`)
 	// speak the same vocabulary as this key.
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
 	// Custodians is the operator-declared CUSTODIAN catalog (or#880), keyed by
@@ -925,8 +925,8 @@ func SeedManifestCustodianSecrets(ctx context.Context, merchantID merchant.ID, r
 // returns them by declared key, so the PSP pass can resolve its `custodian:`
 // reference to a row id. Custodians land BEFORE PSPs for the obvious reason:
 // psps.custodian_id is a foreign key.
-func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) (map[string]gen.OpenrailsCustodian, error) {
-	out := map[string]gen.OpenrailsCustodian{}
+func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) (map[string]gen.BillingCustodian, error) {
+	out := map[string]gen.BillingCustodian{}
 	entries := CustodianEntries(mt.Custodians)
 	if len(entries) == 0 {
 		return out, nil
@@ -963,7 +963,7 @@ func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, databa
 		// Same apply tiers as a PSP (#527): plan-only runs mutate nothing, and
 		// without --overwrite an existing declaration is left as it stands.
 		mctx := merchant.WithID(ctx, merchantID)
-		var row gen.OpenrailsCustodian
+		var row gen.BillingCustodian
 		found := true
 		if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			var err error
@@ -1033,7 +1033,7 @@ func NonNilSettings(in map[string]any) map[string]any {
 // the merchant's declared custodians. An undeclared key is a HARD error: a PSP
 // that means to charge a vault-held card and cannot find the vault must not
 // arm as though its gateway held the card.
-func ResolveManifestCustodianReference(rail string, account ProviderRailAccountConfig, declared map[string]gen.OpenrailsCustodian) (*uuid.UUID, error) {
+func ResolveManifestCustodianReference(rail string, account ProviderRailAccountConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
 	key := strings.ToLower(strings.TrimSpace(account.Custodian))
 	if key == "" {
 		return nil, nil
@@ -1559,7 +1559,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		railAcctID, nRail, nEnv, nAccount := merchants.PSPNaturalKey(rail, environment, accountID)
 		qualifiedRow, readErr := database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: merchantID.UUID(), ID: railAcctID})
 		if errors.Is(readErr, pgx.ErrNoRows) {
-			qualifiedRow = gen.OpenrailsPsp{ID: railAcctID, Rail: nRail, Environment: nEnv}
+			qualifiedRow = gen.BillingPsp{ID: railAcctID, Rail: nRail, Environment: nEnv}
 		} else if readErr != nil {
 			return readErr
 		}

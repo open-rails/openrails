@@ -13,7 +13,7 @@ import (
 )
 
 const getSweepCursor = `-- name: GetSweepCursor :one
-SELECT cursor_merchant_id, cursor_version FROM openrails.worker_state
+SELECT cursor_merchant_id, cursor_version FROM billing.worker_state
 WHERE worker_kind = $1::text
 `
 
@@ -31,7 +31,7 @@ func (q *Queries) GetSweepCursor(ctx context.Context, workerKind string) (GetSwe
 
 const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
 
-SELECT merchant_id FROM openrails.retention_work_merchant_ids(
+SELECT merchant_id FROM billing.retention_work_merchant_ids(
     $1::timestamptz,
     $2::timestamptz,
     $3::timestamptz,
@@ -91,12 +91,12 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 }
 
 const saveSweepCursor = `-- name: SaveSweepCursor :execrows
-INSERT INTO openrails.worker_state (worker_kind, cursor_merchant_id, cursor_version)
+INSERT INTO billing.worker_state (worker_kind, cursor_merchant_id, cursor_version)
 VALUES ($1::text, $2::uuid, 1)
 ON CONFLICT (worker_kind) DO UPDATE
     SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        cursor_version = openrails.worker_state.cursor_version + 1
-    WHERE openrails.worker_state.cursor_version
+        cursor_version = billing.worker_state.cursor_version + 1
+    WHERE billing.worker_state.cursor_version
           = $3::bigint
 `
 

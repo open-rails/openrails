@@ -98,7 +98,7 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 var ErrServiceCredentialHostMismatch = credential.ErrServiceCredentialHostMismatch
 
 // ErrServiceCredentialMerchantUnresolved indicates the caller's permission group
-// backs no active OpenRails merchant (no openrails.merchants row with that
+// backs no active OpenRails merchant (no billing.merchants row with that
 // permission_group_id, or the merchant is deleted). Treated as an
 // authorization failure: the caller cannot act on any merchant surface.
 var ErrServiceCredentialMerchantUnresolved = credential.ErrServiceCredentialMerchantUnresolved
@@ -155,7 +155,7 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mi
 // returns pgx.ErrNoRows untouched so callers can decide whether a fallback
 // applies. If the lookup matches multiple active merchants, the caller must
 // name a merchant explicitly and authorize it with AuthorizeMerchant.
-func (c *ControlPlane) merchantDirectoryRow(matches []gen.OpenrailsMerchant, err error) (merchant.ID, string, error) {
+func (c *ControlPlane) merchantDirectoryRow(matches []gen.BillingMerchant, err error) (merchant.ID, string, error) {
 	if err != nil {
 		return merchant.ID{}, "", err
 	}

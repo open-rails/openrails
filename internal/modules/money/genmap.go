@@ -34,7 +34,7 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 // #512 immutable ledger transfer (the single-entry money_transactions table was
 // retired in the hard cut). The DTO's sign convention is preserved: money OUT of
 // the customer is negative. Transfers are immutable, so UpdatedAt == CreatedAt.
-func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTransaction {
+func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTransaction {
 	amount := r.Amount
 	txType := r.TransferType
 	switch r.TransferType {
@@ -79,7 +79,7 @@ func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTr
 	}
 }
 
-func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
+func settingsFromGen(r gen.BillingMoneySetting) *models.MoneyAccount {
 	return &models.MoneyAccount{
 		MerchantID:              r.MerchantID,
 		CustomerID:              r.CustomerID,
@@ -93,7 +93,7 @@ func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 	}
 }
 
-func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
+func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 	m := &models.UsageEvent{
 		ID:               r.ID,
 		MerchantID:       r.MerchantID,
@@ -119,7 +119,7 @@ func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 	return m, nil
 }
 
-func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
+func invoiceFromGen(r gen.BillingInvoice) (*models.Invoice, error) {
 	m := &models.Invoice{
 		ID:                           r.ID,
 		MerchantID:                   r.MerchantID,
@@ -176,7 +176,7 @@ func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 	return m, nil
 }
 
-func invoicePaymentAttemptFromGen(r gen.OpenrailsInvoicePayment) models.InvoicePaymentAttempt {
+func invoicePaymentAttemptFromGen(r gen.BillingInvoicePayment) models.InvoicePaymentAttempt {
 	return models.InvoicePaymentAttempt{
 		ID:              r.ID,
 		InvoiceID:       r.InvoiceID,

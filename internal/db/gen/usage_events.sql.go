@@ -16,7 +16,7 @@ const aggregateUsageDimensions = `-- name: AggregateUsageDimensions :many
 SELECT ue.event_type,
        d.key::text AS key,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
   AND ue.currency = $3
@@ -70,7 +70,7 @@ const aggregateUsageTotals = `-- name: AggregateUsageTotals :many
 SELECT event_type,
        COALESCE(SUM(amount), 0)::bigint AS total_amount,
        COUNT(*)::bigint AS event_count
-FROM openrails.usage_events
+FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
   AND occurred_at >= $4::timestamptz
   AND occurred_at < $5::timestamptz
@@ -119,7 +119,7 @@ func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTo
 }
 
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
-SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at FROM openrails.usage_events
+SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND event_type = $3 AND source = $4 AND source_id = $5
 LIMIT 1
@@ -134,7 +134,7 @@ type GetUsageEventByCoordsParams struct {
 	Currency   string
 }
 
-func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (OpenrailsUsageEvent, error) {
+func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (BillingUsageEvent, error) {
 	row := q.db.QueryRow(ctx, getUsageEventByCoords,
 		arg.MerchantID,
 		arg.CustomerID,
@@ -143,7 +143,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		arg.SourceID,
 		arg.Currency,
 	)
-	var i OpenrailsUsageEvent
+	var i BillingUsageEvent
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -167,7 +167,7 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 
 const insertUsageEvent = `-- name: InsertUsageEvent :exec
 
-INSERT INTO openrails.usage_events (
+INSERT INTO billing.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
     ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at
@@ -193,7 +193,7 @@ type InsertUsageEventParams struct {
 	PricingAuthority string
 }
 
-// openrails.usage_events: append-only metered usage (#289), idempotent on
+// billing.usage_events: append-only metered usage (#289), idempotent on
 // (tenant, payer, event_type, source, source_id).
 // pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
 func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
@@ -222,7 +222,7 @@ const resourceRevenueDaily = `-- name: ResourceRevenueDaily :many
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
        ue.currency,
        COALESCE(SUM(ue.amount), 0)::bigint AS amount
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = $3
   AND ue.occurred_at >= $4::timestamptz
   AND ue.occurred_at < $5::timestamptz
@@ -284,7 +284,7 @@ SELECT COALESCE(CASE $3::text
        ue.currency,
        COUNT(*)::bigint AS event_count,
        COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = $1 AND ue.customer_id = $2
   AND ue.currency = $4
   AND ue.occurred_at >= $5::timestamptz
@@ -346,7 +346,7 @@ func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollup
 
 const sumUsageAmountSince = `-- name: SumUsageAmountSince :one
 SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
-FROM openrails.usage_events
+FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
   AND occurred_at >= $4::timestamptz
 `

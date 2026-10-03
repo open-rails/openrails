@@ -12,9 +12,9 @@ import (
 )
 
 const getConflictingInitialEnrollmentOperation = `-- name: GetConflictingInitialEnrollmentOperation :one
-SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id FROM openrails.rail_intents i
-JOIN openrails.products accepted ON accepted.merchant_id=i.merchant_id AND accepted.id=$1::uuid
-JOIN openrails.products existing ON existing.merchant_id=i.merchant_id AND existing.id::text=i.payload->'terms'->>'product_id'
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id FROM billing.rail_intents i
+JOIN billing.products accepted ON accepted.merchant_id=i.merchant_id AND accepted.id=$1::uuid
+JOIN billing.products existing ON existing.merchant_id=i.merchant_id AND existing.id::text=i.payload->'terms'->>'product_id'
 WHERE i.merchant_id=$2::uuid AND i.intent_type='initial_membership'
  AND i.payload->'terms'->>'customer_id'=$3::uuid::text
  AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND accepted.tier_group<>'' AND existing.tier_group=accepted.tier_group))
@@ -28,9 +28,9 @@ type GetConflictingInitialEnrollmentOperationParams struct {
 	CustomerID uuid.UUID
 }
 
-func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, arg GetConflictingInitialEnrollmentOperationParams) (OpenrailsRailIntent, error) {
+func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, arg GetConflictingInitialEnrollmentOperationParams) (BillingRailIntent, error) {
 	row := q.db.QueryRow(ctx, getConflictingInitialEnrollmentOperation, arg.ProductID, arg.MerchantID, arg.CustomerID)
-	var i OpenrailsRailIntent
+	var i BillingRailIntent
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -63,9 +63,9 @@ func (q *Queries) GetConflictingInitialEnrollmentOperation(ctx context.Context, 
 }
 
 const getConflictingInitialEnrollmentSubscription = `-- name: GetConflictingInitialEnrollmentSubscription :one
-SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.user_email, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.scheduled_price_id, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.cancelled_at, s.cancel_type, s.cancel_feedback, s.entitlements_spec_snapshot, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy FROM openrails.subscriptions s
-JOIN openrails.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
-JOIN openrails.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.user_email, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.scheduled_price_id, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.cancelled_at, s.cancel_type, s.cancel_feedback, s.entitlements_spec_snapshot, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy FROM billing.subscriptions s
+JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
+JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
  AND (s.product_id=accepted.id OR (accepted.tier_group IS NOT NULL AND accepted.tier_group<>'' AND existing.tier_group=accepted.tier_group))
  AND s.status IN ('active','pending','past_due','awaiting_method','unverified') AND s.deleted_at IS NULL
@@ -80,9 +80,9 @@ type GetConflictingInitialEnrollmentSubscriptionParams struct {
 
 // Customer row lock serializes admissions. Unknown obligations retain their
 // exclusion until provider outcome is resolved; a new local row is no handoff.
-func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Context, arg GetConflictingInitialEnrollmentSubscriptionParams) (OpenrailsSubscription, error) {
+func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Context, arg GetConflictingInitialEnrollmentSubscriptionParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getConflictingInitialEnrollmentSubscription, arg.ProductID, arg.MerchantID, arg.CustomerID)
-	var i OpenrailsSubscription
+	var i BillingSubscription
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,

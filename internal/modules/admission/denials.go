@@ -13,7 +13,7 @@ import (
 
 // Denial capture (#733): denials are counted in Redis hourly hashes on the hot
 // path (one HINCRBY, fire-and-forget) and flushed to
-// openrails.admission_denials_hourly by a periodic river job. The hot path
+// billing.admission_denials_hourly by a periodic river job. The hot path
 // NEVER writes Postgres per-request.
 
 // DenialKeyPrefix namespaces the hourly denial hashes:

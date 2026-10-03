@@ -14,7 +14,7 @@ import (
 
 const createDestructiveRun = `-- name: CreateDestructiveRun :one
 
-INSERT INTO openrails.maintenance_runs (
+INSERT INTO billing.maintenance_runs (
     id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
@@ -40,7 +40,7 @@ type CreateDestructiveRunParams struct {
 // Deliberately the GENERAL run table (or#859 §5.1): kind='prune' is its first
 // user. Opened BEFORE anything is written, so a crash mid-run still leaves a
 // reversible record.
-func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (OpenrailsMaintenanceRun, error) {
+func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, createDestructiveRun,
 		arg.ID,
 		arg.MerchantID,
@@ -52,7 +52,7 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 		arg.ExpectedRows,
 		arg.Note,
 	)
-	var i OpenrailsMaintenanceRun
+	var i BillingMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -83,7 +83,7 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 }
 
 const finishDestructiveRun = `-- name: FinishDestructiveRun :one
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status = $1::text,
     finished_at = $2::timestamptz,
     affected = $3::jsonb
@@ -99,7 +99,7 @@ type FinishDestructiveRunParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiveRunParams) (OpenrailsMaintenanceRun, error) {
+func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiveRunParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, finishDestructiveRun,
 		arg.Status,
 		arg.Now,
@@ -107,7 +107,7 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 		arg.MerchantID,
 		arg.ID,
 	)
-	var i OpenrailsMaintenanceRun
+	var i BillingMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -138,7 +138,7 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 }
 
 const getDestructiveRun = `-- name: GetDestructiveRun :one
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $2::uuid
 `
 
@@ -147,9 +147,9 @@ type GetDestructiveRunParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunParams) (OpenrailsMaintenanceRun, error) {
+func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, getDestructiveRun, arg.MerchantID, arg.ID)
-	var i OpenrailsMaintenanceRun
+	var i BillingMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -180,7 +180,7 @@ func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunPa
 }
 
 const listDestructiveRuns = `-- name: ListDestructiveRuns :many
-SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid
   AND kind IN ('prune','converge_enforce','merchant_purge')
   AND ($2::text IS NULL OR kind = $2::text)
@@ -194,15 +194,15 @@ type ListDestructiveRunsParams struct {
 	Lim        int32
 }
 
-func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRunsParams) ([]OpenrailsMaintenanceRun, error) {
+func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRunsParams) ([]BillingMaintenanceRun, error) {
 	rows, err := q.db.Query(ctx, listDestructiveRuns, arg.MerchantID, arg.Kind, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsMaintenanceRun
+	var items []BillingMaintenanceRun
 	for rows.Next() {
-		var i OpenrailsMaintenanceRun
+		var i BillingMaintenanceRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -240,7 +240,7 @@ func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRu
 }
 
 const listExcessPaymentsForPSP = `-- name: ListExcessPaymentsForPSP :many
-SELECT id FROM openrails.payments
+SELECT id FROM billing.payments
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND deleted_at IS NULL
@@ -289,7 +289,7 @@ func (q *Queries) ListExcessPaymentsForPSP(ctx context.Context, arg ListExcessPa
 
 const listExcessSubscriptionsForPSP = `-- name: ListExcessSubscriptionsForPSP :many
 
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND rail_subscription_id <> ''
@@ -340,7 +340,7 @@ func (q *Queries) ListExcessSubscriptionsForPSP(ctx context.Context, arg ListExc
 }
 
 const listPSPPaymentCandidates = `-- name: ListPSPPaymentCandidates :many
-SELECT id FROM openrails.payments
+SELECT id FROM billing.payments
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND deleted_at IS NULL
@@ -381,7 +381,7 @@ func (q *Queries) ListPSPPaymentCandidates(ctx context.Context, arg ListPSPPayme
 }
 
 const listPSPSubscriptionCandidates = `-- name: ListPSPSubscriptionCandidates :many
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND rail_subscription_id <> ''
@@ -416,7 +416,7 @@ func (q *Queries) ListPSPSubscriptionCandidates(ctx context.Context, arg ListPSP
 }
 
 const markDestructiveRunReversed = `-- name: MarkDestructiveRunReversed :one
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status = 'reversed',
     reversed_at = $1::timestamptz,
     reversed_by = $2::text
@@ -434,14 +434,14 @@ type MarkDestructiveRunReversedParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestructiveRunReversedParams) (OpenrailsMaintenanceRun, error) {
+func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestructiveRunReversedParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, markDestructiveRunReversed,
 		arg.Now,
 		arg.ReversedBy,
 		arg.MerchantID,
 		arg.ID,
 	)
-	var i OpenrailsMaintenanceRun
+	var i BillingMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -473,9 +473,9 @@ func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestru
 
 const paymentHasProtectedDependents = `-- name: PaymentHasProtectedDependents :one
 SELECT
-  EXISTS(SELECT 1 FROM openrails.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
-  OR EXISTS(SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid AND r.deleted_at IS NULL)
-  OR EXISTS(SELECT 1 FROM openrails.checkout_sessions cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
+  EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
+  OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid AND r.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing.checkout_sessions cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
   AS protected
 `
 
@@ -496,7 +496,7 @@ func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg Payment
 
 const pruneSoftDeleteCheckoutSessionsBySubscription = `-- name: PruneSoftDeleteCheckoutSessionsBySubscription :execrows
 
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
@@ -527,7 +527,7 @@ func (q *Queries) PruneSoftDeleteCheckoutSessionsBySubscription(ctx context.Cont
 }
 
 const pruneSoftDeleteEntitlementsBySubscription = `-- name: PruneSoftDeleteEntitlementsBySubscription :execrows
-UPDATE openrails.entitlements
+UPDATE billing.entitlements
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
@@ -558,7 +558,7 @@ func (q *Queries) PruneSoftDeleteEntitlementsBySubscription(ctx context.Context,
 }
 
 const pruneSoftDeletePaymentByID = `-- name: PruneSoftDeletePaymentByID :execrows
-UPDATE openrails.payments
+UPDATE billing.payments
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid
 WHERE merchant_id = $3::uuid
@@ -588,7 +588,7 @@ func (q *Queries) PruneSoftDeletePaymentByID(ctx context.Context, arg PruneSoftD
 }
 
 const pruneSoftDeleteSubscriptionByID = `-- name: PruneSoftDeleteSubscriptionByID :execrows
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
@@ -619,7 +619,7 @@ func (q *Queries) PruneSoftDeleteSubscriptionByID(ctx context.Context, arg Prune
 }
 
 const restoreCheckoutSessionsByDestructiveRun = `-- name: RestoreCheckoutSessionsByDestructiveRun :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
 `
@@ -639,7 +639,7 @@ func (q *Queries) RestoreCheckoutSessionsByDestructiveRun(ctx context.Context, a
 }
 
 const restoreEntitlementsByDestructiveRun = `-- name: RestoreEntitlementsByDestructiveRun :execrows
-UPDATE openrails.entitlements
+UPDATE billing.entitlements
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
 `
@@ -659,7 +659,7 @@ func (q *Queries) RestoreEntitlementsByDestructiveRun(ctx context.Context, arg R
 }
 
 const restorePaymentsByDestructiveRun = `-- name: RestorePaymentsByDestructiveRun :execrows
-UPDATE openrails.payments
+UPDATE billing.payments
 SET deleted_at = NULL, destructive_run_id = NULL
 WHERE merchant_id = $1::uuid AND destructive_run_id = $2::uuid
 `
@@ -679,7 +679,7 @@ func (q *Queries) RestorePaymentsByDestructiveRun(ctx context.Context, arg Resto
 
 const restoreSubscriptionsByDestructiveRun = `-- name: RestoreSubscriptionsByDestructiveRun :execrows
 
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
 `
@@ -704,7 +704,7 @@ func (q *Queries) RestoreSubscriptionsByDestructiveRun(ctx context.Context, arg 
 
 const subscriptionHasGrant = `-- name: SubscriptionHasGrant :one
 SELECT EXISTS(
-  SELECT 1 FROM openrails.grants
+  SELECT 1 FROM billing.grants
   WHERE merchant_id = $1::uuid
     AND source_type = 'subscription'
     AND source_id = $2::uuid::text

@@ -472,7 +472,7 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	return trx, nil
 }
 
-// ensureCustomer upserts the openrails.customers row for a payable customer id
+// ensureCustomer upserts the billing.customers row for a payable customer id
 // so the money-write FKs are satisfied on a customer's FIRST money operation
 // (deposit/hold/usage). customers is UUID-only (#491). ON CONFLICT DO NOTHING.
 func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUID) error {
@@ -604,7 +604,7 @@ func sameDepositExpiry(a, b *time.Time) bool {
 // creditGrantTxn synthesizes the public MoneyTransaction DTO for a deposit from
 // its backing credit grant (the lot). The single-entry money_transactions row is
 // gone (#512 hard cut); this DTO is derived, not stored.
-func creditGrantTxn(g gen.OpenrailsGrant) (*models.MoneyTransaction, error) {
+func creditGrantTxn(g gen.BillingGrant) (*models.MoneyTransaction, error) {
 	var spec grants.Spec
 	if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil {
 		return nil, fmt.Errorf("decode deposit provenance: %w", err)

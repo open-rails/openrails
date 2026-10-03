@@ -72,7 +72,7 @@ const DefaultDunningWindow = 14 * 24 * time.Hour
 // SubscriptionState is the decider's view of the local row.
 type SubscriptionState struct {
 	CollectionPolicy   models.CollectionPolicy
-	Status             string // openrails.subscription_status
+	Status             string // billing.subscription_status
 	Rail               string
 	RailSubscriptionID string
 	PeriodStart        *time.Time // current_period_starts_at: bounds the period's cadence
@@ -81,7 +81,7 @@ type SubscriptionState struct {
 	NextRetryScheduled bool // next_retry_at IS NOT NULL
 }
 
-// ChargeEvidence is the first-party billing evidence (openrails.payments +
+// ChargeEvidence is the first-party billing evidence (billing.payments +
 // dunning bookkeeping) a plane can attach.
 type ChargeEvidence struct {
 	// RenewalPaymentAfterPeriodEnd: a completed payment at/after the lapsed
@@ -135,7 +135,7 @@ type EvidenceBundle struct {
 	Charge   ChargeEvidence
 	// EvidenceFloor (#835) is the instant this deployment first completed a
 	// provider pull for this merchant
-	// (openrails.merchant_destructive_policy.first_pull_completed_at). Evidence
+	// (billing.merchant_destructive_policy.first_pull_completed_at). Evidence
 	// OLDER than it was never corroborated by an observation this deployment
 	// made: on an imported legacy book it is inherited history, and inherited
 	// history is exactly what the arming gate could not protect against once an

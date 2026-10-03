@@ -5,7 +5,7 @@
 -- Verified-accepted webhook: stamp the silence watermark. The lifetime tallies
 -- this used to bump were dropped in or#823 — a monotonic total answers no
 -- windowed question, which is what webhook_health_daily is for.
-INSERT INTO openrails.webhook_health (merchant_id, rail, last_accepted_at)
+INSERT INTO billing.webhook_health (merchant_id, rail, last_accepted_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(at)::timestamptz)
 ON CONFLICT (merchant_id, rail) DO UPDATE SET
     last_accepted_at = EXCLUDED.last_accepted_at,
@@ -17,15 +17,15 @@ ON CONFLICT (merchant_id, rail) DO UPDATE SET
 -- still upserted so a rail that has ONLY ever rejected still has a created_at
 -- for the silence age to measure from.
 WITH health AS (
-    INSERT INTO openrails.webhook_health (merchant_id, rail)
+    INSERT INTO billing.webhook_health (merchant_id, rail)
     VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text)
     ON CONFLICT (merchant_id, rail) DO UPDATE SET
         updated_at = now()
 )
-INSERT INTO openrails.webhook_health_daily (merchant_id, rail, day_at, rejected)
+INSERT INTO billing.webhook_health_daily (merchant_id, rail, day_at, rejected)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, date_trunc('day', sqlc.arg(at)::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', 1)
 ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
-    rejected = openrails.webhook_health_daily.rejected + 1;
+    rejected = billing.webhook_health_daily.rejected + 1;
 
 -- name: RecordWebhookDrift :execrows
 -- Pull-derived corrections count as drift ONLY when the accepted watermark
@@ -34,7 +34,7 @@ ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
 -- First-ever pull (no last_pull_at / no row) records nothing: an initial
 -- import is not drift. Returns rows affected (0 = gate closed).
 WITH gate AS (
-    UPDATE openrails.webhook_health
+    UPDATE billing.webhook_health
     SET updated_at = now()
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND rail = sqlc.arg(rail)::text
@@ -42,16 +42,16 @@ WITH gate AS (
       AND (last_accepted_at IS NULL OR last_accepted_at < last_pull_at)
     RETURNING merchant_id, rail
 )
-INSERT INTO openrails.webhook_health_daily (merchant_id, rail, day_at, drift)
+INSERT INTO billing.webhook_health_daily (merchant_id, rail, day_at, drift)
 SELECT merchant_id, rail, date_trunc('day', sqlc.arg(at)::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC', sqlc.arg(n)::bigint
 FROM gate
 ON CONFLICT (merchant_id, rail, day_at) DO UPDATE SET
-    drift = openrails.webhook_health_daily.drift + EXCLUDED.drift;
+    drift = billing.webhook_health_daily.drift + EXCLUDED.drift;
 
 -- name: StampWebhookPull :exec
 -- Advance the pull watermark AFTER a provider-refresh pass, so during the next
 -- pass last_pull_at is the PREVIOUS pull the drift gate compares against.
-INSERT INTO openrails.webhook_health (merchant_id, rail, last_pull_at)
+INSERT INTO billing.webhook_health (merchant_id, rail, last_pull_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(at)::timestamptz)
 ON CONFLICT (merchant_id, rail) DO UPDATE SET
     last_pull_at = EXCLUDED.last_pull_at,
@@ -61,7 +61,7 @@ ON CONFLICT (merchant_id, rail) DO UPDATE SET
 -- Exact account event coverage. A sibling account's refresh or a recent
 -- health stamp while catching up historical windows cannot retire this job.
 SELECT watermark_at
-FROM openrails.rail_refresh_watermarks
+FROM billing.rail_refresh_watermarks
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = sqlc.arg(rail)::text
   AND psp_id = sqlc.arg(psp_id)::uuid
@@ -73,21 +73,21 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- still receive provider events, #655) AND carry subscriptions projected to
 -- keep billing (billable_subscriptions doctrine). Merchant-scoped.
 SELECT s.rail, count(*) AS billable
-FROM openrails.subscriptions s
-JOIN openrails.prices pr ON pr.id = s.price_id
+FROM billing.subscriptions s
+JOIN billing.prices pr ON pr.id = s.price_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.auto_renew
   AND s.deleted_at IS NULL
   AND s.status IN ('pending','active','past_due','awaiting_method','unverified')
   AND s.cancelled_at IS NULL
   AND s.deletion_scheduled_at IS NULL
   AND EXISTS (
-      SELECT 1 FROM openrails.psps rma
+      SELECT 1 FROM billing.psps rma
       WHERE rma.merchant_id = sqlc.arg(merchant_id)::uuid AND rma.merchant_id = s.merchant_id AND rma.rail = s.rail
   )
 GROUP BY s.rail;
 
 -- name: UpsertPSPRefreshWatermark :exec
-INSERT INTO openrails.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
+INSERT INTO billing.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(psp_id)::uuid, 'events', sqlc.arg(watermark_at)::timestamptz)
 ON CONFLICT ON CONSTRAINT rail_refresh_watermarks_identity_key
 DO UPDATE SET watermark_at = EXCLUDED.watermark_at, updated_at = now();

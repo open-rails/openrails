@@ -31,7 +31,7 @@ type initialMembershipRefusal struct {
 	Text          string `json:"text,omitempty"`
 }
 
-func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
+func (r InitialMembershipRefusal) Validate(in gen.BillingRailIntent) error {
 	if _, err := subscriptions.DecodeInitialMembershipPayload(in); err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (r InitialMembershipRefusal) Declined() (answer decline.Evidence, transacti
 	return decline.Evidence{}, "", false
 }
 
-func LoadInitialMembershipRefusal(in gen.OpenrailsRailIntent) (InitialMembershipRefusal, bool, error) {
+func LoadInitialMembershipRefusal(in gen.BillingRailIntent) (InitialMembershipRefusal, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return InitialMembershipRefusal{}, false, nil
@@ -131,7 +131,7 @@ func LoadInitialMembershipRefusal(in gen.OpenrailsRailIntent) (InitialMembership
 // RetainInitialMembershipDecline is called only with the account-bound native
 // submission's structured rejection. Generic progress cannot create this key.
 // response=3 errors are not promoted to proof of no provider-side effects.
-func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.OpenrailsRailIntent, rejection *nmi.CustomerVaultError) error {
+func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.BillingRailIntent, rejection *nmi.CustomerVaultError) error {
 	if rejection == nil {
 		return errors.New("initial decline requires a provider rejection")
 	}
@@ -167,7 +167,7 @@ func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.Openr
 
 // RetainUnsubmittedInitialMembership runs under the canonical completion lock;
 // SQL also checks the fence so a concurrent submission cannot turn into absence.
-func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.OpenrailsRailIntent) error {
+func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.BillingRailIntent) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
@@ -183,7 +183,7 @@ func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.O
 // RetainInitialStripeDecline reads the canceled exact accepted PI before sealing
 // terminal refusal. A recoverable PI with a client secret cannot release the
 // enrollment duplicate fence until Stripe confirms it can no longer be paid.
-func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) error {
+func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.BillingRailIntent, service *subscriptions.StripeService, reference string) error {
 	if in.IntentType != subscriptions.TypeInitialMembership {
 		return errors.New("not initial Stripe enrollment")
 	}
@@ -221,7 +221,7 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.Openrails
 // stack. Reloading an operation never recreates authority to declare nonexecution.
 type InitialMembershipNonexecutionProof struct{ binding receiptBinding }
 
-func (s *Store) BeginInitialMembershipPayment(ctx context.Context, in gen.OpenrailsRailIntent) (InitialMembershipNonexecutionProof, bool, error) {
+func (s *Store) BeginInitialMembershipPayment(ctx context.Context, in gen.BillingRailIntent) (InitialMembershipNonexecutionProof, bool, error) {
 	if in.IntentType != subscriptions.TypeInitialMembership {
 		return InitialMembershipNonexecutionProof{}, false, errors.New("not an initial membership")
 	}
@@ -235,7 +235,7 @@ func (s *Store) BeginInitialMembershipPayment(ctx context.Context, in gen.Openra
 	}
 	return InitialMembershipNonexecutionProof{binding}, true, nil
 }
-func (s *Store) RetainInitialMembershipNonexecution(ctx context.Context, in gen.OpenrailsRailIntent, proof InitialMembershipNonexecutionProof) error {
+func (s *Store) RetainInitialMembershipNonexecution(ctx context.Context, in gen.BillingRailIntent, proof InitialMembershipNonexecutionProof) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err

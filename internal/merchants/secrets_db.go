@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// dbSecretStore persists per-merchant secrets in openrails.merchant_secrets.
+// dbSecretStore persists per-merchant secrets in billing.merchant_secrets.
 // This is the self-hosted / dev default: it builds and runs WITHOUT a live
 // Vault. A managed deployment swaps in the Vault-backed store (secrets_vault.go)
 // with the same (merchant, name) addressing and no schema change.

@@ -92,7 +92,7 @@ func (h *NMIPaymentMethodDeleteHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
 
-func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMethodDeletePayload, error) {
+func decodeNMIVaultDeletePayload(intent gen.BillingRailIntent) (NMIPaymentMethodDeletePayload, error) {
 	var p NMIPaymentMethodDeletePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("nmi vault delete intent has no payload")
@@ -109,7 +109,7 @@ func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMeth
 // Accepted deletion remains pending if an external observation makes the
 // method live again. Preserve its fence until use resolves; never strand a
 // delete fence behind a superseded operation. Missing rows retain target refs.
-func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
@@ -118,7 +118,7 @@ func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, inte
 	return StillRelevant(), err
 }
 
-func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return Parked(err.Error())
@@ -199,7 +199,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 // Verify resolves an ambiguous delete via provider READS: vault (or billing
 // entry) absent means the delete is done; present means it verifiably did not
 // happen and the executor may retry.
-func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return Parked(err.Error())
@@ -235,7 +235,7 @@ func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.O
 
 // loadPaymentMethod requires the canonical accepted row and its fence. Atomic
 // completion retains that row until the terminal receipt commits with removal.
-func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload) (*models.PaymentMethod, error) {
+func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.BillingRailIntent, p NMIPaymentMethodDeletePayload) (*models.PaymentMethod, error) {
 	scope, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil || scope.UUID() != intent.MerchantID || intent.IntentType != TypeNMIPaymentMethodDelete {
 		return nil, paymentmethods.ErrPaymentMethodDeleteUnsafe
@@ -295,7 +295,7 @@ func billingEntryPresent(customer *nmi.V5Customer, billingID string) bool {
 // complete commits the exact fenced local removal and retained receipt together.
 // A failed ledger write rolls back removal, so recovery can still resolve the
 // canonical method and verify its accepted native-vault target.
-func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload, evidence map[string]any) Outcome {
+func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.BillingRailIntent, p NMIPaymentMethodDeletePayload, evidence map[string]any) Outcome {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	customer, err := uuid.Parse(p.UserID)

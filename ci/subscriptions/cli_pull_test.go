@@ -20,7 +20,7 @@ import (
 // clock counts as observed here (#835).
 func (w *world) armedAtWorldClock() {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE openrails.merchant_destructive_policy SET enforce_armed_at = $1, first_pull_completed_at = $1`), w.clock.Now())
+	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE billing.merchant_destructive_policy SET enforce_armed_at = $1, first_pull_completed_at = $1`), w.clock.Now())
 	require.NoError(w.t, err)
 }
 

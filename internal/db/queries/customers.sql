@@ -4,17 +4,17 @@
 -- name: EnsureCustomer :one
 -- Refresh only the selected merchant's row. Issuer is audit metadata and does
 -- not participate in identity; callers without an issuer preserve its value.
-INSERT INTO openrails.customers (id, merchant_id, issuer)
+INSERT INTO billing.customers (id, merchant_id, issuer)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(issuer))
 ON CONFLICT (merchant_id, id) DO UPDATE SET
-  issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
+  issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
 RETURNING *;
 
 -- name: EnsureCustomerRow :exec
 -- FK-target materialization before commerce writes. The scoped primary key
 -- resolves concurrent first touches without a read or cross-merchant claim.
-INSERT INTO openrails.customers (id, merchant_id)
+INSERT INTO billing.customers (id, merchant_id)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id))
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
@@ -25,17 +25,17 @@ ON CONFLICT (merchant_id, id) DO NOTHING;
 -- newest-touched first. email is the latest subscription email on file
 -- (customers carry none themselves).
 SELECT c.id, c.id::text AS subject, c.created_at, c.last_seen_at,
-  (SELECT s.user_email FROM openrails.subscriptions s
+  (SELECT s.user_email FROM billing.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
        AND s.deleted_at IS NULL
        AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
-FROM openrails.customers c
+FROM billing.customers c
 WHERE c.merchant_id = sqlc.arg(merchant_id)
   AND (sqlc.arg(q)::text = ''
    OR c.id::text ILIKE sqlc.arg(q) || '%'
    OR EXISTS (
-        SELECT 1 FROM openrails.subscriptions se
+        SELECT 1 FROM billing.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
           AND se.merchant_id = sqlc.arg(merchant_id)
@@ -45,12 +45,12 @@ ORDER BY c.last_seen_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CountSearchCustomers :one
-SELECT count(*) FROM openrails.customers c
+SELECT count(*) FROM billing.customers c
 WHERE c.merchant_id = sqlc.arg(merchant_id)
   AND (sqlc.arg(q)::text = ''
    OR c.id::text ILIKE sqlc.arg(q) || '%'
    OR EXISTS (
-        SELECT 1 FROM openrails.subscriptions se
+        SELECT 1 FROM billing.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
           AND se.merchant_id = sqlc.arg(merchant_id)
@@ -63,7 +63,7 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
 -- detail page. The explicit merchant predicate is the merchant scope.
 SELECT COALESCE((
   SELECT BTRIM(s.user_email)
-  FROM openrails.subscriptions s
+  FROM billing.subscriptions s
   WHERE s.customer_id = sqlc.arg(customer_id)
     AND s.merchant_id = sqlc.arg(merchant_id)
     AND s.deleted_at IS NULL
@@ -73,14 +73,14 @@ SELECT COALESCE((
 ), '')::text AS email;
 
 -- #824: the hosted portal's "which merchants am I a customer of" directory
--- (openrails-saas #18). openrails.merchants is global, so only the
+-- (openrails-saas #18). billing.merchants is global, so only the
 -- customers half needs the SECURITY DEFINER cross-merchant reader (0016).
 -- name: ListMerchantsForCustomerSubject :many
 SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
-FROM openrails.merchants m
+FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
   AND m.id IN (
-      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject(sqlc.arg(subject)::uuid)
+      SELECT merchant_id FROM billing.customer_merchant_ids_for_subject(sqlc.arg(subject)::uuid)
   )
 ORDER BY m.slug;

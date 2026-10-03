@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CustomerID identifies an openrails.customers row: the OpenRails payable
+// CustomerID identifies a billing.customers row: the OpenRails payable
 // subject whose balance, invoices, reservations, and entitlements are
 // recorded. It is the shared wire type billing.CustomerID (one family, one
 // spelling), distinct from any invoker or operator identity so the compiler

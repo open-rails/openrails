@@ -17,7 +17,7 @@ import (
 
 const stripeSaleIntentKey = "stripe_payment_intent_id"
 
-func (h *NMISaleIntentHandler) stripeService(ctx context.Context, in gen.OpenrailsRailIntent) (*subscriptions.StripeService, error) {
+func (h *NMISaleIntentHandler) stripeService(ctx context.Context, in gen.BillingRailIntent) (*subscriptions.StripeService, error) {
 	if h.Sale == nil || h.Sale.StripeEngines == nil {
 		return nil, errors.New("Stripe sale account resolver unavailable")
 	}
@@ -32,7 +32,7 @@ func (h *NMISaleIntentHandler) stripeService(ctx context.Context, in gen.Openrai
 }
 
 // submitStripeSale runs only for the unique submission-fence winner.
-func (h *NMISaleIntentHandler) submitStripeSale(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) submitStripeSale(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	service, err := h.stripeService(ctx, in)
 	if err != nil {
 		return intents.Ambiguous("submitted Stripe sale account unavailable: " + err.Error())
@@ -60,7 +60,7 @@ func (h *NMISaleIntentHandler) submitStripeSale(ctx context.Context, in gen.Open
 
 // recoverStripeSale is the Execute-lease path after submission: it may cancel
 // the SAME declined PaymentIntent (gated) before settling the refusal.
-func (h *NMISaleIntentHandler) recoverStripeSale(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) recoverStripeSale(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -110,7 +110,7 @@ func (h *NMISaleIntentHandler) recoverStripeSale(ctx context.Context, in gen.Ope
 }
 
 // verifyStripeSale never writes to the provider.
-func (h *NMISaleIntentHandler) verifyStripeSale(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *NMISaleIntentHandler) verifyStripeSale(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	service, err := h.stripeService(ctx, in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -165,7 +165,7 @@ func (h *NMISaleIntentHandler) verifyStripeSale(ctx context.Context, in gen.Open
 	}
 }
 
-func (h *NMISaleIntentHandler) resolveStripeSale(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.Outcome, error) {
+func (h *NMISaleIntentHandler) resolveStripeSale(ctx context.Context, in gen.BillingRailIntent, reference string) (intents.Outcome, error) {
 	service, err := h.stripeService(ctx, in)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -183,7 +183,7 @@ func (h *NMISaleIntentHandler) resolveStripeSale(ctx context.Context, in gen.Ope
 
 // authenticationAbandoned: a buyer who started an issuer challenge and never
 // finished it releases the purchase after the engine's authentication window.
-func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.OpenrailsRailIntent) bool {
+func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.BillingRailIntent) bool {
 	if h.Sale == nil || h.Sale.PurchaseService == nil {
 		return false
 	}

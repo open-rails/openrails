@@ -36,7 +36,7 @@ type rebillDecline struct {
 // ValidateManualRebillTerminal is the archive/reload boundary for this exact
 // kind. Unsupported or contradictory evidence refuses export and restore;
 // callers cannot silently drop a retained field to make the record portable.
-func ValidateManualRebillTerminal(in gen.OpenrailsRailIntent) error {
+func ValidateManualRebillTerminal(in gen.BillingRailIntent) error {
 	if _, err := subscriptions.DecodeManualRebillPayload(in); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func ValidateManualRebillTerminal(in gen.OpenrailsRailIntent) error {
 	return nil
 }
 
-func loadRebillDecline(in gen.OpenrailsRailIntent) (rebillDecline, bool, error) {
+func loadRebillDecline(in gen.BillingRailIntent) (rebillDecline, bool, error) {
 	var all map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return rebillDecline{}, false, nil
@@ -117,17 +117,17 @@ func loadRebillDecline(in gen.OpenrailsRailIntent) (rebillDecline, bool, error) 
 	}
 	return fact, true, nil
 }
-func (h *ManualRebillHandler) retainDecline(ctx context.Context, in gen.OpenrailsRailIntent, code int, reference string) error {
+func (h *ManualRebillHandler) retainDecline(ctx context.Context, in gen.BillingRailIntent, code int, reference string) error {
 	return NewStore(h.DB).RetainRecurringDecline(ctx, in, code, reference)
 }
 
 // LoadRecurringDecline exposes only bound, positive refusal facts.
-func LoadRecurringDecline(in gen.OpenrailsRailIntent) (int, string, bool, error) {
+func LoadRecurringDecline(in gen.BillingRailIntent) (int, string, bool, error) {
 	fact, found, err := loadRebillDecline(in)
 	return fact.ResponseCode, fact.ProviderReference, found, err
 }
 
-func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.OpenrailsRailIntent, code int, reference string) error {
+func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.BillingRailIntent, code int, reference string) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
@@ -156,7 +156,7 @@ func (h *ManualRebillHandler) lifecycle(d *db.DB) *subscriptions.SubscriptionLif
 	lifecycle.SetProviderCancelScheduler(h.DeferDelete)
 	return lifecycle
 }
-func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, receipt CollectedReceipt) Outcome {
+func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.BillingRailIntent, p subscriptions.ManualRebillPayload, receipt CollectedReceipt) Outcome {
 	ctx = pinIntentAddress(ctx, in)
 	retained, err := NewStore(h.DB).RetainCollectedReceipt(ctx, in, receipt)
 	if err != nil {
@@ -201,7 +201,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.Openra
 	}
 	return outcome
 }
-func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload) Outcome {
+func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.BillingRailIntent, p subscriptions.ManualRebillPayload) Outcome {
 	ctx = pinIntentAddress(ctx, in)
 	refusal, found, err := loadRebillDecline(in)
 	if err != nil || !found {
@@ -259,7 +259,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 	}
 	return outcome
 }
-func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, reason string) Outcome {
+func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.BillingRailIntent, p subscriptions.ManualRebillPayload, reason string) Outcome {
 	ctx = pinIntentAddress(ctx, in)
 	outcome := TerminalWithEvidence(reason, map[string]any{"declined": false, "not_executed": true})
 	ctx, cancel := LedgerWriteContext(ctx)
@@ -279,7 +279,7 @@ func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.Op
 
 // recordRebillAttempt records an OpenRails rebill's answer for its cycle
 // (#1111) in the completion transaction.
-func recordRebillAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, sub *models.Subscription, a attempts.Attempt, at time.Time) error {
+func recordRebillAttempt(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p subscriptions.ManualRebillPayload, sub *models.Subscription, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Renewal.CustomerID, p.Instrument.PSPID, p.Rail
 	a.Kind, a.Owner, a.At, a.Step = attempts.RebillKind(p.Initiator == charge.InitiatorCustomer, p.FailureCount), attempts.OwnerOf(sub.CollectionPolicy), at, "charge"
 	a.Amount, a.Currency, a.PaymentMethodID, a.RailIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID

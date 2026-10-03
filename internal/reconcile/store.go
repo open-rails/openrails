@@ -418,7 +418,7 @@ var (
 	// type counts: derive.subscription.missing and derive.wallet.missing are
 	// AUTO-repaired in the same sweep and never sit open (same rationale that
 	// keeps the dead-subs AUTO check out of freeloaders) — they are episode
-	// material (openrails.orphaned_episodes), not standing errors.
+	// material (billing.orphaned_episodes), not standing errors.
 	// derive.grant.missing is ADMIN surface-only and DOES sit open.
 	OrphanedFindingTypes = []string{
 		"derive.grant.missing",
@@ -486,7 +486,7 @@ func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) ([]
 	var total int64
 	for _, row := range rows {
 		total = row.TotalCount
-		out = append(out, FindingRecordFromRow(row.OpenrailsReconciliationFinding))
+		out = append(out, FindingRecordFromRow(row.BillingReconciliationFinding))
 	}
 	return out, total, nil
 }
@@ -651,7 +651,7 @@ func (s *PGStore) AppendFindingNotes(ctx context.Context, id uuid.UUID, note str
 	return err
 }
 
-func FindingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
+func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 	evidence := unmarshalEvidence(row.Evidence)
 	provider, _ := evidence["provider"].(string)
 	if row.Rail != "" {
@@ -699,7 +699,7 @@ func FindingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 	return rec
 }
 
-func runRecordFromRow(row gen.OpenrailsMaintenanceRun) RunRecord {
+func runRecordFromRow(row gen.BillingMaintenanceRun) RunRecord {
 	rec := RunRecord{
 		ID:          row.ID,
 		MerchantID:  row.MerchantID,

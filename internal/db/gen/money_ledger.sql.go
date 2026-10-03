@@ -13,7 +13,7 @@ import (
 
 const lockCustomerForSpend = `-- name: LockCustomerForSpend :one
 
-SELECT id FROM openrails.customers
+SELECT id FROM billing.customers
 WHERE id = $1 AND merchant_id = $2
 FOR UPDATE
 `

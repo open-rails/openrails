@@ -11,7 +11,7 @@ import (
 // ValidateSubscriptionCollectionTerminal retains the accepted obligation and
 // positive terminal proof through archive/reload. Generic terminal statuses,
 // disappeared provider searches and expired leases are not retry authority.
-func ValidateSubscriptionCollectionTerminal(in gen.OpenrailsRailIntent) error {
+func ValidateSubscriptionCollectionTerminal(in gen.BillingRailIntent) error {
 	if _, err := subscriptions.DecodeSubscriptionCollectionPayload(in); err != nil {
 		return err
 	}

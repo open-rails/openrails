@@ -68,7 +68,7 @@ merchants:
       - prefer: [mobius, ccbill, solana]
 
     # Operator-declared PSP catalog: one word everywhere — this key, the DB table
-    # (openrails.psps) and the merchant-secret name prefix (`psps/…`). One rail each.
+    # (billing.psps) and the merchant-secret name prefix (`psps/…`). One rail each.
     psps:
       mobius:
         nmi:

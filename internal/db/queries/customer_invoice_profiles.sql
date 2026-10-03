@@ -1,9 +1,9 @@
--- openrails.customer_invoice_profiles: per-payer enterprise invoicing profile
+-- billing.customer_invoice_profiles: per-payer enterprise invoicing profile
 -- (#798) — net-N terms, collection method and the document fields snapshotted
 -- onto invoices at finalize.
 
 -- name: UpsertCustomerInvoiceProfile :exec
-INSERT INTO openrails.customer_invoice_profiles (
+INSERT INTO billing.customer_invoice_profiles (
     merchant_id, customer_id, net_terms_days, collection_method,
     po_number, tax, billing_contacts, memo, created_at, updated_at
 ) VALUES (
@@ -22,7 +22,7 @@ ON CONFLICT (merchant_id, customer_id) DO UPDATE SET
     updated_at = EXCLUDED.updated_at;
 
 -- name: InsertCustomerInvoiceProfileIfAbsent :execrows
-INSERT INTO openrails.customer_invoice_profiles (
+INSERT INTO billing.customer_invoice_profiles (
     merchant_id, customer_id, net_terms_days, collection_method,
     po_number, tax, billing_contacts, memo, created_at, updated_at
 ) VALUES (
@@ -34,6 +34,6 @@ INSERT INTO openrails.customer_invoice_profiles (
 ON CONFLICT (merchant_id, customer_id) DO NOTHING;
 
 -- name: GetCustomerInvoiceProfile :one
-SELECT * FROM openrails.customer_invoice_profiles
+SELECT * FROM billing.customer_invoice_profiles
 WHERE merchant_id = $1 AND customer_id = $2
 LIMIT 1;

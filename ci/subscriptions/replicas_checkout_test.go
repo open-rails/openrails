@@ -124,7 +124,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, owned["content:post"])
 			var claims int64
-			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claims FROM openrails.idempotency_keys
+			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claims FROM billing.idempotency_keys
 				WHERE operation = 'checkout_session_create' AND idempotency_key LIKE $1`), victim.id+":%").Scan(&claims))
 			require.EqualValues(t, 2, claims, "the dead replica's claim was reclaimed once")
 			require.Empty(t, f.base.stripe.unexpected())
@@ -137,7 +137,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 // database clock, as a dead owner's silence or starved renewals would.
 func (f *fleet) lapseCheckoutClaims(customerID string) {
 	f.t.Helper()
-	_, err := f.base.pool.Exec(f.t.Context(), f.q(`UPDATE openrails.idempotency_keys SET lease_expires_at = now() - interval '1 millisecond'
+	_, err := f.base.pool.Exec(f.t.Context(), f.q(`UPDATE billing.idempotency_keys SET lease_expires_at = now() - interval '1 millisecond'
 		WHERE operation = 'checkout_session_create' AND idempotency_key LIKE $1 AND status = 'processing'`), customerID+":%")
 	require.NoError(f.t, err)
 }
@@ -168,7 +168,7 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	}
 	firstSessionStatus := func(c *customer) string {
 		var status string
-		require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT status FROM openrails.checkout_sessions
+		require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT status FROM billing.checkout_sessions
 			WHERE customer_id = $1 ORDER BY created_at LIMIT 1`), c.id).Scan(&status))
 		return status
 	}
@@ -291,7 +291,7 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	require.Equal(t, before, charges(), "the frozen owner never charges")
 	require.Zero(t, subscriptions(c), "nor enrolls")
 	var sessions int
-	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT count(*) FROM openrails.checkout_sessions WHERE customer_id = $1`), c.id).Scan(&sessions))
+	require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT count(*) FROM billing.checkout_sessions WHERE customer_id = $1`), c.id).Scan(&sessions))
 	require.Zero(t, sessions, "nor creates its session")
 
 	s2, err := b.client[embedded].CreateCheckoutSession(t.Context(), request(c, "checkout:"+uuid.NewString()+":2"))

@@ -274,8 +274,8 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 	evidence, err := json.Marshal(map[string]any{"recommendation": map[string]any{"action": "cancel_and_refund", "params": map[string]any{"subscription_id": subject.sub.String()}}})
 	require.NoError(t, err)
 	var finding string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`INSERT INTO openrails.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, evidence)
-		SELECT id, 'consistency.security.override', $2, 'critical', 'requires_review', $3::jsonb FROM openrails.merchants WHERE slug = $1 RETURNING id::text`), w.slug, "override-"+uuid.NewString(), string(evidence)).Scan(&finding))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, evidence)
+		SELECT id, 'consistency.security.override', $2, 'critical', 'requires_review', $3::jsonb FROM billing.merchants WHERE slug = $1 RETURNING id::text`), w.slug, "override-"+uuid.NewString(), string(evidence)).Scan(&finding))
 
 	for _, override := range []map[string]any{
 		{"refund_payment_id": payment.ID.String()},

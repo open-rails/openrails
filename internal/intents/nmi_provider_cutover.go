@@ -101,7 +101,7 @@ type NMIProviderCutover struct {
 func (*NMIProviderCutover) Type() string                  { return TypeNMIProviderCutover }
 func (*NMIProviderCutover) Backoff(n int32) time.Duration { return DefaultBackoff.Delay(n) }
 func (*NMIProviderCutover) PrunePolicy() (bool, bool)     { return true, true }
-func (*NMIProviderCutover) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
+func (*NMIProviderCutover) CheckRelevance(context.Context, gen.BillingRailIntent) (Relevance, error) {
 	return StillRelevant(), nil
 }
 func (h *NMIProviderCutover) now() time.Time {
@@ -234,7 +234,7 @@ func (h *NMIProviderCutover) Preview(ctx context.Context, id uuid.UUID, body bil
 		return nil, cutoverConflict("paid-through anchor must be in the future")
 	}
 	mid, _ := merchant.Require(ctx)
-	return cutoverResult(gen.OpenrailsRailIntent{MerchantID: mid.UUID(), Status: "ready"}, p, nmiCutoverProgress{}), nil
+	return cutoverResult(gen.BillingRailIntent{MerchantID: mid.UUID(), Status: "ready"}, p, nmiCutoverProgress{}), nil
 }
 
 func (h *NMIProviderCutover) Get(ctx context.Context, id uuid.UUID, key string) (*billing.ProviderCutover, error) {
@@ -265,7 +265,7 @@ func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid
 	if err != nil {
 		return nil, err
 	}
-	var in gen.OpenrailsRailIntent
+	var in gen.BillingRailIntent
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
 		store := NewStore(d)
@@ -356,7 +356,7 @@ func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid
 	return cutoverResult(in, p, progress), nil
 }
 func pMerchant(ctx context.Context) uuid.UUID { m, _ := merchant.Require(ctx); return m.UUID() }
-func decodeCutover(in gen.OpenrailsRailIntent) (nmiCutoverPayload, nmiCutoverProgress, error) {
+func decodeCutover(in gen.BillingRailIntent) (nmiCutoverPayload, nmiCutoverProgress, error) {
 	var p nmiCutoverPayload
 	var progress nmiCutoverProgress
 	if in.IntentType != "" && in.IntentType != TypeNMIProviderCutover {
@@ -372,7 +372,7 @@ func decodeCutover(in gen.OpenrailsRailIntent) (nmiCutoverPayload, nmiCutoverPro
 	}
 	return p, progress, nil
 }
-func cutoverResult(in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) *billing.ProviderCutover {
+func cutoverResult(in gen.BillingRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) *billing.ProviderCutover {
 	r := &billing.ProviderCutover{ID: in.ID, MerchantID: in.MerchantID, SubscriptionID: billing.SubscriptionID(p.SubscriptionID), SourcePSPID: p.Request.ExpectedSourcePSPID, TargetPSPID: p.Request.ExpectedTargetPSPID, TargetPaymentMethodID: billing.PaymentMethodID(p.Request.TargetPaymentMethodID), Anchor: p.Anchor, Status: in.Status, Stage: "pending"}
 	if !g.BillingAnchor.IsZero() {
 		r.Anchor = g.BillingAnchor
@@ -416,14 +416,14 @@ func cutoverResult(in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutover
 	}
 	return r
 }
-func (h *NMIProviderCutover) Execute(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
+func (h *NMIProviderCutover) Execute(ctx context.Context, in gen.BillingRailIntent) Outcome {
 	return h.advance(ctx, in, true)
 }
-func (h *NMIProviderCutover) Verify(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
+func (h *NMIProviderCutover) Verify(ctx context.Context, in gen.BillingRailIntent) Outcome {
 	return h.advance(ctx, in, false)
 }
 
-func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIntent, send bool) Outcome {
+func (h *NMIProviderCutover) advance(ctx context.Context, in gen.BillingRailIntent, send bool) Outcome {
 	store := NewStore(h.DB)
 	current, err := store.Get(ctx, in.ID)
 	if err != nil {
@@ -761,7 +761,7 @@ func (h *NMIProviderCutover) repoint(ctx context.Context, p nmiCutoverPayload, t
 // create: the operator's reason must identify provider evidence linking this
 // ID to the original submission. This is never automatic tuple matching and
 // never authorizes another create.
-func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, r Resolution) (Outcome, error) {
+func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.BillingRailIntent, r Resolution) (Outcome, error) {
 	p, g, e := decodeCutover(in)
 	if e != nil {
 		return Outcome{}, e
@@ -802,7 +802,7 @@ func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIn
 	return Retryable("operator supplied verified paused target; continue under executor gates"), nil
 }
 
-func cutoverAnchorResolutionMatches(in gen.OpenrailsRailIntent, r Resolution) bool {
+func cutoverAnchorResolutionMatches(in gen.BillingRailIntent, r Resolution) bool {
 	_, g, err := decodeCutover(in)
 	if err != nil || r.BillingAnchor.IsZero() || !g.BillingAnchor.Equal(r.BillingAnchor) || len(g.AnchorResolutions) == 0 {
 		return false
@@ -814,7 +814,7 @@ func cutoverAnchorResolutionMatches(in gen.OpenrailsRailIntent, r Resolution) bo
 // An expired anchor can only be replaced by explicit operator authorization.
 // Resolve reads the exact paused target and canceled source; the ordinary
 // executor performs the update under the same mode and destructive gates.
-func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, r Resolution) (Outcome, error) {
+func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.BillingRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, r Resolution) (Outcome, error) {
 	if r.Step != "anchor" || r.ProviderReference != "" || r.NotExecuted || r.Actor == "" || r.Reason == "" || r.BillingAnchor.Nanosecond() != 0 || !r.BillingAnchor.After(h.now()) || g.Target == nil || (!g.SourceCancelSubmitted && !g.SourceCanceled) || g.TargetActive {
 		return Outcome{}, ErrResolutionRejected
 	}

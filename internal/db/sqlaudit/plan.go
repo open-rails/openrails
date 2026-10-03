@@ -49,7 +49,7 @@ func (n planNode) walk(fn func(planNode)) {
 func PrepareSession(ctx context.Context, conn *pgx.Conn) error {
 	stmts := []string{
 		`SELECT set_config('app.merchant_id', '` + AuditMerchantID + `', false)`,
-		`SET search_path = openrails, public`,
+		`SET search_path = billing, public`,
 		`SET enable_seqscan = off`,
 	}
 	for _, s := range stmts {

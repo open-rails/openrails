@@ -159,7 +159,7 @@ type subscriptionSummary = billing.PaymentMethodSubscription
 type paymentMethodResponse = billing.PaymentMethod
 
 // paymentMethodHealth is the #589 DERIVED per-method health, computed at query
-// time (never a stored column). last_charge_* come from openrails.payments via the
+// time (never a stored column). last_charge_* come from billing.payments via the
 // subscription link; expiry_status from the card's expiry vs now.
 type paymentMethodHealth = billing.PaymentMethodHealth
 

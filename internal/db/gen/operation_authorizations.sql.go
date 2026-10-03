@@ -14,7 +14,7 @@ import (
 
 const getOperationAuthorization = `-- name: GetOperationAuthorization :one
 SELECT operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
-FROM openrails.operation_authorizations
+FROM billing.operation_authorizations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
 `
@@ -24,9 +24,9 @@ type GetOperationAuthorizationParams struct {
 	OperationID string
 }
 
-func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperationAuthorizationParams) (OpenrailsOperationAuthorization, error) {
+func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, getOperationAuthorization, arg.MerchantID, arg.OperationID)
-	var i OpenrailsOperationAuthorization
+	var i BillingOperationAuthorization
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
@@ -52,7 +52,7 @@ func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperatio
 
 const insertOperationAuthorization = `-- name: InsertOperationAuthorization :one
 
-INSERT INTO openrails.operation_authorizations (
+INSERT INTO billing.operation_authorizations (
     operation_id,
     merchant_id,
     payer_id,
@@ -92,7 +92,7 @@ type InsertOperationAuthorizationParams struct {
 // th-005 durable operation-level financial reservations. The immutable body
 // and principals make the operation id a safe replay coordinate; only the
 // three-state terminal transition may update a row.
-func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOperationAuthorizationParams) (OpenrailsOperationAuthorization, error) {
+func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, insertOperationAuthorization,
 		arg.OperationID,
 		arg.MerchantID,
@@ -104,7 +104,7 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 		arg.AuthorizationBodyBytes,
 		arg.AuthorizationBodyDigest,
 	)
-	var i OpenrailsOperationAuthorization
+	var i BillingOperationAuthorization
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
@@ -129,7 +129,7 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 }
 
 const releaseOperationAuthorization = `-- name: ReleaseOperationAuthorization :one
-UPDATE openrails.operation_authorizations
+UPDATE billing.operation_authorizations
 SET state = 'released',
     terminal_reference = $1::text,
     released_at = $2::timestamptz
@@ -138,9 +138,9 @@ WHERE merchant_id = $3::uuid
   AND state = 'open'
   AND NOT EXISTS (
       SELECT 1
-      FROM openrails.provider_billing_qualifications qualification
-      WHERE qualification.merchant_id = openrails.operation_authorizations.merchant_id
-        AND qualification.operation_id = openrails.operation_authorizations.operation_id
+      FROM billing.provider_billing_qualifications qualification
+      WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
+        AND qualification.operation_id = billing.operation_authorizations.operation_id
   )
 RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
 `
@@ -152,14 +152,14 @@ type ReleaseOperationAuthorizationParams struct {
 	OperationID       string
 }
 
-func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg ReleaseOperationAuthorizationParams) (OpenrailsOperationAuthorization, error) {
+func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg ReleaseOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, releaseOperationAuthorization,
 		arg.TerminalReference,
 		arg.ReleasedAt,
 		arg.MerchantID,
 		arg.OperationID,
 	)
-	var i OpenrailsOperationAuthorization
+	var i BillingOperationAuthorization
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
@@ -184,7 +184,7 @@ func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg Release
 }
 
 const settleOperationAuthorizationPassThroughProviderCost = `-- name: SettleOperationAuthorizationPassThroughProviderCost :one
-UPDATE openrails.operation_authorizations
+UPDATE billing.operation_authorizations
 SET state = 'settled',
     settlement_provider_cost_usd_micros = $1::bigint,
     settlement_rated_usd_micros = $2::bigint,
@@ -209,7 +209,7 @@ type SettleOperationAuthorizationPassThroughProviderCostParams struct {
 	OperationID                     string
 }
 
-func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx context.Context, arg SettleOperationAuthorizationPassThroughProviderCostParams) (OpenrailsOperationAuthorization, error) {
+func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx context.Context, arg SettleOperationAuthorizationPassThroughProviderCostParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, settleOperationAuthorizationPassThroughProviderCost,
 		arg.SettlementProviderCostUsdMicros,
 		arg.SettlementRatedUsdMicros,
@@ -220,7 +220,7 @@ func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx contex
 		arg.MerchantID,
 		arg.OperationID,
 	)
-	var i OpenrailsOperationAuthorization
+	var i BillingOperationAuthorization
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,

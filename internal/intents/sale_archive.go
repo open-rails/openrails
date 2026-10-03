@@ -11,7 +11,7 @@ import (
 
 // ValidateNMISaleTerminal rechecks the complete accepted purchase and retained
 // payment custody when an archive reloads a terminal result.
-func ValidateNMISaleTerminal(in gen.OpenrailsRailIntent) error {
+func ValidateNMISaleTerminal(in gen.BillingRailIntent) error {
 	if _, err := payments.DecodeNMISalePayload(in); err != nil {
 		return err
 	}

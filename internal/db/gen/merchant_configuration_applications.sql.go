@@ -12,7 +12,7 @@ import (
 )
 
 const applyMerchantConfigurationDirectory = `-- name: ApplyMerchantConfigurationDirectory :exec
-UPDATE openrails.merchants SET
+UPDATE billing.merchants SET
  display_name=CASE WHEN $1::boolean THEN $2::text ELSE display_name END,
  api_host=CASE WHEN $3::boolean THEN NULLIF($4::text,'') ELSE api_host END,
  updated_at=current_timestamp
@@ -39,7 +39,7 @@ func (q *Queries) ApplyMerchantConfigurationDirectory(ctx context.Context, arg A
 }
 
 const getMerchantConfigurationApplication = `-- name: GetMerchantConfigurationApplication :one
-SELECT request_sha256,result FROM openrails.merchant_configuration_applications
+SELECT request_sha256,result FROM billing.merchant_configuration_applications
 WHERE merchant_id=$1::uuid AND application_id=$2::text
 `
 
@@ -62,7 +62,7 @@ func (q *Queries) GetMerchantConfigurationApplication(ctx context.Context, arg G
 
 const getMerchantConfigurationDirectory = `-- name: GetMerchantConfigurationDirectory :one
 SELECT COALESCE(display_name,'')::text AS display_name,COALESCE(api_host,'')::text AS api_host
-FROM openrails.merchants WHERE id=$1::uuid AND status='active' AND deleted_at IS NULL
+FROM billing.merchants WHERE id=$1::uuid AND status='active' AND deleted_at IS NULL
 `
 
 type GetMerchantConfigurationDirectoryRow struct {
@@ -78,7 +78,7 @@ func (q *Queries) GetMerchantConfigurationDirectory(ctx context.Context, merchan
 }
 
 const insertMerchantConfigurationApplication = `-- name: InsertMerchantConfigurationApplication :exec
-INSERT INTO openrails.merchant_configuration_applications(merchant_id,application_id,request_sha256,result)
+INSERT INTO billing.merchant_configuration_applications(merchant_id,application_id,request_sha256,result)
 VALUES($1::uuid,$2::text,$3::bytea,$4::jsonb)
 `
 

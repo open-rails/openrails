@@ -30,7 +30,7 @@ const (
 	BillingPolicyAccrualRateCap BillingPolicyKind = "accrual_rate_cap"
 )
 
-// BillingPolicy is the JSONB body stored in openrails.billing_policies.
+// BillingPolicy is the JSONB body stored in billing.billing_policies.
 //
 // Every quantity is measured from the double-entry ledger — never from invoices
 // (presentation artifacts) and never from merchant-supplied numbers. The
@@ -105,7 +105,7 @@ func (p BillingPolicy) RateWindowSeconds() int64 {
 	return DefaultAccrualRateWindowSeconds
 }
 
-// BillingPolicyBinding is one row of openrails.billing_policy_bindings: which
+// BillingPolicyBinding is one row of billing.billing_policy_bindings: which
 // named policy applies to whom. Exactly one rung is populated — CustomerID for
 // a per-customer override, Tier for a per-tier override, neither for the
 // merchant default.

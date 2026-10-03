@@ -149,7 +149,7 @@ func (p stripeTierChangeProgress) refused() *stripeTierChangeStep {
 	return nil
 }
 
-func decodeStripeTierChange(in gen.OpenrailsRailIntent) (StripeTierChangePayload, stripeTierChangeProgress, error) {
+func decodeStripeTierChange(in gen.BillingRailIntent) (StripeTierChangePayload, stripeTierChangeProgress, error) {
 	var p StripeTierChangePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, stripeTierChangeProgress{}, fmt.Errorf("invalid tier change payload: %w", err)
@@ -183,13 +183,13 @@ func (*StripeTierChangeIntentHandler) Backoff(attempts int32) time.Duration {
 // PrunePolicy keeps payload and receipts: a client replay renders the stored
 // result from them.
 func (*StripeTierChangeIntentHandler) PrunePolicy() (bool, bool) { return true, true }
-func (*StripeTierChangeIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+func (*StripeTierChangeIntentHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
-func (h *StripeTierChangeIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *StripeTierChangeIntentHandler) Execute(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	return h.advance(ctx, in, true)
 }
-func (h *StripeTierChangeIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *StripeTierChangeIntentHandler) Verify(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	return h.advance(ctx, in, false)
 }
 
@@ -214,7 +214,7 @@ func stripeRefusalIsDefinitive(err error) (*subscriptions.StripeAPIError, bool) 
 
 type stripeStepRun struct {
 	ctx      context.Context
-	in       gen.OpenrailsRailIntent
+	in       gen.BillingRailIntent
 	p        StripeTierChangePayload
 	progress *stripeTierChangeProgress
 	store    *intents.Store
@@ -228,7 +228,7 @@ func (r *stripeStepRun) save(name string, step *stripeTierChangeStep) error {
 
 func (*StripeTierChangeIntentHandler) CommitsTerminalOutcome() bool { return true }
 
-func (h *StripeTierChangeIntentHandler) advance(ctx context.Context, in gen.OpenrailsRailIntent, send bool) intents.Outcome {
+func (h *StripeTierChangeIntentHandler) advance(ctx context.Context, in gen.BillingRailIntent, send bool) intents.Outcome {
 	if h.Checkout == nil || h.Checkout.SubscriptionService == nil {
 		return intents.Parked("tier change service unavailable")
 	}
@@ -257,7 +257,7 @@ func (h *StripeTierChangeIntentHandler) advance(ctx context.Context, in gen.Open
 	return h.advanceUpgrade(run)
 }
 
-func (h *StripeTierChangeIntentHandler) refusedOutcome(ctx context.Context, in gen.OpenrailsRailIntent, progress stripeTierChangeProgress, step *stripeTierChangeStep) intents.Outcome {
+func (h *StripeTierChangeIntentHandler) refusedOutcome(ctx context.Context, in gen.BillingRailIntent, progress stripeTierChangeProgress, step *stripeTierChangeStep) intents.Outcome {
 	reason := "stripe refused the tier change: " + step.Refusal
 	if step.Resolution != nil {
 		reason = "tier change closed by operator: " + step.Refusal
@@ -508,7 +508,7 @@ func (h *StripeTierChangeIntentHandler) requireFrozenSubscription(ctx context.Co
 // have mirrored the same Stripe subscription first: a subscription already on
 // the target price is complete, and only a period older than the receipt's
 // is brought up to it.
-func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in gen.OpenrailsRailIntent, p StripeTierChangePayload, receipt subscriptions.StripeSubscriptionState, outcome intents.Outcome) error {
+func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in gen.BillingRailIntent, p StripeTierChangePayload, receipt subscriptions.StripeSubscriptionState, outcome intents.Outcome) error {
 	start, end, ok := receipt.Period()
 	if !ok {
 		return fmt.Errorf("price change receipt for %s carries no billing period", receipt.ID)
@@ -552,7 +552,7 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in 
 	})
 }
 
-func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, in gen.OpenrailsRailIntent, p StripeTierChangePayload, outcome intents.Outcome) error {
+func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, in gen.BillingRailIntent, p StripeTierChangePayload, outcome intents.Outcome) error {
 	database := h.Checkout.SubscriptionService.Database()
 	now := h.Checkout.now().UTC()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -604,7 +604,7 @@ func (h *StripeTierChangeIntentHandler) result(p StripeTierChangePayload, progre
 // receipt, or provider-confirmed non-execution of it. A receipt is read back
 // by its exact id and must match the frozen operation; non-execution is
 // refused while the provider shows the step's effect.
-func (h *StripeTierChangeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *StripeTierChangeIntentHandler) Resolve(ctx context.Context, in gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	if h.Checkout == nil || h.Checkout.SubscriptionService == nil {
 		return intents.Outcome{}, errors.New("tier change service unavailable")
 	}
@@ -716,7 +716,7 @@ func (h *StripeTierChangeIntentHandler) Resolve(ctx context.Context, in gen.Open
 }
 
 // ResolveUnsent releases an operation that never crossed a submission fence.
-func (h *StripeTierChangeIntentHandler) ResolveUnsent(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *StripeTierChangeIntentHandler) ResolveUnsent(ctx context.Context, in gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	_, progress, err := decodeStripeTierChange(in)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -740,7 +740,7 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 		IntentType: TypeStripeTierChange, SubscriptionID: &existingSub.ID, PriceID: &payload.PriceID,
 		Payload: payload, IdempotencyKey: key, NextAttemptAt: s.now(), Origin: intents.OriginUser,
 		OriginReason: "customer tier " + payload.Action,
-	}, func(row gen.OpenrailsRailIntent) error { return tierChangeOwnedBy(row, payload.subject()) })
+	}, func(row gen.BillingRailIntent) error { return tierChangeOwnedBy(row, payload.subject()) })
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
 		return nil, s.tierChangeInFlight(ctx, existingSub.ID)
@@ -752,7 +752,7 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 }
 
 // stripeTierChangeResponse renders a Stripe tier change (tierChangeResponse).
-func stripeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
+func stripeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeResponse, error) {
 	var p StripeTierChangePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err

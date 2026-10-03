@@ -5,7 +5,7 @@ import (
 )
 
 // MerchantConfiguration is the JSONB payload stored in
-// openrails.merchant_configurations.
+// billing.merchant_configurations.
 type MerchantConfiguration struct {
 	Profile MerchantProfileConfiguration `json:"profile,omitempty"`
 

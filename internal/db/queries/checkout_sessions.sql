@@ -1,7 +1,7 @@
--- openrails.checkout_sessions.
+-- billing.checkout_sessions.
 
 -- name: CreateCheckoutSession :execrows
-INSERT INTO openrails.checkout_sessions (
+INSERT INTO billing.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, rail_fields, rail_state, routing_reason,
@@ -18,11 +18,11 @@ INSERT INTO openrails.checkout_sessions (
 );
 
 -- name: GetCheckoutSessionByID :one
-SELECT * FROM openrails.checkout_sessions WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+SELECT * FROM billing.checkout_sessions WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: LockCheckoutSessionForShare :one
-SELECT id FROM openrails.checkout_sessions
+SELECT id FROM billing.checkout_sessions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND deleted_at IS NULL
 FOR SHARE;
@@ -30,7 +30,7 @@ FOR SHARE;
 -- #1099: the session's lock orders intent admission against a definite
 -- failure; the caller refuses to admit on a terminal session.
 -- name: LockCheckoutSessionForAdmission :one
-SELECT status FROM openrails.checkout_sessions
+SELECT status FROM billing.checkout_sessions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND deleted_at IS NULL
 FOR UPDATE;
@@ -39,17 +39,17 @@ FOR UPDATE;
 -- operation was admitted for it. Run after LockCheckoutSessionForAdmission in
 -- the same transaction, so the intent check reads committed admissions.
 -- name: FailCheckoutSessionInitialization :execrows
-UPDATE openrails.checkout_sessions cs
+UPDATE billing.checkout_sessions cs
 SET status = 'failed', updated_at = sqlc.arg(now)::timestamptz,
     rail_state = COALESCE(cs.rail_state, '{}'::jsonb) || jsonb_build_object('message', sqlc.arg(reason)::text, 'failure_reason', sqlc.arg(reason)::text,
       'failure_kind', sqlc.arg(kind)::text, 'failure_code', sqlc.arg(code)::text)
 WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.id = sqlc.arg(id)::uuid
   AND cs.deleted_at IS NULL AND cs.status = 'created'
-  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
                   WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY(sqlc.arg(intent_keys)::text[]));
 
 -- name: UpdateCheckoutSession :execrows
-UPDATE openrails.checkout_sessions SET
+UPDATE billing.checkout_sessions SET
     customer_id = $2,
     price_id = $3,
     mode = $4,
@@ -83,7 +83,7 @@ WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
        OR COALESCE((sqlc.narg(rail_state)::jsonb->>'provider_closed')::boolean, false));
 
 -- name: BindSolanaCheckoutSession :execrows
-UPDATE openrails.checkout_sessions SET
+UPDATE billing.checkout_sessions SET
     reference = sqlc.arg(reference),
     rail_state = sqlc.arg(rail_state),
     updated_at = sqlc.arg(updated_at)
@@ -99,20 +99,20 @@ WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
 -- violation (uq_checkout_sessions_solana_signature): the transaction already
 -- settles another checkout.
 -- name: ClaimSolanaCheckoutSignature :execrows
-UPDATE openrails.checkout_sessions SET transaction_id = sqlc.arg(signature)::text
+UPDATE billing.checkout_sessions SET transaction_id = sqlc.arg(signature)::text
 WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND rail = 'solana'
   AND deleted_at IS NULL
   AND (transaction_id IS NULL OR transaction_id = sqlc.arg(signature)::text);
 
 -- name: GetCheckoutSessionByReference :one
-SELECT * FROM openrails.checkout_sessions cs
+SELECT * FROM billing.checkout_sessions cs
 WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.reference = $1
   AND cs.deleted_at IS NULL
 LIMIT 1;
 
 -- name: GetLatestOpenCheckoutSession :one
-SELECT * FROM openrails.checkout_sessions cs
+SELECT * FROM billing.checkout_sessions cs
 WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
@@ -126,12 +126,12 @@ LIMIT 1;
 -- with the merchant predicate written out.
 -- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: ExpireCheckoutSessions :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
     status = 'expired', updated_at = sqlc.arg(now)
 WHERE deleted_at IS NULL
   AND ctid IN (
-    SELECT cs.ctid FROM openrails.checkout_sessions cs
+    SELECT cs.ctid FROM billing.checkout_sessions cs
     WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid
       AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
       AND cs.status IN ('created', 'requires_action')
@@ -142,7 +142,7 @@ WHERE deleted_at IS NULL
 -- #511 LIFE plane (life.checkout_session.stale): expired-but-not-terminal
 -- checkout sessions for a scope. Detection (read-only) for the Convergence Engine.
 -- name: ListStaleCheckoutSessions :many
-SELECT id FROM openrails.checkout_sessions
+SELECT id FROM billing.checkout_sessions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND expires_at IS NOT NULL AND expires_at < sqlc.arg(now)::timestamptz
@@ -152,7 +152,7 @@ ORDER BY expires_at;
 
 -- name: ExpireCheckoutSessionByID :execrows
 -- Repair for life.checkout_session.stale: mark one stale session expired.
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
     status = 'expired', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
@@ -162,7 +162,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 -- A setup row is addressed by the stable merchant/customer/idempotency-key
 -- UUID. The first writer owns its immutable request fingerprint and binding.
 -- name: CreatePaymentMethodSetupSession :execrows
-INSERT INTO openrails.checkout_sessions
+INSERT INTO billing.checkout_sessions
 (id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
 VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'payment_method','nmi','created',sqlc.arg(expires_at),sqlc.arg(rail_state),sqlc.arg(metadata),sqlc.arg(now),sqlc.arg(now))
 ON CONFLICT (id) DO NOTHING;
@@ -170,7 +170,7 @@ ON CONFLICT (id) DO NOTHING;
 -- Only one prepared vendor session is accepted and exposed to the browser.
 -- Concurrent losers reload that same action; no accepted session is retargeted.
 -- name: AcceptPaymentMethodSetupSession :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state=jsonb_set(rail_state,'{capture}',sqlc.arg(capture)::jsonb),
     expires_at=sqlc.arg(expires_at),status='requires_action',updated_at=sqlc.arg(now)
 WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
@@ -178,14 +178,14 @@ WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
   AND expires_at>sqlc.arg(now) AND rail_state->'capture'=sqlc.arg(previous)::jsonb;
 
 -- name: GetPaymentMethodSetupSessionForUpdate :one
-SELECT * FROM openrails.checkout_sessions
+SELECT * FROM billing.checkout_sessions
 WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
   AND mode='payment_method' AND deleted_at IS NULL
 FOR UPDATE;
 
 -- Completion and erasure of the short-lived secret commit with attachment.
 -- name: CompletePaymentMethodSetupSession :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state=jsonb_set(rail_state,'{capture}',sqlc.arg(capture)::jsonb),
     status='succeeded',updated_at=sqlc.arg(now)
 WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
@@ -194,42 +194,42 @@ WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
 
 -- Capture attachment never reparents an existing instrument to another payer.
 -- name: AttachCapturedPaymentMethod :one
-INSERT INTO openrails.payment_methods
+INSERT INTO billing.payment_methods
 (id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
 VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'nmi','hyperswitch',sqlc.arg(custodian_id),sqlc.arg(vendor_customer_id),sqlc.arg(vendor_method_id),sqlc.arg(last_four),sqlc.arg(card_type),sqlc.arg(expiry_date),'pan_proxy','',sqlc.arg(now),sqlc.arg(now))
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
-DO UPDATE SET id=openrails.payment_methods.id
-WHERE openrails.payment_methods.customer_id=EXCLUDED.customer_id
-  AND openrails.payment_methods.custodian='hyperswitch'
+DO UPDATE SET id=billing.payment_methods.id
+WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
+  AND billing.payment_methods.custodian='hyperswitch'
 RETURNING *;
 
 -- name: CountInvalidCheckoutCaptureReferences :one
 -- Terminal replay retains the original capture authority even after a later
 -- legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
 -- deletion leaves historical replay intact and does not recreate the method.
-SELECT count(*) FROM openrails.checkout_sessions cs
+SELECT count(*) FROM billing.checkout_sessions cs
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method' AND cs.rail='nmi'
 AND (
- NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
- OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+ NOT EXISTS(SELECT 1 FROM billing.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
+ OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
 );
 
 -- name: GetCheckoutCaptureAccountsForShare :one
 -- Recheck current authority after vendor metadata readback, inside only the
 -- short local attachment transaction. Archive/reconfiguration serializes here.
-SELECT sqlc.embed(p),sqlc.embed(c) FROM openrails.psps p
-JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+SELECT sqlc.embed(p),sqlc.embed(c) FROM billing.psps p
+JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
 FOR SHARE OF p,c;
 
 -- name: CountInvalidStripeSetupReferences :one
-SELECT count(*) FROM openrails.checkout_sessions cs
+SELECT count(*) FROM billing.checkout_sessions cs
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'
-AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id);
+AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id);
 
 -- name: CountInvalidEngineCheckoutReferences :one
-SELECT count(*) FROM openrails.checkout_sessions cs
-LEFT JOIN openrails.rail_intents i ON i.merchant_id=cs.merchant_id
+SELECT count(*) FROM billing.checkout_sessions cs
+LEFT JOIN billing.rail_intents i ON i.merchant_id=cs.merchant_id
  AND i.payload->>'checkout_session_id'=cs.id::text AND i.intent_type='initial_membership'
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state ? 'initial_membership_quote'
 AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
@@ -238,8 +238,8 @@ AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
    OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
    OR (i.status='failed_terminal' AND cs.status<>'failed'))));
 -- name: LockPurchasableCheckoutPrice :one
-SELECT p.id FROM openrails.prices p
-JOIN openrails.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
+SELECT p.id FROM billing.prices p
+JOIN billing.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
 WHERE p.id=sqlc.arg(price_id)::uuid AND p.merchant_id=sqlc.arg(merchant_id)::uuid
   AND NOT p.archived AND NOT product.archived
 FOR SHARE OF p, product;
@@ -248,7 +248,7 @@ FOR SHARE OF p, product;
 -- failure after this point has an unknown provider outcome; it is not a license
 -- to create another payable session after provider idempotency retention ends.
 -- name: ClaimHostedPurchaseDispatch :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
@@ -259,7 +259,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 -- Validation failed before dispatch, or the dispatched request had an unknown
 -- outcome. Decide from the persisted claim atomically, never a stale Go copy.
 -- name: FailHostedPurchaseInitialization :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET status='failed', updated_at=sqlc.arg(now)::timestamptz,
     rail_state=rail_state || jsonb_build_object('failure_reason', sqlc.arg(reason)::text)
       || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
@@ -269,7 +269,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND status<>'succeeded';
 
 -- name: CloseHostedCheckoutFromProvider :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET status=CASE WHEN status='succeeded' THEN status ELSE sqlc.arg(status)::text END,
     rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
     updated_at=sqlc.arg(now)::timestamptz
@@ -279,8 +279,8 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 -- Archive integrity includes tombstones and preserves accepted commercial
 -- snapshots against their immutable price identity, not current product text.
 -- name: CountInvalidPurchaseCheckoutReferences :one
-SELECT count(*) FROM openrails.checkout_sessions s
-LEFT JOIN openrails.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+SELECT count(*) FROM billing.checkout_sessions s
+LEFT JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
 WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.rail_state ? 'accepted_purchase'
  AND (p.id IS NULL
    OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
@@ -295,8 +295,8 @@ WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.rail_state ? 'accepted_pur
 -- hosted session. NMI's accepted operation owns uncertainty after submission.
 -- name: HasUnresolvedProductCheckout :one
 SELECT EXISTS (
- SELECT 1 FROM openrails.checkout_sessions s
- JOIN openrails.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
+ SELECT 1 FROM billing.checkout_sessions s
+ JOIN billing.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
  WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid
    AND s.customer_id=sqlc.arg(customer_id)::uuid
    AND p.product_id=sqlc.arg(product_id)::uuid
@@ -305,7 +305,7 @@ SELECT EXISTS (
    AND (s.status IN ('created','requires_action')
      OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
    -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents f
+   AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
      WHERE f.merchant_id=s.merchant_id
        AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
        AND f.status IN ('failed_terminal','expired','superseded'))

@@ -79,7 +79,7 @@ func (h *CCBillCancelHandler) Backoff(attempts int32) time.Duration { return h.P
 // CheckRelevance: the remote cancel applies while the subscription is still
 // locally cancelled. Re-checked at execution time so a reactivation between
 // enqueue and drain can never cancel a live subscription remotely.
-func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -93,7 +93,7 @@ func (h *CCBillCancelHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 	return StillRelevant(), nil
 }
 
-func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	client, err := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
 	if err != nil {
 		return Parked("ccbill rail not armable (fail closed): " + err.Error())
@@ -147,7 +147,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 // Verify resolves an ambiguous cancel by reading: not-rebilling means the
 // cancel (whenever it happened) is done; still-rebilling means it definitely
 // has not happened and the executor may retry.
-func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	client, cerr := ccbillDataLinkForMerchant(ctx, h.Config, h.Rails, h.DataLinkBaseURL)
 	if cerr != nil {
 		return Ambiguous("ccbill rail not armable; cannot verify: " + cerr.Error())
@@ -201,7 +201,7 @@ func verifiedEvidence(psid string, status ccbill.SubscriptionStatusResult, viaVe
 	return ev
 }
 
-func (h *CCBillCancelHandler) loadSubscription(ctx context.Context, intent gen.OpenrailsRailIntent) (*models.Subscription, error) {
+func (h *CCBillCancelHandler) loadSubscription(ctx context.Context, intent gen.BillingRailIntent) (*models.Subscription, error) {
 	if intent.SubscriptionID == nil {
 		return nil, fmt.Errorf("intent has no subscription_id")
 	}

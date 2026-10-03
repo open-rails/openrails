@@ -19,7 +19,7 @@ import (
 // The caller selects and locks the row, applies operation/archive policy, and
 // qualifies the concrete deployment contract before granting SDK or PSP access.
 // An archive does not itself revoke an existing obligation's custody.
-func HyperSwitchClient(ctx context.Context, cfg *config.Config, secrets merchants.MerchantSecretReader, owner merchant.ID, row gen.OpenrailsCustodian) (*hyperswitch.Client, error) {
+func HyperSwitchClient(ctx context.Context, cfg *config.Config, secrets merchants.MerchantSecretReader, owner merchant.ID, row gen.BillingCustodian) (*hyperswitch.Client, error) {
 	if cfg == nil || cfg.HyperSwitch == nil || secrets == nil || owner.IsZero() || row.ID == uuid.Nil || row.MerchantID != owner.UUID() || row.Kind != models.CustodianHyperSwitch || row.Environment != config.ExpectedProviderEnvironment(cfg.IsTestMode()) {
 		return nil, hyperswitch.ErrBinding
 	}

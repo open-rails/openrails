@@ -27,7 +27,7 @@ func engineHyperSwitchPointer(custodian string, binding charge.HyperSwitchBindin
 	return nil
 }
 
-func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.OpenrailsPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
+func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
 	var binding charge.HyperSwitchBinding
 	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: method.MerchantID, ID: method.PspID})
 	if err != nil {
@@ -50,7 +50,7 @@ type recurringNMICharger interface {
 	ChargeRecurringMIT(context.Context, charge.Request) (charge.Result, *nmi.CustomerVaultError, error)
 }
 
-func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.OpenrailsPaymentMethod, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
+func prepareEngineNMICharge(ctx context.Context, resolver CollectionPlane, method gen.BillingPaymentMethod, binding charge.HyperSwitchBinding) (recurringNMICharger, error) {
 	if method.Custodian == models.CustodianHyperSwitch {
 		return PrepareHyperSwitchCharge(ctx, resolver, method, binding)
 	}

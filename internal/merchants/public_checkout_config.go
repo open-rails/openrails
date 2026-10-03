@@ -212,7 +212,7 @@ func publicSettingValue(settings map[string]any, key string) string {
 
 // PublicCheckoutPSPs lists the merchant's ARMED PSPs for environment with each
 // one's public browser config. Armed means exactly what checkout means by it:
-// a non-archived openrails.psps row for this merchant, rail and environment
+// a non-archived billing.psps row for this merchant, rail and environment
 // whose full credential shape resolves — armed reports that, with the same
 // resolver checkout routes through. A PSP declared without credentials (an
 // import attribution) is an identity, never advertised as available.

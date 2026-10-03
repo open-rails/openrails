@@ -12,8 +12,8 @@ import (
 )
 
 const deletePricePSPBindings = `-- name: DeletePricePSPBindings :exec
-DELETE FROM openrails.price_psp_bindings
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM openrails.prices owned_price JOIN openrails.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=price_psp_bindings.merchant_id AND owned_price.id=price_psp_bindings.price_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND price_id = $3::uuid
+DELETE FROM billing.price_psp_bindings
+WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=price_psp_bindings.merchant_id AND owned_price.id=price_psp_bindings.price_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND price_id = $3::uuid
 `
 
 type DeletePricePSPBindingsParams struct {
@@ -28,11 +28,11 @@ func (q *Queries) DeletePricePSPBindings(ctx context.Context, arg DeletePricePSP
 }
 
 const insertPricePSPBinding = `-- name: InsertPricePSPBinding :exec
-INSERT INTO openrails.price_psp_bindings
+INSERT INTO billing.price_psp_bindings
 (merchant_id, price_id, psp_id, plan_id, price_ref, recurring_billing_option_id, plan_pda, flex_id, configuration)
 SELECT $1::uuid, $2::uuid, $3::uuid,
     $4, $5, $6, $7, $8, $9::jsonb
-FROM openrails.prices owned_price JOIN openrails.products catalog_product
+FROM billing.prices owned_price JOIN billing.products catalog_product
   ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
 WHERE owned_price.merchant_id=$1::uuid AND owned_price.id=$2::uuid
   AND ($10::uuid IS NULL OR catalog_product.catalog_id=$10::uuid)
@@ -69,9 +69,9 @@ func (q *Queries) InsertPricePSPBinding(ctx context.Context, arg InsertPricePSPB
 
 const listPricePSPBindings = `-- name: ListPricePSPBindings :many
 SELECT b.merchant_id, b.price_id, b.psp_id, b.plan_id, b.price_ref, b.recurring_billing_option_id, b.plan_pda, b.flex_id, b.configuration, p.rail, COALESCE(p.key, p.id::text)::text AS psp_key
-FROM openrails.price_psp_bindings b
-JOIN openrails.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM openrails.prices owned_price JOIN openrails.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=b.merchant_id AND owned_price.id=b.price_id AND catalog_product.catalog_id=$1::uuid)) AND b.merchant_id = $2::uuid AND (cardinality($3::uuid[]) = 0 OR b.price_id = ANY($3::uuid[]))
+FROM billing.price_psp_bindings b
+JOIN billing.psps p ON p.id = b.psp_id AND p.merchant_id = b.merchant_id
+WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.prices owned_price JOIN billing.products catalog_product ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id WHERE owned_price.merchant_id=b.merchant_id AND owned_price.id=b.price_id AND catalog_product.catalog_id=$1::uuid)) AND b.merchant_id = $2::uuid AND (cardinality($3::uuid[]) = 0 OR b.price_id = ANY($3::uuid[]))
   AND ($4::uuid IS NULL OR b.psp_id = $4::uuid)
 ORDER BY b.price_id, b.psp_id
 `
@@ -135,8 +135,8 @@ func (q *Queries) ListPricePSPBindings(ctx context.Context, arg ListPricePSPBind
 }
 
 const lockPriceForBindingUpdate = `-- name: LockPriceForBindingUpdate :one
-SELECT id FROM openrails.prices
-WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM openrails.products catalog_product WHERE catalog_product.merchant_id=prices.merchant_id AND catalog_product.id=prices.product_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND id = $3::uuid
+SELECT id FROM billing.prices
+WHERE ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM billing.products catalog_product WHERE catalog_product.merchant_id=prices.merchant_id AND catalog_product.id=prices.product_id AND catalog_product.catalog_id=$1::uuid)) AND merchant_id = $2::uuid AND id = $3::uuid
 FOR UPDATE
 `
 
@@ -154,7 +154,7 @@ func (q *Queries) LockPriceForBindingUpdate(ctx context.Context, arg LockPriceFo
 }
 
 const resolvePriceBindingPSP = `-- name: ResolvePriceBindingPSP :many
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM billing.psps
 WHERE merchant_id = $1::uuid AND rail = $2::text
   AND (($3::uuid IS NOT NULL AND id = $3::uuid)
        OR ($3::uuid IS NULL AND key = $4::text))
@@ -167,7 +167,7 @@ type ResolvePriceBindingPSPParams struct {
 	PspKey     string
 }
 
-func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBindingPSPParams) ([]OpenrailsPsp, error) {
+func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBindingPSPParams) ([]BillingPsp, error) {
 	rows, err := q.db.Query(ctx, resolvePriceBindingPSP,
 		arg.MerchantID,
 		arg.Rail,
@@ -178,9 +178,9 @@ func (q *Queries) ResolvePriceBindingPSP(ctx context.Context, arg ResolvePriceBi
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsPsp
+	var items []BillingPsp
 	for rows.Next() {
-		var i OpenrailsPsp
+		var i BillingPsp
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,

@@ -412,7 +412,7 @@ func TestDunningStallResumesOnSchedule(t *testing.T) {
 	now := w.clock.Now()
 	last := now.Add(-time.Hour)
 	stall := func(l *legacy, grace time.Time) {
-		_, err := w.pool.Exec(t.Context(), strings.ReplaceAll(`UPDATE openrails.subscriptions
+		_, err := w.pool.Exec(t.Context(), strings.ReplaceAll(`UPDATE billing.subscriptions
 			SET lifecycle_rev = lifecycle_rev + 1, status = 'past_due', next_retry_at = NULL, retry_attempts = 2, last_retry_at = $2, grace_ends_at = $3
 			WHERE id = $1`, "openrails.", pgx.Identifier{w.schema}.Sanitize()+"."), l.sub.UUID(), last, grace)
 		require.NoError(t, err)

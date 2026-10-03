@@ -133,7 +133,7 @@ func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer)
 				return err
 			}
 			var expected int64
-			if err := tx.QueryRow(ctx, "SELECT count(*) FROM openrails."+p.Name+" t WHERE "+exportWhere(p.Name), id.UUID()).Scan(&expected); err != nil {
+			if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing."+p.Name+" t WHERE "+exportWhere(p.Name), id.UUID()).Scan(&expected); err != nil {
 				return err
 			}
 			if count != expected {
@@ -256,7 +256,7 @@ func insertQuery(p contract.Profile) string {
 		cols[i] = pgx.Identifier{c.Name}.Sanitize()
 		params[i] = fmt.Sprintf("$%d::text::%s", i+1, c.Type)
 	}
-	return "INSERT INTO openrails." + p.Name + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(params, ",") + ")"
+	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(params, ",") + ")"
 }
 
 func exportQuery(p contract.Profile) string {
@@ -269,7 +269,7 @@ func exportQuery(p contract.Profile) string {
 		}
 		cols[i] = "(" + expr + ")::text"
 	}
-	from := "openrails." + p.Name + " t"
+	from := "billing." + p.Name + " t"
 	order := ""
 	for _, c := range p.Columns {
 		if c.Name == "id" {
@@ -293,7 +293,7 @@ func exportQuery(p contract.Profile) string {
 		parent = "supersedes_id"
 	}
 	if parent != "" {
-		prefix = "WITH RECURSIVE lineage AS (SELECT id,0 depth FROM openrails." + p.Name + " WHERE merchant_id=$1 AND " + parent + " IS NULL UNION ALL SELECT c.id,l.depth+1 FROM openrails." + p.Name + " c JOIN lineage l ON c." + parent + "=l.id WHERE c.merchant_id=$1) "
+		prefix = "WITH RECURSIVE lineage AS (SELECT id,0 depth FROM billing." + p.Name + " WHERE merchant_id=$1 AND " + parent + " IS NULL UNION ALL SELECT c.id,l.depth+1 FROM billing." + p.Name + " c JOIN lineage l ON c." + parent + "=l.id WHERE c.merchant_id=$1) "
 		from += " JOIN lineage l ON l.id=t.id"
 		order = "l.depth,t.id"
 	}

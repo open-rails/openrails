@@ -24,14 +24,14 @@ func TestIndexAvailabilityProbeRejectsMissingPredicateIndex(t *testing.T) {
 	// The unrelated primary key gives the planner a possible full index scan.
 	// Everything is rolled back, including fixture DDL and session settings.
 	_, err = conn.Exec(ctx, `BEGIN;
-		CREATE TABLE openrails.audit_index_probe (id bigint PRIMARY KEY, merchant_id uuid, needle text);
-		CREATE INDEX ON openrails.audit_index_probe(id) WHERE true;
-		CREATE INDEX ON openrails.audit_index_probe(id) WHERE id IS NOT NULL;`)
+		CREATE TABLE billing.audit_index_probe (id bigint PRIMARY KEY, merchant_id uuid, needle text);
+		CREATE INDEX ON billing.audit_index_probe(id) WHERE true;
+		CREATE INDEX ON billing.audit_index_probe(id) WHERE id IS NOT NULL;`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Exec(ctx, "ROLLBACK") //nolint:errcheck // fixture teardown
-	q := Query{Name: "index_probe", Kind: "many", SQL: "SELECT id FROM openrails.audit_index_probe WHERE needle=$1::text LIMIT 1"}
+	q := Query{Name: "index_probe", Kind: "many", SQL: "SELECT id FROM billing.audit_index_probe WHERE needle=$1::text LIMIT 1"}
 	structure, err := q.Parse()
 	if err != nil {
 		t.Fatal(err)
@@ -40,9 +40,9 @@ func TestIndexAvailabilityProbeRejectsMissingPredicateIndex(t *testing.T) {
 		if indexed {
 			// A one-row table makes a normal sequential scan cheaper. That cost
 			// choice must not conceal the useful index from an availability probe.
-			if _, err := conn.Exec(ctx, `CREATE INDEX ON openrails.audit_index_probe(needle);
-				INSERT INTO openrails.audit_index_probe(id,needle) VALUES(1,'present');
-				ANALYZE openrails.audit_index_probe;`); err != nil {
+			if _, err := conn.Exec(ctx, `CREATE INDEX ON billing.audit_index_probe(needle);
+				INSERT INTO billing.audit_index_probe(id,needle) VALUES(1,'present');
+				ANALYZE billing.audit_index_probe;`); err != nil {
 				t.Fatal(err)
 			}
 		}

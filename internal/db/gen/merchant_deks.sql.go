@@ -12,7 +12,7 @@ import (
 )
 
 const getMerchantWrappedDEK = `-- name: GetMerchantWrappedDEK :one
-SELECT wrapped_dek FROM openrails.merchant_deks
+SELECT wrapped_dek FROM billing.merchant_deks
 WHERE merchant_id = $1::uuid
 `
 
@@ -24,10 +24,10 @@ func (q *Queries) GetMerchantWrappedDEK(ctx context.Context, merchantID uuid.UUI
 }
 
 const putMerchantWrappedDEK = `-- name: PutMerchantWrappedDEK :one
-INSERT INTO openrails.merchant_deks (merchant_id, wrapped_dek)
+INSERT INTO billing.merchant_deks (merchant_id, wrapped_dek)
 VALUES ($1::uuid, $2)
 ON CONFLICT (merchant_id) DO UPDATE
-SET merchant_id = openrails.merchant_deks.merchant_id
+SET merchant_id = billing.merchant_deks.merchant_id
 RETURNING wrapped_dek
 `
 

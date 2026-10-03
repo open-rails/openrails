@@ -38,7 +38,7 @@ type InvoiceCollectionPayload struct {
 	Description         string                     `json:"description"`
 }
 
-func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceCollectionPayload, error) {
+func DecodeInvoiceCollectionPayload(intent gen.BillingRailIntent) (InvoiceCollectionPayload, error) {
 	var p InvoiceCollectionPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("invoice collection intent has no payload")

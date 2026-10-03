@@ -20,8 +20,8 @@ type StripeEngineAuthentication struct {
 	ProviderPaymentMethodID string                   `json:"provider_payment_method_id,omitempty"`
 }
 
-func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.OpenrailsRailIntent, error) {
-	var empty gen.OpenrailsRailIntent
+func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.BillingRailIntent, error) {
+	var empty gen.BillingRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return empty, err
@@ -98,7 +98,7 @@ func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context
 		return billing.PaymentOperation{}, err
 	}
 	verifier, ok := s.Intents.(interface {
-		VerifyByID(context.Context, uuid.UUID) (gen.OpenrailsRailIntent, error)
+		VerifyByID(context.Context, uuid.UUID) (gen.BillingRailIntent, error)
 	})
 	if !ok {
 		return billing.PaymentOperation{}, errors.New("payment verifier unavailable")

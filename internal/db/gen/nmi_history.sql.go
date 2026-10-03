@@ -13,10 +13,10 @@ import (
 )
 
 const deleteNMIHistoryMonthsBefore = `-- name: DeleteNMIHistoryMonthsBefore :execrows
-DELETE FROM openrails.nmi_history_months
+DELETE FROM billing.nmi_history_months
 WHERE (merchant_id, psp_id, month, kind, category, reason) IN (
     SELECT h.merchant_id, h.psp_id, h.month, h.kind, h.category, h.reason
-    FROM openrails.nmi_history_months h
+    FROM billing.nmi_history_months h
     WHERE h.merchant_id = $1::uuid
       AND h.month < $2::timestamptz
     LIMIT $3::int
@@ -39,7 +39,7 @@ func (q *Queries) DeleteNMIHistoryMonthsBefore(ctx context.Context, arg DeleteNM
 }
 
 const deleteNMIHistoryMonthsFrom = `-- name: DeleteNMIHistoryMonthsFrom :exec
-DELETE FROM openrails.nmi_history_months
+DELETE FROM billing.nmi_history_months
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
   AND month >= $3::timestamptz
 `
@@ -57,7 +57,7 @@ func (q *Queries) DeleteNMIHistoryMonthsFrom(ctx context.Context, arg DeleteNMIH
 }
 
 const insertNMIHistoryMonths = `-- name: InsertNMIHistoryMonths :exec
-INSERT INTO openrails.nmi_history_months (merchant_id, psp_id, month, kind, category, reason, authorizations)
+INSERT INTO billing.nmi_history_months (merchant_id, psp_id, month, kind, category, reason, authorizations)
 SELECT $1::uuid, $2::uuid, c.month, c.kind, c.category, c.reason, c.authorizations
 FROM unnest($3::timestamptz[], $4::text[], $5::text[],
     $6::text[], $7::bigint[]) AS c(month, kind, category, reason, authorizations)
@@ -89,8 +89,8 @@ func (q *Queries) InsertNMIHistoryMonths(ctx context.Context, arg InsertNMIHisto
 const listNMIHistoryDuePSPs = `-- name: ListNMIHistoryDuePSPs :many
 
 SELECT p.id, r.read_at
-FROM openrails.psps p
-LEFT JOIN openrails.nmi_history_reads r ON r.merchant_id = p.merchant_id AND r.psp_id = p.id
+FROM billing.psps p
+LEFT JOIN billing.nmi_history_reads r ON r.merchant_id = p.merchant_id AND r.psp_id = p.id
 WHERE p.merchant_id = $1::uuid
   AND p.rail = 'nmi' AND p.archived = false
   AND (r.read_at IS NULL OR r.read_at < $2::timestamptz)
@@ -133,7 +133,7 @@ func (q *Queries) ListNMIHistoryDuePSPs(ctx context.Context, arg ListNMIHistoryD
 }
 
 const recordNMIHistoryRead = `-- name: RecordNMIHistoryRead :exec
-INSERT INTO openrails.nmi_history_reads (merchant_id, psp_id, read_at)
+INSERT INTO billing.nmi_history_reads (merchant_id, psp_id, read_at)
 VALUES ($1::uuid, $2::uuid, $3::timestamptz)
 ON CONFLICT (merchant_id, psp_id) DO UPDATE SET read_at = EXCLUDED.read_at
 `

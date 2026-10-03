@@ -1,23 +1,23 @@
 -- name: LockLiveMerchantForSecretWrite :one
-SELECT id FROM openrails.merchants
+SELECT id FROM billing.merchants
 WHERE id=sqlc.arg(id)::uuid AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: LockMerchantSecretCleanupRun :one
-SELECT r.* FROM openrails.maintenance_runs r
-JOIN openrails.merchants m ON m.id=r.merchant_id
+SELECT r.* FROM billing.maintenance_runs r
+JOIN billing.merchants m ON m.id=r.merchant_id
 WHERE r.merchant_id=sqlc.arg(merchant_id)::uuid AND r.id=sqlc.arg(id)::uuid
   AND r.kind='merchant_purge' AND m.deleted_at IS NOT NULL
   AND r.affected->>'database_purged'='true'
 FOR UPDATE OF r,m;
 
 -- name: MarkMerchantDatabasePurged :exec
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET affected=sqlc.arg(affected)::jsonb || '{"database_purged":true}'::jsonb
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
 -- name: RecordMerchantSecretCleanup :execrows
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status=sqlc.arg(status)::text,
     finished_at=CASE WHEN sqlc.arg(status)::text='completed' THEN now() ELSE NULL END,
     affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object(
@@ -28,5 +28,5 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 -- CROSS-MERCHANT: committed tombstoned purge runs only. Per-run rows and cleanup
 -- are handled under the captured merchant's scope.
 -- name: ListPendingMerchantSecretCleanups :many
-SELECT merchant_id,run_id FROM openrails.pending_merchant_secret_cleanups(
+SELECT merchant_id,run_id FROM billing.pending_merchant_secret_cleanups(
  sqlc.narg(after_run_id)::uuid,sqlc.arg(page_limit)::int);

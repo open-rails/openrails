@@ -31,16 +31,16 @@ var ErrEngineMethodUnusable = errors.New("the subscription's payment method cann
 // engineCollectionMethod checks the local instrument and account facts shared
 // by admission and recovery readback. Call with the customer/subscription locked;
 // the handle lock precedes the method lock, as it does in method retirement.
-func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub *models.Subscription) (gen.OpenrailsPaymentMethod, charge.HyperSwitchBinding, error) {
-	var method gen.OpenrailsPaymentMethod
+func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub *models.Subscription) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
+	var method gen.BillingPaymentMethod
 	var binding charge.HyperSwitchBinding
-	unsupported := func(err error) (gen.OpenrailsPaymentMethod, charge.HyperSwitchBinding, error) {
+	unsupported := func(err error) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
 		return method, binding, fmt.Errorf("%w: %w", intents.ErrRebillUnsupported, err)
 	}
-	unusable := func(err error) (gen.OpenrailsPaymentMethod, charge.HyperSwitchBinding, error) {
+	unusable := func(err error) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
 		return method, binding, fmt.Errorf("%w: %w: %w", intents.ErrRebillUnsupported, ErrEngineMethodUnusable, err)
 	}
-	readFailure := func(err error) (gen.OpenrailsPaymentMethod, charge.HyperSwitchBinding, error) {
+	readFailure := func(err error) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return unusable(err)
 		}

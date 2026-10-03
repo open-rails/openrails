@@ -74,7 +74,7 @@ func (t Terms) normalized() Terms {
 	return t
 }
 
-func OriginalTerms(row gen.OpenrailsAdmissionOperation) (Terms, error) {
+func OriginalTerms(row gen.BillingAdmissionOperation) (Terms, error) {
 	var terms Terms
 	if err := json.Unmarshal(row.Terms, &terms); err != nil {
 		return terms, fmt.Errorf("decode admission terms: %w", err)
@@ -218,7 +218,7 @@ func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput)
 	return &decision, err
 }
 
-func (g *Gate) replay(row gen.OpenrailsAdmissionOperation, in AdmitInput) (Decision, error) {
+func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decision, error) {
 	field := ""
 	switch {
 	case row.PayerID != in.Customer:
@@ -270,10 +270,10 @@ func sameDeadline(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-func (g *Gate) Get(ctx context.Context, requestID string) (gen.OpenrailsAdmissionOperation, error) {
+func (g *Gate) Get(ctx context.Context, requestID string) (gen.BillingAdmissionOperation, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsAdmissionOperation{}, err
+		return gen.BillingAdmissionOperation{}, err
 	}
 	row, err := g.db.Gen(ctx).GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -283,7 +283,7 @@ func (g *Gate) Get(ctx context.Context, requestID string) (gen.OpenrailsAdmissio
 }
 
 // WithOperation locks payer before operation; original ownership is immutable.
-func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(context.Context, *db.DB, gen.OpenrailsAdmissionOperation) error) error {
+func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(context.Context, *db.DB, gen.BillingAdmissionOperation) error) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -309,7 +309,7 @@ func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(cont
 }
 
 func (g *Gate) Release(ctx context.Context, requestID string) error {
-	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.OpenrailsAdmissionOperation) error {
+	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
 		if row.State == "captured" {
 			return ErrCaptured
 		}
@@ -325,7 +325,7 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 	if until.IsZero() || !until.After(g.Now()) {
 		return ErrExpired
 	}
-	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.OpenrailsAdmissionOperation) error {
+	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
 		if row.State != "open" {
 			return ErrNotFound
 		}

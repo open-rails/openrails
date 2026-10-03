@@ -134,7 +134,7 @@ func (p *SolanaPayPoller) PollOnce(ctx context.Context) error {
 	if err != nil || len(refs) == 0 {
 		return err
 	}
-	byMerchant := map[uuid.UUID][]gen.OpenrailsSolanaPayReference{}
+	byMerchant := map[uuid.UUID][]gen.BillingSolanaPayReference{}
 	for _, r := range refs {
 		byMerchant[r.MerchantID] = append(byMerchant[r.MerchantID], r)
 	}
@@ -153,7 +153,7 @@ func (p *SolanaPayPoller) PollOnce(ctx context.Context) error {
 	return nil
 }
 
-func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid merchant.ID, refs []gen.OpenrailsSolanaPayReference) {
+func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid merchant.ID, refs []gen.BillingSolanaPayReference) {
 	ledger := NewPayLedger(p.db)
 	rpc, err := p.rpcBuilder.Resolve(ctx, mid)
 	if rpc == nil {
@@ -179,7 +179,7 @@ func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid merchant.ID, ref
 }
 
 // check reads one reference and returns when to read it again.
-func (p *SolanaPayPoller) check(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.OpenrailsSolanaPayReference) (time.Duration, error) {
+func (p *SolanaPayPoller) check(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference) (time.Duration, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -243,7 +243,7 @@ var errHistoryGap = errors.New("solana: node does not hold the reference's histo
 // otherwise newer signatures arrived and the walk goes down again. A short
 // answer is trusted only from a node that holds both its cursor and the
 // newest signature already processed.
-func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.OpenrailsSolanaPayReference, session *models.CheckoutSession) error {
+func (p *SolanaPayPoller) settlePurchase(ctx context.Context, rpc *solanarpc.RPCClient, ledger *PayLedger, ref gen.BillingSolanaPayReference, session *models.CheckoutSession) error {
 	known, err := ledger.KnownSignatures(ctx, ref.Reference)
 	if err != nil {
 		return err
@@ -338,7 +338,7 @@ func nonEmptyAll(values ...string) []string {
 // settleSignature reads one transaction and records it through the checkout.
 // Only an error worth retrying is returned: a transaction that is foreign,
 // failed or unreadable is recorded as such.
-func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.OpenrailsSolanaPayReference, session *models.CheckoutSession, signature string) error {
+func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.BillingSolanaPayReference, session *models.CheckoutSession, signature string) error {
 	policy := solanarpc.MemoRequired
 	if stateString(session.RailState, "flow") == "transfer_request" {
 		policy = solanarpc.MemoPresenceOptional
@@ -373,7 +373,7 @@ func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RP
 
 // confirmMirror routes a landed cancel, tier change or subscribe to its
 // session mirror. awaiting reports a subscribe whose funded step has not landed.
-func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, ref gen.OpenrailsSolanaPayReference, sigs []solanarpc.SignatureInfo) (bool, error) {
+func (p *SolanaPayPoller) confirmMirror(ctx context.Context, ledger *PayLedger, ref gen.BillingSolanaPayReference, sigs []solanarpc.SignatureInfo) (bool, error) {
 	if ref.Status != ReferencePending {
 		return false, nil
 	}

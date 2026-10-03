@@ -69,7 +69,7 @@ func (c *ControlPlane) FleetTimeseries(ctx context.Context, exclude merchant.ID,
 	// go through migration 0022's SECURITY DEFINER readers — read on the base
 	// pool they were silently empty under the since-removed RLS.
 	// The week list and the new-merchant series stay ordinary queries:
-	// generate_series touches no table, and openrails.merchants is the
+	// generate_series touches no table, and billing.merchants is the
 	// global directory.
 	//
 	// Canonical week list from Postgres so bucket alignment can never drift

@@ -14,8 +14,8 @@ import (
 
 const countOpenCatalogDriftByKind = `-- name: CountOpenCatalogDriftByKind :many
 SELECT rail, kind, count(*)::bigint AS n
-FROM openrails.catalog_drift_events
-WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
+FROM billing.catalog_drift_events
+WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
 GROUP BY rail, kind
 `
 
@@ -46,8 +46,8 @@ func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenC
 }
 
 const countOpenCatalogDriftFiltered = `-- name: CountOpenCatalogDriftFiltered :one
-SELECT count(*) FROM openrails.catalog_drift_events
-WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
+SELECT count(*) FROM billing.catalog_drift_events
+WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
   AND ($1::text IS NULL OR rail = $1::text)
   AND ($2::text IS NULL OR kind = $2::text)
   AND ($3::text IS NULL OR openrails_resource_type = $3::text)
@@ -68,21 +68,21 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 
 const listOpenCatalogDriftEvents = `-- name: ListOpenCatalogDriftEvents :many
 
-SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
-WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
+SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM billing.catalog_drift_events
+WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
 `
 
 // Operational job state: catalog drift events (reconciliation). Manual rebill
-// attempts were folded into openrails.rail_intents (#358 phase C).
-func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCatalogDriftEvent, error) {
+// attempts were folded into billing.rail_intents (#358 phase C).
+func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]BillingCatalogDriftEvent, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftEvents)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCatalogDriftEvent
+	var items []BillingCatalogDriftEvent
 	for rows.Next() {
-		var i OpenrailsCatalogDriftEvent
+		var i BillingCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.PspID,
@@ -109,8 +109,8 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCa
 }
 
 const listOpenCatalogDriftFiltered = `-- name: ListOpenCatalogDriftFiltered :many
-SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
-WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
+SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM billing.catalog_drift_events
+WHERE merchant_id=billing.current_merchant_id() AND resolved_at IS NULL
   AND ($3::text IS NULL OR rail = $3::text)
   AND ($4::text IS NULL OR kind = $4::text)
   AND ($5::text IS NULL OR openrails_resource_type = $5::text)
@@ -126,7 +126,7 @@ type ListOpenCatalogDriftFilteredParams struct {
 	ResourceType *string
 }
 
-func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]OpenrailsCatalogDriftEvent, error) {
+func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpenCatalogDriftFilteredParams) ([]BillingCatalogDriftEvent, error) {
 	rows, err := q.db.Query(ctx, listOpenCatalogDriftFiltered,
 		arg.Column1,
 		arg.Column2,
@@ -138,9 +138,9 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCatalogDriftEvent
+	var items []BillingCatalogDriftEvent
 	for rows.Next() {
-		var i OpenrailsCatalogDriftEvent
+		var i BillingCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
 			&i.PspID,
@@ -167,10 +167,10 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 }
 
 const resolveCatalogDriftFinding = `-- name: ResolveCatalogDriftFinding :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET resolved_at = $1::timestamptz, status = 'fixed', resolution = 'auto_vanished',
     updated_at = $1::timestamptz, notified_at = NULL, notified_severity = NULL
-WHERE merchant_id = openrails.current_merchant_id() AND finding_type LIKE 'catalog.%'
+WHERE merchant_id = billing.current_merchant_id() AND finding_type LIKE 'catalog.%'
   AND id = $2::uuid AND psp_id = $3::uuid AND resolved_at IS NULL
   AND last_seen_at <= $1::timestamptz
 `
@@ -192,10 +192,10 @@ func (q *Queries) ResolveCatalogDriftFinding(ctx context.Context, arg ResolveCat
 }
 
 const resolveCatalogDriftForResource = `-- name: ResolveCatalogDriftForResource :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET resolved_at = $1::timestamptz, status = 'fixed', resolution = 'enforced',
     updated_at = $1::timestamptz, notified_at = NULL, notified_severity = NULL
-WHERE finding_type LIKE 'catalog.%' AND merchant_id = openrails.current_merchant_id() AND resolved_at IS NULL
+WHERE finding_type LIKE 'catalog.%' AND merchant_id = billing.current_merchant_id() AND resolved_at IS NULL
   AND psp_id = $2::uuid
   AND openrails_resource_type = $3::text
   AND openrails_resource_id = $4::text
@@ -224,7 +224,7 @@ func (q *Queries) ResolveCatalogDriftForResource(ctx context.Context, arg Resolv
 }
 
 const upsertCatalogDriftFinding = `-- name: UpsertCatalogDriftFinding :one
-INSERT INTO openrails.reconciliation_findings (
+INSERT INTO billing.reconciliation_findings (
     id, merchant_id, finding_type, subject_key, severity, status,
     rail, psp_id, openrails_resource_type, openrails_resource_id,
     external_resource_id, field, openrails_value, external_value,
@@ -241,16 +241,16 @@ INSERT INTO openrails.reconciliation_findings (
     $12::timestamptz, $12::timestamptz, $12::timestamptz
 )
 ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
-    openrails_value = CASE WHEN openrails.reconciliation_findings.status = 'ignored'
-        THEN openrails.reconciliation_findings.openrails_value ELSE EXCLUDED.openrails_value END,
-    external_value = CASE WHEN openrails.reconciliation_findings.status = 'ignored'
-        THEN openrails.reconciliation_findings.external_value ELSE EXCLUDED.external_value END,
-    status = CASE WHEN openrails.reconciliation_findings.status = 'ignored' THEN 'ignored' ELSE 'reconcile_required' END,
-    resolved_at = CASE WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolved_at END,
-    resolution = CASE WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolution END,
+    openrails_value = CASE WHEN billing.reconciliation_findings.status = 'ignored'
+        THEN billing.reconciliation_findings.openrails_value ELSE EXCLUDED.openrails_value END,
+    external_value = CASE WHEN billing.reconciliation_findings.status = 'ignored'
+        THEN billing.reconciliation_findings.external_value ELSE EXCLUDED.external_value END,
+    status = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored' ELSE 'reconcile_required' END,
+    resolved_at = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolved_at END,
+    resolution = CASE WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolution END,
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = EXCLUDED.updated_at
-WHERE EXCLUDED.last_seen_at >= openrails.reconciliation_findings.last_seen_at
+WHERE EXCLUDED.last_seen_at >= billing.reconciliation_findings.last_seen_at
 RETURNING status
 `
 

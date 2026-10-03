@@ -104,7 +104,7 @@ type Receipt struct {
 
 // Decide classifies a transfer on a purchase reference. Callers resolve the
 // same signature seen before (idempotency) first.
-func Decide(ref gen.OpenrailsSolanaPayReference, sessionOpen bool, expected uint64, t ObservedTransfer, now time.Time) (Disposition, string) {
+func Decide(ref gen.BillingSolanaPayReference, sessionOpen bool, expected uint64, t ObservedTransfer, now time.Time) (Disposition, string) {
 	landed := now
 	if t.LandedAt != nil {
 		landed = *t.LandedAt
@@ -142,10 +142,10 @@ func NewPayLedger(d *db.DB) *PayLedger { return &PayLedger{db: d} }
 
 // Register gives a checkout attempt its reference. A second call for the same
 // attempt returns the existing row; a different reference is refused.
-func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt, now time.Time) (gen.OpenrailsSolanaPayReference, error) {
+func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt, now time.Time) (gen.BillingSolanaPayReference, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsSolanaPayReference{}, err
+		return gen.BillingSolanaPayReference{}, err
 	}
 	// SEC-33: a transfer is credited at the quoted amount until the late
 	// window closes; later money is recorded for review, never credited.
@@ -167,20 +167,20 @@ func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID 
 	return row, nil
 }
 
-func (l *PayLedger) Get(ctx context.Context, reference string) (gen.OpenrailsSolanaPayReference, error) {
+func (l *PayLedger) Get(ctx context.Context, reference string) (gen.BillingSolanaPayReference, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsSolanaPayReference{}, err
+		return gen.BillingSolanaPayReference{}, err
 	}
 	return l.db.Gen(ctx).GetSolanaPayReference(ctx, gen.GetSolanaPayReferenceParams{MerchantID: mid.UUID(), Reference: reference})
 }
 
 // Lock takes the reference row for the rest of the caller's transaction:
 // every settlement of one reference is serialized behind it.
-func (l *PayLedger) Lock(ctx context.Context, reference string) (gen.OpenrailsSolanaPayReference, error) {
+func (l *PayLedger) Lock(ctx context.Context, reference string) (gen.BillingSolanaPayReference, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsSolanaPayReference{}, err
+		return gen.BillingSolanaPayReference{}, err
 	}
 	row, err := l.db.Gen(ctx).LockSolanaPayReference(ctx, gen.LockSolanaPayReferenceParams{MerchantID: mid.UUID(), Reference: reference})
 	if db.IsNotFound(err) {
@@ -391,7 +391,7 @@ func RecordLateSettlement(ctx context.Context, database *db.DB, landedAt time.Ti
 
 // ClaimDue hands this replica the references due for a chain read, across
 // merchants, leasing each until leaseUntil.
-func ClaimDue(ctx context.Context, d *db.DB, now, leaseUntil time.Time, batch int32) ([]gen.OpenrailsSolanaPayReference, error) {
+func ClaimDue(ctx context.Context, d *db.DB, now, leaseUntil time.Time, batch int32) ([]gen.BillingSolanaPayReference, error) {
 	return d.GenDirectory().ClaimDueSolanaPayReferences(ctx, gen.ClaimDueSolanaPayReferencesParams{Now: now, LeaseUntil: leaseUntil, Batch: batch})
 }
 
@@ -400,7 +400,7 @@ func DeleteSettled(ctx context.Context, d *db.DB, now time.Time, batch int32) (i
 	return d.GenDirectory().DeleteSettledSolanaPayReferences(ctx, gen.DeleteSettledSolanaPayReferencesParams{Now: now, Batch: batch})
 }
 
-func receiptFromRow(r gen.OpenrailsSolanaPayReceipt) *Receipt {
+func receiptFromRow(r gen.BillingSolanaPayReceipt) *Receipt {
 	out := &Receipt{
 		Reference: r.Reference, Signature: r.Signature, SessionID: r.CheckoutSessionID,
 		Disposition: Disposition(r.Disposition), Recipient: r.Recipient, TokenMint: r.TokenMint,

@@ -1,7 +1,7 @@
 // Package merchants implements merchant provisioning, lifecycle, per-merchant
 // rail credentials, and webhook routing for OpenRails' merchant platform
 // (issue #225). It builds on the #223 merchant primitive (pkg/merchant +
-// openrails.merchants)
+// billing.merchants)
 // and the #224 in-process AuthKit control plane (internal/controlplane): the
 // lifecycle service records merchant permission-group ids through control-plane
 // core calls and records merchant directory state directly in openrails.*
@@ -435,7 +435,7 @@ type ArchivedPSPKeyResolver interface {
 // Two implementations ship:
 //
 //   - dbSecretStore / memSecretStore: build and run WITHOUT a live Vault (the
-//     dev / self-hosted default). DB-backed persists to openrails.merchant_secrets.
+//     dev / self-hosted default). DB-backed persists to billing.merchant_secrets.
 //   - vaultSecretStore: a documented adapter that resolves the SAME (merchant,
 //     name) addressing to a merchant-scoped Vault KV path. It is a stub today and
 //     is wired in managed deployments without any schema or caller change.

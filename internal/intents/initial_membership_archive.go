@@ -11,7 +11,7 @@ import (
 
 // ValidateInitialMembershipTerminal revalidates retained immutable custody. A
 // future schedule and a free initial phase never stand in for collected money.
-func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
+func ValidateInitialMembershipTerminal(in gen.BillingRailIntent) error {
 	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return err

@@ -18,7 +18,7 @@ import (
 
 // Rate cards (#638) are the ONLY metered-pricing engine (#707) and, since
 // or#893, the only metered-pricing INPUT: this sweep rates reported usage
-// (openrails.usage_events) into pending owed invoice items through the #672
+// (billing.usage_events) into pending owed invoice items through the #672
 // per-period watermark.
 
 type catalogRateCardRow struct {

@@ -14,7 +14,7 @@ import (
 
 const getProviderBillingObservation = `-- name: GetProviderBillingObservation :one
 SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end, raw_body_available, raw_body_bytes, raw_body_digest, normalized_records_bytes, normalized_records_digest, provider_cost_usd_micros, has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
-FROM openrails.provider_billing_observations
+FROM billing.provider_billing_observations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
   AND observation_id = $3::text
@@ -26,9 +26,9 @@ type GetProviderBillingObservationParams struct {
 	ObservationID string
 }
 
-func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProviderBillingObservationParams) (OpenrailsProviderBillingObservation, error) {
+func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProviderBillingObservationParams) (BillingProviderBillingObservation, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingObservation, arg.MerchantID, arg.OperationID, arg.ObservationID)
-	var i OpenrailsProviderBillingObservation
+	var i BillingProviderBillingObservation
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -53,7 +53,7 @@ func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProv
 
 const getProviderBillingQualificationForUpdate = `-- name: GetProviderBillingQualificationForUpdate :one
 SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_provider_cost_usd_micros, qualified_at, created_at, updated_at
-FROM openrails.provider_billing_qualifications
+FROM billing.provider_billing_qualifications
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
 FOR UPDATE
@@ -64,9 +64,9 @@ type GetProviderBillingQualificationForUpdateParams struct {
 	OperationID string
 }
 
-func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, arg GetProviderBillingQualificationForUpdateParams) (OpenrailsProviderBillingQualification, error) {
+func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, arg GetProviderBillingQualificationForUpdateParams) (BillingProviderBillingQualification, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingQualificationForUpdate, arg.MerchantID, arg.OperationID)
-	var i OpenrailsProviderBillingQualification
+	var i BillingProviderBillingQualification
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -96,8 +96,8 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 
 const getProviderBillingQualificationWithAuthorization = `-- name: GetProviderBillingQualificationWithAuthorization :one
 SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_start, q.provider_lifetime_end, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_provider_cost_usd_micros, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.payer_id, a.record_owner, a.ledger_account_id, a.authorized_usd_micros, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_provider_cost_usd_micros, a.settlement_rated_usd_micros, a.settlement_body_bytes, a.settlement_body_digest
-FROM openrails.provider_billing_qualifications q
-JOIN openrails.operation_authorizations a
+FROM billing.provider_billing_qualifications q
+JOIN billing.operation_authorizations a
   ON a.merchant_id = q.merchant_id
  AND a.operation_id = q.operation_id
 WHERE q.merchant_id = $1::uuid
@@ -110,60 +110,60 @@ type GetProviderBillingQualificationWithAuthorizationParams struct {
 }
 
 type GetProviderBillingQualificationWithAuthorizationRow struct {
-	OpenrailsProviderBillingQualification OpenrailsProviderBillingQualification
-	OpenrailsOperationAuthorization       OpenrailsOperationAuthorization
+	BillingProviderBillingQualification BillingProviderBillingQualification
+	BillingOperationAuthorization       BillingOperationAuthorization
 }
 
 func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.Context, arg GetProviderBillingQualificationWithAuthorizationParams) (GetProviderBillingQualificationWithAuthorizationRow, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingQualificationWithAuthorization, arg.MerchantID, arg.OperationID)
 	var i GetProviderBillingQualificationWithAuthorizationRow
 	err := row.Scan(
-		&i.OpenrailsProviderBillingQualification.MerchantID,
-		&i.OpenrailsProviderBillingQualification.OperationID,
-		&i.OpenrailsProviderBillingQualification.Provider,
-		&i.OpenrailsProviderBillingQualification.ProviderResourceID,
-		&i.OpenrailsProviderBillingQualification.ProviderLifetimeStart,
-		&i.OpenrailsProviderBillingQualification.ProviderLifetimeEnd,
-		&i.OpenrailsProviderBillingQualification.ProviderAbsentAt,
-		&i.OpenrailsProviderBillingQualification.ProviderAbsenceReference,
-		&i.OpenrailsProviderBillingQualification.BillingStopReference,
-		&i.OpenrailsProviderBillingQualification.WindowsClosedAt,
-		&i.OpenrailsProviderBillingQualification.WindowsClosedReference,
-		&i.OpenrailsProviderBillingQualification.LifecycleEvidenceBytes,
-		&i.OpenrailsProviderBillingQualification.LifecycleEvidenceDigest,
-		&i.OpenrailsProviderBillingQualification.QuiescenceSeconds,
-		&i.OpenrailsProviderBillingQualification.State,
-		&i.OpenrailsProviderBillingQualification.Reason,
-		&i.OpenrailsProviderBillingQualification.BaselineObservationID,
-		&i.OpenrailsProviderBillingQualification.QualifiedObservationID,
-		&i.OpenrailsProviderBillingQualification.QualifiedProviderCostUsdMicros,
-		&i.OpenrailsProviderBillingQualification.QualifiedAt,
-		&i.OpenrailsProviderBillingQualification.CreatedAt,
-		&i.OpenrailsProviderBillingQualification.UpdatedAt,
-		&i.OpenrailsOperationAuthorization.OperationID,
-		&i.OpenrailsOperationAuthorization.MerchantID,
-		&i.OpenrailsOperationAuthorization.PayerID,
-		&i.OpenrailsOperationAuthorization.RecordOwner,
-		&i.OpenrailsOperationAuthorization.LedgerAccountID,
-		&i.OpenrailsOperationAuthorization.AuthorizedUsdMicros,
-		&i.OpenrailsOperationAuthorization.ClaimReference,
-		&i.OpenrailsOperationAuthorization.AuthorizationBodyBytes,
-		&i.OpenrailsOperationAuthorization.AuthorizationBodyDigest,
-		&i.OpenrailsOperationAuthorization.State,
-		&i.OpenrailsOperationAuthorization.TerminalReference,
-		&i.OpenrailsOperationAuthorization.CreatedAt,
-		&i.OpenrailsOperationAuthorization.ReleasedAt,
-		&i.OpenrailsOperationAuthorization.SettledAt,
-		&i.OpenrailsOperationAuthorization.SettlementProviderCostUsdMicros,
-		&i.OpenrailsOperationAuthorization.SettlementRatedUsdMicros,
-		&i.OpenrailsOperationAuthorization.SettlementBodyBytes,
-		&i.OpenrailsOperationAuthorization.SettlementBodyDigest,
+		&i.BillingProviderBillingQualification.MerchantID,
+		&i.BillingProviderBillingQualification.OperationID,
+		&i.BillingProviderBillingQualification.Provider,
+		&i.BillingProviderBillingQualification.ProviderResourceID,
+		&i.BillingProviderBillingQualification.ProviderLifetimeStart,
+		&i.BillingProviderBillingQualification.ProviderLifetimeEnd,
+		&i.BillingProviderBillingQualification.ProviderAbsentAt,
+		&i.BillingProviderBillingQualification.ProviderAbsenceReference,
+		&i.BillingProviderBillingQualification.BillingStopReference,
+		&i.BillingProviderBillingQualification.WindowsClosedAt,
+		&i.BillingProviderBillingQualification.WindowsClosedReference,
+		&i.BillingProviderBillingQualification.LifecycleEvidenceBytes,
+		&i.BillingProviderBillingQualification.LifecycleEvidenceDigest,
+		&i.BillingProviderBillingQualification.QuiescenceSeconds,
+		&i.BillingProviderBillingQualification.State,
+		&i.BillingProviderBillingQualification.Reason,
+		&i.BillingProviderBillingQualification.BaselineObservationID,
+		&i.BillingProviderBillingQualification.QualifiedObservationID,
+		&i.BillingProviderBillingQualification.QualifiedProviderCostUsdMicros,
+		&i.BillingProviderBillingQualification.QualifiedAt,
+		&i.BillingProviderBillingQualification.CreatedAt,
+		&i.BillingProviderBillingQualification.UpdatedAt,
+		&i.BillingOperationAuthorization.OperationID,
+		&i.BillingOperationAuthorization.MerchantID,
+		&i.BillingOperationAuthorization.PayerID,
+		&i.BillingOperationAuthorization.RecordOwner,
+		&i.BillingOperationAuthorization.LedgerAccountID,
+		&i.BillingOperationAuthorization.AuthorizedUsdMicros,
+		&i.BillingOperationAuthorization.ClaimReference,
+		&i.BillingOperationAuthorization.AuthorizationBodyBytes,
+		&i.BillingOperationAuthorization.AuthorizationBodyDigest,
+		&i.BillingOperationAuthorization.State,
+		&i.BillingOperationAuthorization.TerminalReference,
+		&i.BillingOperationAuthorization.CreatedAt,
+		&i.BillingOperationAuthorization.ReleasedAt,
+		&i.BillingOperationAuthorization.SettledAt,
+		&i.BillingOperationAuthorization.SettlementProviderCostUsdMicros,
+		&i.BillingOperationAuthorization.SettlementRatedUsdMicros,
+		&i.BillingOperationAuthorization.SettlementBodyBytes,
+		&i.BillingOperationAuthorization.SettlementBodyDigest,
 	)
 	return i, err
 }
 
 const insertProviderBillingObservation = `-- name: InsertProviderBillingObservation :one
-INSERT INTO openrails.provider_billing_observations (
+INSERT INTO billing.provider_billing_observations (
     merchant_id,
     operation_id,
     observation_id,
@@ -224,7 +224,7 @@ type InsertProviderBillingObservationParams struct {
 	ObservedAt              time.Time
 }
 
-func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg InsertProviderBillingObservationParams) (OpenrailsProviderBillingObservation, error) {
+func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg InsertProviderBillingObservationParams) (BillingProviderBillingObservation, error) {
 	row := q.db.QueryRow(ctx, insertProviderBillingObservation,
 		arg.MerchantID,
 		arg.OperationID,
@@ -244,7 +244,7 @@ func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg Inse
 		arg.QualificationReason,
 		arg.ObservedAt,
 	)
-	var i OpenrailsProviderBillingObservation
+	var i BillingProviderBillingObservation
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -269,7 +269,7 @@ func (q *Queries) InsertProviderBillingObservation(ctx context.Context, arg Inse
 
 const insertProviderBillingQualification = `-- name: InsertProviderBillingQualification :one
 
-INSERT INTO openrails.provider_billing_qualifications (
+INSERT INTO billing.provider_billing_qualifications (
     merchant_id,
     operation_id,
     provider,
@@ -322,7 +322,7 @@ type InsertProviderBillingQualificationParams struct {
 }
 
 // th-045 OpenRails-owned provider billing evidence and qualification.
-func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg InsertProviderBillingQualificationParams) (OpenrailsProviderBillingQualification, error) {
+func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg InsertProviderBillingQualificationParams) (BillingProviderBillingQualification, error) {
 	row := q.db.QueryRow(ctx, insertProviderBillingQualification,
 		arg.MerchantID,
 		arg.OperationID,
@@ -339,7 +339,7 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 		arg.LifecycleEvidenceDigest,
 		arg.QuiescenceSeconds,
 	)
-	var i OpenrailsProviderBillingQualification
+	var i BillingProviderBillingQualification
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -368,7 +368,7 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 }
 
 const updateProviderBillingQualification = `-- name: UpdateProviderBillingQualification :one
-UPDATE openrails.provider_billing_qualifications
+UPDATE billing.provider_billing_qualifications
 SET state = $1::text,
     reason = $2::text,
     baseline_observation_id = $3::text,
@@ -393,7 +393,7 @@ type UpdateProviderBillingQualificationParams struct {
 	OperationID                    string
 }
 
-func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg UpdateProviderBillingQualificationParams) (OpenrailsProviderBillingQualification, error) {
+func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg UpdateProviderBillingQualificationParams) (BillingProviderBillingQualification, error) {
 	row := q.db.QueryRow(ctx, updateProviderBillingQualification,
 		arg.State,
 		arg.Reason,
@@ -405,7 +405,7 @@ func (q *Queries) UpdateProviderBillingQualification(ctx context.Context, arg Up
 		arg.MerchantID,
 		arg.OperationID,
 	)
-	var i OpenrailsProviderBillingQualification
+	var i BillingProviderBillingQualification
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,

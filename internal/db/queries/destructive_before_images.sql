@@ -11,11 +11,11 @@
 -- The row verbatim, server-side, so the image cannot drift from the table.
 -- ON CONFLICT DO NOTHING: the FIRST capture inside a run is the state the run
 -- inherited; a later one would be the run's own write.
-INSERT INTO openrails.destructive_run_before_images (
+INSERT INTO billing.destructive_run_before_images (
     merchant_id, destructive_run_id, table_name, row_id, before, captured_at
 )
 SELECT s.merchant_id, sqlc.arg(run_id)::uuid, 'subscriptions', s.id, to_jsonb(s), sqlc.arg(now)::timestamptz
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.id = sqlc.arg(subscription_id)::uuid
   -- A pruned row is prune's to reverse (or#858), never converge's: capturing
@@ -30,11 +30,11 @@ ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 -- log, never restored; a restored effect can silently disagree with its grant,
 -- a re-derived one cannot). What they buy is the ability to say exactly which
 -- windows a bad pass closed, and to check the recomputation against them.
-INSERT INTO openrails.destructive_run_before_images (
+INSERT INTO billing.destructive_run_before_images (
     merchant_id, destructive_run_id, table_name, row_id, before, captured_at
 )
 SELECT e.merchant_id, sqlc.arg(run_id)::uuid, 'entitlements', e.id, to_jsonb(e), sqlc.arg(now)::timestamptz
-FROM openrails.entitlements e
+FROM billing.entitlements e
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.source_type = 'subscription'
   AND e.source_id = sqlc.arg(subscription_id)::uuid
@@ -50,7 +50,7 @@ ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 -- subscription's before-image, so anything newer for that subject is this
 -- pass's doing; `destructive_run_id IS NULL` keeps an earlier run's intent from
 -- being re-attributed. Attribution only — no status is changed here.
-UPDATE openrails.rail_intents
+UPDATE billing.rail_intents
 SET destructive_run_id = sqlc.arg(run_id)::uuid
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
@@ -74,7 +74,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- happens per intent, never both, and whichever way it goes the reverse's
 -- report is truthful. The reverse also disarms the destructive-action switch
 -- first, which is what stops NEW claims from starting during the reversal.
-UPDATE openrails.rail_intents
+UPDATE billing.rail_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason)::text,
     claimed_until = NULL,
@@ -90,7 +90,7 @@ RETURNING id, intent_type, subscription_id, rail;
 -- IRREVERSIBLE (the vault entry is gone, the remote subscription is cancelled);
 -- in_flight / unknown_needs_verify = ambiguous, may have reached the provider.
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
-FROM openrails.rail_intents
+FROM billing.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid
 ORDER BY created_at;
@@ -111,9 +111,9 @@ ORDER BY created_at;
 -- pair, owned by prune — a converge run must never resurrect a pruned row), and
 -- psp_id / customer_id / product_id / price_id (identity, which no transition
 -- moves).
-UPDATE openrails.subscriptions s
+UPDATE billing.subscriptions s
 SET lifecycle_rev            = s.lifecycle_rev + 1,
-    status                   = (b.before->>'status')::openrails.subscription_status,
+    status                   = (b.before->>'status')::billing.subscription_status,
     current_period_starts_at = (b.before->>'current_period_starts_at')::timestamptz,
     current_period_ends_at   = (b.before->>'current_period_ends_at')::timestamptz,
     ended_at                 = (b.before->>'ended_at')::timestamptz,
@@ -126,7 +126,7 @@ SET lifecycle_rev            = s.lifecycle_rev + 1,
     cancel_feedback          = b.before->>'cancel_feedback',
     deletion_scheduled_at    = (b.before->>'deletion_scheduled_at')::timestamptz,
     updated_at               = sqlc.arg(now)::timestamptz
-FROM openrails.destructive_run_before_images b
+FROM billing.destructive_run_before_images b
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND b.destructive_run_id = sqlc.arg(run_id)::uuid
   AND b.table_name = 'subscriptions'
@@ -154,11 +154,11 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
 -- restored one can. The stamp keeps the invalidation itself attributable to one
 -- run, and or#858's uniques/exclusion already ignore soft-deleted rows so the
 -- rebuilt window does not collide with the invalidated one.
-UPDATE openrails.entitlements e
+UPDATE billing.entitlements e
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
-FROM openrails.destructive_run_before_images b
+FROM billing.destructive_run_before_images b
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND b.destructive_run_id = sqlc.arg(run_id)::uuid
   AND b.table_name = 'entitlements'
@@ -170,7 +170,7 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
 -- Runs in the same transaction as the restore above. Entitlement images are
 -- deliberately excluded: leaving restored_at NULL on them is the durable record
 -- that the reverse saw them and chose recomputation over restoration.
-UPDATE openrails.destructive_run_before_images
+UPDATE billing.destructive_run_before_images
 SET restored_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid
@@ -181,7 +181,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT
     count(*) FILTER (WHERE table_name = 'subscriptions')::bigint AS subscriptions,
     count(*) FILTER (WHERE table_name = 'entitlements')::bigint AS entitlements
-FROM openrails.destructive_run_before_images
+FROM billing.destructive_run_before_images
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
@@ -192,7 +192,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- stale `fully_reconciled = true` licenses mass retraction against a book that
 -- is missing rows — i.e. it re-creates the very incident being recovered from.
 -- The single most dangerous post-rollback state in the system; cleared here.
-UPDATE openrails.reconciliation_state
+UPDATE billing.reconciliation_state
 SET fully_reconciled = false, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND fully_reconciled = true;
@@ -203,7 +203,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- them and re-arms by hand. Also trips the per-merchant destructive stop, which
 -- is the quiesce half: it is read by the same gate the intent runner checks, so
 -- no new provider write starts while the reversal runs.
-INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
+INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
 VALUES (sqlc.arg(merchant_id)::uuid, false, NULL, sqlc.narg(updated_by)::text, sqlc.narg(reason)::text, now())
 ON CONFLICT (merchant_id) DO UPDATE SET
     destructive_actions_enabled = false,

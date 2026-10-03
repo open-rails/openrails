@@ -525,10 +525,10 @@ func (w *world) armDestructive() {
 	q := func(sql string) string {
 		return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
 	}
-	_, err := w.pool.Exec(ctx, q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
+	_, err := w.pool.Exec(ctx, q(`UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
 	require.NoError(w.t, err)
-	_, err = w.pool.Exec(ctx, q(`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
-		SELECT id, true, now(), 'e2e', 'reviewed' FROM openrails.merchants WHERE slug = $1
+	_, err = w.pool.Exec(ctx, q(`INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
+		SELECT id, true, now(), 'e2e', 'reviewed' FROM billing.merchants WHERE slug = $1
 		ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true`), w.slug)
 	require.NoError(w.t, err)
 }

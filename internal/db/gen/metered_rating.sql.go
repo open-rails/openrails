@@ -13,7 +13,7 @@ import (
 )
 
 const advanceMeteredRatingWatermark = `-- name: AdvanceMeteredRatingWatermark :exec
-UPDATE openrails.metered_rating_watermarks
+UPDATE billing.metered_rating_watermarks
 SET rated_through = GREATEST(rated_through, $1::timestamptz),
     accrued_amount = accrued_amount + $2::bigint,
     updated_at = $3::timestamptz
@@ -59,8 +59,8 @@ SELECT rc.id,
        COALESCE(rc.filter, '{}'::jsonb)::jsonb AS filter,
        rc.allowance,
        rc.price
-FROM openrails.catalog_rate_cards rc
-JOIN openrails.catalog_meters cm ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
+FROM billing.catalog_rate_cards rc
+JOIN billing.catalog_meters cm ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
 WHERE rc.merchant_id = $1::uuid
   AND rc.meter_key IS NOT NULL
   AND (rc.customer_id IS NULL OR rc.customer_id = $2::uuid)
@@ -123,14 +123,14 @@ func (q *Queries) ListPayerArrearsRateCards(ctx context.Context, arg ListPayerAr
 }
 
 const lockMeteredRatingWatermark = `-- name: LockMeteredRatingWatermark :one
-INSERT INTO openrails.metered_rating_watermarks (
+INSERT INTO billing.metered_rating_watermarks (
     merchant_id, customer_id, currency, source, period_from, rated_through, accrued_amount, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::text, $4::text,
     $5::timestamptz, $5::timestamptz, 0, $6::timestamptz, $6::timestamptz
 )
 ON CONFLICT (merchant_id, customer_id, currency, source, period_from)
-DO UPDATE SET updated_at = openrails.metered_rating_watermarks.updated_at
+DO UPDATE SET updated_at = billing.metered_rating_watermarks.updated_at
 RETURNING accrued_amount
 `
 
@@ -166,7 +166,7 @@ SELECT COALESCE(NULLIF(ue.metadata ->> $1::text, ''),
                 ELSE COALESCE((ue.dimensions ->> $3::text)::bigint,
                               (ue.metadata ->> $3::text)::bigint, 0)
            END), 0)::bigint AS quantity
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = $4::uuid
   AND ue.customer_id = $5::uuid
   AND ue.currency = $6::text
@@ -246,7 +246,7 @@ SELECT COALESCE(NULLIF(ue.metadata ->> $1::text, ''),
                 ELSE COALESCE((ue.dimensions ->> $4::text)::bigint,
                               (ue.metadata ->> $4::text)::bigint, 0)
            END), 0)::bigint AS quantity
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = $5::uuid
   AND ue.customer_id = $6::uuid
   AND ue.currency = $7::text

@@ -108,7 +108,7 @@ func NewVolumeBreaker(d *db.DB) *VolumeBreaker { return &VolumeBreaker{db: d} }
 // serialized per merchant, and an admitted intent's attempt is recorded by
 // admit in the same transaction, so concurrent executors cannot spend one
 // remaining budget twice.
-func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailIntent, now time.Time, admit func(context.Context, *db.DB) error) (held bool, reason string, err error) {
+func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingRailIntent, now time.Time, admit func(context.Context, *db.DB) error) (held bool, reason string, err error) {
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")
 	}
@@ -137,7 +137,7 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.OpenrailsRailInten
 	return held, reason, nil
 }
 
-func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.OpenrailsRailIntent, now time.Time) (held bool, reason string, err error) {
+func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.BillingRailIntent, now time.Time) (held bool, reason string, err error) {
 	q := d.Gen(ctx)
 
 	windowStart := now.Add(-DestructiveWindow)
@@ -213,7 +213,7 @@ func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.Openrail
 	), nil
 }
 
-func (b *VolumeBreaker) finding(ctx context.Context, d *db.DB, merchantID uuid.UUID) (gen.OpenrailsReconciliationFinding, bool, error) {
+func (b *VolumeBreaker) finding(ctx context.Context, d *db.DB, merchantID uuid.UUID) (gen.BillingReconciliationFinding, bool, error) {
 	row, err := d.Gen(ctx).GetReconciliationFindingByIdentity(ctx, gen.GetReconciliationFindingByIdentityParams{
 		MerchantID:  merchantID,
 		FindingType: HeldBulkFindingType,
@@ -221,9 +221,9 @@ func (b *VolumeBreaker) finding(ctx context.Context, d *db.DB, merchantID uuid.U
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsReconciliationFinding{}, false, nil
+			return gen.BillingReconciliationFinding{}, false, nil
 		}
-		return gen.OpenrailsReconciliationFinding{}, false, err
+		return gen.BillingReconciliationFinding{}, false, err
 	}
 	return row, true, nil
 }

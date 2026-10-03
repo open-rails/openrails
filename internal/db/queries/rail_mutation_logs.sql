@@ -1,5 +1,5 @@
 -- name: InsertRailMutationLog :exec
-INSERT INTO openrails.rail_mutation_logs (
+INSERT INTO billing.rail_mutation_logs (
     merchant_id,
     rail,
     psp_id,
@@ -19,7 +19,7 @@ INSERT INTO openrails.rail_mutation_logs (
 -- the durable mutation log).
 
 -- name: ListRailMutationLogs :many
-SELECT * FROM openrails.rail_mutation_logs
+SELECT * FROM billing.rail_mutation_logs
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(rail_intent_id)::uuid IS NULL OR rail_intent_id = sqlc.narg(rail_intent_id)::uuid)
@@ -29,7 +29,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(limit_rows);
 
 -- name: CountRailMutationLogs :one
-SELECT count(*) FROM openrails.rail_mutation_logs
+SELECT count(*) FROM billing.rail_mutation_logs
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(rail_intent_id)::uuid IS NULL OR rail_intent_id = sqlc.narg(rail_intent_id)::uuid)

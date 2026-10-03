@@ -407,7 +407,7 @@ func (f *fleet) crash(r *world) {
 	r.replica.proxy.kill()
 	r.stop()
 	f.dead[r] = true
-	_, err := f.base.pool.Exec(f.t.Context(), f.q(`UPDATE openrails.river_job SET attempted_at = now() - interval '10 minutes'
+	_, err := f.base.pool.Exec(f.t.Context(), f.q(`UPDATE billing.river_job SET attempted_at = now() - interval '10 minutes'
 		WHERE state = 'running' AND attempted_by[array_length(attempted_by, 1)] = $1`), id)
 	require.NoError(f.t, err)
 }
@@ -438,7 +438,7 @@ func (f *fleet) recover() {
 // leader is the replica holding River leadership.
 func (f *fleet) leader() *world {
 	var id string
-	err := f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT leader_id FROM openrails.river_leader WHERE expires_at > now()`)).Scan(&id)
+	err := f.base.pool.QueryRow(f.t.Context(), f.q(`SELECT leader_id FROM billing.river_leader WHERE expires_at > now()`)).Scan(&id)
 	if err != nil {
 		return nil
 	}
@@ -479,8 +479,8 @@ func (f *fleet) lockCustomer(e *engineCase) *rowLock {
 		_ = tx.Rollback(ctx)
 	})
 	var id string
-	require.NoError(f.t, tx.QueryRow(f.t.Context(), f.q(`SELECT c.id::text FROM openrails.customers c
-		JOIN openrails.subscriptions s ON s.merchant_id = c.merchant_id AND s.customer_id = c.id
+	require.NoError(f.t, tx.QueryRow(f.t.Context(), f.q(`SELECT c.id::text FROM billing.customers c
+		JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.customer_id = c.id
 		WHERE s.id = $1 FOR UPDATE OF c`), subUUID(e.sub)).Scan(&id))
 	return &rowLock{f: f, tx: tx}
 }
@@ -597,8 +597,8 @@ func (f *fleet) periodEnd(e *engineCase) time.Time {
 // customers) holding the local customer's cards.
 func (f *fleet) providerCustomers(e *engineCase) []string {
 	f.t.Helper()
-	rows, err := f.base.pool.Query(f.t.Context(), f.q(`SELECT DISTINCT pm.rail_customer_ref FROM openrails.payment_methods pm
-		JOIN openrails.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+	rows, err := f.base.pool.Query(f.t.Context(), f.q(`SELECT DISTINCT pm.rail_customer_ref FROM billing.payment_methods pm
+		JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
 		WHERE s.id = $1 AND pm.rail_customer_ref <> ''`), subUUID(e.sub))
 	require.NoError(f.t, err)
 	refs, err := pgx.CollectRows(rows, pgx.RowTo[string])
@@ -666,7 +666,7 @@ type renewalOp struct {
 func (f *fleet) collections(e *engineCase) []renewalOp {
 	f.t.Helper()
 	rows, err := f.base.pool.Query(f.t.Context(), f.q(`SELECT coalesce(payload->>'previous_period_end', ''), coalesce(payload->>'attempt', ''), status, coalesce(result_evidence::text, '')
-		FROM openrails.rail_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' ORDER BY created_at, id`), subUUID(e.sub))
+		FROM billing.rail_intents WHERE subscription_id = $1 AND intent_type = 'subscription_collection' ORDER BY created_at, id`), subUUID(e.sub))
 	require.NoError(f.t, err)
 	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[renewalOp])
 	require.NoError(f.t, err)

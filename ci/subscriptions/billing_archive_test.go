@@ -60,15 +60,15 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(body), &refusal), body)
 		return refusal.Error.Metadata.Table, refusal.Error.Metadata.Count
 	}
-	_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO openrails.idempotency_keys (merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
+	_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.idempotency_keys (merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
 		SELECT id, 'checkout_session_create', k, s, gen_random_uuid(), CASE WHEN s = 'succeeded' THEN '{}'::jsonb END, now() + interval '1 hour', now() + interval '1 day'
-		FROM openrails.merchants, (VALUES ('running', 'processing'), ('done', 'succeeded')) AS v(k, s) WHERE slug = $1`), w.slug)
+		FROM billing.merchants, (VALUES ('running', 'processing'), ('done', 'succeeded')) AS v(k, s) WHERE slug = $1`), w.slug)
 	require.NoError(t, err)
 	table, count := archiveRefusal()
 	require.Equal(t, "idempotency_keys", table)
 	require.Equal(t, 1, count, "only the live claim holds the export back")
 
-	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE openrails.idempotency_keys SET lease_expires_at = now() - interval '1 second' WHERE idempotency_key = 'running'`))
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.idempotency_keys SET lease_expires_at = now() - interval '1 second' WHERE idempotency_key = 'running'`))
 	require.NoError(t, err)
 	table, _ = archiveRefusal()
 	require.NotEqual(t, "idempotency_keys", table, "a lapsed claim does not block the export")
@@ -103,18 +103,18 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	require.NotEqual(t, "rail_intents", refusedTable())
 
 	// The decline record the checkout wrote before #1111.
-	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO openrails.payments (merchant_id, id, customer_id, price_id, psp_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
+	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.payments (merchant_id, id, customer_id, price_id, psp_id, rail, transaction_id, amount, list_amount, currency, status, money_movement)
 		SELECT merchant_id, (payload->'terms'->>'payment_id')::uuid, (payload->'terms'->>'customer_id')::uuid, (payload->'terms'->>'price_id')::uuid,
 		       psp_id, rail, rail || '_sub_declined:' || id, (payload->'terms'->>'amount')::bigint, (payload->'terms'->>'recurring_amount')::bigint,
 		       payload->'terms'->>'currency', 'failed', 'none'
-		FROM openrails.rail_intents WHERE intent_type = 'initial_membership' AND status = 'failed_terminal'`))
+		FROM billing.rail_intents WHERE intent_type = 'initial_membership' AND status = 'failed_terminal'`))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, record.RowsAffected())
 	require.NotEqual(t, "rail_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
 
-	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE openrails.payments SET status = 'completed' WHERE transaction_id LIKE '%_sub_declined:%'`))
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET status = 'completed' WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
 	require.Equal(t, "rail_intents", refusedTable(), "a completed payment under a refused enrollment")
-	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM openrails.payments WHERE transaction_id LIKE '%_sub_declined:%'`))
+	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.payments WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
 }

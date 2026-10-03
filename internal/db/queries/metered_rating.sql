@@ -13,8 +13,8 @@ SELECT rc.id,
        COALESCE(rc.filter, '{}'::jsonb)::jsonb AS filter,
        rc.allowance,
        rc.price
-FROM openrails.catalog_rate_cards rc
-JOIN openrails.catalog_meters cm ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
+FROM billing.catalog_rate_cards rc
+JOIN billing.catalog_meters cm ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
 WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid
   AND rc.meter_key IS NOT NULL
   AND (rc.customer_id IS NULL OR rc.customer_id = sqlc.arg(customer_id)::uuid)
@@ -31,7 +31,7 @@ SELECT COALESCE(NULLIF(ue.metadata ->> sqlc.arg(group_property)::text, ''),
                 ELSE COALESCE((ue.dimensions ->> sqlc.arg(value_key)::text)::bigint,
                               (ue.metadata ->> sqlc.arg(value_key)::text)::bigint, 0)
            END), 0)::bigint AS quantity
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ue.customer_id = sqlc.arg(customer_id)::uuid
   AND ue.currency = sqlc.arg(currency)::text
@@ -60,7 +60,7 @@ SELECT COALESCE(NULLIF(ue.metadata ->> sqlc.arg(dimension_property)::text, ''),
                 ELSE COALESCE((ue.dimensions ->> sqlc.arg(value_key)::text)::bigint,
                               (ue.metadata ->> sqlc.arg(value_key)::text)::bigint, 0)
            END), 0)::bigint AS quantity
-FROM openrails.usage_events ue
+FROM billing.usage_events ue
 WHERE ue.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ue.customer_id = sqlc.arg(customer_id)::uuid
   AND ue.currency = sqlc.arg(currency)::text
@@ -81,18 +81,18 @@ GROUP BY 1, 2;
 
 -- ON CONFLICT DO UPDATE takes the row lock, serializing concurrent sweeps.
 -- name: LockMeteredRatingWatermark :one
-INSERT INTO openrails.metered_rating_watermarks (
+INSERT INTO billing.metered_rating_watermarks (
     merchant_id, customer_id, currency, source, period_from, rated_through, accrued_amount, created_at, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(currency)::text, sqlc.arg(source)::text,
     sqlc.arg(period_from)::timestamptz, sqlc.arg(period_from)::timestamptz, 0, sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 )
 ON CONFLICT (merchant_id, customer_id, currency, source, period_from)
-DO UPDATE SET updated_at = openrails.metered_rating_watermarks.updated_at
+DO UPDATE SET updated_at = billing.metered_rating_watermarks.updated_at
 RETURNING accrued_amount;
 
 -- name: AdvanceMeteredRatingWatermark :exec
-UPDATE openrails.metered_rating_watermarks
+UPDATE billing.metered_rating_watermarks
 SET rated_through = GREATEST(rated_through, sqlc.arg(rated_through)::timestamptz),
     accrued_amount = accrued_amount + sqlc.arg(accrued_delta)::bigint,
     updated_at = sqlc.arg(now)::timestamptz

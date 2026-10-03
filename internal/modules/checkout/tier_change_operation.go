@@ -68,7 +68,7 @@ func (p StripeTierChangePayload) subject() tierChangeSubject {
 	return tierChangeSubject{UserID: p.UserID, SubscriptionID: p.SubscriptionID, RequestedPrice: p.RequestedPrice, PriceID: p.PriceID}
 }
 
-func decodeTierChangeSubject(in gen.OpenrailsRailIntent) (tierChangeSubject, error) {
+func decodeTierChangeSubject(in gen.BillingRailIntent) (tierChangeSubject, error) {
 	switch in.IntentType {
 	case TypeNMIUpgrade:
 		var p subscriptions.NMIUpgradePayload
@@ -99,7 +99,7 @@ func decodeTierChangeSubject(in gen.OpenrailsRailIntent) (tierChangeSubject, err
 // both miss the replay lookup; the later enqueue then gets the earlier row
 // through ON CONFLICT, and it must neither run nor answer for a different
 // customer, subscription or target.
-func tierChangeOwnedBy(row gen.OpenrailsRailIntent, want tierChangeSubject) error {
+func tierChangeOwnedBy(row gen.BillingRailIntent, want tierChangeSubject) error {
 	got, err := decodeTierChangeSubject(row)
 	if err != nil || !sameCustomer(got.UserID, want.UserID) || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID {
 		return tierChangeIdempotencyConflict()
@@ -140,7 +140,7 @@ func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeR
 // replayTierChangeOperation answers a request that names an existing
 // operation: its stored result, or its live state after claiming committed
 // work that is still runnable. The frozen payload is never refreshed.
-func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.OpenrailsRailIntent, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.BillingRailIntent, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
 	subject, err := decodeTierChangeSubject(in)
 	if err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 // tierChangeResponse renders an operation's durable state: the stored
 // result, its coded refusal, or "processing" naming it while the provider
 // outcome is unresolved.
-func tierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
+func tierChangeResponse(in gen.BillingRailIntent) (*TierChangeResponse, error) {
 	switch in.IntentType {
 	case TypeNMIUpgrade:
 		return nmiUpgradeTierChangeResponse(in)
@@ -189,7 +189,7 @@ func tierChangeProcessing(resp *TierChangeResponse) (*TierChangeResponse, error)
 // refusal is a 400, and an operator-attested non-execution or a refusal
 // before submission (providerStatus 0) is a 409: the change did not happen
 // and a new request needs a new key.
-func tierChangeRefused(in gen.OpenrailsRailIntent, providerStatus int, declineCode string) error {
+func tierChangeRefused(in gen.BillingRailIntent, providerStatus int, declineCode string) error {
 	refusal := &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "tier change was not executed"}
 	if in.LastFailureReason != nil && *in.LastFailureReason != "" {
 		refusal.Message = *in.LastFailureReason

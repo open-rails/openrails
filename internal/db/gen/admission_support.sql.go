@@ -13,7 +13,7 @@ import (
 )
 
 const deleteAllInvokerSpendLimits = `-- name: DeleteAllInvokerSpendLimits :execrows
-DELETE FROM openrails.invoker_spend_limits
+DELETE FROM billing.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
@@ -34,7 +34,7 @@ func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAll
 }
 
 const deleteCustomerBillingPolicyBinding = `-- name: DeleteCustomerBillingPolicyBinding :exec
-DELETE FROM openrails.billing_policy_bindings
+DELETE FROM billing.billing_policy_bindings
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
@@ -49,7 +49,7 @@ func (q *Queries) DeleteCustomerBillingPolicyBinding(ctx context.Context, arg De
 }
 
 const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
-DELETE FROM openrails.invoker_spend_limits
+DELETE FROM billing.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2 AND scope = $3 AND scope_key = $4
 `
 
@@ -78,8 +78,8 @@ func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvoker
 
 const getCustomerBillingPolicyAssignment = `-- name: GetCustomerBillingPolicyAssignment :one
 SELECT c.id AS customer_id, b.policy_name
-FROM openrails.customers c
-LEFT JOIN openrails.billing_policy_bindings b
+FROM billing.customers c
+LEFT JOIN billing.billing_policy_bindings b
   ON b.merchant_id = c.merchant_id AND b.customer_id = c.id
 WHERE c.merchant_id = $1 AND c.id = $2
 `
@@ -103,21 +103,21 @@ func (q *Queries) GetCustomerBillingPolicyAssignment(ctx context.Context, arg Ge
 }
 
 const listBillingPolicies = `-- name: ListBillingPolicies :many
-SELECT id, merchant_id, name, policy, created_at, updated_at FROM openrails.billing_policies
+SELECT id, merchant_id, name, policy, created_at, updated_at FROM billing.billing_policies
 WHERE merchant_id = $1
 ORDER BY name
 `
 
 // Every named policy the merchant has declared, for the config-sync document.
-func (q *Queries) ListBillingPolicies(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsBillingPolicy, error) {
+func (q *Queries) ListBillingPolicies(ctx context.Context, merchantID uuid.UUID) ([]BillingBillingPolicy, error) {
 	rows, err := q.db.Query(ctx, listBillingPolicies, merchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsBillingPolicy
+	var items []BillingBillingPolicy
 	for rows.Next() {
-		var i OpenrailsBillingPolicy
+		var i BillingBillingPolicy
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -137,7 +137,7 @@ func (q *Queries) ListBillingPolicies(ctx context.Context, merchantID uuid.UUID)
 }
 
 const listDeclarativeBillingPolicyBindings = `-- name: ListDeclarativeBillingPolicyBindings :many
-SELECT id, merchant_id, customer_id, tier, policy_name, created_at, updated_at FROM openrails.billing_policy_bindings
+SELECT id, merchant_id, customer_id, tier, policy_name, created_at, updated_at FROM billing.billing_policy_bindings
 WHERE merchant_id = $1 AND customer_id IS NULL
 ORDER BY (tier IS NOT NULL) DESC, tier
 `
@@ -147,15 +147,15 @@ ORDER BY (tier IS NOT NULL) DESC, tier
 // segmentation state whose row count follows customers, not configuration, so
 // enumerating them would scale with records on file — and dumping them would
 // put customer identifiers into a source-available manifest.
-func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsBillingPolicyBinding, error) {
+func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merchantID uuid.UUID) ([]BillingBillingPolicyBinding, error) {
 	rows, err := q.db.Query(ctx, listDeclarativeBillingPolicyBindings, merchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsBillingPolicyBinding
+	var items []BillingBillingPolicyBinding
 	for rows.Next() {
-		var i OpenrailsBillingPolicyBinding
+		var i BillingBillingPolicyBinding
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -176,7 +176,7 @@ func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merc
 }
 
 const listInvokerSpendLimits = `-- name: ListInvokerSpendLimits :many
-SELECT id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at, provenance FROM openrails.invoker_spend_limits
+SELECT id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at, provenance FROM billing.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
@@ -187,15 +187,15 @@ type ListInvokerSpendLimitsParams struct {
 
 // ALL invoker spend limits for a payer (the admit path reads every scope to
 // compose the verdict).
-func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpendLimitsParams) ([]OpenrailsInvokerSpendLimit, error) {
+func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpendLimitsParams) ([]BillingInvokerSpendLimit, error) {
 	rows, err := q.db.Query(ctx, listInvokerSpendLimits, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsInvokerSpendLimit
+	var items []BillingInvokerSpendLimit
 	for rows.Next() {
-		var i OpenrailsInvokerSpendLimit
+		var i BillingInvokerSpendLimit
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -218,7 +218,7 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 }
 
 const lockBillingPolicyName = `-- name: LockBillingPolicyName :one
-SELECT name FROM openrails.billing_policies
+SELECT name FROM billing.billing_policies
 WHERE merchant_id = $1 AND name = $2
 FOR KEY SHARE
 `
@@ -247,8 +247,8 @@ func (q *Queries) LockInvokerSpendLimits(ctx context.Context, lockKey string) er
 
 const resolveBillingPolicy = `-- name: ResolveBillingPolicy :one
 SELECT b.policy_name, p.policy
-FROM openrails.billing_policy_bindings b
-JOIN openrails.billing_policies p
+FROM billing.billing_policy_bindings b
+JOIN billing.billing_policies p
   ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
 WHERE b.merchant_id = $1
   AND (b.customer_id = $2 OR b.customer_id IS NULL)
@@ -280,7 +280,7 @@ func (q *Queries) ResolveBillingPolicy(ctx context.Context, arg ResolveBillingPo
 
 const upsertBillingPolicy = `-- name: UpsertBillingPolicy :exec
 
-INSERT INTO openrails.billing_policies (
+INSERT INTO billing.billing_policies (
     id, merchant_id, name, policy, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (merchant_id, name) DO UPDATE SET
@@ -317,7 +317,7 @@ func (q *Queries) UpsertBillingPolicy(ctx context.Context, arg UpsertBillingPoli
 }
 
 const upsertBillingPolicyBindingCustomer = `-- name: UpsertBillingPolicyBindingCustomer :exec
-INSERT INTO openrails.billing_policy_bindings (
+INSERT INTO billing.billing_policy_bindings (
     id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
 ) VALUES ($1, $2, $3, NULL, $4, $5, $6)
 ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
@@ -349,7 +349,7 @@ func (q *Queries) UpsertBillingPolicyBindingCustomer(ctx context.Context, arg Up
 }
 
 const upsertBillingPolicyBindingDefault = `-- name: UpsertBillingPolicyBindingDefault :exec
-INSERT INTO openrails.billing_policy_bindings (
+INSERT INTO billing.billing_policy_bindings (
     id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
 ) VALUES ($1, $2, NULL, NULL, $3, $4, $5)
 ON CONFLICT (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL)) DO UPDATE SET
@@ -379,7 +379,7 @@ func (q *Queries) UpsertBillingPolicyBindingDefault(ctx context.Context, arg Ups
 }
 
 const upsertBillingPolicyBindingTier = `-- name: UpsertBillingPolicyBindingTier :exec
-INSERT INTO openrails.billing_policy_bindings (
+INSERT INTO billing.billing_policy_bindings (
     id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
 ) VALUES ($1, $2, NULL, $3, $4, $5, $6)
 ON CONFLICT (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL)) DO UPDATE SET
@@ -410,7 +410,7 @@ func (q *Queries) UpsertBillingPolicyBindingTier(ctx context.Context, arg Upsert
 }
 
 const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
-INSERT INTO openrails.invoker_spend_limits (
+INSERT INTO billing.invoker_spend_limits (
     id, merchant_id, customer_id, scope, scope_key, windows, provenance, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET

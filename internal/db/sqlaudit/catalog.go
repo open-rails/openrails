@@ -17,7 +17,7 @@ type Catalog struct {
 	PrimaryKeys    map[string][]string   // table -> primary key columns
 	PartialIndexes map[string]bool       // index name -> a nontrivial predicate restricts membership
 	Columns        map[string][]string   // table -> its column names
-	Tables         map[string]struct{}   // every table in the openrails schema
+	Tables         map[string]struct{}   // every table in the billing schema
 }
 
 const catalogSQL = `
@@ -28,7 +28,7 @@ SELECT c.relname,
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
- WHERE n.nspname = 'openrails' AND c.relkind = 'r'`
+ WHERE n.nspname = 'billing' AND c.relkind = 'r'`
 
 const uniqueKeysSQL = `
 SELECT c.relname, array_agg(a.attname ORDER BY k.ord), i.indisprimary
@@ -37,7 +37,7 @@ SELECT c.relname, array_agg(a.attname ORDER BY k.ord), i.indisprimary
   JOIN pg_namespace n ON n.oid = c.relnamespace
   CROSS JOIN LATERAL unnest(i.indkey[0:i.indnkeyatts-1]) WITH ORDINALITY AS k(attnum, ord)
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
- WHERE n.nspname = 'openrails' AND i.indisunique AND i.indpred IS NULL
+ WHERE n.nspname = 'billing' AND i.indisunique AND i.indpred IS NULL
  GROUP BY c.relname, i.indexrelid, i.indisprimary`
 
 const partialIndexesSQL = `
@@ -45,7 +45,7 @@ SELECT idx.relname
 FROM pg_index i
 JOIN pg_class idx ON idx.oid=i.indexrelid
 JOIN pg_namespace ns ON ns.oid=idx.relnamespace
-WHERE ns.nspname='openrails' AND i.indpred IS NOT NULL
+WHERE ns.nspname='billing' AND i.indpred IS NOT NULL
   AND pg_get_expr(i.indpred,i.indrelid) <> 'true'
   AND NOT EXISTS (
     SELECT 1 FROM pg_attribute a

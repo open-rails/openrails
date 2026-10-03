@@ -13,14 +13,14 @@ import (
 )
 
 const getMerchantConfiguration = `-- name: GetMerchantConfiguration :one
-SELECT merchant_id, config, created_at, updated_at FROM openrails.merchant_configurations
+SELECT merchant_id, config, created_at, updated_at FROM billing.merchant_configurations
 WHERE merchant_id = $1
 LIMIT 1
 `
 
-func (q *Queries) GetMerchantConfiguration(ctx context.Context, merchantID uuid.UUID) (OpenrailsMerchantConfiguration, error) {
+func (q *Queries) GetMerchantConfiguration(ctx context.Context, merchantID uuid.UUID) (BillingMerchantConfiguration, error) {
 	row := q.db.QueryRow(ctx, getMerchantConfiguration, merchantID)
-	var i OpenrailsMerchantConfiguration
+	var i BillingMerchantConfiguration
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Config,
@@ -31,7 +31,7 @@ func (q *Queries) GetMerchantConfiguration(ctx context.Context, merchantID uuid.
 }
 
 const upsertMerchantConfiguration = `-- name: UpsertMerchantConfiguration :exec
-INSERT INTO openrails.merchant_configurations (
+INSERT INTO billing.merchant_configurations (
     merchant_id, config, created_at, updated_at
 ) VALUES ($1, $2, $3, $4)
 ON CONFLICT (merchant_id) DO UPDATE SET

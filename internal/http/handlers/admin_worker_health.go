@@ -53,7 +53,7 @@ func listWorkerHealth(r *httprequest.Request, withErrorText bool) {
 	r.SuccessJSON(items)
 }
 
-func workerHealthItemFromGen(row gen.OpenrailsWorkerState, withErrorText bool) workerHealthItem {
+func workerHealthItemFromGen(row gen.BillingWorkerState, withErrorText bool) workerHealthItem {
 	item := workerHealthItem{
 		WorkerKind:            row.WorkerKind,
 		RegisteredAt:          row.RegisteredAt,

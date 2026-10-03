@@ -12,7 +12,7 @@ import (
 )
 
 const beginBillingRestore = `-- name: BeginBillingRestore :one
-SELECT openrails.begin_billing_restore($1::uuid)
+SELECT billing.begin_billing_restore($1::uuid)
 `
 
 func (q *Queries) BeginBillingRestore(ctx context.Context, merchantID uuid.UUID) (uuid.UUID, error) {
@@ -24,7 +24,7 @@ func (q *Queries) BeginBillingRestore(ctx context.Context, merchantID uuid.UUID)
 
 const catalogApplicationsAfterRevisionExist = `-- name: CatalogApplicationsAfterRevisionExist :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.catalog_applications
+    SELECT 1 FROM billing.catalog_applications
     WHERE merchant_id = $1::uuid AND applied_revision > $2::bigint
 )
 `
@@ -42,7 +42,7 @@ func (q *Queries) CatalogApplicationsAfterRevisionExist(ctx context.Context, arg
 }
 
 const checkBillingRestoreLedger = `-- name: CheckBillingRestoreLedger :exec
-SELECT openrails.check_billing_restore_ledger($1::uuid)
+SELECT billing.check_billing_restore_ledger($1::uuid)
 `
 
 func (q *Queries) CheckBillingRestoreLedger(ctx context.Context, merchantID uuid.UUID) error {
@@ -51,7 +51,7 @@ func (q *Queries) CheckBillingRestoreLedger(ctx context.Context, merchantID uuid
 }
 
 const finishBillingRestore = `-- name: FinishBillingRestore :exec
-SELECT openrails.finish_billing_restore($1::uuid, $2::text, $3::bigint)
+SELECT billing.finish_billing_restore($1::uuid, $2::text, $3::bigint)
 `
 
 type FinishBillingRestoreParams struct {
@@ -67,7 +67,7 @@ func (q *Queries) FinishBillingRestore(ctx context.Context, arg FinishBillingRes
 
 const getBillingRestoreReceipt = `-- name: GetBillingRestoreReceipt :one
 SELECT summary ->> 'digest' AS digest, CASE WHEN summary ? 'rows' THEN (summary ->> 'rows')::bigint END AS rows
-FROM openrails.maintenance_runs
+FROM billing.maintenance_runs
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -92,7 +92,7 @@ func (q *Queries) GetBillingRestoreReceipt(ctx context.Context, arg GetBillingRe
 const liveMerchantExists = `-- name: LiveMerchantExists :one
 
 SELECT EXISTS (
-    SELECT 1 FROM openrails.merchants
+    SELECT 1 FROM billing.merchants
     WHERE id = $1::uuid AND status = 'active' AND deleted_at IS NULL
 )
 `
@@ -107,7 +107,7 @@ func (q *Queries) LiveMerchantExists(ctx context.Context, id uuid.UUID) (bool, e
 }
 
 const setCatalogRevision = `-- name: SetCatalogRevision :exec
-UPDATE openrails.merchants SET catalog_revision = $1::bigint WHERE id = $2::uuid
+UPDATE billing.merchants SET catalog_revision = $1::bigint WHERE id = $2::uuid
 `
 
 type SetCatalogRevisionParams struct {

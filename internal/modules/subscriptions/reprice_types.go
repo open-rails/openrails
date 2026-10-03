@@ -60,7 +60,7 @@ var (
 )
 
 // DefaultRepriceNoticeWindowDays (#781) is the notice window used when a
-// merchant has no explicit openrails.merchant_configurations override — card
+// merchant has no explicit billing.merchant_configurations override — card
 // networks and consumer-protection law generally require advance notice for
 // recurring-amount increases; 30 days is the console's own long-standing UX
 // default (#777's price-wizard-logic.ts), now also the server-side floor.

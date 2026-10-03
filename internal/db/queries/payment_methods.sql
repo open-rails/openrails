@@ -1,7 +1,7 @@
--- openrails.payment_methods.
+-- billing.payment_methods.
 
 -- name: CreatePaymentMethod :execrows
-INSERT INTO openrails.payment_methods (
+INSERT INTO billing.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
     metadata, created_at, updated_at, psp_id,
@@ -16,7 +16,7 @@ INSERT INTO openrails.payment_methods (
     sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(custodian)::text, ''), 'psp'),
     CASE WHEN COALESCE(NULLIF(sqlc.arg(custodian)::text, ''), 'psp') <> 'psp' THEN
-      COALESCE(sqlc.narg(custodian_id)::uuid, (SELECT p.custodian_id FROM openrails.psps p WHERE p.id=sqlc.arg(psp_id)::uuid AND p.merchant_id=sqlc.arg(merchant_id)::uuid)) END,
+      COALESCE(sqlc.narg(custodian_id)::uuid, (SELECT p.custodian_id FROM billing.psps p WHERE p.id=sqlc.arg(psp_id)::uuid AND p.merchant_id=sqlc.arg(merchant_id)::uuid)) END,
     sqlc.arg(fingerprint), sqlc.arg(network_token_id),
     sqlc.arg(network_token_status), sqlc.arg(network_token_par),
     COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
@@ -24,48 +24,48 @@ INSERT INTO openrails.payment_methods (
 );
 
 -- name: GetPaymentMethodByID :one
-SELECT * FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+SELECT * FROM billing.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetPaymentMethodForShare :one
 -- An operation freezing the instrument reads it under a shared lock, which
 -- conflicts with the custody remap's FOR UPDATE: a remap either commits first
 -- (the operation freezes the new custody) or waits for the operation to
 -- commit and then sees it pinning the instrument.
-SELECT * FROM openrails.payment_methods
+SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(id)::uuid
 FOR SHARE;
 
 -- name: ListPaymentMethodsByIDs :many
-SELECT * FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM billing.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: GetCollectionCustodianAccountsForShare :one
 -- Existing obligations retain the saved card's explicit custody/account, even
 -- after an archive or a new default custodian. Do not re-route to p.custodian_id.
 SELECT sqlc.embed(p), sqlc.embed(c)
-FROM openrails.psps p
-JOIN openrails.custodians c ON c.merchant_id = p.merchant_id
+FROM billing.psps p
+JOIN billing.custodians c ON c.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.id = sqlc.arg(psp_id)::uuid
   AND c.id = sqlc.arg(custodian_id)::uuid
 FOR SHARE OF p, c;
 
 -- name: DeletePaymentMethod :execrows
-DELETE FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
+DELETE FROM billing.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListPaymentMethodsByCustomer :many
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY pm.is_default DESC, pm.created_at DESC;
 
 -- name: CountPaymentMethodsByCustomer :one
-SELECT count(*) FROM openrails.payment_methods pm
+SELECT count(*) FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid;
 
 -- name: ListPaymentMethodsByCustomerPaged :many
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY pm.is_default DESC, pm.created_at DESC
@@ -75,7 +75,7 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 -- Provider webhook folds must bind the instrument to the exact account whose
 -- credentials verified the event. The same merchant may run multiple accounts
 -- on one rail, so a rail-only lookup is not sufficient for provider truth.
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
   AND pm.rail = sqlc.arg(rail)
   AND pm.psp_id = sqlc.arg(psp_id)::uuid
@@ -89,7 +89,7 @@ LIMIT 1;
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
 
 -- name: UpdatePaymentMethod :execrows
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     customer_id = $2,
     rail = $3,
     rail_customer_ref = sqlc.arg(rail_customer_ref),
@@ -105,7 +105,7 @@ WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 -- Verified Stripe setup/provider readback can complete a historical mirror
 -- missing its customer reference. It cannot rename an existing binding.
 -- name: BindMissingStripeCustomerReference :execrows
-UPDATE openrails.payment_methods
+UPDATE billing.payment_methods
 SET rail_customer_ref=sqlc.arg(rail_customer_ref)::text, updated_at=sqlc.arg(now)::timestamptz
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
  AND customer_id=sqlc.arg(customer_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
@@ -113,22 +113,22 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
  AND rail_customer_ref='' AND custodian='psp' AND custodian_id IS NULL AND park_reason='';
 
 -- name: ListPaymentMethodsByRails :many
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = ANY(sqlc.arg(rails)::text[])
 ORDER BY pm.created_at DESC;
 
 -- name: ListPaymentMethodsByCustomerRails :many
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = $1
   AND pm.rail = ANY(sqlc.arg(rails)::text[])
 ORDER BY pm.created_at DESC;
 
 -- name: CountPaymentMethodForUser :one
-SELECT count(*) FROM openrails.payment_methods pm
+SELECT count(*) FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = $1 AND pm.customer_id = $2;
 
 -- name: ListPaymentMethodsByRail :many
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = $1
 ORDER BY pm.created_at DESC;
 
@@ -137,7 +137,7 @@ ORDER BY pm.created_at DESC;
 -- (#1111), approved or not.
 SELECT DISTINCT ON (a.payment_method_id)
     a.payment_method_id, a.attempted_at, a.category
-FROM openrails.payment_attempts a
+FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.payment_method_id = ANY(sqlc.arg(ids)::uuid[]) AND a.kind <> 'verify'
 ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;
 
@@ -145,7 +145,7 @@ ORDER BY a.payment_method_id, a.attempted_at DESC, a.id DESC;
 -- #682 shared-vault guard: how many OTHER stored methods share this rail
 -- customer-scope handle (e.g. an imported multi-card NMI vault) within the
 -- merchant.
-SELECT count(*) FROM openrails.payment_methods
+SELECT count(*) FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = $1
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)
@@ -158,7 +158,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 -- One-vault-per-card minting (#682) makes rail_customer_ref alone decisive for
 -- NMI; the method-ref predicate narrows within shared (imported) vaults and is
 -- skipped when either side has no billing id.
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id) AND pm.psp_id = sqlc.arg(psp_id)::uuid
   AND pm.rail = sqlc.arg(rail)
   AND pm.rail_customer_ref = sqlc.arg(rail_customer_ref)
@@ -172,7 +172,7 @@ LIMIT 1;
 -- #297: persist the rail-scoped stored-credential replay reference captured by
 -- a successful charge, WRITE-ONCE per agreement type — an existing non-empty
 -- reference is never overwritten (the sequence anchors on its first capture).
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     stored_credential_recurring_ref = CASE
         WHEN sqlc.arg(agreement)::text = 'recurring' THEN sqlc.arg(ref)::text
         ELSE stored_credential_recurring_ref END,
@@ -189,7 +189,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 -- #297: instrument-handle variant of CaptureStoredCredentialRef for charge
 -- sites that never load the local row (checkout sale/subscription intents).
 -- Same write-once semantics.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     stored_credential_recurring_ref = CASE
         WHEN sqlc.arg(agreement)::text = 'recurring' THEN sqlc.arg(ref)::text
         ELSE stored_credential_recurring_ref END,
@@ -211,7 +211,7 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND psp_id = sqlc.arg(psp_id)::uuid
 -- reuses that instrument instead of minting a duplicate. Scoped by CUSTODIAN,
 -- not rail (or#879): the fingerprint is issued by whoever holds the card.
 -- merchant_id scopes merchant.
-SELECT * FROM openrails.payment_methods pm
+SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
   AND pm.custodian = sqlc.arg(custodian)
   AND pm.psp_id = sqlc.arg(psp_id)::uuid
@@ -223,7 +223,7 @@ LIMIT 1;
 
 -- name: SetPaymentMethodNetworkToken :execrows
 -- #795 NT provisioning result (id/status/par). Never touches PAN-side expiry.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     network_token_id = sqlc.arg(network_token_id),
     network_token_status = sqlc.arg(network_token_status),
     network_token_par = sqlc.arg(network_token_par),
@@ -235,7 +235,7 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id)
 -- #795 webhook fold: NT lifecycle status/enrichment only (idempotent). Keyed on
 -- the CUSTODIAN that sent the event (or#879) — the network token is a custody
 -- artefact, and the rail says nothing about who minted it.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     network_token_status = sqlc.arg(network_token_status),
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -251,7 +251,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- the operator is notified, and nothing is terminally cancelled. Idempotent:
 -- an already-parked instrument keeps its first park. Keyed on the custodian
 -- that reported the problem (or#879), since the method ref is its token id.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     park_reason = sqlc.arg(park_reason),
     parked_at = now(),
     updated_at = now()
@@ -265,7 +265,7 @@ RETURNING id, customer_id, psp_id;
 -- name: ParkStripePaymentMethodByRef :execrows
 -- A Stripe detach is irreversible provider truth. Preserve the local evidence,
 -- but make the exact PSP-owned instrument unusable, within the merchant.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     park_reason = sqlc.arg(park_reason),
     parked_at = COALESCE(parked_at, now()),
     updated_at = now()
@@ -284,7 +284,7 @@ WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stri
 -- the park set kept charges refused (custodian_proxy_collection) and invoice
 -- recovery skipping the method, which is the engine overruling the very
 -- recovery the account updater exists to deliver.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     rail_method_ref = sqlc.arg(new_method_ref),
     fingerprint = COALESCE(NULLIF(sqlc.arg(new_fingerprint)::text, ''), fingerprint),
     last_four = COALESCE(NULLIF(sqlc.arg(new_last_four)::text, ''), last_four),
@@ -302,7 +302,7 @@ RETURNING id, customer_id, psp_id;
 
 -- name: RefreshCustodianCardMetadata :execrows
 -- #795 token.updated fold: refresh masked metadata from the custodian's read.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
     card_type = COALESCE(NULLIF(sqlc.arg(card_type)::text, ''), card_type),
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
@@ -316,7 +316,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: ReplacePaymentMethodCard :execrows
 -- An in-place card replacement moves the method onto the verified billing
 -- entry: card metadata and its recurring agreement change together.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     rail_method_ref = sqlc.arg(new_rail_method_ref)::text,
     last_four = sqlc.narg(last_four),
     card_type = sqlc.narg(card_type),
@@ -332,7 +332,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 
 -- name: GetDefaultPaymentMethodID :one
 -- #1084: the customer's default payment method (none when it has no usable one).
-SELECT pm.id FROM openrails.payment_methods pm
+SELECT pm.id FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = sqlc.arg(customer_id)::uuid AND pm.is_default;
 
 -- name: LockCustomerDefaultPaymentMethod :exec
@@ -340,16 +340,16 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = sqlc.arg
 SELECT pg_advisory_xact_lock(hashtextextended('openrails.default_payment_method:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(customer_id)::uuid::text, 0));
 
 -- name: ClearDefaultPaymentMethod :exec
-UPDATE openrails.payment_methods SET is_default = false
+UPDATE billing.payment_methods SET is_default = false
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND is_default AND id <> sqlc.arg(keep_id)::uuid;
 
 -- name: MarkDefaultPaymentMethod :execrows
-UPDATE openrails.payment_methods SET is_default = true
+UPDATE billing.payment_methods SET is_default = true
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid AND park_reason = '';
 
 -- name: ListVaultPaymentMethods :many
 -- #1115: the stored cards on one NMI vault of one PSP.
-SELECT * FROM openrails.payment_methods
+SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail = 'nmi'
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND park_reason NOT LIKE 'delete:%'
 ORDER BY created_at, id;
@@ -357,7 +357,7 @@ ORDER BY created_at, id;
 -- name: RefreshPaymentMethodCard :execrows
 -- #1115: an account updater reissued the card in place. Its details change,
 -- and a park an earlier notice set is cleared.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
     card_type = COALESCE(NULLIF(sqlc.arg(card_type)::text, ''), card_type),
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
@@ -369,7 +369,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 -- name: ParkPaymentMethod :execrows
 -- #1115: an account updater reported the card's account closed. The first
 -- park stands.
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     park_reason = sqlc.arg(park_reason)::text,
     parked_at = sqlc.arg(parked_at)::timestamptz,
     updated_at = sqlc.arg(parked_at)::timestamptz
@@ -377,23 +377,23 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND 
 
 -- name: InsertPaymentMethodUpdate :exec
 -- #1115: idempotent on (source, event_ref, method); at defaults to now.
-INSERT INTO openrails.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
+INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(payment_method_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(psp_id)::uuid,
     sqlc.arg(source)::text, sqlc.arg(kind)::text, sqlc.arg(event_ref)::text, COALESCE(sqlc.narg(at)::timestamptz, now()))
 ON CONFLICT DO NOTHING;
 
 -- name: GetPaymentMethodByPSPRefs :one
-SELECT id, customer_id, rail FROM openrails.payment_methods
+SELECT id, customer_id, rail FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
 
 -- name: GetPaymentMethodByPSPRailRefs :one
-SELECT id, customer_id FROM openrails.payment_methods
+SELECT id, customer_id FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail = sqlc.arg(rail)::text
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
 
 -- name: CustomerHasVaultedPaymentMethod :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.payment_methods
+    SELECT 1 FROM billing.payment_methods
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND parked_at IS NULL
 );

@@ -23,7 +23,7 @@ func NewNMICollectionAdapter(client *nmi.NMIClient) *NMICollectionAdapter {
 	return &NMICollectionAdapter{Charger: nmidirect.New(client)}
 }
 
-func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
+func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
 	// or#864: NO default. A guessed currency here mints a real charge in a
 	// currency nobody established; the gate answers before anything else.
 	currency := normalizeCurrency(req.Currency)

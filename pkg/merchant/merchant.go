@@ -54,7 +54,7 @@ func ValidateSlug(s string) error {
 // ID is a typed merchant / billing-namespace identifier. It is required as an
 // explicit parameter on every merchant-owned repository/query; there is no
 // implicit global merchant lookup inside repositories. Canonical merchant uuid =
-// openrails.merchants.id (self-owned uuidv7, never an AuthKit uuid).
+// billing.merchants.id (self-owned uuidv7, never an AuthKit uuid).
 type ID uuid.UUID
 
 // ErrNoMerchant is returned by Require when no merchant has been resolved onto

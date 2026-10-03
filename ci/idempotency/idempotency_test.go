@@ -95,7 +95,7 @@ func (e *env) exec(sql string, args ...any) int64 {
 
 func (e *env) newMerchant() uuid.UUID {
 	var id uuid.UUID
-	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`INSERT INTO openrails.merchants (slug) VALUES ($1) RETURNING id`), "idem-"+uuid.NewString()[:8]).Scan(&id))
+	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`INSERT INTO billing.merchants (slug) VALUES ($1) RETURNING id`), "idem-"+uuid.NewString()[:8]).Scan(&id))
 	return id
 }
 
@@ -116,13 +116,13 @@ func (e *env) ctxFor(id uuid.UUID) context.Context {
 // lapse ends key's lease on the database clock, as elapsed time or starved
 // renewals would.
 func (e *env) lapse(op, key string) {
-	require.EqualValues(e.t, 1, e.exec(`UPDATE openrails.idempotency_keys SET lease_expires_at = now() - interval '1 millisecond'
+	require.EqualValues(e.t, 1, e.exec(`UPDATE billing.idempotency_keys SET lease_expires_at = now() - interval '1 millisecond'
 		WHERE operation = $1 AND idempotency_key = $2 AND status = 'processing'`, op, key))
 }
 
 func (e *env) rows() int {
 	var n int
-	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`SELECT count(*) FROM openrails.idempotency_keys`)).Scan(&n))
+	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`SELECT count(*) FROM billing.idempotency_keys`)).Scan(&n))
 	return n
 }
 
@@ -302,7 +302,7 @@ func TestHoldCancelsBeforeTheLeaseLapses(t *testing.T) {
 	tx, err := e.admin.Begin(t.Context())
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	_, err = tx.Exec(t.Context(), e.q(`SELECT 1 FROM openrails.idempotency_keys WHERE idempotency_key = 'starved' FOR UPDATE`))
+	_, err = tx.Exec(t.Context(), e.q(`SELECT 1 FROM billing.idempotency_keys WHERE idempotency_key = 'starved' FOR UPDATE`))
 	require.NoError(t, err)
 
 	work, stop := owner.Hold(e.ctx())
@@ -336,7 +336,7 @@ func TestTokenSurvivesCollection(t *testing.T) {
 	e := newEnv(t)
 	old, _, err := e.store(0).Begin(e.ctx(), "checkout", "gc")
 	require.NoError(t, err)
-	e.exec(`UPDATE openrails.idempotency_keys SET lease_expires_at = now() - interval '2 seconds', expires_at = now() - interval '1 second' WHERE idempotency_key = 'gc'`)
+	e.exec(`UPDATE billing.idempotency_keys SET lease_expires_at = now() - interval '2 seconds', expires_at = now() - interval '1 second' WHERE idempotency_key = 'gc'`)
 	deleted, err := riverjobs.IdempotencyGCWorker{DB: e.replicas[1].db}.Sweep(t.Context())
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted)
@@ -362,7 +362,7 @@ func TestExpiryAndGC(t *testing.T) {
 	// A backlog larger than several batches, across two merchants.
 	other := e.newMerchant()
 	for _, m := range []uuid.UUID{e.merchant, other} {
-		e.exec(`INSERT INTO openrails.idempotency_keys
+		e.exec(`INSERT INTO billing.idempotency_keys
 			(merchant_id, operation, idempotency_key, status, token, result, lease_expires_at, expires_at)
 			SELECT $1, 'webhook.stripe.test', 'evt_' || g, 'succeeded', gen_random_uuid(), '{}'::jsonb, now(), now() + interval '1 hour' FROM generate_series(1, 1300) g`, m)
 	}
@@ -372,7 +372,7 @@ func TestExpiryAndGC(t *testing.T) {
 	require.NoError(t, gc.Work(t.Context(), &river.Job[riverjobs.IdempotencyGCArgs]{}))
 	require.Equal(t, 2602, e.rows(), "nothing has expired")
 
-	e.exec(`UPDATE openrails.idempotency_keys SET lease_expires_at = LEAST(lease_expires_at, now() - interval '2 seconds'), expires_at = now() - interval '1 second'`)
+	e.exec(`UPDATE billing.idempotency_keys SET lease_expires_at = LEAST(lease_expires_at, now() - interval '2 seconds'), expires_at = now() - interval '1 second'`)
 	again, _, err := s.Begin(e.ctx(), "checkout", "done")
 	require.NoError(t, err)
 	require.NotNil(t, again, "an expired result is not replayed; the key is claimable afresh")
@@ -393,7 +393,7 @@ func (e *env) dedup(i int, lease time.Duration) *webhooks.DeduplicationService {
 // effects is a money effect table: one row per application of an event. The
 // handler marks the event in its effect transaction.
 func (e *env) effects() func(ctx context.Context, d *db.DB, event string) error {
-	e.exec(`CREATE TABLE openrails.test_effects (event text NOT NULL)`)
+	e.exec(`CREATE TABLE billing.test_effects (event text NOT NULL)`)
 	return func(ctx context.Context, d *db.DB, event string) error {
 		return effect(ctx, d, event, true)
 	}
@@ -403,7 +403,7 @@ func (e *env) effects() func(ctx context.Context, d *db.DB, event string) error 
 // ProcessWebhook.
 func effect(ctx context.Context, d *db.DB, event string, mark bool) error {
 	return d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO openrails.test_effects (event) VALUES ($1)`, event); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO billing.test_effects (event) VALUES ($1)`, event); err != nil {
 			return err
 		}
 		if !mark {
@@ -415,7 +415,7 @@ func effect(ctx context.Context, d *db.DB, event string, mark bool) error {
 
 func (e *env) applied(event string) int {
 	var n int
-	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`SELECT count(*) FROM openrails.test_effects WHERE event = $1`), event).Scan(&n))
+	require.NoError(e.t, e.admin.QueryRow(e.t.Context(), e.q(`SELECT count(*) FROM billing.test_effects WHERE event = $1`), event).Scan(&n))
 	return n
 }
 
@@ -484,7 +484,7 @@ func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	dead, _, err := e.store(0).Begin(e.ctx(), op, "evt_crash")
 	require.NoError(t, err)
 	require.NotNil(t, dead)
-	e.exec(`INSERT INTO openrails.webhook_events (merchant_id, op, event_id) VALUES ($1, $2, 'evt_crash')`, e.merchant, op)
+	e.exec(`INSERT INTO billing.webhook_events (merchant_id, op, event_id) VALUES ($1, $2, 'evt_crash')`, e.merchant, op)
 	e.lapse(op, "evt_crash")
 	var crashed atomic.Int32
 	require.NoError(t, deliver(1, "evt_crash", func(context.Context) error { crashed.Add(1); return nil }))
@@ -551,7 +551,7 @@ func TestWebhookMarkRollsBackADuplicateTransaction(t *testing.T) {
 	}))
 	require.Equal(t, 1, e.applied("evt_twice"), "the second transaction saw the mark and rolled back")
 	var marks int
-	require.NoError(t, e.admin.QueryRow(t.Context(), e.q(`SELECT count(*) FROM openrails.webhook_events WHERE op = $1 AND event_id = 'evt_twice'`), op).Scan(&marks))
+	require.NoError(t, e.admin.QueryRow(t.Context(), e.q(`SELECT count(*) FROM billing.webhook_events WHERE op = $1 AND event_id = 'evt_twice'`), op).Scan(&marks))
 	require.Equal(t, 1, marks)
 }
 
@@ -637,7 +637,7 @@ func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
 	var n int
 	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error { return nil }))
 	require.NoError(t, d.DataPool().MerchantTx(ctx, merchant.ID(e.merchant), func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM openrails.idempotency_keys`).Scan(&n)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM billing.idempotency_keys`).Scan(&n)
 	}), "pool work inside a pinned request reuses the pin")
 	require.NoError(t, d.DataPool().QueryRow(ctx, `SELECT 1`).Scan(&n))
 
@@ -660,15 +660,15 @@ func TestPinnedTransactionIsNeverJoined(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	d := e.replicas[0].db
-	e.exec(`CREATE TABLE openrails.test_rows (v text NOT NULL)`)
+	e.exec(`CREATE TABLE billing.test_rows (v text NOT NULL)`)
 	rows := func() []string {
-		r, err := e.admin.Query(t.Context(), e.q(`SELECT v FROM openrails.test_rows ORDER BY v`))
+		r, err := e.admin.Query(t.Context(), e.q(`SELECT v FROM billing.test_rows ORDER BY v`))
 		require.NoError(t, err)
 		out, err := pgx.CollectRows(r, pgx.RowTo[string])
 		require.NoError(t, err)
 		return out
 	}
-	insert := `INSERT INTO openrails.test_rows (v) VALUES ($1)`
+	insert := `INSERT INTO billing.test_rows (v) VALUES ($1)`
 	ctx, release, err := d.WithMerchantConn(e.ctx())
 	require.NoError(t, err)
 	defer release()

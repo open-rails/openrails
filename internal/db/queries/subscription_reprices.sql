@@ -1,8 +1,8 @@
--- openrails.subscription_reprices (#773): per-subscription scheduled/applied/
+-- billing.subscription_reprices (#773): per-subscription scheduled/applied/
 -- canceled price move.
 
 -- name: CreateSubscriptionReprice :one
-INSERT INTO openrails.subscription_reprices (
+INSERT INTO billing.subscription_reprices (
     merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, acknowledged_short_notice, kind
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(from_price_id)::uuid,
@@ -15,7 +15,7 @@ RETURNING *;
 -- NOT auto-schedule (rail requires user action / missing rail config / rail
 -- push failure). Terminal at insert.
 -- name: CreateBlockedSubscriptionReprice :one
-INSERT INTO openrails.subscription_reprices (
+INSERT INTO billing.subscription_reprices (
     merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, kind, status, blocked_reason
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(from_price_id)::uuid,
@@ -27,19 +27,19 @@ RETURNING *;
 -- Merchant identity is explicit so both request and context-scoped worker calls
 -- are isolated without depending on a connection-local GUC.
 -- name: GetSubscriptionRepriceByID :one
-SELECT * FROM openrails.subscription_reprices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+SELECT * FROM billing.subscription_reprices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- The subscription's current scheduled reprice, if any (at most one by
 -- uq_subscription_reprices_one_scheduled) — used both to refuse a second
 -- schedule and, at the renewal boundary, to check whether it is DUE
 -- (effective_at <= now, checked in Go).
 -- name: GetScheduledRepriceForSubscription :one
-SELECT * FROM openrails.subscription_reprices
+SELECT * FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND status = 'scheduled'
 LIMIT 1;
 
 -- name: ListSubscriptionReprices :many
-SELECT * FROM openrails.subscription_reprices
+SELECT * FROM billing.subscription_reprices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(reprice_batch_id)::uuid IS NULL OR reprice_batch_id = sqlc.narg(reprice_batch_id)::uuid)
@@ -48,13 +48,13 @@ ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CancelSubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'scheduled';
 
 -- name: ApplySubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'applied',
     applied_at = now()
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'scheduled';
@@ -63,7 +63,7 @@ WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = s
 -- subscription now carries the target price, the matching scheduled row is
 -- marked applied inside the converge transaction. Idempotent by predicate.
 -- name: ApplyScheduledRepriceForSubscriptionPrice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'applied',
     applied_at = now()
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
@@ -73,7 +73,7 @@ WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND subscr
 -- #813: a scheduled row whose rail push failed after creation — terminal,
 -- with the reason preserved for the batch ledger.
 -- name: BlockSubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'blocked',
     blocked_reason = sqlc.arg(blocked_reason)::text
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'scheduled';
@@ -84,7 +84,7 @@ WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = s
 -- (rail_requires_user_action, interval/cent mismatches, missing rail config
 -- at classify time) never carried a push attempt and stay terminal.
 -- name: ListRedrivableBlockedPlanChangeReprices :many
-SELECT * FROM openrails.subscription_reprices
+SELECT * FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'plan_change'
   AND status = 'blocked'
   AND blocked_reason LIKE 'rail_push_failed:%'
@@ -97,7 +97,7 @@ LIMIT sqlc.arg(batch_size)::int;
 -- violation) if the subscription acquired another scheduled row meanwhile —
 -- callers treat that as a skip.
 -- name: UnblockSubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'scheduled',
     blocked_reason = ''
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'blocked';
@@ -110,7 +110,7 @@ WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = s
 SELECT
     count(*) FILTER (WHERE status = 'blocked')  AS blocked,
     count(*) FILTER (WHERE status <> 'blocked') AS scheduled
-FROM openrails.subscription_reprices
+FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND reprice_batch_id = sqlc.arg(batch_id)::uuid;
 
 -- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
@@ -119,5 +119,5 @@ WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND repric
 -- RLS it enumerated nothing and never re-drove. A definer must not vend
 -- whole merchant rows, so it vends ids and the rows are read per-merchant.
 -- name: ListRedrivablePlanChangeMerchants :many
-SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
+SELECT merchant_id FROM billing.redrivable_plan_change_merchant_ids(
     sqlc.arg(merchant_limit)::int);

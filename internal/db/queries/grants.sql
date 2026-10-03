@@ -1,9 +1,9 @@
--- #514 append-only grant ledger (openrails.grants). derive-1 appends events here;
+-- #514 append-only grant ledger (billing.grants). derive-1 appends events here;
 -- derive-2 folds them into projections (entitlement windows, #512 credit deposits;
 -- ownership is read directly off this table).
 
 -- name: InsertGrant :one
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 ) VALUES (
@@ -16,13 +16,13 @@ INSERT INTO openrails.grants (
 RETURNING *;
 
 -- name: GetGrant :one
-SELECT * FROM openrails.grants
+SELECT * FROM billing.grants
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- GetCreditGrantBySourceID: idempotency lookup for a deposit-as-credit-grant by
 -- its natural source_id key (the deposit's SourceID).
 -- name: GetCreditGrantBySourceID :one
-SELECT * FROM openrails.grants
+SELECT * FROM billing.grants
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND kind = 'credit' AND event = 'grant'
@@ -33,12 +33,12 @@ LIMIT 1;
 -- ListLiveGrantsByCustomer: grant-events not terminated by a later revoke/expire/
 -- supersede event. The fold's input.
 -- name: ListLiveGrantsByCustomer :many
-SELECT g.* FROM openrails.grants g
+SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
   AND g.event = 'grant'
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
 ORDER BY g.created_at;
@@ -46,7 +46,7 @@ ORDER BY g.created_at;
 -- ListGrantsByCustomer: every grant-event for the customer (live or terminated),
 -- the full input to a customer-scoped re-derive.
 -- name: ListGrantsByCustomer :many
-SELECT * FROM openrails.grants
+SELECT * FROM billing.grants
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND event = 'grant'
@@ -54,7 +54,7 @@ ORDER BY created_at;
 
 -- name: IsGrantTerminated :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.grants t
+    SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid
       AND t.supersedes_id = sqlc.arg(grant_id)::uuid
       AND t.event IN ('revoke', 'expire', 'supersede')
@@ -64,7 +64,7 @@ SELECT EXISTS (
 -- deposit transfer? (idempotency for the credit projection)
 -- name: GrantCreditDeposited :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.ledger_transfers
+    SELECT 1 FROM billing.ledger_transfers
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND transfer_type = 'deposit' AND grant_id = sqlc.arg(grant_id)::uuid
 ) AS deposited;
@@ -75,17 +75,17 @@ SELECT EXISTS (
 -- projection is a no-op.
 -- name: GetCreditLotRemaining :one
 SELECT (g.amount - COALESCE((
-    SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+    SELECT SUM(t.amount) FROM billing.ledger_transfers t
     WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
       AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
 ), 0))::bigint AS remaining
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(grant_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant';
 
 -- name: EntitlementExistsForGrant :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements
+    SELECT 1 FROM billing.entitlements
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND grant_id = sqlc.arg(grant_id)::uuid
       AND entitlement = sqlc.arg(entitlement)::text
@@ -98,18 +98,18 @@ SELECT EXISTS (
 -- name: ListSpendableCreditLots :many
 SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+        SELECT SUM(t.amount) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0))::bigint AS remaining
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = sqlc.arg(currency)::text
   AND g.starts_at <= sqlc.arg(as_of)::timestamptz
   AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(as_of)::timestamptz)
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
 ORDER BY g.ends_at ASC NULLS LAST, g.created_at ASC;
 
@@ -118,17 +118,17 @@ ORDER BY g.ends_at ASC NULLS LAST, g.created_at ASC;
 -- name: ListLapsedCreditLots :many
 SELECT g.id,
     (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+        SELECT SUM(t.amount) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0))::bigint AS remaining
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = sqlc.arg(currency)::text
   AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
 ORDER BY g.ends_at ASC;
 
@@ -137,21 +137,21 @@ ORDER BY g.ends_at ASC;
 -- list for the credit-expiry job's per-customer ExpireLapsed sweep. Bounded batch.
 -- name: ListCustomersWithLapsedCreditLots :many
 SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'credit' AND g.event = 'grant'
   AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.merchant_id = sqlc.arg(merchant_id)::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = sqlc.arg(merchant_id)::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
   AND (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+        SELECT SUM(t.amount) FROM billing.ledger_transfers t
         WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0)) > 0
 LIMIT sqlc.arg(batch_size)::int;
 
 -- name: RevokeEntitlementsByGrant :execrows
-UPDATE openrails.entitlements
+UPDATE billing.entitlements
 SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = now()
@@ -174,9 +174,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- over the whole merchant instead of one query per grant-holder).
 -- name: ListUngrantedGrantablePayments :many
 SELECT p.id, p.amount, p.currency
-FROM openrails.payments p
-JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
-JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
+FROM billing.payments p
+JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL
@@ -187,7 +187,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
         (pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
       )
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND (g.payment_id = p.id OR g.source_id = p.id::text)
   )
@@ -201,17 +201,17 @@ ORDER BY p.id;
 -- customer_id is nullable (#575): NULL = merchant-wide sweep.
 -- name: ListLiveGrantsWithRefundedPayment :many
 SELECT g.id, g.kind, g.payment_id
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
   AND g.event = 'grant'
   AND g.payment_id IS NOT NULL
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt
+      SELECT 1 FROM billing.grants tt
       WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
   AND EXISTS (
-      SELECT 1 FROM openrails.payments p
+      SELECT 1 FROM billing.payments p
       WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL AND p.status = 'refunded'
   )
 ORDER BY g.id;
@@ -224,12 +224,12 @@ ORDER BY g.id;
 -- flagged). customer_id nullable: NULL = merchant-wide sweep. Repair =
 -- MaterializeGrant (idempotent), so re-running converges to empty.
 -- name: ListLiveGrantsMissingEffects :many
-SELECT g.* FROM openrails.grants g
+SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
   AND g.event = 'grant'
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
@@ -237,7 +237,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         SELECT 1 FROM jsonb_array_elements_text(
                  COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb)) AS feat
         WHERE NOT EXISTS (
-            SELECT 1 FROM openrails.entitlements e
+            SELECT 1 FROM billing.entitlements e
             WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
               AND e.entitlement = feat AND e.deleted_at IS NULL)
           -- #691: one live STANDING subscription window satisfies every
@@ -245,8 +245,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
           -- ensure-standing skip — detection and repair must agree or the
           -- sweep never converges).
           AND NOT (g.source_type = 'subscription' AND EXISTS (
-            SELECT 1 FROM openrails.entitlements e2
-            JOIN openrails.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
+            SELECT 1 FROM billing.entitlements e2
+            JOIN billing.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
               AND NOT (s2.collection_policy='engine' AND s2.rail IN ('nmi','stripe'))
             WHERE e2.merchant_id = g.merchant_id
               AND e2.customer_id = g.customer_id
@@ -259,7 +259,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 
     OR
     (g.kind = 'credit' AND NOT EXISTS (
-        SELECT 1 FROM openrails.ledger_transfers lt
+        SELECT 1 FROM billing.ledger_transfers lt
         WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
   )
 ORDER BY g.created_at;
@@ -271,24 +271,24 @@ ORDER BY g.created_at;
 -- (amount − spend/expire/revoke transfers) > 0. customer_id nullable: NULL =
 -- merchant-wide sweep. Repair = MaterializeGrant (retracts) — idempotent.
 -- name: ListUnretractedTerminations :many
-SELECT g.* FROM openrails.grants g
+SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
   AND g.event = 'grant'
   AND EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
         AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
     (g.kind = 'entitlement' AND EXISTS (
-        SELECT 1 FROM openrails.entitlements e
+        SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
           AND e.revoked_at IS NULL AND e.deleted_at IS NULL))
     OR
     (g.kind = 'credit' AND (
         g.amount - COALESCE((
-            SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+            SELECT SUM(t.amount) FROM billing.ledger_transfers t
             WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
               AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
         ), 0)) > 0)
@@ -300,14 +300,14 @@ ORDER BY g.created_at;
 -- RevokeOwnershipGrantByID atomically terminates ownership once, including overlapping
 -- provider refund notifications. Other insert errors still fail the transaction.
 -- name: RevokeOwnershipGrantByID :execrows
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
        g.amount, g.currency, sqlc.arg(reason)::text
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.id = sqlc.arg(id)::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
@@ -319,14 +319,14 @@ DO NOTHING;
 -- RevokeOwnershipGrantsByPayment atomically terminates ownership once, including overlapping
 -- provider refund notifications. Other insert errors still fail the transaction.
 -- name: RevokeOwnershipGrantsByPayment :execrows
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
        g.amount, g.currency, sqlc.arg(reason)::text
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.payment_id = sqlc.arg(payment_id)::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
@@ -346,8 +346,8 @@ DO NOTHING;
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
        g.payment_id, g.starts_at, g.ends_at, g.created_at,
        term.starts_at AS revoked_at, term.reason AS revoke_reason
-FROM openrails.grants g
-LEFT JOIN openrails.grants term
+FROM billing.grants g
+LEFT JOIN billing.grants term
   ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
@@ -378,8 +378,8 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at,
        pd.entitlements_spec
-FROM openrails.subscriptions s
-JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
+FROM billing.subscriptions s
+JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
@@ -391,7 +391,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)
   AND COALESCE(s.current_period_ends_at, s.ended_at) >= sqlc.arg(scan_since)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
         AND g.source_type = 'subscription' AND g.source_id = s.id::text
   )
@@ -409,9 +409,9 @@ ORDER BY COALESCE(s.current_period_starts_at, s.started_at);
 SELECT p.id, p.customer_id, p.purchased_at,
        (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at,
        pd.entitlements_spec
-FROM openrails.payments p
-JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
-JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
+FROM billing.payments p
+JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL
@@ -425,7 +425,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (p.metadata->>'expiration_rfc3339')::timestamptz >= sqlc.arg(scan_since)::timestamptz
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
   )
@@ -437,7 +437,7 @@ ORDER BY p.purchased_at;
 -- name: LatestEntitlementGrantEndForSource :one
 -- Zero time = no bounded grant recorded yet.
 SELECT COALESCE(max(g.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
   AND g.kind = 'entitlement' AND g.event = 'grant'
@@ -452,7 +452,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 -- entitlement, so host-one never writes entitlements directly.
 -- name: AdminGrantExistsForSource :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.grants g
+    SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
       AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
@@ -465,14 +465,14 @@ SELECT EXISTS (
 -- been clawed back. Ids only — the per-customer work list and the ledger
 -- transfers run per-merchant under RunInMerchantConn.
 -- name: ListLapsedCreditLotMerchants :many
-SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
+SELECT merchant_id FROM billing.lapsed_credit_lot_merchant_ids(
     sqlc.arg(as_of)::timestamptz,
     sqlc.arg(merchant_limit)::int);
 
 -- name: ListOriginalPurchaseGrants :many
 -- Original immutable events, including later-revoked sources. Accepted purchase
 -- replay validates the original windows without reopening revoked projections.
-SELECT * FROM openrails.grants
+SELECT * FROM billing.grants
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='purchase'
   AND source_id=sqlc.arg(payment_id)::uuid::text AND event='grant'
 ORDER BY id LIMIT sqlc.arg(row_limit)::int;
@@ -480,7 +480,7 @@ ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 -- name: ListInitialMembershipGrants :many
 -- Original source events before the accepted initial period ends; later renewal
 -- events and later revocations do not rewrite this initial history.
-SELECT * FROM openrails.grants
+SELECT * FROM billing.grants
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
   AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant'
   AND starts_at < sqlc.arg(before)::timestamptz
@@ -488,12 +488,12 @@ ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 
 -- name: HasInitialMembershipGrant :one
 -- Refused or still-pending initial membership cannot own a grant at any instant.
-SELECT EXISTS(SELECT 1 FROM openrails.grants
+SELECT EXISTS(SELECT 1 FROM billing.grants
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
   AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant')::boolean;
 
 -- name: ListRenewalGrantsForArchive :many
-SELECT * FROM openrails.grants
+SELECT * FROM billing.grants
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
   AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant'
   AND starts_at=sqlc.arg(period_start)::timestamptz
@@ -503,14 +503,14 @@ ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 -- Initial and pre-engine history precedes the first accepted engine period.
 -- Every later source grant needs its own successful accepted period, including
 -- grants following a declined attempt whose later retry bought the same window.
-SELECT count(*) FROM openrails.grants g
+SELECT count(*) FROM billing.grants g
 WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
   AND g.event='grant'
-  AND EXISTS (SELECT 1 FROM openrails.rail_intents i
+  AND EXISTS (SELECT 1 FROM billing.rail_intents i
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id
       AND g.starts_at >= (i.payload->'renewal'->>'period_start')::timestamptz)
-  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
@@ -519,27 +519,27 @@ WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
 -- CheckProductAccess: one bounded lookup for the page's candidate products.
 -- name: HasPermanentProductOwnership :one
 SELECT EXISTS (
- SELECT 1 FROM openrails.grants g
+ SELECT 1 FROM billing.grants g
  WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
    AND g.customer_id = sqlc.arg(customer_id)::uuid
    AND g.product_id = sqlc.arg(product_id)::uuid
    AND g.kind = 'ownership' AND g.event = 'grant'
    AND g.starts_at <= sqlc.arg(at_time)::timestamptz AND g.ends_at IS NULL
-   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   AND NOT EXISTS (SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
       AND t.event IN ('revoke','expire','supersede'))
 );
 
 -- name: CheckProductAccess :many
 SELECT candidate.product_id, EXISTS (
- SELECT 1 FROM openrails.grants g
+ SELECT 1 FROM billing.grants g
  WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
    AND g.customer_id = sqlc.arg(customer_id)::uuid
    AND g.product_id = candidate.product_id
    AND g.kind = 'ownership' AND g.event = 'grant'
    AND g.starts_at <= sqlc.arg(at_time)::timestamptz
    AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
-   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   AND NOT EXISTS (SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
       AND t.event IN ('revoke','expire','supersede'))
 ) AS has_access
@@ -547,7 +547,7 @@ FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id);
 
 -- ListActiveOwnershipGrantsPage returns a bounded, stable ID-ordered page.
 -- name: ListActiveOwnershipGrantsPage :many
-SELECT g.* FROM openrails.grants g
+SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
@@ -555,7 +555,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.starts_at <= sqlc.arg(at_time)::timestamptz
   AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
   AND g.id > sqlc.arg(after_id)::uuid
-  AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+  AND NOT EXISTS (SELECT 1 FROM billing.grants t
    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
     AND t.event IN ('revoke','expire','supersede'))
 ORDER BY g.id

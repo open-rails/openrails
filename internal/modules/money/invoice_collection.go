@@ -43,7 +43,7 @@ type InvoiceCollectionRetryResult struct {
 	Invoice   *models.Invoice
 	Attempt   models.InvoicePaymentAttempt
 	Replayed  bool
-	Operation gen.OpenrailsRailIntent
+	Operation gen.BillingRailIntent
 }
 
 // ListInvoicePaymentAttempts returns one payer-owned invoice's collection
@@ -534,7 +534,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 // collection method. or#893: the account that vaulted the instrument takes
 // the money. The row is read under a shared lock so the instrument the
 // operation freezes cannot be remapped before the operation commits.
-func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, merchantID, payerID uuid.UUID, invoice *models.Invoice, opts invoiceCollectionEnqueue) (*gen.OpenrailsPaymentMethod, error) {
+func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, merchantID, payerID uuid.UUID, invoice *models.Invoice, opts invoiceCollectionEnqueue) (*gen.BillingPaymentMethod, error) {
 	id := opts.paymentMethodID
 	if id == nil {
 		settingsRow, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{MerchantID: merchantID, CustomerID: payerID, Currency: invoice.Currency})

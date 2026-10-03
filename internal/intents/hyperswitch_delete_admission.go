@@ -40,12 +40,12 @@ func deletionMethodUnused(ctx context.Context, q *gen.Queries, mid, id uuid.UUID
 	return nil
 }
 
-func sameDeletionTarget(row gen.OpenrailsPaymentMethod, pm *models.PaymentMethod) bool {
+func sameDeletionTarget(row gen.BillingPaymentMethod, pm *models.PaymentMethod) bool {
 	return row.ID == pm.ID && row.CustomerID == pm.CustomerID && row.PspID == pm.PspID && row.Custodian == pm.Custodian && row.CustodianID != nil && pm.CustodianID != nil && *row.CustodianID == *pm.CustodianID && row.RailMethodRef == pm.RailMethodRef && row.RailCustomerRef == pm.RailCustomerRef
 }
 
-func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store, pm *models.PaymentMethod) (gen.OpenrailsRailIntent, error) {
-	var operation gen.OpenrailsRailIntent
+func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store, pm *models.PaymentMethod) (gen.BillingRailIntent, error) {
+	var operation gen.BillingRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return operation, err
@@ -128,7 +128,7 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 	return operation, err
 }
 
-func (h *HyperSwitchMethodDeleteHandler) checkFence(ctx context.Context, in gen.OpenrailsRailIntent, p HyperSwitchMethodDeletePayload) error {
+func (h *HyperSwitchMethodDeleteHandler) checkFence(ctx context.Context, in gen.BillingRailIntent, p HyperSwitchMethodDeletePayload) error {
 	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.CustomerID}); err != nil {

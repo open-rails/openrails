@@ -128,7 +128,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	// custodians (or#880) — dumped BEFORE the PSPs that reference them, and
 	// keyed by row id so each PSP can emit its `custodian:` reference. Omitting
 	// them would round-trip a custody arrangement into an unarmed one.
-	var declaredCustodians []gen.OpenrailsCustodian
+	var declaredCustodians []gen.BillingCustodian
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
 		declaredCustodians, lerr = database.Gen(ctx).ListCustodiansForMerchant(ctx, mid.UUID())
@@ -196,7 +196,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 
 	// PSPs (identity + lifecycle + secret references).
-	var accounts []gen.OpenrailsPsp
+	var accounts []gen.BillingPsp
 	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var lerr error
 		accounts, lerr = database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{

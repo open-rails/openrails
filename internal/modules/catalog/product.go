@@ -48,7 +48,7 @@ func productTierRankInt32(v int) (int32, error) {
 	return int32(v), nil
 }
 
-func productsFromGen(rows []gen.OpenrailsProduct) ([]*models.Product, error) {
+func productsFromGen(rows []gen.BillingProduct) ([]*models.Product, error) {
 	out := make([]*models.Product, 0, len(rows))
 	for _, r := range rows {
 		p, err := models.ProductFromGen(r)

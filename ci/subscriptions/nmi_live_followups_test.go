@@ -19,7 +19,7 @@ import (
 // included) whose subject names the subscription.
 func (w *world) findingsAbout(sub billing.SubscriptionID) []string {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT finding_type || ':' || status FROM openrails.reconciliation_findings
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT finding_type || ':' || status FROM billing.reconciliation_findings
 		WHERE subject_key LIKE '%' || $1 || '%' ORDER BY created_at`), sub.UUID().String())
 	require.NoError(w.t, err)
 	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
@@ -36,7 +36,7 @@ type accessWindow struct {
 // entitlement windows.
 func (w *world) subscriptionWindows(sub billing.SubscriptionID) []accessWindow {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT start_at, end_at FROM openrails.entitlements
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT start_at, end_at FROM billing.entitlements
 		WHERE source_type = 'subscription' AND source_id = $1::uuid AND deleted_at IS NULL AND revoked_at IS NULL ORDER BY start_at`), sub.UUID().String())
 	require.NoError(w.t, err)
 	defer rows.Close()

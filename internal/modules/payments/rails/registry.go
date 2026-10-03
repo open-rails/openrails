@@ -50,7 +50,7 @@ type Descriptor struct {
 	DisplayName string
 
 	// HasPSPs: the rail participates in the operator-declared
-	// PSP catalog (openrails.psps).
+	// PSP catalog (billing.psps).
 	HasPSPs bool
 
 	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer

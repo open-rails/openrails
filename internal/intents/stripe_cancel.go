@@ -72,7 +72,7 @@ func NewStripeCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Sour
 func (h *StripeCancelHandler) Type() string                         { return TypeStripeCancelSubscription }
 func (h *StripeCancelHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -86,7 +86,7 @@ func (h *StripeCancelHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 	return StillRelevant(), nil
 }
 
-func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	_, key, err := subscriptions.RequireStripeSecretKey(ctx, h.Rails)
 	if err != nil {
 		return Parked("stripe not configured: " + err.Error())
@@ -136,7 +136,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 
 // Verify reads: billing stopped is success; still billing means the cancel
 // definitely did not apply and may be retried.
-func (h *StripeCancelHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeCancelHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	_, key, err := subscriptions.RequireStripeSecretKey(ctx, h.Rails)
 	if err != nil {
 		return Ambiguous("stripe not configured; cannot verify: " + err.Error())
@@ -210,7 +210,7 @@ func (h *StripeCancelHandler) write(ctx context.Context, key, method, psid strin
 	return resp.StatusCode, subscriptions.ParseStripeAPIError(raw), nil
 }
 
-func (h *StripeCancelHandler) loadSubscription(ctx context.Context, intent gen.OpenrailsRailIntent) (*models.Subscription, error) {
+func (h *StripeCancelHandler) loadSubscription(ctx context.Context, intent gen.BillingRailIntent) (*models.Subscription, error) {
 	if intent.SubscriptionID == nil {
 		return nil, fmt.Errorf("intent has no subscription_id")
 	}

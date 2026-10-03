@@ -7,7 +7,7 @@
 -- name: UpsertBillingPolicy :exec
 -- Declare (or redeclare) one named policy. The body is validated by the shared
 -- normalizer before it gets here, so a stored policy is always an enforceable one.
-INSERT INTO openrails.billing_policies (
+INSERT INTO billing.billing_policies (
     id, merchant_id, name, policy, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (merchant_id, name) DO UPDATE SET
@@ -16,14 +16,14 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET
 
 -- name: ListBillingPolicies :many
 -- Every named policy the merchant has declared, for the config-sync document.
-SELECT * FROM openrails.billing_policies
+SELECT * FROM billing.billing_policies
 WHERE merchant_id = $1
 ORDER BY name;
 
 -- name: UpsertBillingPolicyBindingDefault :exec
 -- The merchant-wide default rung: applies to every payer with no more specific
 -- binding. ON CONFLICT targets the partial unique index for that rung.
-INSERT INTO openrails.billing_policy_bindings (
+INSERT INTO billing.billing_policy_bindings (
     id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
 ) VALUES ($1, $2, NULL, NULL, $3, $4, $5)
 ON CONFLICT (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL)) DO UPDATE SET
@@ -32,7 +32,7 @@ ON CONFLICT (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL)) DO UP
 
 -- name: UpsertBillingPolicyBindingTier :exec
 -- The per-tier rung: applies to every payer at one trust tier.
-INSERT INTO openrails.billing_policy_bindings (
+INSERT INTO billing.billing_policy_bindings (
     id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
 ) VALUES ($1, $2, NULL, $3, $4, $5, $6)
 ON CONFLICT (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL)) DO UPDATE SET
@@ -42,7 +42,7 @@ ON CONFLICT (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NU
 -- name: UpsertBillingPolicyBindingCustomer :exec
 -- The per-customer rung: the merchant's runtime lever for one payer. Beats the
 -- tier and default rungs.
-INSERT INTO openrails.billing_policy_bindings (
+INSERT INTO billing.billing_policy_bindings (
     id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
 ) VALUES ($1, $2, $3, NULL, $4, $5, $6)
 ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
@@ -52,18 +52,18 @@ ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE
 -- name: GetCustomerBillingPolicyAssignment :one
 -- The left join distinguishes an existing unassigned customer from a missing one.
 SELECT c.id AS customer_id, b.policy_name
-FROM openrails.customers c
-LEFT JOIN openrails.billing_policy_bindings b
+FROM billing.customers c
+LEFT JOIN billing.billing_policy_bindings b
   ON b.merchant_id = c.merchant_id AND b.customer_id = c.id
 WHERE c.merchant_id = sqlc.arg(merchant_id) AND c.id = sqlc.arg(customer_id);
 
 -- name: LockBillingPolicyName :one
-SELECT name FROM openrails.billing_policies
+SELECT name FROM billing.billing_policies
 WHERE merchant_id = sqlc.arg(merchant_id) AND name = sqlc.arg(name)
 FOR KEY SHARE;
 
 -- name: DeleteCustomerBillingPolicyBinding :exec
-DELETE FROM openrails.billing_policy_bindings
+DELETE FROM billing.billing_policy_bindings
 WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = sqlc.arg(customer_id);
 
 -- name: ListDeclarativeBillingPolicyBindings :many
@@ -72,7 +72,7 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = sqlc.arg(customer_id
 -- segmentation state whose row count follows customers, not configuration, so
 -- enumerating them would scale with records on file — and dumping them would
 -- put customer identifiers into a source-available manifest.
-SELECT * FROM openrails.billing_policy_bindings
+SELECT * FROM billing.billing_policy_bindings
 WHERE merchant_id = $1 AND customer_id IS NULL
 ORDER BY (tier IS NOT NULL) DESC, tier;
 
@@ -81,8 +81,8 @@ ORDER BY (tier IS NOT NULL) DESC, tier;
 -- the payer's own binding, else the tier's, else the merchant default. The FK
 -- guarantees the joined policy exists, so a resolved binding always yields a body.
 SELECT b.policy_name, p.policy
-FROM openrails.billing_policy_bindings b
-JOIN openrails.billing_policies p
+FROM billing.billing_policy_bindings b
+JOIN billing.billing_policies p
   ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
 WHERE b.merchant_id = $1
   AND (b.customer_id = $2 OR b.customer_id IS NULL)
@@ -95,7 +95,7 @@ LIMIT 1;
 -- invoker/role. Payer-set only (no owner discriminator). provenance (or#911)
 -- is the caller's opaque reference for what authorized the grant; an upsert
 -- replaces the whole grant, provenance included.
-INSERT INTO openrails.invoker_spend_limits (
+INSERT INTO billing.invoker_spend_limits (
     id, merchant_id, customer_id, scope, scope_key, windows, provenance, created_at, updated_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
@@ -107,20 +107,20 @@ ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
 -- Single-grant revocation (or#911): removes exactly one addressed delegation
 -- and leaves every sibling untouched. 0 rows is a real answer (nothing at that
 -- key), surfaced to the caller rather than swallowed.
-DELETE FROM openrails.invoker_spend_limits
+DELETE FROM billing.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2 AND scope = $3 AND scope_key = $4;
 
 -- name: DeleteAllInvokerSpendLimits :execrows
 -- Full-document replacement removes the exact merchant+payer set before
 -- inserting the canonical replacement. This also purges legacy non-canonical
 -- scope_key values that cannot be addressed safely by normalized key deletes.
-DELETE FROM openrails.invoker_spend_limits
+DELETE FROM billing.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2;
 
 -- name: ListInvokerSpendLimits :many
 -- ALL invoker spend limits for a payer (the admit path reads every scope to
 -- compose the verdict).
-SELECT * FROM openrails.invoker_spend_limits
+SELECT * FROM billing.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2;
 
 -- Serializes one payer's spend-limit document writes.

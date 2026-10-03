@@ -606,7 +606,7 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 		return nil, err
 	}
 	fingerprint := saleRequestFingerprint(req, user, price.ID, target)
-	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(accepted), func(in gen.OpenrailsRailIntent) error {
+	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(accepted), func(in gen.BillingRailIntent) error {
 		return ownsInitialMembership(in, user.ID, price.ID, fingerprint, nil)
 	})
 	if err != nil {
@@ -620,7 +620,7 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 
 // initialMembershipResponseFromIntent rebuilds the checkout response from a
 // succeeded create intent's evidence.
-func initialMembershipResponseFromIntent(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
+func initialMembershipResponseFromIntent(intent gen.BillingRailIntent) (*CheckoutResponse, error) {
 	if intent.Status == intents.StatusSucceeded {
 		if err := intents.ValidateInitialMembershipTerminal(intent); err != nil {
 			return nil, err

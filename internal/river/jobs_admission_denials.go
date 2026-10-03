@@ -25,7 +25,7 @@ func (AdmissionDenialFlushArgs) Kind() string { return KindAdmissionDenialFlush 
 
 // AdmissionDenialFlushWorker moves the Redis hourly denial counters (#733,
 // or:mdeny:* hashes written by admission.DenialRecorder) into
-// openrails.admission_denials_hourly. Concurrency-safe: it reads each field's
+// billing.admission_denials_hourly. Concurrency-safe: it reads each field's
 // count, upserts it additively into PG, then HINCRBYs the same amount back
 // out — increments landing mid-flush survive for the next cycle. Keys whose
 // hour has been closed for > 5 minutes are deleted after draining (no writer

@@ -51,7 +51,7 @@ func (p NMIUpgradePayload) Downgrade() bool { return p.Action == "downgrade" }
 
 // DecodeNMIUpgradePayload is shared by the executor and opaque payment receipt
 // boundary. Neither recovery path takes expected money or instruments from a caller.
-func DecodeNMIUpgradePayload(in gen.OpenrailsRailIntent) (NMIUpgradePayload, error) {
+func DecodeNMIUpgradePayload(in gen.BillingRailIntent) (NMIUpgradePayload, error) {
 	var p NMIUpgradePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err

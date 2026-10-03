@@ -42,7 +42,7 @@ var (
 
 // ProvisionMerchantResult reports what ProvisionMerchant ensured.
 type ProvisionMerchantResult struct {
-	// MerchantID is the openrails.merchants directory row id.
+	// MerchantID is the billing.merchants directory row id.
 	MerchantID merchant.ID
 	// GroupID is the merchant permission-group's internal AuthKit id (#567);
 	// empty for an existing host-owned merchant without one.

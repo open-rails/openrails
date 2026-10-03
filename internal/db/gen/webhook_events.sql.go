@@ -13,9 +13,9 @@ import (
 )
 
 const deleteCompletedWebhookEventsBefore = `-- name: DeleteCompletedWebhookEventsBefore :execrows
-DELETE FROM openrails.webhook_events
+DELETE FROM billing.webhook_events
 WHERE ctid IN (
-    SELECT we.ctid FROM openrails.webhook_events we
+    SELECT we.ctid FROM billing.webhook_events we
     WHERE we.merchant_id = $1::uuid
       AND we.completed_at < $2::timestamptz
     LIMIT $3::int
@@ -38,7 +38,7 @@ func (q *Queries) DeleteCompletedWebhookEventsBefore(ctx context.Context, arg De
 }
 
 const markWebhookEventCompleted = `-- name: MarkWebhookEventCompleted :execrows
-INSERT INTO openrails.webhook_events (merchant_id, op, event_id)
+INSERT INTO billing.webhook_events (merchant_id, op, event_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, op, event_id) DO NOTHING
 `
@@ -60,7 +60,7 @@ func (q *Queries) MarkWebhookEventCompleted(ctx context.Context, arg MarkWebhook
 const webhookEventCompleted = `-- name: WebhookEventCompleted :one
 
 SELECT EXISTS(
-  SELECT 1 FROM openrails.webhook_events
+  SELECT 1 FROM billing.webhook_events
   WHERE merchant_id = $1 AND op = $2 AND event_id = $3
 ) AS completed
 `

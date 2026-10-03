@@ -113,7 +113,7 @@ func (h *NMIPaymentSourceUpdateHandler) now() time.Time {
 	return time.Now().UTC()
 }
 
-func decodeNMIPaymentSourceUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPaymentSourceUpdatePayload, error) {
+func decodeNMIPaymentSourceUpdatePayload(intent gen.BillingRailIntent) (NMIPaymentSourceUpdatePayload, error) {
 	var p NMIPaymentSourceUpdatePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("nmi payment source update intent has no payload")
@@ -135,7 +135,7 @@ func decodeNMIPaymentSourceUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPay
 // CheckRelevance: the swap applies while the subscription still rebills and
 // still points at the intent's old (or already new) payment method. A row
 // moved to a THIRD method means a newer swap won — superseded, never re-fought.
-func (h *NMIPaymentSourceUpdateHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *NMIPaymentSourceUpdateHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	p, err := decodeNMIPaymentSourceUpdatePayload(intent)
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
@@ -163,7 +163,7 @@ func (h *NMIPaymentSourceUpdateHandler) CheckRelevance(ctx context.Context, inte
 	}
 }
 
-func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := decodeNMIPaymentSourceUpdatePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -238,7 +238,7 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 // new ⇒ the update landed (finalize local, done); old ⇒ it verifiably did not
 // (the executor re-sends); record gone or a vault matching neither ⇒ terminal
 // with a repair note — the verifier never writes provider state.
-func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := decodeNMIPaymentSourceUpdatePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -287,7 +287,7 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	}
 }
 
-func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, intent gen.OpenrailsRailIntent) (*models.Subscription, error) {
+func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, intent gen.BillingRailIntent) (*models.Subscription, error) {
 	if intent.SubscriptionID == nil {
 		return nil, errors.New("intent has no subscription_id")
 	}
@@ -297,7 +297,7 @@ func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, in
 // resolveClient resolves the account-aware NMI client for the subscription
 // (rows pinned to a PSP resolve by account key, #641/#655).
 // ok=false carries the Parked outcome to return.
-func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, intent gen.OpenrailsRailIntent, sub *models.Subscription) (*nmi.NMIClient, Outcome, bool) {
+func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, intent gen.BillingRailIntent, sub *models.Subscription) (*nmi.NMIClient, Outcome, bool) {
 	client, key, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, h.Resolver, sub)
 	if err != nil {
 		return nil, Parked(fmt.Sprintf("resolve nmi client for provider %q: %v", intent.Rail, err)), false
@@ -328,7 +328,7 @@ type providerAccountPin struct {
 // row deleted out-of-band after a provider write may already have landed is
 // backstopped by the frozen payload: its PSP was proven at enqueue and cannot
 // be re-attributed once gone, so the swap still converges.
-func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentSourceUpdatePayload) (pin providerAccountPin, refused *Outcome, err error) {
+func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, intent gen.BillingRailIntent, p NMIPaymentSourceUpdatePayload) (pin providerAccountPin, refused *Outcome, err error) {
 	if intent.SubscriptionID == nil || *intent.SubscriptionID == uuid.Nil {
 		return pin, ptr(Terminal("intent has no subscription_id")), nil
 	}
@@ -388,7 +388,7 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 // ever called AFTER the provider side is confirmed. Idempotent; a subscription
 // row gone out-of-band leaves nothing to finalize.
 // A subscription waiting for a new card resumes dunning on it.
-func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentSourceUpdatePayload) error {
+func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen.BillingRailIntent, p NMIPaymentSourceUpdatePayload) error {
 	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		repo := subscriptions.NewSubscriptionRepo(h.DB.NewWithPgxTx(tx))
 		sub, err := repo.GetByIDForUpdate(ctx, *intent.SubscriptionID)

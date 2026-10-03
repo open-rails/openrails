@@ -109,17 +109,17 @@ func (*NMIUpgradeIntentHandler) Backoff(attempts int32) time.Duration {
 }
 func (*NMIUpgradeIntentHandler) PrunePolicy() (bool, bool)    { return true, true }
 func (*NMIUpgradeIntentHandler) CommitsTerminalOutcome() bool { return true }
-func (*NMIUpgradeIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+func (*NMIUpgradeIntentHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
-func (h *NMIUpgradeIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *NMIUpgradeIntentHandler) Execute(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	return h.advance(ctx, in, true)
 }
-func (h *NMIUpgradeIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *NMIUpgradeIntentHandler) Verify(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	return h.advance(ctx, in, false)
 }
 
-func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsRailIntent, send bool) intents.Outcome {
+func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.BillingRailIntent, send bool) intents.Outcome {
 	if h.Checkout == nil || h.Checkout.Lifecycle == nil {
 		return intents.Parked("tier change lifecycle unavailable")
 	}
@@ -394,7 +394,7 @@ func (h *NMIUpgradeIntentHandler) targetPlan(ctx context.Context, client *nmi.NM
 // provider's record under the operation's order: nothing after the settle
 // delay means nothing was charged; a lone refused sale is a decline. A read
 // that cannot settle it raises the operator finding.
-func (h *NMIUpgradeIntentHandler) absentProration(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, client *nmi.NMIClient, step *nmiUpgradeStep, save func(string, any) error, evidence func() map[string]any) intents.Outcome {
+func (h *NMIUpgradeIntentHandler) absentProration(ctx context.Context, in gen.BillingRailIntent, p subscriptions.NMIUpgradePayload, client *nmi.NMIClient, step *nmiUpgradeStep, save func(string, any) error, evidence func() map[string]any) intents.Outcome {
 	if h.Checkout.now().Before(step.SubmittedAt.Add(intents.LostSubmissionSettle)) {
 		return intents.Ambiguous("tier change proration receipt is not yet visible")
 	}
@@ -431,7 +431,7 @@ func (h *NMIUpgradeIntentHandler) closeFinding(ctx context.Context, merchantID u
 	}
 }
 
-func (h *NMIUpgradeIntentHandler) raiseProrationUnresolved(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, reason string) {
+func (h *NMIUpgradeIntentHandler) raiseProrationUnresolved(ctx context.Context, in gen.BillingRailIntent, p subscriptions.NMIUpgradePayload, reason string) {
 	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": billing.SubscriptionID(p.OldSubscriptionID).String(), "order_id": in.ID.String(), "reason": reason})
 	action := fmt.Sprintf("A tier change charge (order %s) cannot be settled from NMI: %s. Nothing further is charged while this stands. Confirm at NMI, then run `openrails intents resolve --intent %s --step proration --receipt <transaction id>` if it was charged, or `--not-executed` if NMI holds no transaction for the order.", in.ID, reason, in.ID)
 	wctx, cancel := intents.LedgerWriteContext(ctx)
@@ -440,7 +440,7 @@ func (h *NMIUpgradeIntentHandler) raiseProrationUnresolved(ctx context.Context, 
 		SubjectKey: in.ID.String(), Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: raw})
 }
 
-func (h *NMIUpgradeIntentHandler) raiseUpdateStuck(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, cause error) {
+func (h *NMIUpgradeIntentHandler) raiseUpdateStuck(ctx context.Context, in gen.BillingRailIntent, p subscriptions.NMIUpgradePayload, cause error) {
 	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": billing.SubscriptionID(p.OldSubscriptionID).String(),
 		"rail_subscription_id": p.OldProviderSubscriptionID, "action": p.Action, "error": cause.Error()})
 	action := "A tier change could not move the NMI schedule to its new amount; NMI still bills the previous amount. If the schedule is on a named NMI plan, link the target price to an NMI plan of the same amount and cycle; the operation keeps retrying and completes once NMI accepts the change."
@@ -452,7 +452,7 @@ func (h *NMIUpgradeIntentHandler) raiseUpdateStuck(ctx context.Context, in gen.O
 
 // Resolve accepts exact provider evidence for a submitted proration that has
 // no receipt; the verifier then converges through the same path.
-func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	if h.Checkout == nil || h.Checkout.Lifecycle == nil {
 		return intents.Outcome{}, errors.New("tier change lifecycle unavailable")
 	}
@@ -524,7 +524,7 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 // period end: an upgrade switches price, product and access now and records
 // the proration payment; a downgrade schedules the price for the renewal NMI
 // already bills at the new amount.
-func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, receipt intents.CollectedReceipt, outcome intents.Outcome) error {
+func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingRailIntent, p subscriptions.NMIUpgradePayload, receipt intents.CollectedReceipt, outcome intents.Outcome) error {
 	database := h.Checkout.SubscriptionService.Database()
 	customer, err := customerIDFromUser(p.UserID)
 	if err != nil {
@@ -578,7 +578,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 // nmiUpgradeTierChangeResponse renders an NMI upgrade (tierChangeResponse).
 // While unresolved it names the predecessor the operation owns; once
 // committed, the successor.
-func nmiUpgradeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
+func nmiUpgradeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeResponse, error) {
 	var p subscriptions.NMIUpgradePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
@@ -624,13 +624,13 @@ func (r upgradeReceiptResolver) ResolveNMIClient(context.Context, uuid.UUID, *uu
 	return r.client, r.client != nil, nil
 }
 
-func (h *NMIUpgradeIntentHandler) terminal(ctx context.Context, in gen.OpenrailsRailIntent, outcome intents.Outcome) intents.Outcome {
+func (h *NMIUpgradeIntentHandler) terminal(ctx context.Context, in gen.BillingRailIntent, outcome intents.Outcome) intents.Outcome {
 	return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, outcome, h.Checkout.now())
 }
 
 // recordProration records a refused proration charge (#1110); an approved one
 // is recorded with its tier change.
-func (h *NMIUpgradeIntentHandler) recordProration(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, a paymentattempts.Attempt) error {
+func (h *NMIUpgradeIntentHandler) recordProration(ctx context.Context, in gen.BillingRailIntent, p subscriptions.NMIUpgradePayload, a paymentattempts.Attempt) error {
 	customer, err := customerIDFromUser(p.UserID)
 	if err != nil {
 		return err
@@ -639,7 +639,7 @@ func (h *NMIUpgradeIntentHandler) recordProration(ctx context.Context, in gen.Op
 	return recordProrationAttempt(ctx, database, in, p, customer, a, h.Checkout.now())
 }
 
-func recordProrationAttempt(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, customer uuid.UUID, a paymentattempts.Attempt, at time.Time) error {
+func recordProrationAttempt(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p subscriptions.NMIUpgradePayload, customer uuid.UUID, a paymentattempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
 	a.Kind, a.Owner, a.At, a.Target, a.Step = paymentattempts.Upgrade, paymentattempts.OwnerNMISchedule, at, p.PriceID.String(), "proration"
 	a.Amount, a.Currency, a.TokenType = p.ProrationAmount, p.Currency, charge.TokenTypePSPToken

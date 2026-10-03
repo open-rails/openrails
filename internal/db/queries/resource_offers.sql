@@ -1,7 +1,7 @@
 -- Exact access is a grant-ledger projection, independent of mutable catalog.
 -- name: CheckResourceEntitlements :many
 SELECT candidate.entitlement::text AS entitlement, EXISTS (
- SELECT 1 FROM openrails.entitlements e
+ SELECT 1 FROM billing.entitlements e
  WHERE e.merchant_id=sqlc.arg(merchant_id)::uuid
    AND e.customer_id=sqlc.arg(customer_id)::uuid AND e.entitlement=candidate.entitlement
    AND e.start_at<=sqlc.arg(at_time)::timestamptz
@@ -23,8 +23,8 @@ CROSS JOIN LATERAL (
   product.display_name AS product_name, product.entitlements_spec,
   price.id AS price_id, price.key AS price_key, price.amount AS unit_amount,
   price.currency, price.access_duration_hours, price.auto_renew
- FROM openrails.products product
- JOIN openrails.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
+ FROM billing.products product
+ JOIN billing.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
  WHERE product.merchant_id=sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(catalog_id)::uuid IS NULL OR product.catalog_id=sqlc.narg(catalog_id)::uuid)
   AND NOT product.archived AND NOT price.archived
@@ -47,12 +47,12 @@ ORDER BY wanted.entitlement, offer.currency<>sqlc.arg(preferred_currency)::text,
 SELECT cardinality(sqlc.arg(entitlements)::text[])>0 AND NOT EXISTS (
  SELECT 1 FROM unnest(sqlc.arg(entitlements)::text[]) AS wanted(key)
  WHERE NOT EXISTS (
-   SELECT 1 FROM openrails.entitlements e
+   SELECT 1 FROM billing.entitlements e
    WHERE e.merchant_id=sqlc.arg(merchant_id)::uuid AND e.customer_id=sqlc.arg(customer_id)::uuid
      AND e.entitlement=wanted.key AND e.end_at IS NULL AND e.start_at<=sqlc.arg(at_time)::timestamptz
      AND e.revoked_at IS NULL AND e.deleted_at IS NULL
  ) AND NOT (sqlc.arg(include_pending)::boolean AND (
-   EXISTS (SELECT 1 FROM openrails.checkout_sessions s
+   EXISTS (SELECT 1 FROM billing.checkout_sessions s
     WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.customer_id=sqlc.arg(customer_id)::uuid
       AND s.id<>sqlc.arg(except_session_id)::uuid AND s.mode='one_off' AND s.status<>'succeeded'
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
@@ -61,11 +61,11 @@ SELECT cardinality(sqlc.arg(entitlements)::text[])>0 AND NOT EXISTS (
       AND COALESCE(s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0'
       -- #1099: a session whose sale finally failed reserves nothing; its
       -- operation's outcome is the session's.
-      AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents f
+      AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
         WHERE f.merchant_id=s.merchant_id
           AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
           AND f.status IN ('failed_terminal','expired','superseded')))
-   OR EXISTS (SELECT 1 FROM openrails.rail_intents i
+   OR EXISTS (SELECT 1 FROM billing.rail_intents i
     WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.intent_type='nmi_sale'
       AND i.payload->>'user_id'=sqlc.arg(customer_id)::uuid::text
       AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')

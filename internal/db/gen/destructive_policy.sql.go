@@ -13,7 +13,7 @@ import (
 )
 
 const armMerchantEnforcement = `-- name: ArmMerchantEnforcement :exec
-INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
+INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
 VALUES ($1::uuid, true, $2::timestamptz, $3::text, $4::text, now())
 ON CONFLICT (merchant_id) DO UPDATE SET
     enforce_armed_at = EXCLUDED.enforce_armed_at,
@@ -43,7 +43,7 @@ func (q *Queries) ArmMerchantEnforcement(ctx context.Context, arg ArmMerchantEnf
 }
 
 const countLiveLinkedSubscriptionsForRail = `-- name: CountLiveLinkedSubscriptionsForRail :one
-SELECT count(*) FROM openrails.subscriptions
+SELECT count(*) FROM billing.subscriptions
 WHERE merchant_id = $1::uuid
   AND rail = $2::text
   AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
@@ -75,8 +75,8 @@ SELECT
     m.enforce_armed_at,
     m.first_pull_completed_at
 FROM (SELECT 1) AS one
-LEFT JOIN openrails.destructive_action_switch s ON true
-LEFT JOIN openrails.merchant_destructive_policy m ON m.merchant_id = $1::uuid
+LEFT JOIN billing.destructive_action_switch s ON true
+LEFT JOIN billing.merchant_destructive_policy m ON m.merchant_id = $1::uuid
 `
 
 type GetDestructivePolicyRow struct {
@@ -112,7 +112,7 @@ func (q *Queries) GetDestructivePolicy(ctx context.Context, merchantID uuid.UUID
 }
 
 const isDestructiveActionSwitchEnabled = `-- name: IsDestructiveActionSwitchEnabled :one
-SELECT COALESCE((SELECT enabled FROM openrails.destructive_action_switch LIMIT 1), false)::boolean AS enabled
+SELECT COALESCE((SELECT enabled FROM billing.destructive_action_switch LIMIT 1), false)::boolean AS enabled
 `
 
 func (q *Queries) IsDestructiveActionSwitchEnabled(ctx context.Context) (bool, error) {
@@ -123,10 +123,10 @@ func (q *Queries) IsDestructiveActionSwitchEnabled(ctx context.Context) (bool, e
 }
 
 const recordFirstPullCompleted = `-- name: RecordFirstPullCompleted :exec
-INSERT INTO openrails.merchant_destructive_policy (merchant_id, first_pull_completed_at, updated_at)
+INSERT INTO billing.merchant_destructive_policy (merchant_id, first_pull_completed_at, updated_at)
 VALUES ($1::uuid, $2::timestamptz, now())
 ON CONFLICT (merchant_id) DO UPDATE SET
-    first_pull_completed_at = COALESCE(openrails.merchant_destructive_policy.first_pull_completed_at, EXCLUDED.first_pull_completed_at),
+    first_pull_completed_at = COALESCE(billing.merchant_destructive_policy.first_pull_completed_at, EXCLUDED.first_pull_completed_at),
     updated_at = now()
 `
 
@@ -144,7 +144,7 @@ func (q *Queries) RecordFirstPullCompleted(ctx context.Context, arg RecordFirstP
 }
 
 const setDestructiveActionSwitch = `-- name: SetDestructiveActionSwitch :exec
-UPDATE openrails.destructive_action_switch
+UPDATE billing.destructive_action_switch
 SET enabled = $1::boolean,
     updated_by = $2::text,
     reason = $3::text,

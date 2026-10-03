@@ -21,7 +21,7 @@ import (
 )
 
 // FinalizeInvoice builds the period invoice for (payer, currency) over [from,
-// to). Line items are rolled up from openrails.usage_events; money movements and
+// to). Line items are rolled up from billing.usage_events; money movements and
 // totals come from the money ledger; both are snapshotted on the invoice.
 // Idempotent: re-finalizing the same (period, currency) returns the existing
 // invoice. Arrears invoices with owed accrual become open receivables; prepaid
@@ -59,7 +59,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		return nil, err
 	}
 
-	// #615/#707: rate reported usage (openrails.usage_events) into pending owed
+	// #615/#707: rate reported usage (billing.usage_events) into pending owed
 	// invoice items via the catalog rate cards, BEFORE the finalize transaction
 	// rolls pending items onto the invoice. Runs in its own transactions
 	// (AccrueOwed) so the committed owed accruals are visible to the finalize tx

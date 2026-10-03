@@ -43,7 +43,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 		return terms, err
 	}
 	var accepted subscriptions.InitialMembershipTerms
-	var payment gen.OpenrailsPayment
+	var payment gen.BillingPayment
 	switch op.IntentType {
 	case subscriptions.TypeInitialMembership:
 		if err := ValidateInitialMembershipTerminal(op); err != nil {

@@ -13,8 +13,8 @@ import (
 )
 
 const countNotificationsFiltered = `-- name: CountNotificationsFiltered :one
-SELECT count(*) FROM openrails.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = openrails.current_merchant_id()
+SELECT count(*) FROM billing.notifications nq
+WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id()
   AND ($1::uuid IS NULL OR nq.customer_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR (nq.read_at IS NOT NULL) = $3::boolean)
@@ -34,8 +34,8 @@ func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotif
 }
 
 const countRepairAlerts = `-- name: CountRepairAlerts :one
-SELECT count(*) FROM openrails.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = openrails.current_merchant_id() AND nq.customer_id = $1::uuid
+SELECT count(*) FROM billing.notifications nq
+WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND ($3::boolean IS NULL OR (nq.read_at IS NOT NULL) = $3::boolean)
@@ -56,7 +56,7 @@ func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsPa
 
 const createNotification = `-- name: CreateNotification :execrows
 
-INSERT INTO openrails.notifications (
+INSERT INTO billing.notifications (
     id, merchant_id, customer_id, event_type, data, read_at, created_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::text, COALESCE($5, '{}'::jsonb), CASE WHEN $6::boolean THEN now() END,
@@ -74,7 +74,7 @@ type CreateNotificationParams struct {
 	CreatedAt  time.Time
 }
 
-// openrails.notifications.
+// billing.notifications.
 func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createNotification,
 		arg.ID,
@@ -92,7 +92,7 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 }
 
 const createNotificationIfAbsent = `-- name: CreateNotificationIfAbsent :exec
-INSERT INTO openrails.notifications (
+INSERT INTO billing.notifications (
     id, merchant_id, customer_id, event_type, data, read_at, created_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::text, COALESCE($5, '{}'::jsonb), CASE WHEN $6::boolean THEN now() END,
@@ -125,7 +125,7 @@ func (q *Queries) CreateNotificationIfAbsent(ctx context.Context, arg CreateNoti
 }
 
 const deleteNotification = `-- name: DeleteNotification :execrows
-DELETE FROM openrails.notifications WHERE recipient_kind = 'customer' AND merchant_id = openrails.current_merchant_id() AND id = $1
+DELETE FROM billing.notifications WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1
 `
 
 func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, error) {
@@ -137,9 +137,9 @@ func (q *Queries) DeleteNotification(ctx context.Context, id uuid.UUID) (int64, 
 }
 
 const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
-DELETE FROM openrails.notifications
+DELETE FROM billing.notifications
 WHERE ctid IN (
-    SELECT nq.ctid FROM openrails.notifications nq
+    SELECT nq.ctid FROM billing.notifications nq
     WHERE nq.merchant_id = $1::uuid
       AND nq.created_at < $2::timestamptz
     LIMIT $3::int
@@ -161,9 +161,9 @@ func (q *Queries) DeleteNotificationsBefore(ctx context.Context, arg DeleteNotif
 }
 
 const deleteSeenNotificationsBefore = `-- name: DeleteSeenNotificationsBefore :execrows
-DELETE FROM openrails.notifications
+DELETE FROM billing.notifications
 WHERE ctid IN (
-    SELECT nq.ctid FROM openrails.notifications nq
+    SELECT nq.ctid FROM billing.notifications nq
     WHERE nq.merchant_id = $1::uuid
       AND nq.read_at IS NOT NULL AND nq.created_at < $2::timestamptz
     LIMIT $3::int
@@ -193,12 +193,12 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteS
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications WHERE recipient_kind = 'customer' AND merchant_id = openrails.current_merchant_id() AND id = $1
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1
 `
 
-func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (OpenrailsNotification, error) {
+func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (BillingNotification, error) {
 	row := q.db.QueryRow(ctx, getNotificationByID, id)
-	var i OpenrailsNotification
+	var i BillingNotification
 	err := row.Scan(
 		&i.ID,
 		&i.EventType,
@@ -218,20 +218,20 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Openra
 }
 
 const listNotificationsByCustomer = `-- name: ListNotificationsByCustomer :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = openrails.current_merchant_id() AND nq.customer_id = $1::uuid
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
 ORDER BY nq.created_at DESC
 `
 
-func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uuid.UUID) ([]OpenrailsNotification, error) {
+func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uuid.UUID) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listNotificationsByCustomer, customerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsNotification
+	var items []BillingNotification
 	for rows.Next() {
-		var i OpenrailsNotification
+		var i BillingNotification
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -258,8 +258,8 @@ func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uu
 }
 
 const listNotificationsFiltered = `-- name: ListNotificationsFiltered :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = openrails.current_merchant_id()
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id()
   AND ($1::uuid IS NULL OR nq.customer_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
   AND ($3::boolean IS NULL OR (nq.read_at IS NOT NULL) = $3::boolean)
@@ -275,7 +275,7 @@ type ListNotificationsFilteredParams struct {
 	PageLimit  int32
 }
 
-func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotificationsFilteredParams) ([]OpenrailsNotification, error) {
+func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotificationsFilteredParams) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listNotificationsFiltered,
 		arg.CustomerID,
 		arg.EventType,
@@ -287,9 +287,9 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsNotification
+	var items []BillingNotification
 	for rows.Next() {
-		var i OpenrailsNotification
+		var i BillingNotification
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -316,8 +316,8 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 }
 
 const listRepairAlerts = `-- name: ListRepairAlerts :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = openrails.current_merchant_id() AND nq.customer_id = $1::uuid
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
   AND nq.event_type = $2
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND ($5::boolean IS NULL OR (nq.read_at IS NOT NULL) = $5::boolean)
@@ -333,7 +333,7 @@ type ListRepairAlertsParams struct {
 	Seen       *bool
 }
 
-func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]OpenrailsNotification, error) {
+func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listRepairAlerts,
 		arg.CustomerID,
 		arg.EventType,
@@ -345,9 +345,9 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsNotification
+	var items []BillingNotification
 	for rows.Next() {
-		var i OpenrailsNotification
+		var i BillingNotification
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -374,7 +374,7 @@ func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsPara
 }
 
 const listUndeliveredNotifications = `-- name: ListUndeliveredNotifications :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications nq
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
 WHERE nq.merchant_id = $1::uuid
   AND nq.recipient_kind = 'customer' AND nq.emailed_at IS NULL
   AND ($2::timestamptz IS NULL
@@ -391,7 +391,7 @@ type ListUndeliveredNotificationsParams struct {
 }
 
 // #789: undelivered rows for the notification email sweep (emailed_at NULL).
-func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]OpenrailsNotification, error) {
+func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listUndeliveredNotifications,
 		arg.MerchantID,
 		arg.AfterCreatedAt,
@@ -402,9 +402,9 @@ func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUnde
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsNotification
+	var items []BillingNotification
 	for rows.Next() {
-		var i OpenrailsNotification
+		var i BillingNotification
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -431,9 +431,9 @@ func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUnde
 }
 
 const markNotificationEmailed = `-- name: MarkNotificationEmailed :execrows
-UPDATE openrails.notifications
+UPDATE billing.notifications
 SET emailed_at = $2::timestamptz
-WHERE recipient_kind = 'customer' AND merchant_id = openrails.current_merchant_id() AND id = $1 AND emailed_at IS NULL
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1 AND emailed_at IS NULL
 `
 
 type MarkNotificationEmailedParams struct {
@@ -450,8 +450,8 @@ func (q *Queries) MarkNotificationEmailed(ctx context.Context, arg MarkNotificat
 }
 
 const markNotificationSeen = `-- name: MarkNotificationSeen :execrows
-UPDATE openrails.notifications SET read_at = COALESCE(read_at, now())
-WHERE recipient_kind = 'customer' AND merchant_id = openrails.current_merchant_id()
+UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id()
   AND id = $1::uuid AND customer_id = $2::uuid
 `
 
@@ -470,7 +470,7 @@ func (q *Queries) MarkNotificationSeen(ctx context.Context, arg MarkNotification
 
 const premiumEndedNotificationExistsSince = `-- name: PremiumEndedNotificationExistsSince :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.notifications nq
+    SELECT 1 FROM billing.notifications nq
     WHERE nq.merchant_id = $1::uuid
       AND nq.customer_id = $2::uuid
       AND nq.event_type = 'premium_ended'
@@ -495,9 +495,9 @@ func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg P
 
 const renewalReceiptSince = `-- name: RenewalReceiptSince :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.notifications nq
+    SELECT 1 FROM billing.notifications nq
     WHERE nq.recipient_kind = 'customer'
-      AND nq.merchant_id = openrails.current_merchant_id()
+      AND nq.merchant_id = billing.current_merchant_id()
       AND nq.customer_id = $1::uuid
       AND nq.event_type = 'premium_renewed'
       AND nq.data->>'subscription_id' = $2::text
@@ -521,12 +521,12 @@ func (q *Queries) RenewalReceiptSince(ctx context.Context, arg RenewalReceiptSin
 }
 
 const updateNotification = `-- name: UpdateNotification :execrows
-UPDATE openrails.notifications SET
+UPDATE billing.notifications SET
     customer_id = $2::uuid,
     event_type = $3::text,
     data = $4,
     read_at = CASE WHEN $5::boolean THEN COALESCE(read_at, now()) END
-WHERE recipient_kind = 'customer' AND merchant_id = openrails.current_merchant_id() AND id = $1
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1
 `
 
 type UpdateNotificationParams struct {

@@ -37,7 +37,7 @@ func validateSaleReferences(ctx context.Context, tx pgx.Tx, mid merchant.ID) err
 	}
 }
 
-func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.OpenrailsRailIntent) error {
+func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingRailIntent) error {
 	if err := intents.ValidateNMISaleTerminal(op); err != nil {
 		return err
 	}
@@ -122,6 +122,6 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 
 // declineRecord is a decline recorded in payments before declines became
 // payment attempts (#1111): it moved no money.
-func declineRecord(p gen.OpenrailsPayment) bool {
-	return p.Status == gen.OpenrailsPaymentStatusFailed && p.MoneyMovement == "none" && p.RefundedPaymentID == nil
+func declineRecord(p gen.BillingPayment) bool {
+	return p.Status == gen.BillingPaymentStatusFailed && p.MoneyMovement == "none" && p.RefundedPaymentID == nil
 }

@@ -63,7 +63,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err != nil {
 			return err
 		}
-		var accepted gen.OpenrailsRailIntent
+		var accepted gen.BillingRailIntent
 		var replayed bool
 		if owned.CollectionPolicy == models.CollectionPolicyEngine {
 			accepted, replayed, err = s.moneyService().AdmitCustomerSubscriptionCollection(ctx, owned.ID, payer.UUID(), request.IdempotencyKey, method, principal)
@@ -75,7 +75,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err != nil {
 			return err
 		}
-		var result gen.OpenrailsRailIntent
+		var result gen.BillingRailIntent
 		if accepted.Status == intents.StatusUnknownNeedsVerify {
 			result, err = rt.IntentRunner().VerifyByID(ctx, accepted.ID)
 		} else {
@@ -244,7 +244,7 @@ type CustomerPaymentRefusal struct {
 
 func (r *CustomerPaymentRefusal) Error() string { return "customer payment was refused" }
 
-func customerPaymentRefusal(row gen.OpenrailsRailIntent) error {
+func customerPaymentRefusal(row gen.BillingRailIntent) error {
 	if row.Status != intents.StatusFailedTerminal {
 		return nil
 	}

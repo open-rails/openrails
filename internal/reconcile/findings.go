@@ -26,7 +26,7 @@ const (
 	// way. Enforce: adopt the rail's status + period timestamps.
 	FindingStatusMismatch FindingType = "pull.subscription.mismatch"
 	// FindingChargeMissingLocal (PS-4): a successful rail charge has no
-	// local payment record. Enforce: backfill openrails.payments (+ entitlements
+	// local payment record. Enforce: backfill billing.payments (+ entitlements
 	// when the charge's subscription period is current).
 	FindingChargeMissingLocal FindingType = "pull.charge.missing"
 	// FindingRefundUnrecorded (PS-5): a rail refund is not recorded
@@ -170,7 +170,7 @@ type DecideAction struct {
 // subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
-	// PspID is openrails.psps.id for the pull that materialized this row.
+	// PspID is billing.psps.id for the pull that materialized this row.
 	// Required (or#893): subscriptions.psp_id is NOT NULL.
 	PspID uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —

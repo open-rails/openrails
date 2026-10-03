@@ -27,7 +27,7 @@ func TestCollectionReceiptBindsExactAcceptedAmount(t *testing.T) {
 	payload.AmountMinor = minor
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
-	in := gen.OpenrailsRailIntent{ID: uuid.New(), MerchantID: uuid.New(), PspID: &psp, IntentType: "invoice_collection", Rail: "nmi", Payload: raw}
+	in := gen.BillingRailIntent{ID: uuid.New(), MerchantID: uuid.New(), PspID: &psp, IntentType: "invoice_collection", Rail: "nmi", Payload: raw}
 	binding, err := collectionBinding(in)
 	require.NoError(t, err)
 	receipt := CollectedReceipt{data: collectedReceipt{Version: 1, Family: "collected_payment", Binding: binding,
@@ -52,7 +52,7 @@ func TestInitialMembershipDeclineRejectsAmbiguousRawProof(t *testing.T) {
 		"response=2&response_code=202&responsetext=%QRAW_PROVIDER_SENTINEL",
 	} {
 		var store *Store // nil: any storage attempt panics
-		err := store.RetainInitialMembershipDecline(t.Context(), gen.OpenrailsRailIntent{}, &nmi.CustomerVaultError{ResponseCode: 202, RawResponse: raw})
+		err := store.RetainInitialMembershipDecline(t.Context(), gen.BillingRailIntent{}, &nmi.CustomerVaultError{ResponseCode: 202, RawResponse: raw})
 		require.Error(t, err, raw)
 		require.NotContains(t, err.Error(), "RAW_PROVIDER_SENTINEL")
 	}
@@ -96,7 +96,7 @@ func TestProviderCutoverLineage(t *testing.T) {
 	instrument := func(psp uuid.UUID) charge.FrozenInstrument {
 		return charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "vault", RailMethodRef: "billing"}
 	}
-	encode := func(row gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) gen.OpenrailsRailIntent {
+	encode := func(row gen.BillingRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) gen.BillingRailIntent {
 		var err error
 		row.Payload, err = json.Marshal(p)
 		require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestProviderCutoverLineage(t *testing.T) {
 		require.NoError(t, err)
 		return row
 	}
-	hop := func(from, to uuid.UUID, oldRef, newRef string) gen.OpenrailsRailIntent {
+	hop := func(from, to uuid.UUID, oldRef, newRef string) gen.BillingRailIntent {
 		p := nmiCutoverPayload{CustomerID: customer, SubscriptionID: sub, SourceSubscriptionID: oldRef, SourceInstrument: instrument(from), TargetInstrument: instrument(to),
 			Request:             nmiCutoverRequest{ExpectedSourcePSPID: from, ExpectedTargetPSPID: to, TargetPaymentMethodID: uuid.New()},
 			SourceQualification: qualification(from), TargetQualification: qualification(to), SourceCredentialFingerprint: fingerprint, TargetCredentialFingerprint: fingerprint,
@@ -113,9 +113,9 @@ func TestProviderCutoverLineage(t *testing.T) {
 			Plan: &nmi.V5Plan{ID: "plan", PlanAmount: "1.00", PlanPayments: "0", DayFrequency: "1"}}
 		g := nmiCutoverProgress{Decision: &nmiCutoverDecision{Action: "complete"}, CreateSubmitted: true, SourceCanceled: true, SourceAbsentAt: anchor.Add(-time.Hour),
 			SourceReceipt: &nmi.V5Subscription{Object: "subscription", ID: oldRef, CustomerVaultID: "vault", DelayedCondition: "inactive"}, TargetActive: true, Target: &target, ActivatedTarget: &target}
-		return encode(gen.OpenrailsRailIntent{ID: uuid.New(), MerchantID: mid, Rail: "nmi", IntentType: TypeNMIProviderCutover, Status: StatusSucceeded, SubscriptionID: &sub, PspID: &to}, p, g)
+		return encode(gen.BillingRailIntent{ID: uuid.New(), MerchantID: mid, Rail: "nmi", IntentType: TypeNMIProviderCutover, Status: StatusSucceeded, SubscriptionID: &sub, PspID: &to}, p, g)
 	}
-	check := func(rows ...gen.OpenrailsRailIntent) error {
+	check := func(rows ...gen.BillingRailIntent) error {
 		return ValidateProviderCutoverLineage(mid, sub, customer, a, "A", c, "C", rows)
 	}
 	ab, bc := hop(a, b, "A", "B"), hop(b, c, "B", "C")

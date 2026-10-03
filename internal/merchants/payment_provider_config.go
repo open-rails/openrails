@@ -116,7 +116,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		return nil, apperr.Invalidf("merchants: unknown status %q (use %q, %q, or omit for all)", status, pspLifecycleActive, pspLifecycleArchived)
 	}
 
-	var rows []gen.OpenrailsPsp
+	var rows []gen.BillingPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var providerFilter *string
 		if rail != "" {
@@ -434,7 +434,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	return s.paymentProviderConfigWithObligations(ctx, id, row)
 }
 
-func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id merchant.ID, row gen.OpenrailsPsp) (PaymentProviderConfig, error) {
+func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id merchant.ID, row gen.BillingPsp) (PaymentProviderConfig, error) {
 	statuses, err := s.paymentProviderCredentialStatuses(ctx, id, row)
 	if err != nil {
 		return PaymentProviderConfig{}, err
@@ -448,12 +448,12 @@ func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id m
 	return cfg, nil
 }
 
-func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.OpenrailsPsp, error) {
+func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environment, accountID string, enabled bool, publicConfig map[string]string, credentialsValidated bool, lastVerifiedAt *time.Time, credentialVersions map[string]int) (gen.BillingPsp, error) {
 	// #650: reject a cross-merchant claim with a clear error before the upsert
 	// (which would otherwise fail with an opaque unique-violation).
 	queries := gen.New(s.pool)
 	if err := AssertPSPUnowned(ctx, queries, id.UUID(), rail, environment, accountID); err != nil {
-		return gen.OpenrailsPsp{}, err
+		return gen.BillingPsp{}, err
 	}
 	archived := !enabled
 	// #662: derive the id from the global natural key and store the SAME
@@ -483,19 +483,19 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 		}
 		credentialVersions = mergeCredentialVersions(existingEvidence.CredentialVersions, credentialVersions)
 	case !errors.Is(err, pgx.ErrNoRows):
-		return gen.OpenrailsPsp{}, fmt.Errorf("merchants: load existing provider config: %w", err)
+		return gen.BillingPsp{}, fmt.Errorf("merchants: load existing provider config: %w", err)
 	default:
 		credentialVersions = mergeCredentialVersions(nil, credentialVersions)
 	}
 	evidence, err := marshalProviderEvidence(existingEvidenceRaw, publicConfig, credentialsValidated, credentialVersions)
 	if err != nil {
-		return gen.OpenrailsPsp{}, err
+		return gen.BillingPsp{}, err
 	}
 	key := existing.Key
 	if key == nil {
 		key = &nRail
 	}
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).UpsertPSP(ctx, gen.UpsertPSPParams{
@@ -517,19 +517,19 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 // lockRailPSPs locks every PSP row of the merchant on (rail, environment) for
 // the transaction, so two concurrent archives cannot each see the other as the
 // remaining active account and leave the rail with none.
-func lockRailPSPs(ctx context.Context, tx pgx.Tx, id merchant.ID, rail, environment string) ([]gen.OpenrailsPsp, error) {
+func lockRailPSPs(ctx context.Context, tx pgx.Tx, id merchant.ID, rail, environment string) ([]gen.BillingPsp, error) {
 	return gen.New(tx).LockPSPsForRailEnvironment(ctx, gen.LockPSPsForRailEnvironmentParams{MerchantID: id.UUID(), Rail: rail, Environment: environment})
 }
 
-func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.UUID) (gen.OpenrailsPsp, error) {
+func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.UUID) (gen.BillingPsp, error) {
 	return gen.New(tx).ArchivePSP(ctx, gen.ArchivePSPParams{ID: pspID, MerchantID: id.UUID()})
 }
 
 // archivePSP archives the named account inside one transaction that holds the
 // rail's rows locked (in one order, so concurrent archives serialize instead
 // of deadlocking). An already-archived account is returned unchanged.
-func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, allowLast bool) (gen.OpenrailsPsp, error) {
-	var out gen.OpenrailsPsp
+func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, allowLast bool) (gen.BillingPsp, error) {
+	var out gen.BillingPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		environment, err := gen.New(tx).GetPSPEnvironmentForRail(ctx, gen.GetPSPEnvironmentForRailParams{ID: pspID, MerchantID: id.UUID(), Rail: rail})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -542,7 +542,7 @@ func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, p
 		if err != nil {
 			return err
 		}
-		var target *gen.OpenrailsPsp
+		var target *gen.BillingPsp
 		otherActive := 0
 		for i := range rows {
 			switch {
@@ -575,14 +575,14 @@ func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, p
 // archiveSoleActivePSP is the rail-level archive: exactly one active account
 // on (rail, environment) is archived; none is ErrPaymentProviderNotFound and
 // several is MultipleActiveProviderAccountsError.
-func (s *Service) archiveSoleActivePSP(ctx context.Context, id merchant.ID, rail, environment string) (gen.OpenrailsPsp, error) {
-	var out gen.OpenrailsPsp
+func (s *Service) archiveSoleActivePSP(ctx context.Context, id merchant.ID, rail, environment string) (gen.BillingPsp, error) {
+	var out gen.BillingPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := lockRailPSPs(ctx, tx, id, rail, environment)
 		if err != nil {
 			return err
 		}
-		var active []gen.OpenrailsPsp
+		var active []gen.BillingPsp
 		for _, row := range rows {
 			if !row.Archived {
 				active = append(active, row)
@@ -633,7 +633,7 @@ func isUndefinedTable(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
 }
 
-func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecretStatus) PaymentProviderConfig {
+func paymentProviderConfigFromRow(row gen.BillingPsp, statuses []MerchantSecretStatus) PaymentProviderConfig {
 	evidence := unmarshalProviderEvidence(row.Evidence)
 	configured := map[string]struct{}{}
 	for _, st := range statuses {
@@ -685,7 +685,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 	}
 }
 
-func providerValidationCredentialsConfigured(row gen.OpenrailsPsp, configured map[string]struct{}) bool {
+func providerValidationCredentialsConfigured(row gen.BillingPsp, configured map[string]struct{}) bool {
 	var requiredKeys []string
 	switch row.Rail {
 	case "stripe":
@@ -916,7 +916,7 @@ func (s *Service) storedNMIDeployment(ctx context.Context, id merchant.ID, rail,
 
 // Read only the registry-bounded slots for this account. Published references
 // select exact custody; fallback names are used only for unpublished slots.
-func (s *Service) paymentProviderCredentialStatuses(ctx context.Context, id merchant.ID, row gen.OpenrailsPsp) ([]MerchantSecretStatus, error) {
+func (s *Service) paymentProviderCredentialStatuses(ctx context.Context, id merchant.ID, row gen.BillingPsp) ([]MerchantSecretStatus, error) {
 	var statuses []MerchantSecretStatus
 	for _, key := range paymentProviderCredentialKeys(row.Rail) {
 		ref, err := PSPSecretRef(row.Rail, row.Environment, row.AccountID, row.Evidence, key)

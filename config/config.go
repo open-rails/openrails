@@ -389,11 +389,11 @@ func (cfg *Config) SecretStoreBackend() string {
 // EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
 // master key wraps each merchant's Data Encryption Key (envelope encryption); the
 // DEK encrypts sensitive at-rest field values (e.g. per-merchant rail
-// credentials in openrails.merchant_secrets).
+// credentials in billing.merchant_secrets).
 //
 // Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
 // ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
-// KMS (the wrapped DEKs in openrails.merchant_deks stay in the DB; the master key
+// KMS (the wrapped DEKs in billing.merchant_deks stay in the DB; the master key
 // that unwraps them never does). An empty key disables this encryptor. Managed
 // Managed DB provider credentials always require encryption, while sensitive
 // optional features such as stored webhook URLs and SDK capture tokens refuse

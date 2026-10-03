@@ -14,17 +14,17 @@ import (
 const getDashboardConfig = `-- name: GetDashboardConfig :one
 
 SELECT merchant_id, layout, updated_at, updated_by
-FROM openrails.dashboard_configs
+FROM billing.dashboard_configs
 
 WHERE dashboard_configs.merchant_id = $1::uuid
 LIMIT 1
 `
 
-// openrails.dashboard_configs — #741 per-merchant dashboard widget layout.
+// billing.dashboard_configs — #741 per-merchant dashboard widget layout.
 // An explicit merchant_id scopes every statement to the request's merchant.
-func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) (OpenrailsDashboardConfig, error) {
+func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) (BillingDashboardConfig, error) {
 	row := q.db.QueryRow(ctx, getDashboardConfig, merchantID)
-	var i OpenrailsDashboardConfig
+	var i BillingDashboardConfig
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Layout,
@@ -35,10 +35,10 @@ func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const hasUsageActivity = `-- name: HasUsageActivity :one
-SELECT (EXISTS (SELECT 1 FROM openrails.usage_events
+SELECT (EXISTS (SELECT 1 FROM billing.usage_events
 WHERE usage_events.merchant_id = $1::uuid
 )
-    OR EXISTS (SELECT 1 FROM openrails.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity
+    OR EXISTS (SELECT 1 FROM billing.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity
 `
 
 // Any usage-stream signal for the merchant: metered events or purchased credit
@@ -51,7 +51,7 @@ func (q *Queries) HasUsageActivity(ctx context.Context, merchantID uuid.UUID) (b
 }
 
 const upsertDashboardConfig = `-- name: UpsertDashboardConfig :one
-INSERT INTO openrails.dashboard_configs (merchant_id, layout, updated_by)
+INSERT INTO billing.dashboard_configs (merchant_id, layout, updated_by)
 VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id)
 DO UPDATE SET layout = EXCLUDED.layout, updated_by = EXCLUDED.updated_by, updated_at = now()
@@ -64,9 +64,9 @@ type UpsertDashboardConfigParams struct {
 	UpdatedBy  *string
 }
 
-func (q *Queries) UpsertDashboardConfig(ctx context.Context, arg UpsertDashboardConfigParams) (OpenrailsDashboardConfig, error) {
+func (q *Queries) UpsertDashboardConfig(ctx context.Context, arg UpsertDashboardConfigParams) (BillingDashboardConfig, error) {
 	row := q.db.QueryRow(ctx, upsertDashboardConfig, arg.MerchantID, arg.Layout, arg.UpdatedBy)
-	var i OpenrailsDashboardConfig
+	var i BillingDashboardConfig
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Layout,
