@@ -82,6 +82,7 @@ func LoadQueries(genDir string) ([]Query, error) {
 type Structure struct {
 	Writes      bool                // UPDATE/DELETE somewhere in the statement
 	HasLimit    bool                // any SELECT level carries LIMIT
+	GroupCapped bool                // top-level GROUP BY keys are all pinned by its WHERE; see groupCapped
 	Relations   []string            // every table referenced
 	WriteTables []string            // tables an UPDATE/DELETE targets
 	EqParams    map[string]struct{} // columns pinned by `col = $n` (parameter, not constant)
@@ -113,6 +114,7 @@ func (q Query) Parse() (*Structure, error) {
 	for _, raw := range tree.Stmts {
 		walk(raw.Stmt.ProtoReflect(), s)
 	}
+	s.GroupCapped = groupCapped(tree.Stmts[0].Stmt.GetSelectStmt())
 	sort.Strings(s.Relations)
 	sort.Strings(s.WriteTables)
 	return s, nil
@@ -193,6 +195,68 @@ func collectWhere(where *pgq.Node, s *Structure) {
 		walkNodes(n.ProtoReflect(), rec)
 	}
 	rec(where)
+}
+
+// groupCapped reports whether a SELECT groups only by columns its own AND-ed
+// WHERE pins to `$n`, a literal or `ANY($n)`: one row per caller-supplied value,
+// however many rows each group folds.
+func groupCapped(sel *pgq.SelectStmt) bool {
+	if sel == nil || sel.Op != pgq.SetOperation_SETOP_NONE || len(sel.GroupClause) == 0 {
+		return false
+	}
+	pinned := map[string]bool{}
+	var conjuncts func(*pgq.Node)
+	conjuncts = func(n *pgq.Node) {
+		if b := n.GetBoolExpr(); b != nil {
+			if b.Boolop == pgq.BoolExprType_AND_EXPR {
+				for _, arg := range b.Args {
+					conjuncts(arg)
+				}
+			}
+			return
+		}
+		e := n.GetAExpr()
+		if e == nil || opName(e) != "=" {
+			return
+		}
+		switch e.Kind {
+		case pgq.A_Expr_Kind_AEXPR_OP:
+			if isParam(e.Rexpr) || isConst(e.Rexpr) {
+				pinned[columnPath(e.Lexpr)] = true
+			}
+			if isParam(e.Lexpr) || isConst(e.Lexpr) {
+				pinned[columnPath(e.Rexpr)] = true
+			}
+		case pgq.A_Expr_Kind_AEXPR_OP_ANY, pgq.A_Expr_Kind_AEXPR_IN:
+			if isParam(e.Rexpr) {
+				pinned[columnPath(e.Lexpr)] = true
+			}
+		}
+	}
+	conjuncts(sel.WhereClause)
+	for _, key := range sel.GroupClause {
+		if path := columnPath(key); path == "" || !pinned[path] {
+			return false
+		}
+	}
+	return true
+}
+
+// columnPath is a ColumnRef as written (`a.subject`), or "" for anything else.
+func columnPath(n *pgq.Node) string {
+	cr := n.GetColumnRef()
+	if cr == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(cr.Fields))
+	for _, f := range cr.Fields {
+		sv := f.GetString_()
+		if sv == nil {
+			return ""
+		}
+		parts = append(parts, sv.GetSval())
+	}
+	return strings.Join(parts, ".")
 }
 
 func walkNodes(m protoreflect.Message, fn func(*pgq.Node)) {

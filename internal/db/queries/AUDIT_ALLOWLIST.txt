@@ -7,7 +7,7 @@
 # tripping fails the build as STALE — fix a query and its exemption goes too.
 #
 # Rules: unbounded-many, unscoped-write, seq-scan, unindexed-filter, unplannable.
-# Gate: internal/db/sqlaudit, run by `task sqlc-check`.
+# Gate: internal/db/sqlaudit, run by `task sqlc-check` and CI's End-to-end job.
 
 ## PERMANENT
 

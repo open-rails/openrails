@@ -158,10 +158,15 @@ WHERE sub.merchant_id = $1::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
   AND ((sub.collection_policy = 'engine' AND sub.current_period_ends_at <= $2::timestamptz)
        OR (sub.collection_policy = 'nmi_schedule' AND sub.current_period_ends_at <= $3::timestamptz))
+  -- Separate anti-joins: an EXISTS under OR plans as a hash of every merchant's attempts.
   AND NOT EXISTS (
       SELECT 1 FROM openrails.rebill_cycles c
        WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at
-         AND (c.missed_at IS NOT NULL OR EXISTS (SELECT 1 FROM openrails.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)))
+         AND c.missed_at IS NOT NULL)
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.rebill_cycles c
+        JOIN openrails.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
+       WHERE c.merchant_id = sub.merchant_id AND c.subscription_id = sub.id AND c.due_at = sub.current_period_ends_at)
 ORDER BY sub.current_period_ends_at, sub.id
 LIMIT $4::int
 `

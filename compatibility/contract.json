@@ -5272,7 +5272,7 @@
     "internal/intents/payment_method_delete_authority.go": "edc67d168ceae15e148a920c5bacf5f3cfcb10c82f549265f61f8e9ff4855e7b",
     "internal/intents/rate_ceiling.go": "09ffa49b9d04589a53703c7982157f2d4a35ebaeb9f8c7d2a18c4e4b3d6f2d1a",
     "internal/merchanttarget/target.go": "eec1601b9945ad63c5d73866df550bcc2f53218d54708ff6e7d956ce03667820",
-    "internal/migrate/postgres/0001_schema.up.sql": "480ef226b5f1bc9c30904f36e4f1dc749e014c7069d5585e9aea9b8fe540e81b",
+    "internal/migrate/postgres/0001_schema.up.sql": "42862f51e79c79d3a14e654f0bf12ea9fa4dd0736efadcc93e132cd377795565",
     "internal/migrate/postgres/migrations.go": "4f095c84f5e99b7b8383e7da326310637dd1f1dc28111818be7ab973cff2e712",
     "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/initial_membership_new_card.go": "84f53897b2b8d869ec0832aebd4dcf4891e5ab46caeac4f6e229a88ac8d67f4c",

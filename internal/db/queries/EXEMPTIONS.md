@@ -1,7 +1,8 @@
 # SQL gate exemptions
 
 Two gates run under `task sqlc-check`, on top of `sqlc vet`'s `db-prepare`
-correctness check (`TestNoInlineSQL` also runs in CI's unit suite):
+correctness check. In CI the query auditor runs in the End-to-end job and
+`TestNoInlineSQL` in the unit suite:
 
 | gate | what it proves | allowlist |
 |---|---|---|
@@ -67,7 +68,9 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 - **`unbounded-many`** — a `:many` query over a merchant-scoped table with
   no `LIMIT` and no bounding predicate. Bounding means `col = $n` on an indexed
   column, or `col = ANY($n)` where col plus `merchant_id` covers a whole unique
-  key (so the caller's list caps the rows). `merchant_id` alone never bounds:
+  key (so the caller's list caps the rows), or a `GROUP BY` whose every key the
+  same WHERE pins with an AND-ed `= $n`, literal or `= ANY($n)` (one row per
+  caller-supplied value). `merchant_id` alone never bounds:
   one merchant's entire table still grows with records on file.
 - **`unscoped-write`** — `UPDATE`/`DELETE` pinning neither `merchant_id` nor a
   key, and not fed by a `LIMIT`ed claim CTE.

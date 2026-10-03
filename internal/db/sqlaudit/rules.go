@@ -79,7 +79,7 @@ func structuralFindings(q Query, s *Structure, cat *Catalog) []Finding {
 	var out []Finding
 	scoped := cat.anyMerchantScoped(s.Relations)
 
-	if q.Kind == "many" && !s.HasLimit && scoped && len(boundingCols(s, cat)) == 0 {
+	if q.Kind == "many" && !s.HasLimit && !s.GroupCapped && scoped && len(boundingCols(s, cat)) == 0 {
 		out = append(out, Finding{
 			Query: q.Name, File: q.File, Rule: RuleUnboundedMany,
 			Detail: fmt.Sprintf("reads %s with no LIMIT and no indexed `col = $n` predicate; result grows with records on file",
