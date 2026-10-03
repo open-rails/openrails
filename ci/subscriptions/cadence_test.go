@@ -9,12 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -38,7 +36,7 @@ func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount
 }
 
 func (w *world) sql(query string) string {
-	return strings.ReplaceAll(query, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
+	return inSchema(w.schema, query)
 }
 
 // Default price keys are exact per cadence: neighbouring cadences never share

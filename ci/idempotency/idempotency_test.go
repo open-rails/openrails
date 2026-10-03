@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -84,7 +85,9 @@ func newEnv(t *testing.T) *env {
 }
 
 func (e *env) q(sql string) string {
-	return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{e.schema}.Sanitize()+".")
+	out, err := sqlschema.Rewrite(sql, e.schema)
+	require.NoError(e.t, err)
+	return out
 }
 
 func (e *env) exec(sql string, args ...any) int64 {

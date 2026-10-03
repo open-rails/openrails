@@ -26,9 +26,8 @@ type DB struct {
 	// injected by embedded hosts (NewWithPGXPool) stay open.
 	ownsPool bool
 
-	// rw rewrites the canonical `openrails.` schema qualifier to the configured
-	// schema (#471). Inactive (identity) for the default schema, so the common
-	// path is a no-op. Inherited by tx-scoped wrappers.
+	// rw relocates statements to the configured schema (#471); identity for
+	// the default schema. Inherited by tx-scoped wrappers.
 	rw schemaRewriter
 }
 

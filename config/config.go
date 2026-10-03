@@ -621,12 +621,9 @@ func (c *DBConfig) GetConnectionString() string {
 	return ""
 }
 
-// DefaultSchema is the Postgres schema used when none is configured.
+// DefaultSchema is the Postgres schema used when none is configured. All SQL
+// is authored in it; any other schema is reached by internal/sqlschema.
 const DefaultSchema = "billing"
-
-// CanonicalSchema is the namespace used in authored SQL. Queries and migration
-// DDL are rewritten from this fixed namespace to the configured billing schema.
-const CanonicalSchema = "openrails"
 
 // MigratekitApp is the migratekit app/tracking key written to
 // public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations.
@@ -650,7 +647,7 @@ var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // applying the `billing` default and normalization (trim + lower-case). All
 // OpenRails code that needs the schema (migrator, River client construction,
 // runtime query rewriting) MUST go through this accessor rather than reading
-// DBConfig.Schema directly or hardcoding "openrails".
+// DBConfig.Schema directly or hardcoding a schema name.
 func (c *DBConfig) SchemaName() string {
 	if c == nil {
 		return DefaultSchema

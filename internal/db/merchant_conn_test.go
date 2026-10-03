@@ -13,11 +13,11 @@ import (
 // Pins are lazy, so these ownership checks need no live connection.
 func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 	firstPool, otherPool := new(pgxpool.Pool), new(pgxpool.Pool)
-	first, err := NewWithPGXPool(firstPool, "openrails")
+	first, err := NewWithPGXPool(firstPool, "billing")
 	require.NoError(t, err)
-	other, err := NewWithPGXPool(otherPool, "openrails")
+	other, err := NewWithPGXPool(otherPool, "billing")
 	require.NoError(t, err)
-	_, err = NewWithPGXPool(nil, "openrails")
+	_, err = NewWithPGXPool(nil, "billing")
 	require.Error(t, err)
 
 	_, _, err = first.WithMerchantConn(context.Background())
@@ -31,7 +31,7 @@ func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ctx, nestedCtx, "a compatible nested pin reuses the outer one")
 
-	require.Equal(t, pooledDBTX{pool: otherPool, schema: "openrails"}, other.Qx(ctx), "another database must never execute on the first pool's pin")
+	require.Equal(t, pooledDBTX{pool: otherPool, schema: "billing"}, other.Qx(ctx), "another database must never execute on the first pool's pin")
 	otherCtx, done, err := other.WithMerchantConn(ctx)
 	require.NoError(t, err)
 	defer done()
@@ -49,7 +49,7 @@ func TestMerchantPinBelongsToItsDatabaseSchemaAndMerchant(t *testing.T) {
 }
 
 func TestIndependentMerchantPinKeepsAuthorityAndCancellation(t *testing.T) {
-	database := &DB{pool: &pgxpool.Pool{}, rw: newSchemaRewriter("openrails")}
+	database := &DB{pool: &pgxpool.Pool{}, rw: newSchemaRewriter("billing")}
 	mid := merchant.ID(uuid.New())
 	ctx, cancel := context.WithCancel(merchant.WithID(context.Background(), mid))
 	defer cancel()
@@ -70,7 +70,7 @@ func TestIndependentMerchantPinKeepsAuthorityAndCancellation(t *testing.T) {
 		db  *DB
 		ctx context.Context
 	}{
-		"different pool":      {&DB{pool: &pgxpool.Pool{}, rw: newSchemaRewriter("openrails")}, pinned},
+		"different pool":      {&DB{pool: &pgxpool.Pool{}, rw: newSchemaRewriter("billing")}, pinned},
 		"different schema":    {&DB{pool: database.pool, rw: newSchemaRewriter("other")}, pinned},
 		"different merchant":  {database, merchant.WithID(pinned, merchant.ID(uuid.New()))},
 		"no merchant":         {database, context.Background()},

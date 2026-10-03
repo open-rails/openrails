@@ -33,7 +33,7 @@ flowchart LR
         S -- billingauth --> OR[OpenRails engine]
         C[Your backend code] -- openrails.Client --> OR
     end
-    OR --> PG[(Postgres, openrails schema)]
+    OR --> PG[(Postgres, billing schema)]
     R[Stripe / NMI / CCBill / Solana] -- webhooks --> S
 ```
 

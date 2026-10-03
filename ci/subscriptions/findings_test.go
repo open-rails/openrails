@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,7 +102,7 @@ func (w *world) findings(findingType string) []findingRow {
 }
 
 func (w *world) q(sql string) string {
-	return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
+	return inSchema(w.schema, sql)
 }
 
 // seedFinding stands in for an open finding a previous detector raised.

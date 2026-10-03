@@ -51,16 +51,14 @@ func (r *recordingTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.Comm
 	return pgconn.CommandTag{}, nil
 }
 
-func TestSchemaRewriteRelocatesOnlyTheOpenRailsQualifier(t *testing.T) {
-	const in = "INSERT INTO openrails.payments (id) SELECT public.gen_random_uuid() FROM profiles.users p JOIN openrails.customers c ON c.id = p.id"
+func TestSchemaRewriteRelocatesEveryExecutionPath(t *testing.T) {
+	const in = "INSERT INTO billing.payments (id) SELECT public.gen_random_uuid() FROM profiles.users p JOIN billing.customers c ON c.id = p.id WHERE c.note <> 'billing.x'"
 	for schema, want := range map[string]string{
-		config.CanonicalSchema: in,
-		"":                     strings.ReplaceAll(in, "openrails.", "billing."),
-		config.DefaultSchema:   strings.ReplaceAll(in, "openrails.", "billing."),
-		"shop":                 strings.ReplaceAll(in, "openrails.", "shop."),
+		"":                   in,
+		config.DefaultSchema: in,
+		"shop":               "INSERT INTO shop.payments (id) SELECT public.gen_random_uuid() FROM profiles.users p JOIN shop.customers c ON c.id = p.id WHERE c.note <> 'billing.x'",
 	} {
 		rw := newSchemaRewriter(schema)
-		require.Equal(t, want, rw.apply(in), schema)
 		wantSchema := schema
 		if schema == "" {
 			wantSchema = config.DefaultSchema
@@ -80,17 +78,20 @@ func TestSchemaRewriteRelocatesOnlyTheOpenRailsQualifier(t *testing.T) {
 	// A raw host transaction has no schema of its own and gets the default;
 	// one begun by a configured DB keeps that DB's schema.
 	raw := &recordingTx{}
-	_, err := NewWithPgxTx(raw).Qx(context.Background()).Exec(context.Background(), "SELECT 1 FROM openrails.x")
+	_, err := NewWithPgxTx(raw).Qx(context.Background()).Exec(context.Background(), "SELECT 1 FROM billing.x")
 	require.NoError(t, err)
 	custom := &recordingTx{}
-	_, err = (&DB{rw: newSchemaRewriter("shop")}).NewWithPgxTx(custom).Qx(context.Background()).Exec(context.Background(), "SELECT 1 FROM openrails.x")
-	require.NoError(t, err)
-	canonical := &recordingTx{}
-	_, err = NewWithPgxTx(newSchemaRewriter(config.CanonicalSchema).wrapTx(canonical)).Qx(context.Background()).Exec(context.Background(), "SELECT 1 FROM openrails.x")
+	_, err = (&DB{rw: newSchemaRewriter("shop")}).NewWithPgxTx(custom).Qx(context.Background()).Exec(context.Background(), "SELECT 1 FROM billing.x")
 	require.NoError(t, err)
 	require.Equal(t, []string{"SELECT 1 FROM billing.x"}, raw.sql)
 	require.Equal(t, []string{"SELECT 1 FROM shop.x"}, custom.sql)
-	require.Equal(t, []string{"SELECT 1 FROM openrails.x"}, canonical.sql)
+
+	// SQL that cannot be relocated is refused, never run against the default schema.
+	refused := &recordingTx{}
+	_, err = newSchemaRewriter("shop").wrapTx(refused).Exec(context.Background(), "SELECT 'unterminated FROM billing.x")
+	require.Error(t, err)
+	require.Error(t, newSchemaRewriter("shop").wrapTx(refused).QueryRow(context.Background(), "SELECT 'unterminated").Scan())
+	require.Empty(t, refused.sql)
 }
 
 // Provider-bound rows must carry the PSP that produced them; nothing invents one.

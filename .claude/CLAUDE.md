@@ -33,7 +33,7 @@ placeholders, not customer or repository names.
 - ALL NMI HTTP goes through `internal/integrations/nmi`.
 
 ## PSP identity
-- `openrails.psps` (was rail_merchant_accounts ← provider_accounts) is an OPERATOR-DECLARED
+- `billing.psps` (was rail_merchant_accounts ← provider_accounts) is an OPERATOR-DECLARED
   catalog (manifest `account_id`). There is NO runtime "whoami"/identity resolution and NO
   account-mismatch guard — that whole subsystem was ripped out (#592). `account_id` is an
   opaque, operator-declared label.
@@ -70,8 +70,10 @@ placeholders, not customer or repository names.
   mirrored to Stripe Features (`lookup_key` = the string).
 
 ## Schema / DB
-- SQL is authored in the canonical `openrails` schema; the default runtime schema is `billing`
-  (`config.DefaultSchema`), applied by execution-time rewrite. The role that runs migrations owns
+- SQL is authored in `billing` (`config.DefaultSchema`, the default `db.schema`) and runs there
+  verbatim; any other schema is reached by one token-aware rewriter (`internal/sqlschema`, used by
+  migrations and every runtime statement) that moves schema references only — never other
+  literals or comments, so `'openrails.…'` lock keys/domain values stay identical. The role that runs migrations owns
   every object and is the role OpenRails runs as (no grants, no runtime role). There is NO row-level
   security: tenant isolation is the explicit `merchant_id` (or `psp_id`) predicate on every tenant
   query, plus composite foreign keys. The `app.merchant_id` GUC MerchantTx sets only serves stored

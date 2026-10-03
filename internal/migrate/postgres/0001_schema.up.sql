@@ -1,6 +1,6 @@
 -- parent: root
--- OpenRails PostgreSQL schema. Objects are authored in the canonical
--- `openrails` schema; the migrator relocates them to the configured schema.
+-- OpenRails PostgreSQL schema. Objects are authored in `billing`, the default
+-- schema; the migrator relocates them to any other configured schema.
 -- AuthKit and River are migrated separately by their own libraries.
 
 SET statement_timeout = '300s';

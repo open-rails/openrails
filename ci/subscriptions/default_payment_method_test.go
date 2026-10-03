@@ -3,17 +3,21 @@
 package subscriptions_test
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // defaults reads the invariant straight from the database: how many of the
@@ -143,6 +147,48 @@ func TestDefaultPaymentMethod(t *testing.T) {
 		c.removeCard(newest)
 		require.Equal(t, used, c.requireOneDefault("remove a non-default"))
 	})
+}
+
+// LockCustomerDefaultPaymentMethod and the deferred default trigger serialize on
+// one advisory lock in a relocated schema (#1123): each world has its own.
+func TestDefaultPaymentMethodLockSharedWithTrigger(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	ctx := t.Context()
+	id := strings.TrimPrefix(w.newCustomer().saveCard("nmi", visa), "pm_")
+	var merchantID, customerID uuid.UUID
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT merchant_id, customer_id FROM billing.payment_methods WHERE id = $1::uuid`), id).Scan(&merchantID, &customerID))
+
+	holder, err := w.pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	require.NoError(t, gen.New(db.RewriteDBTX(holder, w.schema)).LockCustomerDefaultPaymentMethod(ctx, gen.LockCustomerDefaultPaymentMethodParams{MerchantID: merchantID, CustomerID: customerID}))
+	var holderPID, writerPID int
+	require.NoError(t, holder.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID))
+
+	writer, err := w.pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = writer.Rollback(context.Background()) }()
+	require.NoError(t, writer.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&writerPID))
+	_, err = writer.Exec(ctx, w.q(`UPDATE billing.payment_methods SET is_default = is_default WHERE id = $1::uuid`), id)
+	require.NoError(t, err)
+	committed := make(chan error, 1)
+	go func() { committed <- writer.Commit(context.Background()) }()
+
+	require.Eventually(t, func() bool {
+		var waits bool
+		err := w.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks wl JOIN pg_locks hl
+			ON (hl.locktype, hl.database, hl.classid, hl.objid, hl.objsubid) = (wl.locktype, wl.database, wl.classid, wl.objid, wl.objsubid)
+			WHERE wl.locktype = 'advisory' AND wl.pid = $1 AND NOT wl.granted AND hl.pid = $2 AND hl.granted)`, writerPID, holderPID).Scan(&waits)
+		return err == nil && waits
+	}, 10*time.Second, 20*time.Millisecond, "the trigger must wait on the advisory lock the query holds")
+	select {
+	case err := <-committed:
+		t.Fatalf("writer committed past the held lock: %v", err)
+	default:
+	}
+	require.NoError(t, holder.Rollback(ctx))
+	require.NoError(t, <-committed)
 }
 
 // Two first saves racing each other end with exactly one default.

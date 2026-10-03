@@ -332,7 +332,7 @@ func (f *fleet) toDue(cases ...*engineCase) {
 }
 
 func (f *fleet) q(sql string) string {
-	return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{f.base.schema}.Sanitize()+".")
+	return inSchema(f.base.schema, sql)
 }
 
 // pass is one due pass queued on one replica's private queue.
