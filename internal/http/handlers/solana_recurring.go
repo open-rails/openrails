@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -52,7 +52,7 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
 	}
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
@@ -127,7 +127,7 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
 	}
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
@@ -242,7 +242,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	}
 
 	// Resolve the NEW price + its published plan terms.
-	typedNewPriceID, err := openrails.ParsePriceID(newPriceIDStr)
+	typedNewPriceID, err := billing.ParsePriceID(newPriceIDStr)
 	if err != nil || typedNewPriceID.IsZero() {
 		return nil, http.StatusBadRequest, "invalid new_price_id"
 	}
@@ -559,7 +559,7 @@ func parseSubscriptionIDParam(r *httprequest.Request) (uuid.UUID, bool) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return uuid.Nil, false
 	}
-	typedId, err := openrails.ParseSubscriptionID(idStr)
+	typedId, err := billing.ParseSubscriptionID(idStr)
 	if err != nil || typedId.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return uuid.Nil, false

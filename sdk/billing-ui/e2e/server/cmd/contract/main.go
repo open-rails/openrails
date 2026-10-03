@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/sdk/billing-ui/e2e/server/harness"
 )
@@ -90,7 +90,7 @@ func run(out, dsn string) error {
 		}
 		byKey[key].Scopes = append(byKey[key].Scopes, scope)
 	}
-	c := contract{HostedCheckoutSession: shape(reflect.TypeFor[openrails.HostedCheckoutSession]())}
+	c := contract{HostedCheckoutSession: shape(reflect.TypeFor[billing.HostedCheckoutSession]())}
 	for _, r := range byKey {
 		sort.Strings(r.Scopes)
 		c.Routes = append(c.Routes, *r)
@@ -191,7 +191,7 @@ func routesTS(c contract) []byte {
 	// The registry is fixed per OpenRails release; amounts on /me carry no scale.
 	b.WriteString("\n// Currency code to native-unit decimals (openrails.Currencies()).\n")
 	b.WriteString("export const OPENRAILS_CURRENCY_SCALES: Readonly<Record<string, number>> = {\n")
-	for _, cur := range openrails.Currencies() {
+	for _, cur := range billing.Currencies() {
 		fmt.Fprintf(&b, "  %s: %d,\n", cur.Code, cur.Decimals)
 	}
 	b.WriteString("}\n")

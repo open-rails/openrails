@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // SEC-33: tier-change idempotency keys belong to one customer. Another
@@ -26,7 +26,7 @@ func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 		const key = "upgrade-1"
 		for _, tp := range []topology{embedded, remote} {
 			_, sub := w.engineMember(rail, tp, from)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, key, openrails.ChangeTierRequest{PriceID: to.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), sub, key, billing.ChangeTierRequest{PriceID: to.ID})
 			require.NoError(t, err, "%s: a key another customer used is still this customer's", tp)
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.NotEqual(t, sub, *done.SubscriptionID)
@@ -45,8 +45,8 @@ func TestSecurityForeignIDsLookMissing(t *testing.T) {
 	sub := owner.subscribe(embedded, "nmi", price.ID, "content:members", method)
 	prober := w.newCustomer()
 	mine := prober.saveCard("nmi", visa)
-	missingMethod := openrails.PaymentMethodID(uuid.New()).String()
-	missingSub := openrails.SubscriptionID(uuid.New()).String()
+	missingMethod := billing.PaymentMethodID(uuid.New()).String()
+	missingSub := billing.SubscriptionID(uuid.New()).String()
 
 	same := func(what, method, foreign, missing string, body any) {
 		t.Helper()

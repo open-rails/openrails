@@ -50,7 +50,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -104,9 +104,9 @@ type PlanMigrationRequest struct {
 
 // Plan migration results are the shared client wire types.
 type (
-	PlanMigrationOutcome = openrails.PlanMigrationOutcome
-	PlanMigrationResult  = openrails.PlanMigrationResult
-	RailCounts           = openrails.PlanMigrationRailCounts
+	PlanMigrationOutcome = billing.PlanMigrationOutcome
+	PlanMigrationResult  = billing.PlanMigrationResult
+	RailCounts           = billing.PlanMigrationRailCounts
 )
 
 // StripePusher is the observed-rail push seam (satisfied by
@@ -223,7 +223,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 		return byRail[key]
 	}
 	for _, sub := range cohort {
-		out := PlanMigrationOutcome{SubscriptionID: openrails.SubscriptionID(sub.ID), Rail: string(sub.Rail)}
+		out := PlanMigrationOutcome{SubscriptionID: billing.SubscriptionID(sub.ID), Rail: string(sub.Rail)}
 		capability := s.classifyMigrationCapability(ctx, sub)
 		switch {
 		case sub.PriceID == target.ID:
@@ -297,8 +297,8 @@ func (s *PlanMigrationService) Preview(ctx context.Context, req PlanMigrationReq
 		return nil, err
 	}
 	res := &PlanMigrationResult{
-		SourcePriceID:  (openrails.PriceID(source.ID)).String(),
-		TargetPriceID:  (openrails.PriceID(target.ID)).String(),
+		SourcePriceID:  (billing.PriceID(source.ID)).String(),
+		TargetPriceID:  (billing.PriceID(target.ID)).String(),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -342,8 +342,8 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 	}
 
 	res := &PlanMigrationResult{
-		SourcePriceID:  (openrails.PriceID(source.ID)).String(),
-		TargetPriceID:  (openrails.PriceID(target.ID)).String(),
+		SourcePriceID:  (billing.PriceID(source.ID)).String(),
+		TargetPriceID:  (billing.PriceID(target.ID)).String(),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -581,7 +581,7 @@ func (s *PlanMigrationService) GetBatch(ctx context.Context, batchID uuid.UUID, 
 }
 
 // PlanMigrationCancelResult is the shared client cancel result.
-type PlanMigrationCancelResult = openrails.PlanMigrationCancelResult
+type PlanMigrationCancelResult = billing.PlanMigrationCancelResult
 
 // CancelBatch cancels every still-scheduled row in the batch (rows already
 // applied or blocked are untouched). It does NOT un-archive the source price.
@@ -611,7 +611,7 @@ func (s *PlanMigrationService) CancelBatch(ctx context.Context, batchID uuid.UUI
 		// that this cancel does not release.
 		if row.Kind == models.RepriceKindPlanChange {
 			if sub, serr := s.reprice.subscriptions.GetByID(ctx, row.SubscriptionID); serr == nil && sub != nil && sub.Rail == models.RailStripe {
-				res.RailReleaseRequired = append(res.RailReleaseRequired, openrails.SubscriptionID(row.SubscriptionID))
+				res.RailReleaseRequired = append(res.RailReleaseRequired, billing.SubscriptionID(row.SubscriptionID))
 			}
 		}
 	}
@@ -632,11 +632,11 @@ func (s *RepriceService) emitPlanChangeNotification(ctx context.Context, sub *mo
 		ID:         uuidutil.NewV7(),
 		CustomerID: sub.CustomerID,
 		EventType:  models.NotificationSubscriptionPlanChangeScheduled,
-		Data: openrails.NotificationData{
-			SubscriptionID: openrails.SubscriptionID(sub.ID),
-			FromPriceID:    (openrails.PriceID(from.ID)).String(),
-			ToPriceID:      (openrails.PriceID(to.ID)).String(),
-			ToProductID:    (openrails.ProductID(toProduct.ID)).String(),
+		Data: billing.NotificationData{
+			SubscriptionID: billing.SubscriptionID(sub.ID),
+			FromPriceID:    (billing.PriceID(from.ID)).String(),
+			ToPriceID:      (billing.PriceID(to.ID)).String(),
+			ToProductID:    (billing.ProductID(toProduct.ID)).String(),
 			ToProductName:  toProduct.DisplayName,
 			OldAmount:      &from.Amount,
 			NewAmount:      &to.Amount,

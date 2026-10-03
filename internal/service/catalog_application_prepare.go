@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
@@ -31,13 +31,13 @@ type catalogReferenceCheck struct {
 	link                      map[string]string
 }
 type catalogApplicationPreparation struct {
-	replay   *openrails.CatalogApplicationReceipt
+	replay   *billing.CatalogApplicationReceipt
 	links    map[string]map[string]map[string]string
 	accounts map[uuid.UUID]gen.OpenrailsPsp
 	checks   []catalogReferenceCheck
 }
 
-func (s *Service) catalogApplicationReplay(ctx context.Context, params openrails.CatalogApplyParams, digest [32]byte) (*openrails.CatalogApplicationReceipt, error) {
+func (s *Service) catalogApplicationReplay(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte) (*billing.CatalogApplicationReceipt, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func (s *Service) catalogApplicationReplay(ctx context.Context, params openrails
 	if !bytes.Equal(previous.RequestSha256, digest[:]) {
 		return nil, apperr.New(409, "catalog_application_conflict", "application_id already committed with different content")
 	}
-	var receipt openrails.CatalogApplicationReceipt
+	var receipt billing.CatalogApplicationReceipt
 	if err := json.Unmarshal(previous.Result, &receipt); err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (s *Service) catalogApplicationReplay(ctx context.Context, params openrails
 // Prepare only observes remote references. Snapshot collection and the final
 // local commit each fence the merchant, but no transaction spans provider I/O.
 // A committed retry returns before resolving targets or contacting a provider.
-func (s *Service) prepareCatalogApplication(ctx context.Context, params openrails.CatalogApplyParams, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
+func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		replay, err := scoped.catalogApplicationReplay(ctx, params, digest)
 		if err != nil {
@@ -87,7 +87,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 		}
 		var target uuid.UUID
 		if params.CatalogID != "" {
-			id, err := openrails.ParseCatalogID(params.CatalogID)
+			id, err := billing.ParseCatalogID(params.CatalogID)
 			if err != nil {
 				return nil, apperr.Invalidf("invalid catalog_id")
 			}
@@ -109,7 +109,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 		}
 		for _, declared := range params.Products {
 			product, err := scoped.GetProductByKey(ctx, declared.Key)
-			if err != nil && !errors.Is(err, openrails.ErrNotFound) {
+			if err != nil && !errors.Is(err, billing.ErrNotFound) {
 				return nil, err
 			}
 			if product != nil && product.CatalogID.UUID() != target {
@@ -119,7 +119,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 				if !declared.DisplayName.Set {
 					return nil, apperr.Invalidf("new product %q requires display_name; cannot archive unknown product", declared.Key)
 				}
-				product = &CatalogProduct{ID: openrails.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), declared.Key)), Key: declared.Key, DisplayName: declared.DisplayName.Value}
+				product = &CatalogProduct{ID: billing.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), declared.Key)), Key: declared.Key, DisplayName: declared.DisplayName.Value}
 			}
 			reactivatingProduct := product.Archived && declared.Archived.Set && !declared.Archived.Value
 			if declared.Archived.Set {
@@ -144,10 +144,10 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 				for _, price := range declared.Prices {
 					named[price.Key] = true
 				}
-				references = append([]openrails.CatalogApplyPrice(nil), declared.Prices...)
+				references = append([]billing.CatalogApplyPrice(nil), declared.Prices...)
 				for _, price := range prices {
 					if !price.Archived && !named[price.Key] && len(price.Providers) > 0 {
-						references = append(references, openrails.CatalogApplyPrice{Key: price.Key, ID: price.ID.String()})
+						references = append(references, billing.CatalogApplyPrice{Key: price.Key, ID: price.ID.String()})
 					}
 				}
 			}

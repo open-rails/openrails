@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	service "github.com/open-rails/openrails/internal/service"
 )
@@ -12,7 +12,7 @@ import (
 // ServiceEnsureCustomer handles PUT /v1/merchant/customers/{customer_id}:
 // materialize or touch the credential merchant's customer record.
 func ServiceEnsureCustomer(r *httprequest.Request) {
-	customerID, err := openrails.ParseCustomerID(r.Param("customer_id"))
+	customerID, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || customerID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
@@ -25,7 +25,7 @@ func ServiceEnsureCustomer(r *httprequest.Request) {
 	}
 	customer, err := svc.EnsureCustomer(r.Request.Context(), id)
 	if err != nil {
-		var status *openrails.StatusError
+		var status *billing.StatusError
 		if errors.As(err, &status) {
 			r.JSON(status.Status, map[string]any{"error": status.ErrorDetails})
 			return

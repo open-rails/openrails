@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -48,9 +49,9 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			malloryCard := mallory.saveCard(rail, mastercard)
 			mallorySub := mallory.subscribe(embedded, rail, price.ID, "content:members", malloryCard)
 			other := w.membership("content:other", 4_990_000)
-			pending, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: alice.id}, Entitlement: "content:other", PriceID: other.ID,
-				IdempotencyKey: "alice-pending-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: aliceCard},
+			pending, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: alice.id}, Entitlement: "content:other", PriceID: other.ID,
+				IdempotencyKey: "alice-pending-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: aliceCard},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
@@ -246,37 +247,37 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 
 	// Merchant B's own Client, by merchant A's typed ids.
 	_, err := r.client.GetSubscription(ctx, e.sub)
-	require.ErrorIs(t, err, openrails.ErrNotFound)
+	require.ErrorIs(t, err, billing.ErrNotFound)
 	_, err = r.client.GetPayment(ctx, payment.ID)
-	require.ErrorIs(t, err, openrails.ErrNotFound)
-	_, err = r.client.RefundPayment(ctx, payment.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "rival-refund"})
+	require.ErrorIs(t, err, billing.ErrNotFound)
+	_, err = r.client.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "rival-refund"})
 	require.Error(t, err)
-	require.Error(t, r.client.CancelSubscription(ctx, e.sub, openrails.CancelSubscriptionRequest{}))
+	require.Error(t, r.client.CancelSubscription(ctx, e.sub, billing.CancelSubscriptionRequest{}))
 	price, err := w.client[embedded].Prices.Retrieve(ctx, e.price)
 	require.NoError(t, err)
 	_, err = r.client.Prices.Retrieve(ctx, price.ID)
-	require.ErrorIs(t, err, openrails.ErrNotFound)
+	require.ErrorIs(t, err, billing.ErrNotFound)
 	_, err = r.client.Products.Retrieve(ctx, price.ProductID)
-	require.ErrorIs(t, err, openrails.ErrNotFound)
-	list, err := r.client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: e.c.id})
+	require.ErrorIs(t, err, billing.ErrNotFound)
+	list, err := r.client.ListPayments(ctx, billing.PaymentFilter{CustomerID: e.c.id})
 	require.NoError(t, err)
 	require.Empty(t, list.Data)
 
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
-	_, err = r.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: e.ent, PriceID: e.price,
-		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
+	_, err = r.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
+		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: e.ent, PriceID: e.price,
+		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.Error(t, err)
 	own := r.client
-	product, err := own.Products.Create(ctx, &openrails.ProductCreateParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", EntitlementsSpec: map[string]*int{"content:rival": nil}})
+	product, err := own.Products.Create(ctx, &billing.ProductCreateParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", EntitlementsSpec: map[string]*int{"content:rival": nil}})
 	require.NoError(t, err)
-	rivalPrice, err := own.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	rivalPrice, err := own.Prices.Create(ctx, &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	_, err = own.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
-		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
+	_, err = own.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
+		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: e.c.id}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
+		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: e.method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.Error(t, err, "a foreign merchant's saved card is not chargeable")
@@ -318,16 +319,16 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = crossed.GetSubscription(ctx, e.sub)
 	require.Error(t, err)
-	_, err = crossed.RefundPayment(ctx, payment.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "crossed-refund"})
+	_, err = crossed.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "crossed-refund"})
 	require.Error(t, err)
 
 	// A customer credential is never merchant authority.
 	customerRemote, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return e.c.token, nil }))
 	require.NoError(t, err)
-	_, err = customerRemote.RefundPayment(ctx, payment.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "customer-refund"})
+	_, err = customerRemote.RefundPayment(ctx, payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "customer-refund"})
 	require.Error(t, err)
-	_, err = customerRemote.ListPayments(ctx, openrails.PaymentFilter{})
+	_, err = customerRemote.ListPayments(ctx, billing.PaymentFilter{})
 	require.Error(t, err)
 
 	w.settle()

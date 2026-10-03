@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Inputs are facts established by merchant setup or earlier customer activity:
@@ -21,10 +22,10 @@ type Inputs struct {
 	Run                     string
 	CheckoutPriceKey        string
 	CheckoutRail            string
-	CheckoutCustomerID      openrails.CustomerID
-	CheckoutPaymentMethodID openrails.PaymentMethodID
-	SubscriberID            openrails.CustomerID
-	SubscriptionID          openrails.SubscriptionID
+	CheckoutCustomerID      billing.CustomerID
+	CheckoutPaymentMethodID billing.PaymentMethodID
+	SubscriberID            billing.CustomerID
+	SubscriptionID          billing.SubscriptionID
 	InvoiceID               uuid.UUID
 }
 
@@ -62,12 +63,12 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	payer := customer.ID
 	invoker := "app:" + in.Run
 
-	if err := client.SetMerchantSettings(ctx, openrails.MerchantSettings{
-		BillingPolicies: []openrails.BillingPolicyInput{{
+	if err := client.SetMerchantSettings(ctx, billing.MerchantSettings{
+		BillingPolicies: []billing.BillingPolicyInput{{
 			Name: "app_window", Kind: "window_spend_cap",
-			SpendWindows: []openrails.BudgetWindowInput{{Key: "hourly", WindowSeconds: 3600, Limit: 50_000}},
+			SpendWindows: []billing.BudgetWindowInput{{Key: "hourly", WindowSeconds: 3600, Limit: 50_000}},
 		}},
-		BillingPolicyBindings: []openrails.BillingPolicyBindingInput{{PolicyName: "app_window", Tier: "app"}},
+		BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "app_window", Tier: "app"}},
 	}); err != nil {
 		return r, fmt.Errorf("set policy: %w", err)
 	}
@@ -87,7 +88,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("read credit limit: %w", err)
 	}
 
-	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{
+	deposit, err := client.DepositCredits(ctx, billing.DepositCreditsRequest{
 		CustomerID: &payer, Invoker: invoker, Currency: in.Currency, Amount: 100_000,
 		Source: "billingapp", SourceID: in.Run + ":deposit", Description: "prepaid balance",
 	})
@@ -98,30 +99,30 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 
 	expires := time.Now().Add(time.Hour)
 	job := in.Run + ":job"
-	admitted, err := client.Admit(ctx, openrails.AdmitRequest{
-		CustomerID: payer, Invoker: invoker, InvokerType: openrails.InvokerTypePayer, Currency: in.Currency,
+	admitted, err := client.Admit(ctx, billing.AdmitRequest{
+		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypePayer, Currency: in.Currency,
 		EstimatedAmount: 10_000, ExpiresAt: &expires, RequestID: job, Source: "billingapp",
 	})
 	if err != nil {
 		return r, fmt.Errorf("admit: %w", err)
 	}
 	r.Admitted = admitted.Allowed
-	receipt, err := client.Capture(ctx, job, 7_500, &openrails.CaptureUsage{
+	receipt, err := client.Capture(ctx, job, 7_500, &billing.CaptureUsage{
 		EventType: "generation", Resource: "image", Source: "billingapp", SourceID: job,
 	})
 	if err != nil {
 		return r, fmt.Errorf("capture: %w", err)
 	}
 	r.Captured = receipt.Amount
-	denied, err := client.Admit(ctx, openrails.AdmitRequest{
-		CustomerID: payer, Invoker: invoker, InvokerType: openrails.InvokerTypePayer, Currency: in.Currency,
+	denied, err := client.Admit(ctx, billing.AdmitRequest{
+		CustomerID: payer, Invoker: invoker, InvokerType: billing.InvokerTypePayer, Currency: in.Currency,
 		EstimatedAmount: 10_000_000, ExpiresAt: &expires, RequestID: in.Run + ":too-large", Source: "billingapp",
 	})
 	if err != nil {
 		return r, fmt.Errorf("admit over balance: %w", err)
 	}
 	r.DeniedBy = denied.BlockedBy
-	r.UnknownRelease = errors.Is(client.Release(ctx, uuid.NewString()), openrails.ErrNotFound)
+	r.UnknownRelease = errors.Is(client.Release(ctx, uuid.NewString()), billing.ErrNotFound)
 	balance, err := client.Balance(ctx, payer)
 	if err != nil {
 		return r, fmt.Errorf("balance: %w", err)
@@ -141,11 +142,11 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.CheckoutRails = len(options)
 	buyer := in.CheckoutCustomerID
-	request := openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
+	request := billing.CreateCheckoutSessionRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
 		PriceKey:       in.CheckoutPriceKey,
 		IdempotencyKey: in.Run + ":checkout",
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID.String(), NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID.String(), NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}
 	session, err := client.CreateCheckoutSession(ctx, request)
 	if err != nil {
@@ -165,10 +166,10 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.CheckoutAmount = *read.Amount
 
-	if err := client.CancelSubscription(ctx, in.SubscriptionID, openrails.CancelSubscriptionRequest{Reason: "customer request"}); err != nil {
+	if err := client.CancelSubscription(ctx, in.SubscriptionID, billing.CancelSubscriptionRequest{Reason: "customer request"}); err != nil {
 		return r, fmt.Errorf("cancel subscription: %w", err)
 	}
-	page, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: (in.SubscriberID).String(), PageOptions: openrails.PageOptions{Limit: 10}})
+	page, err := client.ListSubscriptions(ctx, billing.SubscriptionFilter{CustomerID: (in.SubscriberID).String(), PageOptions: billing.PageOptions{Limit: 10}})
 	if err != nil {
 		return r, fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -186,12 +187,12 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID, openrails.InvoiceProfileDTO{
+	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID, billing.InvoiceProfileDTO{
 		NetTermsDays: 14, CollectionMethod: "send_invoice",
 	}); err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)
 	}
-	payment := openrails.RecordInvoicePaymentRequest{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
+	payment := billing.RecordInvoicePaymentRequest{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
 	paid, err := client.RecordInvoicePayment(ctx, in.InvoiceID, payment)
 	if err != nil {
 		return r, fmt.Errorf("record invoice payment: %w", err)
@@ -199,7 +200,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	r.InvoiceDueAfterPaid = paid.AmountDue
 	_, err = client.RecordInvoicePayment(ctx, in.InvoiceID, payment)
 	r.InvoicePaidTwice = err == nil
-	if !errors.Is(err, openrails.ErrConflict) {
+	if !errors.Is(err, billing.ErrConflict) {
 		return r, fmt.Errorf("replayed remittance: %w", err)
 	}
 	voided, err := client.VoidInvoice(ctx, in.InvoiceID)

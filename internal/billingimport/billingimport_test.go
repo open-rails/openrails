@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +15,7 @@ import (
 const visa = "4111111111111111"
 
 func declaredBook() DeclaredBilling {
-	customer := openrails.CustomerID(uuid.New())
+	customer := billing.CustomerID(uuid.New())
 	return DeclaredBilling{
 		AsOf:       time.Now().UTC(),
 		DefaultPSP: PSPRef{Key: "nmi-main"},
@@ -25,12 +25,12 @@ func declaredBook() DeclaredBilling {
 			InitialTransactionID: "1234567890", LastFour: "1111", CardType: "visa", ExpiryDate: "12/29",
 		}},
 		Subscriptions: []DeclaredSubscription{{
-			SourceID: "sub_" + uuid.NewString(), Customer: customer, Price: openrails.PriceID(uuid.New()),
+			SourceID: "sub_" + uuid.NewString(), Customer: customer, Price: billing.PriceID(uuid.New()),
 			Rail: "nmi", RailSubscriptionID: uuid.NewString(), UserEmail: "payer@example.test",
 			Evidence: json.RawMessage(`{"legacy_id":"` + uuid.NewString() + `"}`),
 		}},
 		Transactions: []DeclaredTransaction{{RailSubscriptionID: uuid.NewString(), TransactionID: uuid.NewString(), Currency: "USD", OccurredAt: time.Now().UTC()}},
-		AdminGrants:  []DeclaredAdminGrant{{Customer: customer, Product: openrails.ProductID(uuid.New()), SourceID: "grant_" + uuid.NewString()}},
+		AdminGrants:  []DeclaredAdminGrant{{Customer: customer, Product: billing.ProductID(uuid.New()), SourceID: "grant_" + uuid.NewString()}},
 	}
 }
 

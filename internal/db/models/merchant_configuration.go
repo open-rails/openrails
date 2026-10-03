@@ -1,6 +1,8 @@
 package models
 
-import "github.com/open-rails/openrails"
+import (
+	"github.com/open-rails/openrails/billing"
+)
 
 // MerchantConfiguration is the JSONB payload stored in
 // openrails.merchant_configurations.
@@ -52,7 +54,7 @@ type MerchantConfiguration struct {
 
 	// DunningPolicy (#1093) replaces the built-in dunning schedule. Nil ⇒
 	// collection.DefaultPolicy.
-	DunningPolicy *openrails.DunningPolicy `json:"dunning_policy,omitempty"`
+	DunningPolicy *billing.DunningPolicy `json:"dunning_policy,omitempty"`
 
 	// CheckoutRouting (or#288) is the merchant's deterministic processor
 	// preference policy: ordered rules, first match wins. Empty ⇒ the built-in
@@ -60,8 +62,8 @@ type MerchantConfiguration struct {
 	CheckoutRouting []CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 }
 
-type CheckoutRoutingRule = openrails.CheckoutRoutingRule
-type CheckoutRoutingMatch = openrails.CheckoutRoutingMatch
+type CheckoutRoutingRule = billing.CheckoutRoutingRule
+type CheckoutRoutingMatch = billing.CheckoutRoutingMatch
 
 // MerchantProfileConfiguration is merchant-owned public/communication metadata.
 // It is stored per merchant, not in process-wide runtime config.

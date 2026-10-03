@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
@@ -31,7 +31,7 @@ type CatalogApplyOptions struct {
 	Out                  io.Writer
 }
 
-func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*openrails.CatalogApplicationReceipt, error) {
+func ApplyMerchantCatalog(ctx context.Context, opts CatalogApplyOptions) (*billing.CatalogApplicationReceipt, error) {
 	if strings.TrimSpace(opts.Merchant) == "" {
 		return nil, fmt.Errorf("catalog merchant is required")
 	}

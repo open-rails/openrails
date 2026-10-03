@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 )
@@ -113,13 +114,13 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	f := newFixture(t)
 	_, client := f.runtime(t, "bootstrap-"+uuid.NewString()[:8])
 
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key:              "welcome-" + uuid.NewString()[:8],
 		DisplayName:      "Welcome",
 		EntitlementsSpec: map[string]*int{"content:welcome": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{
 		ProductID:  product.ID,
 		Key:        "welcome-usd-" + uuid.NewString()[:8],
 		UnitAmount: 9_007_199_254_740_993,
@@ -132,7 +133,7 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
-	offers, err := client.ListOffersForEntitlements(t.Context(), []string{"content:welcome"}, openrails.OfferListParams{Kind: openrails.OfferPermanent})
+	offers, err := client.ListOffersForEntitlements(t.Context(), []string{"content:welcome"}, billing.OfferListParams{Kind: billing.OfferPermanent})
 	require.NoError(t, err)
 	require.Len(t, offers["content:welcome"].Data, 1)
 	require.Equal(t, price.ID, offers["content:welcome"].Data[0].PriceID)
@@ -143,14 +144,14 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	_, alice := f.runtime(t, "merchant-a-"+uuid.NewString()[:8])
 	_, bob := f.runtime(t, "merchant-b-"+uuid.NewString()[:8])
 
-	productA, err := alice.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "alice-post", DisplayName: "Alice post"})
+	productA, err := alice.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "alice-post", DisplayName: "Alice post"})
 	require.NoError(t, err)
-	productB, err := bob.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "bob-post", DisplayName: "Bob post"})
+	productB, err := bob.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "bob-post", DisplayName: "Bob post"})
 	require.NoError(t, err)
 
 	_, err = alice.Products.Retrieve(t.Context(), productB.ID)
-	require.ErrorIs(t, err, openrails.ErrNotFound)
-	page, err := alice.Products.List(t.Context(), &openrails.ProductListParams{})
+	require.ErrorIs(t, err, billing.ErrNotFound)
+	page, err := alice.Products.List(t.Context(), &billing.ProductListParams{})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, page.Total)
 	require.Equal(t, productA.ID, page.Items[0].ID)
@@ -161,7 +162,7 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = bob.EnsureCustomer(t.Context(), customerB)
 	require.NoError(t, err)
-	_, err = alice.GrantEntitlement(t.Context(), customerA, openrails.GrantEntitlementRequest{Entitlement: "content:" + productA.Key})
+	_, err = alice.GrantEntitlement(t.Context(), customerA, billing.GrantEntitlementRequest{Entitlement: "content:" + productA.Key})
 	require.NoError(t, err)
 
 	owned, err := alice.CheckEntitlements(t.Context(), customerA, []string{"content:" + productA.Key}, time.Time{})
@@ -177,9 +178,9 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 	_, client := f.runtime(t, "idempotent-"+uuid.NewString()[:8])
 	key := "stable-product-" + uuid.NewString()[:8]
 
-	first, err := client.Products.Ensure(t.Context(), &openrails.ProductCreateParams{Key: key, DisplayName: "First title"})
+	first, err := client.Products.Ensure(t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: "First title"})
 	require.NoError(t, err)
-	second, err := client.Products.Ensure(t.Context(), &openrails.ProductCreateParams{Key: key, DisplayName: "Changed title"})
+	second, err := client.Products.Ensure(t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: "Changed title"})
 	require.NoError(t, err)
 	require.Equal(t, first.ID, second.ID)
 	require.Equal(t, first.DisplayName, second.DisplayName)
@@ -198,7 +199,7 @@ func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	apply := func(unitAmount string) {
 		revision, err := client.Catalog.Revision(t.Context())
 		require.NoError(t, err)
-		params, err := openrails.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+		params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: gf-%[1]s-%[3]s
 expected_revision: %[2]d
 meters:
@@ -238,13 +239,13 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	provider := &stripeCheckoutFake{t: t}
 	_, client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
 
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key:              "premium-post-" + uuid.NewString()[:8],
 		DisplayName:      "Premium post",
 		EntitlementsSpec: map[string]*int{"content:premium": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{
 		ProductID:  product.ID,
 		Key:        product.Key + "-usd",
 		UnitAmount: 1_000_000,
@@ -253,12 +254,12 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	customer := uuid.NewString()
-	request := openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "reader@example.test"},
+	request := billing.CreateCheckoutSessionRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:premium",
-		OfferKind:      openrails.OfferPermanent,
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+		OfferKind:      billing.OfferPermanent,
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "checkout-" + uuid.NewString(),
 		SuccessURL:     "https://e2e.test/success",
 		CancelURL:      "https://e2e.test/cancel",
@@ -280,7 +281,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	changed := request
 	changed.SuccessURL = "https://e2e.test/changed"
 	_, err = client.CreateCheckoutSession(t.Context(), changed)
-	require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
+	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "conflicting replay must not contact Stripe")
 
 	lookup, err := client.LookupCheckoutSession(t.Context(), request)
@@ -290,7 +291,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	before, err := client.CheckEntitlements(t.Context(), customer, []string{"content:premium"}, time.Time{})
 	require.NoError(t, err)
 	require.False(t, before["content:premium"])
-	_, err = client.GrantEntitlement(t.Context(), customer, openrails.GrantEntitlementRequest{Entitlement: "content:premium"})
+	_, err = client.GrantEntitlement(t.Context(), customer, billing.GrantEntitlementRequest{Entitlement: "content:premium"})
 	require.NoError(t, err)
 	after, err := client.CheckEntitlements(t.Context(), customer, []string{"content:premium"}, time.Time{})
 	require.NoError(t, err)

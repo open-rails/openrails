@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -20,7 +20,7 @@ var (
 )
 
 // GetCustomerBillingPolicy returns only the customer's explicit runtime assignment.
-func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID openrails.CustomerID) (*openrails.CustomerBillingPolicyAssignment, error) {
+func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID billing.CustomerID) (*billing.CustomerBillingPolicyAssignment, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -40,12 +40,12 @@ func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID openr
 	if err != nil {
 		return nil, err
 	}
-	return &openrails.CustomerBillingPolicyAssignment{CustomerID: openrails.CustomerID(row.CustomerID).String(), PolicyName: row.PolicyName}, nil
+	return &billing.CustomerBillingPolicyAssignment{CustomerID: billing.CustomerID(row.CustomerID).String(), PolicyName: row.PolicyName}, nil
 }
 
 // SetCustomerBillingPolicy sets or clears one assignment, preserving every
 // declaration and other customer. Unknown customers are never materialized.
-func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID openrails.CustomerID, policyName *string) (*openrails.CustomerBillingPolicyAssignment, error) {
+func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID billing.CustomerID, policyName *string) (*billing.CustomerBillingPolicyAssignment, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -96,5 +96,5 @@ func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID openr
 	if err != nil {
 		return nil, err
 	}
-	return &openrails.CustomerBillingPolicyAssignment{CustomerID: customerID.String(), PolicyName: normalized}, nil
+	return &billing.CustomerBillingPolicyAssignment{CustomerID: customerID.String(), PolicyName: normalized}, nil
 }

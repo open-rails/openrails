@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 
@@ -29,7 +29,7 @@ const (
 // InvoiceProfileDTO is a payer's enterprise invoicing profile: net-N credit
 // terms, collection method and the document fields snapshotted onto every
 // invoice at finalize.
-type InvoiceProfileDTO = openrails.InvoiceProfileDTO
+type InvoiceProfileDTO = billing.InvoiceProfileDTO
 
 // SetCustomerInvoiceProfile upserts a payer's invoicing profile. Operator
 // surface — a payer must not grant itself credit terms.
@@ -116,7 +116,7 @@ func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.
 }
 
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
-type UsageMeterSpec = openrails.UsageMeterSpec
+type UsageMeterSpec = billing.UsageMeterSpec
 
 // EnsureUsageMeter idempotently declares a host-owned catalog meter.
 func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {

@@ -1,6 +1,6 @@
 // Package apperr is the service-layer error model: a refusal carries the HTTP
 // status and stable wire code a handler answers with, so classification never
-// reads a human message. It is the server-side twin of openrails.StatusError
+// reads a human message. It is the server-side twin of billing.StatusError
 // and classifies exactly like the StatusError a Client receives for it.
 package apperr
 
@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 )
 
@@ -60,5 +60,5 @@ func (e *Error) Is(target error) bool {
 	if other, ok := target.(*Error); ok {
 		return other.Status == e.Status && other.Code == e.Code
 	}
-	return (&openrails.StatusError{Status: e.Status, ErrorDetails: openrails.ErrorDetails{Code: e.Code}}).Is(target)
+	return (&billing.StatusError{Status: e.Status, ErrorDetails: billing.ErrorDetails{Code: e.Code}}).Is(target)
 }

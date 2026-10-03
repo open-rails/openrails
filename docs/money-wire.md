@@ -27,7 +27,7 @@ payment methods and checkout sessions travel as `prod_`, `price_`, `sub_`,
 `pay_`, `pm_` and `cs_` text on every DTO, path and query parameter that names
 them, and only that spelling is accepted — a bare UUID or another kind's prefix
 is `invalid_param`. Customer, merchant and PSP ids are plain UUIDs. Go callers
-hold `openrails.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.
+hold `billing.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.
 The catalog `by-key` routes, checkout `price_id` on the public (browser)
 checkout route and `plan-migrations` price references still accept a price
 key; the shared Client's typed fields do not. The same spelling holds
@@ -57,8 +57,8 @@ A subscription's `payments[]` history is the same `Payment` shape
 `amount`), not a second summary shape.
 
 
-The registry has one owner. Go consumers read it with `openrails.Currencies()`
-/ `openrails.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
+The registry has one owner. Go consumers read it with `billing.Currencies()`
+/ `billing.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
 table from the public `GET /v1/currencies` route. The admin UI's
 `web/admin/src/lib/currency-units.json` is generated from it by
 `go run ./scripts/currency-units` and pinned by a Go test. It formats exact decimal strings with BigInt/Intl, including

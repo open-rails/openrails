@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -82,13 +82,13 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 // live row already holds the target key, THAT row is archived first (the same
 // repoint invariant CreatePrice/ActivatePrice enforce), so a rename can also
 // double as a manual repoint.
-func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key string) (*CatalogPrice, error) {
+func (s *Service) SetPriceKey(ctx context.Context, id billing.PriceID, key string) (*CatalogPrice, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
 		return scoped.setPriceKey(ctx, id, key)
 	})
 }
 
-func (s *Service) setPriceKey(ctx context.Context, id openrails.PriceID, key string) (*CatalogPrice, error) {
+func (s *Service) setPriceKey(ctx context.Context, id billing.PriceID, key string) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}

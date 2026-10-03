@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/stretchr/testify/require"
@@ -154,13 +154,13 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	client, err := runtime.Client()
 	require.NoError(t, err)
 
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{
 		Key:              "webhook-product-" + uuid.NewString()[:8],
 		DisplayName:      "Webhook product",
 		EntitlementsSpec: map[string]*int{"content:webhook": nil},
 	})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{
 		ProductID:  product.ID,
 		Key:        "webhook-price-" + uuid.NewString()[:8],
 		UnitAmount: 1_000_000,
@@ -170,12 +170,12 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	userID := uuid.NewString()
 	_, err = client.EnsureCustomer(t.Context(), userID)
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "webhook@example.test"},
+	session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "webhook@example.test"},
 		PriceID:        price.ID,
 		Entitlement:    "content:webhook",
-		OfferKind:      openrails.OfferPermanent,
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+		OfferKind:      billing.OfferPermanent,
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "e2e-webhook-" + uuid.NewString(),
 		SuccessURL:     "https://example.test/success",
 		CancelURL:      "https://example.test/cancel",
@@ -218,7 +218,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	access, err := client.CheckEntitlements(t.Context(), userID, []string{"content:webhook"}, time.Time{})
 	require.NoError(t, err)
 	require.True(t, access["content:webhook"])
-	payments, err := client.ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: userID})
+	payments, err := client.ListPayments(t.Context(), billing.PaymentFilter{CustomerID: userID})
 	require.NoError(t, err)
 	require.Len(t, payments.Data, 1, "event replay must not duplicate the payment")
 	require.EqualValues(t, 1_000_000, payments.Data[0].Amount)

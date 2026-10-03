@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -14,14 +14,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-type ChangeTierRequest = openrails.ChangeTierRequest
+type ChangeTierRequest = billing.ChangeTierRequest
 
 func ChangeTier(r *httprequest.Request) {
 	var req ChangeTierRequest
 	if !r.BindJSON(&req) {
 		return
 	}
-	if id, err := openrails.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
+	if id, err := billing.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return
 	}
@@ -42,7 +42,7 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
@@ -91,7 +91,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if id, err := openrails.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
+	if id, err := billing.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return
 	}
@@ -108,7 +108,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 		return
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
@@ -137,7 +137,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 func writeChangeTierError(r *httprequest.Request, err error) {
 	var inFlight *checkout.TierChangeInFlightError
 	if errors.As(err, &inFlight) {
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodeTierChangeInFlight, inFlight.Error()).
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeTierChangeInFlight, inFlight.Error()).
 			WithMetadata(map[string]any{"operation_id": inFlight.OperationID.String()}))
 		return
 	}

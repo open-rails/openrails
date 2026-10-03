@@ -1,4 +1,4 @@
-package openrails
+package billing
 
 // Transport refusal codes: the middleware answers before any handler exists,
 // in the same envelope every handler uses.

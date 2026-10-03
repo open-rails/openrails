@@ -1,22 +1,4 @@
-// Package openrails is the canonical OpenRails SDK surface (#338): ONE Go
-// client implementation with two constructors —
-//
-//   - NewRemote(baseURL, opts...) talks to a standalone OpenRails over its
-//     service-credential-authenticated /v1/merchant/* routes (this file + remote.go,
-//     ported from the go-client module, which this package supersedes);
-//   - openrails/embed.New(...).Client() runs the engine in-process and returns
-//     the SAME client implementation wired to an in-process transport (#685): a
-//     custom http.RoundTripper dispatching into the neutral /v1/merchant
-//     handler, no socket.
-//
-// PARITY IS STRUCTURAL: one client implementation, one handler surface — the
-// transports cannot drift because there is nothing to drift between. The
-// dual-mode conformance test in openrails/embed enforces this end to end.
-//
-// This root package stays dependency-light: it must not link the engine or
-// pkg/embedded. The shared, standard-library-only archive format verifier is
-// the sole internal-package exception (enforced by deps_test.go).
-package openrails
+package billing
 
 import (
 	"time"

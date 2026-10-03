@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -49,22 +50,22 @@ func (w *world) callAt(server, token, method, path, key string, body any) (int, 
 }
 
 // finitePass is a one-time 30-day pass.
-func (w *world) finitePass(entitlement string) *openrails.Price {
+func (w *world) finitePass(entitlement string) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: "pass-" + uuid.NewString()[:8], DisplayName: "Pass", EntitlementsSpec: map[string]*int{entitlement: nil}})
+	product, err := client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: "pass-" + uuid.NewString()[:8], DisplayName: "Pass", EntitlementsSpec: map[string]*int{entitlement: nil}})
 	require.NoError(w.t, err)
 	hours := monthHours
-	price, err := client.Prices.Create(w.t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD", AccessDurationHours: &hours})
+	price, err := client.Prices.Create(w.t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD", AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
 
-func (c *customer) buyWith(rail, method string, price *openrails.Price, kind openrails.OfferKind, entitlement string) {
+func (c *customer) buyWith(rail, method string, price *billing.Price, kind billing.OfferKind, entitlement string) {
 	c.w.t.Helper()
-	_, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), openrails.CreateCheckoutSessionRequest{
-		OfferKind: kind, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID,
-		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
+	_, err := c.w.client[embedded].CreateCheckoutSession(c.w.t.Context(), billing.CreateCheckoutSessionRequest{
+		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: price.ID,
+		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 	})
 	require.NoError(c.w.t, err)
@@ -91,11 +92,11 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			start := w.clock.Now()
-			c.buyWith(rail, method, price, openrails.OfferFinite, "content:pass")
+			c.buyWith(rail, method, price, billing.OfferFinite, "content:pass")
 			first := completed(w.payments(embedded, c.id))
 			require.Len(t, first, 1)
 			w.advance(time.Hour)
-			c.buyWith(rail, method, price, openrails.OfferFinite, "content:pass")
+			c.buyWith(rail, method, price, billing.OfferFinite, "content:pass")
 			paid := completed(w.payments(embedded, c.id))
 			require.Len(t, paid, 2)
 			require.True(t, c.entitledAt("content:pass", start.Add(45*day)), "the second pass is stacked after the first")
@@ -103,7 +104,7 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 			if second.ID == first[0].ID {
 				second = paid[1]
 			}
-			_, err := w.client[embedded].RefundPayment(t.Context(), second.ID, openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + second.ID.String()})
+			_, err := w.client[embedded].RefundPayment(t.Context(), second.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + second.ID.String()})
 			require.NoError(t, err)
 			w.settle()
 			for range 2 {
@@ -119,9 +120,9 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 		c := w.newCustomer()
 		hours := 24
 		client := w.client[embedded]
-		_, err := client.GrantEntitlement(t.Context(), c.id, openrails.GrantEntitlementRequest{Entitlement: "content:gift", Hours: &hours})
+		_, err := client.GrantEntitlement(t.Context(), c.id, billing.GrantEntitlementRequest{Entitlement: "content:gift", Hours: &hours})
 		require.NoError(t, err)
-		future, err := client.GrantEntitlement(t.Context(), c.id, openrails.GrantEntitlementRequest{Entitlement: "content:gift", Hours: &hours})
+		future, err := client.GrantEntitlement(t.Context(), c.id, billing.GrantEntitlementRequest{Entitlement: "content:gift", Hours: &hours})
 		require.NoError(t, err)
 		now := w.clock.Now()
 		require.True(t, c.entitledAt("content:gift", now.Add(30*time.Hour)))
@@ -152,7 +153,7 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		var wg sync.WaitGroup
 		change := func(client *openrails.Client, target tier) {
 			defer wg.Done()
-			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, "upgrade-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: target.ID})
+			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: target.ID})
 			t.Logf("upgrade to %s: %v", target.ent, err)
 		}
 		wg.Add(1)
@@ -172,7 +173,7 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		w.nmi.unhold()
 		w.settle()
 		require.Len(t, w.railLedger(rail), charges+1, "one upgrade charge")
-		subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+		subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 		require.NoError(t, err)
 		live := 0
 		for _, s := range subs.Data {
@@ -200,13 +201,13 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 	looseSub := other.subscribe(embedded, "nmi", loose.ID, "content:loose", other.saveCard("nmi", visa))
 	charges := len(w.railLedger("nmi"))
 	for _, tc := range []struct {
-		sub    openrails.SubscriptionID
+		sub    billing.SubscriptionID
 		target string
 	}{{sub, loose.ID}, {looseSub, basic.ID}} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].ChangeTier(t.Context(), tc.sub, "cross-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: tc.target})
+			_, err := w.client[tp].ChangeTier(t.Context(), tc.sub, "cross-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target})
 			require.Error(t, err)
-			_, err = w.client[tp].PreviewTierChange(t.Context(), tc.sub, openrails.ChangeTierRequest{PriceID: tc.target})
+			_, err = w.client[tp].PreviewTierChange(t.Context(), tc.sub, billing.ChangeTierRequest{PriceID: tc.target})
 			require.Error(t, err)
 		}
 	}
@@ -320,13 +321,13 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		client, err := rt.Client()
 		require.NoError(t, err)
-		product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", EntitlementsSpec: map[string]*int{"content:live": nil}})
+		product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", EntitlementsSpec: map[string]*int{"content:live": nil}})
 		require.NoError(t, err)
-		price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+		price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-			Customer: openrails.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
-			OfferKind: openrails.OfferPermanent, PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
+		_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
+			OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 		})
 		require.Error(t, err, "a live key is disarmed in a sandbox deployment")

@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // raw is a goroutine-safe customer request: it reports instead of failing.
@@ -70,9 +71,9 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-				OfferKind: openrails.OfferRecurring, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
-				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID,
+				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 			})
 			require.NoError(t, err)
@@ -109,7 +110,7 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			w.nmi.unhold()
 			w.settle()
 			require.Len(t, w.railLedger(rail), 1, "one provider charge")
-			subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+			subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 			require.NoError(t, err)
 			require.Len(t, subs.Data, 1, "one membership")
 			require.Len(t, completed(w.payments(embedded, c.id)), 1, "one recorded payment")
@@ -131,9 +132,9 @@ func TestSecurityConcurrentRefundsNeverExceedPayment(t *testing.T) {
 				replica := w.sibling()
 				e := enroll(t, w, rail, embedded)
 				payment := completed(w.payments(embedded, e.c.id))[0]
-				params := openrails.RefundPaymentParams{Full: true, Reason: "requested_by_customer"}
+				params := billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer"}
 				if partial {
-					params = openrails.RefundPaymentParams{Amount: 6_000_000, Reason: "requested_by_customer"}
+					params = billing.RefundPaymentParams{Amount: 6_000_000, Reason: "requested_by_customer"}
 				}
 				g := w.refundGate(rail)
 				clients := []*openrails.Client{w.client[embedded], w.client[remote], replica.client, w.client[embedded], replica.client}

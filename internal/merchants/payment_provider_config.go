@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -25,7 +25,7 @@ import (
 
 // PaymentProviderCredentialStatus is the redacted credential view returned to
 // merchant admins. It never contains plaintext.
-type PaymentProviderCredentialStatus = openrails.PaymentProviderCredentialStatus
+type PaymentProviderCredentialStatus = billing.PaymentProviderCredentialStatus
 
 // ErrPaymentProviderNotFound reports that the merchant has no active provider
 // account on the requested rail and environment.
@@ -46,16 +46,16 @@ func providerCredentialError(err error) error {
 
 // PaymentProviderConfig is one merchant-owned payment-PSP.
 
-type PaymentProviderConfig = openrails.PaymentProviderConfig
+type PaymentProviderConfig = billing.PaymentProviderConfig
 
 // PaymentProviderDefinition describes one merchant-configurable provider from
 // the rail registry. CredentialKeys contains only merchant-writable secrets.
-type PaymentProviderDefinition = openrails.PaymentProviderDefinition
+type PaymentProviderDefinition = billing.PaymentProviderDefinition
 
 // UpsertPaymentProviderConfigRequest creates or replaces one PSP.
 // There is no `environment` field (#882): a deployment is all-test or all-live,
 // so the environment is derived from the deployment's test_mode posture.
-type UpsertPaymentProviderConfigRequest = openrails.UpsertPaymentProviderParams
+type UpsertPaymentProviderConfigRequest = billing.UpsertPaymentProviderParams
 
 type pspEvidence struct {
 	WebhookEndpointID    string               `json:"webhook_endpoint_id,omitempty"`

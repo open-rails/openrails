@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -40,9 +40,9 @@ import (
 //     price for a period of its cadence, and nothing is refunded.
 
 var (
-	errTierChangeRenewalDue = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change tier after the renewal settles"}
-	errTierChangeScheduled  = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
-	errTierChangeMoved      = &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused, Message: "the subscription changed since the tier change was requested; preview again"}
+	errTierChangeRenewalDue = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change tier after the renewal settles"}
+	errTierChangeScheduled  = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
+	errTierChangeMoved      = &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "the subscription changed since the tier change was requested; preview again"}
 )
 
 // engineUpgradeQuote prices an engine upgrade at now and freezes the successor
@@ -87,7 +87,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		return nil, errors.New("engine tier change services unavailable")
 	}
 	if s.Config.EngineAdmissionHold {
-		return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused, Message: "engine payment admission is held"}
+		return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "engine payment admission is held"}
 	}
 	ctx = db.WithPSPID(ctx, existingSub.PspID)
 	terms, err := engineUpgradeQuote(existingSub, currentPrice, newPrice, newProduct, s.now().UTC().Truncate(time.Microsecond))
@@ -130,7 +130,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 			return err
 		}
 		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
-			return &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
+			return &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
 		label := psp.ID.String()
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
@@ -203,10 +203,10 @@ func (s *CheckoutService) processEngineDowngrade(ctx context.Context, newPrice *
 		existingSub = scheduled
 	}
 	end := *existingSub.CurrentPeriodEndsAt
-	subID := openrails.SubscriptionID(existingSub.ID)
+	subID := billing.SubscriptionID(existingSub.ID)
 	return &TierChangeResponse{
 		Object: "tier_change", Status: "succeeded", Mode: "tier_change", Action: "downgrade", Effective: "period_end",
-		PriceID: openrails.PriceID(newPrice.ID).String(), Payment: CheckoutSessionPaymentResponse{Rail: string(existingSub.Rail)}, SubscriptionID: &subID,
+		PriceID: billing.PriceID(newPrice.ID).String(), Payment: CheckoutSessionPaymentResponse{Rail: string(existingSub.Rail)}, SubscriptionID: &subID,
 		Message:      fmt.Sprintf("Downgrade to %s scheduled. Your current plan stays active until the period ends.", newProduct.DisplayName),
 		DelayedStart: &end, Currency: newPrice.Currency, NextChargeAmount: newPrice.Amount, NextChargeDate: &end,
 	}, nil
@@ -264,10 +264,10 @@ func engineUpgradeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeRes
 	if !p.Upgrade() {
 		return nil, fmt.Errorf("intent %s is not a tier upgrade", in.ID)
 	}
-	replaced := openrails.SubscriptionID(p.Terms.Replaces.SubscriptionID)
+	replaced := billing.SubscriptionID(p.Terms.Replaces.SubscriptionID)
 	end := p.Terms.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: "upgrade", Effective: "now", PriceID: openrails.PriceID(p.Terms.PriceID).String(),
+		Object: "tier_change", Mode: "tier_change", Action: "upgrade", Effective: "now", PriceID: billing.PriceID(p.Terms.PriceID).String(),
 		Payment: CheckoutSessionPaymentResponse{Rail: in.Rail}, SubscriptionID: &replaced,
 		Currency: p.Terms.Currency, AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(),
@@ -277,7 +277,7 @@ func engineUpgradeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeRes
 		if err := intents.ValidateInitialMembershipTerminal(in); err != nil {
 			return nil, err
 		}
-		successor := openrails.SubscriptionID(p.Terms.SubscriptionID)
+		successor := billing.SubscriptionID(p.Terms.SubscriptionID)
 		resp.Status, resp.SubscriptionID = "succeeded", &successor
 		resp.Payment.TransactionID = intents.EvidenceString(in, "transaction_id")
 		resp.Message = intents.EvidenceString(in, "message")

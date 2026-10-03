@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -36,7 +36,7 @@ type solanaShop struct {
 	fake     *solanafake.Node
 	merchant solanago.PrivateKey
 	mint     solanago.PublicKey
-	option   openrails.CheckoutRailOption
+	option   billing.CheckoutRailOption
 	price    string
 	key      string
 }
@@ -94,9 +94,9 @@ type solanaCheckout struct {
 // checkout opens a wallet-connected subscribe checkout for b naming wallet.
 func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.PublicKey) *solanaCheckout {
 	t.Helper()
-	session, err := s.w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: b.id}, PriceID: s.price, IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: s.option.Selector, PSPID: s.option.PSPID, TokenSymbol: "DUSD", Wallet: wallet.String()},
+	session, err := s.w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: b.id}, PriceID: s.price, IdempotencyKey: "sol-" + uuid.NewString(),
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: s.option.Selector, PSPID: s.option.PSPID, TokenSymbol: "DUSD", Wallet: wallet.String()},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -126,7 +126,7 @@ func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (int, map[str
 // checkout still awaits its payment.
 func (s *solanaShop) requireNothingGranted(t *testing.T, b *solanaBuyer, c *solanaCheckout) {
 	t.Helper()
-	subs, err := s.w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: b.id})
+	subs, err := s.w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: b.id})
 	require.NoError(t, err)
 	require.Empty(t, subs.Data)
 	require.Empty(t, s.w.payments(embedded, b.id))
@@ -351,9 +351,9 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		c := s.checkout(t, other, other.wallet.PublicKey())
 		d, err := db.NewWithPGXPool(s.w.pool, s.w.schema)
 		require.NoError(t, err)
-		first, err := openrails.ParseCheckoutSessionID(paid.session)
+		first, err := billing.ParseCheckoutSessionID(paid.session)
 		require.NoError(t, err)
-		second, err := openrails.ParseCheckoutSessionID(c.id)
+		second, err := billing.ParseCheckoutSessionID(c.id)
 		require.NoError(t, err)
 		require.NoError(t, d.RunInMerchantScope(t.Context(), s.w.client[embedded].MerchantID(), "solana claim", func(ctx context.Context) error {
 			require.ErrorIs(t, settlement.ClaimCheckout(ctx, d, second.UUID(), paid.sig), settlement.ErrClaimed)

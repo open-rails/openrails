@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type updateSubscriptionPaymentMethodBody = openrails.UpdateSubscriptionPaymentMethodRequest
+type updateSubscriptionPaymentMethodBody = billing.UpdateSubscriptionPaymentMethodRequest
 
 func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
@@ -40,7 +40,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
@@ -83,7 +83,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			writeRefusal(r, err, "Failed to select payment method")
 			return
 		}
-		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": openrails.SubscriptionID(subscription.ID), "payment_method_id": openrails.PaymentMethodID(paymentMethodID)})
+		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": billing.SubscriptionID(subscription.ID), "payment_method_id": billing.PaymentMethodID(paymentMethodID)})
 		return
 	}
 	if !rails.IsNMI(subscription.Rail) {
@@ -168,7 +168,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	switch {
 	case out.Done:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
-		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": openrails.SubscriptionID(subscription.ID), "payment_method_id": openrails.PaymentMethodID(paymentMethodID)})
+		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": billing.SubscriptionID(subscription.ID), "payment_method_id": billing.PaymentMethodID(paymentMethodID)})
 	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
 		writePaymentMethodPSPMismatch(r)
@@ -185,11 +185,11 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	}
 }
 
-// writePaymentMethodPSPMismatch renders openrails.CodePaymentMethodPSPMismatch:
+// writePaymentMethodPSPMismatch renders billing.CodePaymentMethodPSPMismatch:
 // the named method was vaulted by another provider account than the
 // subscription's; nothing reached the provider. Same answer at the HTTP
 // pre-check and at the durable seam (#657).
 func writePaymentMethodPSPMismatch(r *httprequest.Request) {
-	r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentMethodPSPMismatch,
+	r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentMethodPSPMismatch,
 		"This payment method belongs to a different provider account than the subscription. Add the card again on the subscription's provider."))
 }

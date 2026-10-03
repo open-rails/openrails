@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 func main() {
 	units := map[string]int{}
-	for _, currency := range openrails.Currencies() {
+	for _, currency := range billing.Currencies() {
 		units[currency.Code] = currency.Decimals
 	}
 	raw, err := json.MarshalIndent(units, "", "  ")

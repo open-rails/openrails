@@ -8,19 +8,11 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 )
 
 const merchantBillingArchivePath = "/v1/merchant/billing-archive"
-
-// MerchantBillingImportResult is the committed receipt for a complete billing
-// archive. Repeating an import returns its receipt without replaying records.
-type MerchantBillingImportResult struct {
-	MerchantID      MerchantID `json:"merchant_id"`
-	Digest          string     `json:"digest"`
-	Rows            int64      `json:"rows,string"`
-	AlreadyImported bool       `json:"already_imported"`
-}
 
 // ExportMerchantBilling writes the bound merchant's versioned billing archive.
 // Stop source writers for the final cutover export. Authentication identities,
@@ -38,7 +30,7 @@ func (c *Client) ExportMerchantBilling(ctx context.Context, dst io.Writer, reque
 			return err
 		}
 		if _, err := archivewire.CopyVerified(dst, resp.Body); err != nil {
-			return fmt.Errorf("%w: incomplete or invalid billing archive: %w", ErrUnreachable, err)
+			return fmt.Errorf("%w: incomplete or invalid billing archive: %w", billing.ErrUnreachable, err)
 		}
 		return nil
 	}, requestOptions...)
@@ -48,11 +40,11 @@ func (c *Client) ExportMerchantBilling(ctx context.Context, dst io.Writer, reque
 // with the same merchant UUID. Provision destination authority separately and
 // keep destination workers stopped through restoration and reconfiguration.
 // No provider call is made. A lost response can be retried with the same archive.
-func (c *Client) ImportMerchantBilling(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*MerchantBillingImportResult, error) {
+func (c *Client) ImportMerchantBilling(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*billing.MerchantBillingImportResult, error) {
 	if src == nil {
 		return nil, invalidErr("archive reader is required")
 	}
-	var result MerchantBillingImportResult
+	var result billing.MerchantBillingImportResult
 	headers := http.Header{"Content-Type": {"application/x-ndjson"}}
 	err := c.withHTTPResponse(ctx, http.MethodPost, merchantBillingArchivePath, src, headers, func(resp *http.Response) error {
 		if err := archiveResponseError(resp); err != nil {
@@ -60,18 +52,18 @@ func (c *Client) ImportMerchantBilling(ctx context.Context, src io.Reader, reque
 		}
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 		if err != nil {
-			return fmt.Errorf("%w: read archive receipt: %w", ErrUnreachable, err)
+			return fmt.Errorf("%w: read archive receipt: %w", billing.ErrUnreachable, err)
 		}
 		if len(raw) > 1<<20 {
-			return fmt.Errorf("%w: archive receipt exceeds 1 MiB", ErrUnreachable)
+			return fmt.Errorf("%w: archive receipt exceeds 1 MiB", billing.ErrUnreachable)
 		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
 		if err := decoder.Decode(&result); err != nil {
-			return fmt.Errorf("%w: decode archive receipt: %w", ErrUnreachable, err)
+			return fmt.Errorf("%w: decode archive receipt: %w", billing.ErrUnreachable, err)
 		}
 		var extra any
 		if err := decoder.Decode(&extra); err != io.EOF {
-			return fmt.Errorf("%w: archive receipt must contain one JSON value", ErrUnreachable)
+			return fmt.Errorf("%w: archive receipt must contain one JSON value", billing.ErrUnreachable)
 		}
 		return nil
 	}, requestOptions...)
@@ -87,9 +79,9 @@ func archiveResponseError(resp *http.Response) error {
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return fmt.Errorf("%w: read archive refusal: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: read archive refusal: %w", billing.ErrUnreachable, err)
 	}
-	failure := statusErrorFromBody(resp.StatusCode, raw).(*StatusError)
+	failure := statusErrorFromBody(resp.StatusCode, raw).(*billing.StatusError)
 	if failure.RequestID == "" {
 		failure.RequestID = resp.Header.Get("X-Request-ID")
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // #1105: a request holds one pool connection and never waits for a second,
@@ -24,9 +24,9 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 	w := prepareWorld(t, poolSize)
 	w.start()
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	customers := make([]*customer, requests)
 	for i := range customers {
@@ -49,9 +49,9 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 					return
 				}
 			}
-			session, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-				Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "checkout:" + uuid.NewString() + ":1", Confirm: true,
-				PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Pool Payer", Zip: "10001", Country: "US"},
+			session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
+				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "checkout:" + uuid.NewString() + ":1", Confirm: true,
+				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Pool Payer", Zip: "10001", Country: "US"},
 			})
 			if err == nil && session.Status != "succeeded" {
 				err = errUnexpected(session.Status)

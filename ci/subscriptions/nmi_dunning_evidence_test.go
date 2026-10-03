@@ -11,12 +11,12 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-func providerDunning(book *openrails.DeclaredBilling) {
+func providerDunning(book *billing.DeclaredBilling) {
 	declareRecurringAnchor(book)
 }
 

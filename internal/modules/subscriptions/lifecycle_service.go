@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -1577,7 +1577,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       openrails.NotificationData{Reason: string(reason)},
+		Data:       billing.NotificationData{Reason: string(reason)},
 	}
 	if err := notificationRepo.Create(ctx, notification); err != nil {
 		log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
@@ -1984,7 +1984,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			ID:         uuidutil.NewV7(),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
-			Data:       openrails.NotificationData{Reason: string(PremiumEndReasonExpired)},
+			Data:       billing.NotificationData{Reason: string(PremiumEndReasonExpired)},
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
@@ -2371,7 +2371,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		//   bucket 3                -> premium_ended / non_recoverable ("the
 		//                              mandate is gone; re-subscribe")
 		eventType := models.NotificationPaymentMethodFailed
-		var data openrails.NotificationData
+		var data billing.NotificationData
 		switch {
 		case needsPaymentMethodUpdate:
 			eventType = models.NotificationPaymentMethodUpdateRequired

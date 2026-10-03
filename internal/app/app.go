@@ -13,7 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/cache"
 	"github.com/open-rails/openrails/internal/db"
@@ -74,8 +74,8 @@ type BootstrapOptions struct {
 	Clock       clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
-	UserDirectory    openrails.UserDirectory
-	UsernameResolver openrails.UsernameResolver
+	UserDirectory    billing.UserDirectory
+	UsernameResolver billing.UsernameResolver
 
 	ConfiguredMerchant merchant.ID
 }
@@ -167,13 +167,13 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 			}
 			return nil
 		}(),
-		UserDirectory: func() openrails.UserDirectory {
+		UserDirectory: func() billing.UserDirectory {
 			if opts != nil {
 				return opts.UserDirectory
 			}
 			return nil
 		}(),
-		UsernameResolver: func() openrails.UsernameResolver {
+		UsernameResolver: func() billing.UsernameResolver {
 			if opts != nil {
 				return opts.UsernameResolver
 			}

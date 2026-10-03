@@ -31,7 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/embed"
 )
 
@@ -578,9 +578,9 @@ func (f *fleet) unhold() {
 	f.base.nmi.unhold()
 }
 
-func subUUID(id openrails.SubscriptionID) string { return strings.TrimPrefix(id.String(), "sub_") }
+func subUUID(id billing.SubscriptionID) string { return strings.TrimPrefix(id.String(), "sub_") }
 
-func (f *fleet) subscription(e *engineCase) *openrails.Subscription {
+func (f *fleet) subscription(e *engineCase) *billing.Subscription {
 	f.t.Helper()
 	sub, err := f.any().client[embedded].GetSubscription(f.t.Context(), e.sub)
 	require.NoError(f.t, err)
@@ -686,7 +686,7 @@ func (f *fleet) requireExactlyOnce(e *engineCase, renewals, submissions int) {
 	if submissions >= 0 {
 		require.Equal(t, submissions, f.submissions(e), "provider charge requests")
 	}
-	page, err := f.any().client[embedded].ListPayments(t.Context(), openrails.PaymentFilter{CustomerID: e.c.id, PageOptions: openrails.PageOptions{Limit: 100}})
+	page, err := f.any().client[embedded].ListPayments(t.Context(), billing.PaymentFilter{CustomerID: e.c.id, PageOptions: billing.PageOptions{Limit: 100}})
 	require.NoError(t, err)
 	paid := completed(page.Data)
 	require.Len(t, paid, 1+renewals, "one local payment per paid period")
@@ -755,7 +755,7 @@ func (r *world) post(rail string, payload any) (int, error) {
 }
 
 // retryNow is the member's "pay now" on r, off the test goroutine.
-func (r *world) retryNow(c *customer, sub openrails.SubscriptionID, key string) (int, string, error) {
+func (r *world) retryNow(c *customer, sub billing.SubscriptionID, key string) (int, string, error) {
 	req, err := http.NewRequest(http.MethodPost, r.server.URL+mountPrefix+"/v1/me/subscriptions/"+sub.String()+"/retry-now", strings.NewReader("{}"))
 	if err != nil {
 		return 0, "", err

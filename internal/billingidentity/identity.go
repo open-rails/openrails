@@ -6,15 +6,15 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // CustomerID identifies an openrails.customers row: the OpenRails payable
 // subject whose balance, invoices, reservations, and entitlements are
-// recorded. It is the shared wire type openrails.CustomerID (one family, one
+// recorded. It is the shared wire type billing.CustomerID (one family, one
 // spelling), distinct from any invoker or operator identity so the compiler
 // rejects passing the wrong one.
-type CustomerID = openrails.CustomerID
+type CustomerID = billing.CustomerID
 
 // InvokerType classifies whether an invoker is the payer acting directly or a
 // delegated principal using the payer's billing authority.

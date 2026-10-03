@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"sort"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -68,7 +68,7 @@ var ErrHoldDeadlinePassed = admission.ErrHoldDeadlinePassed
 var ErrHoldNotFound = errors.New("hold not found for request_id")
 
 // AdmitResult is the unified admission decision returned to the host.
-type AdmitResult = openrails.AdmitResponse
+type AdmitResult = billing.AdmitResponse
 
 // Admit evaluates policy and reserves a durable request operation in one payer transaction.
 func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
@@ -176,13 +176,13 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 // spend per WindowSeconds. The single window shape in this package — used by
 // budget-scope policies (#473) and by billing-policy spend/bad-spend windows
 // (or#897).
-type SpendLimitWindowInput = openrails.BudgetWindowInput
+type SpendLimitWindowInput = billing.BudgetWindowInput
 
 // InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
 // Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
 // role uuid, invoker string, or invoker-tier key, empty for scope=subject. It is
 // the shared Client/HTTP delegation wire type.
-type InvokerSpendLimitInput = openrails.SpendDelegationInput
+type InvokerSpendLimitInput = billing.SpendDelegationInput
 
 // ErrInvalidInvokerSpendLimit identifies caller-owned spend-delegation input
 // errors so HTTP and embedded transports can map the shared service result to
@@ -501,14 +501,14 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 // BillingPolicyInput declares one named billing policy (or#897). Window entries
 // carry the same {key, window_seconds, limit, currency} shape everywhere in this
 // package — SpendLimitWindowInput.
-type BillingPolicyInput = openrails.BillingPolicyInput
+type BillingPolicyInput = billing.BillingPolicyInput
 
 // BillingPolicyBindingInput points one rung at a policy name (or#897). Set
 // CustomerID for the per-customer rung, Tier for the per-tier rung, neither for
 // the merchant default — never both.
 type BillingPolicyBindingInput struct {
 	PolicyName string
-	CustomerID openrails.CustomerID
+	CustomerID billing.CustomerID
 	Tier       string
 }
 
@@ -561,7 +561,7 @@ type MerchantConfiguration struct {
 	CheckoutRouting *[]models.CheckoutRoutingRule
 	// DunningPolicy (#1093) replaces the dunning schedule. A nil pointer
 	// preserves the stored policy.
-	DunningPolicy *openrails.DunningPolicy
+	DunningPolicy *billing.DunningPolicy
 }
 
 // GetMerchantConfiguration returns the stored merchant-scoped configuration row.
@@ -817,7 +817,7 @@ type WastedSpendInput struct {
 const wastedSpendEventType = "wasted_spend"
 
 // WastedSpendResult describes how OpenRails handled one wasted-spend report.
-type WastedSpendResult = openrails.WastedSpendResponse
+type WastedSpendResult = billing.WastedSpendResponse
 
 // ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 // accrue against their flat Redis cutoff, while direct payer credentials accrue
@@ -1232,7 +1232,7 @@ func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput
 // ListBillingPolicyBindings returns the DECLARATIVE bindings — the merchant
 // default and the per-tier rungs. Per-customer bindings are runtime segmentation
 // state and are never enumerated (that read would scale with customers).
-func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]openrails.BillingPolicyBindingInput, error) {
+func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]billing.BillingPolicyBindingInput, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -1246,9 +1246,9 @@ func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]openrails.Bi
 	if err != nil {
 		return nil, err
 	}
-	out := make([]openrails.BillingPolicyBindingInput, 0, len(rows))
+	out := make([]billing.BillingPolicyBindingInput, 0, len(rows))
 	for _, r := range rows {
-		b := openrails.BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
+		b := billing.BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
 		out = append(out, b)
 	}
 	return out, nil

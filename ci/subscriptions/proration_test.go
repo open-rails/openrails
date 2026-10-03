@@ -12,14 +12,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // tierPrice creates a product at rank in group with one auto-renewing USD
 // price of cycle hours. A day-based price may carry an NMI plan, which the
 // engine creates at the provider.
 type tier struct {
-	*openrails.Price
+	*billing.Price
 	ent, plan string
 }
 
@@ -27,10 +27,10 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 	w.t.Helper()
 	client := w.client[embedded]
 	key := fmt.Sprintf("tier-%d-%s", rank, uuid.NewString()[:8])
-	product, err := client.Products.Create(w.t.Context(), &openrails.ProductCreateParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank,
+	product, err := client.Products.Create(w.t.Context(), &billing.ProductCreateParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank,
 		EntitlementsSpec: map[string]*int{"content:" + key: nil}})
 	require.NoError(w.t, err)
-	params := &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &cycle}
+	params := &billing.PriceCreateParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &cycle}
 	out := tier{ent: "content:" + key}
 	if nmiPlan {
 		out.plan = "gf_plan_" + uuid.NewString()[:8]
@@ -44,7 +44,7 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 // engineWithLeft enrolls an engine-owned NMI membership on price and moves
 // engine time so left remains in its first period. It returns the customer,
 // the membership and the vault the engine charges.
-func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, openrails.SubscriptionID, string) {
+func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, billing.SubscriptionID, string) {
 	t := w.t
 	t.Helper()
 	c := w.newCustomer()
@@ -60,11 +60,11 @@ func (w *world) engineWithLeft(price tier, left time.Duration) (*customer, openr
 
 // requirePreview asserts both Client topologies quote charge (cents) now and
 // a new period of newCycle hours.
-func (w *world) requirePreview(sub openrails.SubscriptionID, target string, charge int64, newCycle int) {
+func (w *world) requirePreview(sub billing.SubscriptionID, target string, charge int64, newCycle int) {
 	t := w.t
 	t.Helper()
 	for _, tp := range []topology{embedded, remote} {
-		preview, err := w.client[tp].PreviewTierChange(t.Context(), sub, openrails.ChangeTierRequest{PriceID: target})
+		preview, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: target})
 		require.NoError(t, err, tp)
 		require.Equal(t, "upgrade", preview.Action)
 		require.Equal(t, charge*10_000, preview.AmountDueNow, "%s preview", tp)
@@ -109,7 +109,7 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 			sales := len(w.nmi.ledger(vault))
 
 			w.requirePreview(sub, next.ID, row.charge, row.newCyc)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, "upgrade-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), sub, "upgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, row.charge*10_000, done.AmountDueNow, "charged equals preview")
@@ -179,13 +179,13 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 		code   string
 		status int
 	}{
-		{short, openrails.CodeTierChangeCreditExceedsPrice, 409},
-		{noCycle, openrails.CodeTierChangeCycleUnknown, 422},
+		{short, billing.CodeTierChangeCreditExceedsPrice, 409},
+		{noCycle, billing.CodeTierChangeCycleUnknown, 422},
 	} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].PreviewTierChange(t.Context(), sub, openrails.ChangeTierRequest{PriceID: tc.target.ID})
+			_, err := w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: tc.target.ID})
 			requireCode(t, err, tc.status, tc.code)
-			_, err = w.client[tp].ChangeTier(t.Context(), sub, "refused-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: tc.target.ID})
+			_, err = w.client[tp].ChangeTier(t.Context(), sub, "refused-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: tc.target.ID})
 			requireCode(t, err, tc.status, tc.code)
 		}
 	}
@@ -196,7 +196,7 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 
 func requireCode(t *testing.T, err error, status int, code string) {
 	t.Helper()
-	var statusErr *openrails.StatusError
+	var statusErr *billing.StatusError
 	require.True(t, errors.As(err, &statusErr), "%v", err)
 	require.Equal(t, status, statusErr.Status, "%v", err)
 	require.Equal(t, code, statusErr.Code, "%v", err)

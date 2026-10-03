@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -29,7 +29,7 @@ func NewHostTransactions(runtime *Runtime) *HostTransactions { return &HostTrans
 
 // OpenOperationAuthorization reserves capacity; commit it with the host's
 // provider obligation before calling the provider.
-func (h *HostTransactions) OpenOperationAuthorization(ctx context.Context, tx pgx.Tx, req openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+func (h *HostTransactions) OpenOperationAuthorization(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	ctx, err := h.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func (h *HostTransactions) OpenOperationAuthorization(ctx context.Context, tx pg
 }
 
 // GetOperationAuthorization observes tx's own uncommitted changes.
-func (h *HostTransactions) GetOperationAuthorization(ctx context.Context, tx pgx.Tx, operationID string) (*openrails.OperationAuthorization, error) {
+func (h *HostTransactions) GetOperationAuthorization(ctx context.Context, tx pgx.Tx, operationID string) (*billing.OperationAuthorization, error) {
 	ctx, err := h.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (h *HostTransactions) GetOperationAuthorization(ctx context.Context, tx pgx
 
 // ReleaseOperationAuthorization commits with the host's proven provider
 // non-creation fact. Billing evidence refuses it.
-func (h *HostTransactions) ReleaseOperationAuthorization(ctx context.Context, tx pgx.Tx, req openrails.ReleaseOperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+func (h *HostTransactions) ReleaseOperationAuthorization(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	ctx, err := h.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (h *HostTransactions) ReleaseOperationAuthorization(ctx context.Context, tx
 
 // RecordProviderBillingObservation appends provider evidence; eligible evidence
 // is rated and settled by OpenRails inside tx.
-func (h *HostTransactions) RecordProviderBillingObservation(ctx context.Context, tx pgx.Tx, req openrails.ProviderBillingObservationRequest) (*openrails.ProviderBillingQualification, error) {
+func (h *HostTransactions) RecordProviderBillingObservation(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
 	ctx, err := h.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -66,7 +66,7 @@ func (h *HostTransactions) RecordProviderBillingObservation(ctx context.Context,
 	return h.rt.svc.RecordProviderBillingObservationTx(ctx, tx, req)
 }
 
-func (h *HostTransactions) GetProviderBillingQualification(ctx context.Context, tx pgx.Tx, operationID string) (*openrails.ProviderBillingQualification, error) {
+func (h *HostTransactions) GetProviderBillingQualification(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {
 	ctx, err := h.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func (h *HostTransactions) bind(ctx context.Context) (context.Context, error) {
 		return ctx, fmt.Errorf("openrails embed: no merchant is bound")
 	}
 	if pinned, ok := merchant.FromContext(ctx); ok && pinned != bound {
-		return ctx, fmt.Errorf("%w: %s", openrails.ErrConflict, merchantMismatchMsg(bound, pinned))
+		return ctx, fmt.Errorf("%w: %s", billing.ErrConflict, merchantMismatchMsg(bound, pinned))
 	}
 	return merchant.WithID(ctx, bound), nil
 }

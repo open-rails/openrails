@@ -16,7 +16,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -89,7 +89,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	typedPaymentID, err := openrails.ParsePaymentID(path.PaymentID)
+	typedPaymentID, err := billing.ParsePaymentID(path.PaymentID)
 	if err != nil || typedPaymentID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
 		return
@@ -182,7 +182,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 		if err == nil && sub.Status.Live() {
 			if _, err := subscriptions.RequireProviderCancelArmed(ctx, r.State.DB, sub, false); err != nil {
 				if errors.Is(err, subscriptions.ErrProviderCancelHeld) {
-					return adminRefundCodedError(http.StatusConflict, openrails.CodeProviderCancelHeld, err.Error())
+					return adminRefundCodedError(http.StatusConflict, billing.CodeProviderCancelHeld, err.Error())
 				}
 				return err
 			}
@@ -503,7 +503,7 @@ func GetAdminPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	typedPaymentID, err := openrails.ParsePaymentID(path.PaymentID)
+	typedPaymentID, err := billing.ParsePaymentID(path.PaymentID)
 	if err != nil || typedPaymentID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
 		return
@@ -559,7 +559,7 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	typedPriceID, err := openrails.ParsePriceID(strings.TrimSpace(req.PriceID))
+	typedPriceID, err := billing.ParsePriceID(strings.TrimSpace(req.PriceID))
 	if err != nil || typedPriceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return

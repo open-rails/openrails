@@ -22,7 +22,7 @@ var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit
 // package and everything a handler, worker or the shared Client can encode.
 // Generated SQLC output is the storage layer and is skipped.
 var (
-	wireRoots    = []string{".", "pkg", "internal", "embed", "config", "permissions"}
+	wireRoots    = []string{".", "billing", "pkg", "internal", "embed", "config", "permissions"}
 	skippedTrees = map[string]bool{"internal/db/gen": true}
 )
 
@@ -135,17 +135,17 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                                           notHTTPInternalRow,
 	"internal/service/service_definition_catalog_admin.go:CatalogPage.Limit limit":                                                                   notMoneyPageSize,
 
-	"invoices.go:InvoiceDTO.Tax tax": notMoneyTaxFacts,
+	"billing/invoices.go:InvoiceDTO.Tax tax": notMoneyTaxFacts,
 
 	"internal/modules/subscriptions/stripe_tier_change.go:func parseStripeScheduleState.Price price": notHTTPProviderWire,
 
-	"invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
+	"billing/invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
 
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
-	"remote_catalog.go:CatalogPage.Limit limit": notMoneyPageSize,
+	"billing/catalog_page.go:CatalogPage.Limit limit": notMoneyPageSize,
 
-	"subscriptions.go:Page.Limit limit": notMoneyPageSize,
+	"billing/subscriptions.go:Page.Limit limit": notMoneyPageSize,
 }
 
 const (
@@ -205,10 +205,10 @@ var pendingDynamicMoney = map[string]string{
 // the test that pins its money encoding; a marshaler the struct-tag scan
 // cannot see must be pinned or it is a violation.
 var pinnedMarshalers = map[string]string{
-	"merchant_configuration.go:MerchantConfigurationApplyParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
-	"amount_map.go:AmountMap":                                    "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
-	"internal/modules/metrics/service.go:MoneyCell":              "TestResultWireEncoding — decimal string",
-	"pkg/catalog/application.go:Field":                           "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
+	"billing/merchant_configuration.go:MerchantConfigurationApplyParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
+	"billing/amount_map.go:AmountMap":                                    "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
+	"internal/modules/metrics/service.go:MoneyCell":                      "TestResultWireEncoding — decimal string",
+	"pkg/catalog/application.go:Field":                                   "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
 }
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {

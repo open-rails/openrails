@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -61,20 +61,20 @@ func ImportMerchantBilling(r *httprequest.Request) {
 		writeMerchantArchiveError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, openrails.MerchantBillingImportResult{
+	r.JSON(http.StatusOK, billing.MerchantBillingImportResult{
 		MerchantID: mid, Digest: result.Digest, Rows: result.Rows, AlreadyImported: result.Replayed,
 	})
 }
 
 func writeMerchantArchiveError(r *httprequest.Request, err error) {
 	status := http.StatusInternalServerError
-	detail := openrails.ErrorDetails{Type: "api_error", Code: "billing_archive_unavailable", Message: "billing archive operation failed"}
+	detail := billing.ErrorDetails{Type: "api_error", Code: "billing_archive_unavailable", Message: "billing archive operation failed"}
 	var oversized *http.MaxBytesError
 	var failure *merchantarchive.Error
 	switch {
 	case errors.As(err, &oversized):
 		status = http.StatusRequestEntityTooLarge
-		detail = openrails.ErrorDetails{Type: "invalid_request_error", Code: openrails.CodeRequestBodyTooLarge, Message: "billing archive exceeds its size limit"}
+		detail = billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeRequestBodyTooLarge, Message: "billing archive exceeds its size limit"}
 	case errors.As(err, &failure):
 		detail.Type = "invalid_request_error"
 		detail.Code = "billing_archive_" + failure.Code

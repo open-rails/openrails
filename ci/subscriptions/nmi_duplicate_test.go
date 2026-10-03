@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -38,25 +38,25 @@ func TestLegacyNMITierUpgradeDuplicateRefused(t *testing.T) {
 			next := w.tierPrice(group, 2, 1999, monthHours, false)
 			l := w.legacyOnTier(tp, old, 999, monthHours, 10*day)
 			w.nmi.customSchedule(l.railSub)
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
+			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			w.nmi.SetDuplicateWindow(nmiDupWindow)
 			w.nmi.AddRecentCharge(visa, wireAmount(preview.AmountDueNow))
 			sales := len(l.tierSales())
 
 			key := "up-" + uuid.NewString()
-			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
-			requireCode(t, err, http.StatusConflict, openrails.CodePaymentDuplicateRefused)
+			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
+			requireCode(t, err, http.StatusConflict, billing.CodePaymentDuplicateRefused)
 			w.settle()
-			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
-			requireCode(t, err, http.StatusConflict, openrails.CodePaymentDuplicateRefused)
+			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
+			requireCode(t, err, http.StatusConflict, billing.CodePaymentDuplicateRefused)
 			require.Len(t, l.tierSales(), sales, "nothing was charged")
 			require.Empty(t, w.nmi.ScheduleUpdates(l.railSub), "NMI's schedule is untouched")
 			require.Equal(t, old.ID, w.subscription(tp, l.sub).PriceID)
 			require.True(t, l.c.entitled(old.ent))
 
 			w.advance(nmiDupWindow + time.Second)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: next.ID})
+			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: next.ID})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -80,7 +80,7 @@ func TestLegacyNMITierUpgradeLostDuplicateSettles(t *testing.T) {
 	next := w.tierPrice(group, 2, 1999, monthHours, false)
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	w.nmi.customSchedule(l.railSub)
-	preview, err := w.client[embedded].PreviewTierChange(t.Context(), l.sub, openrails.ChangeTierRequest{PriceID: next.ID})
+	preview, err := w.client[embedded].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierRequest{PriceID: next.ID})
 	require.NoError(t, err)
 	w.nmi.SetDuplicateWindow(nmiDupWindow)
 	w.nmi.AddRecentCharge(visa, wireAmount(preview.AmountDueNow))
@@ -88,15 +88,15 @@ func TestLegacyNMITierUpgradeLostDuplicateSettles(t *testing.T) {
 	sales := len(l.tierSales())
 
 	key := "up-" + uuid.NewString()
-	done, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
+	done, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
 	require.NoError(t, err)
 	require.Equal(t, "processing", done.Status, "%+v", done)
 	w.until(func() bool {
-		_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
+		_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
 		return err != nil
 	}, "the unsettled proration resolves from NMI's record")
-	_, err = w.client[embedded].ChangeTier(t.Context(), l.sub, key, openrails.ChangeTierRequest{PriceID: next.ID})
-	requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRefused)
+	_, err = w.client[embedded].ChangeTier(t.Context(), l.sub, key, billing.ChangeTierRequest{PriceID: next.ID})
+	requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRefused)
 	require.Len(t, l.tierSales(), sales, "nothing was charged")
 	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
 	require.Empty(t, w.openFindings("life.tier_change.proration_unresolved"))
@@ -113,14 +113,14 @@ func TestEngineTierUpgradeDuplicateRefused(t *testing.T) {
 	to := w.tierPrice(group, 2, 2000, 720, false)
 	_, sub := w.engineMember("nmi", embedded, from)
 	w.advance(w.subscription(embedded, sub).CurrentPeriodEndsAt.Sub(w.clock.Now()) - 360*time.Hour)
-	preview, err := w.client[embedded].PreviewTierChange(t.Context(), sub, openrails.ChangeTierRequest{PriceID: to.ID})
+	preview, err := w.client[embedded].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: to.ID})
 	require.NoError(t, err)
 	w.nmi.SetDuplicateWindow(nmiDupWindow)
 	w.nmi.AddRecentCharge(visa, wireAmount(preview.AmountDueNow))
 	charges := len(w.nmi.ledger(""))
 
-	_, err = w.client[embedded].ChangeTier(t.Context(), sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: to.ID})
-	var statusErr *openrails.StatusError
+	_, err = w.client[embedded].ChangeTier(t.Context(), sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: to.ID})
+	var statusErr *billing.StatusError
 	require.ErrorAs(t, err, &statusErr)
 	require.Equal(t, http.StatusConflict, statusErr.Status, "%v", err)
 	w.settle()
@@ -128,7 +128,7 @@ func TestEngineTierUpgradeDuplicateRefused(t *testing.T) {
 	require.Equal(t, from.ID, w.subscription(embedded, sub).PriceID)
 
 	w.advance(nmiDupWindow + time.Second)
-	done, err := w.client[embedded].ChangeTier(t.Context(), sub, "up-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: to.ID})
+	done, err := w.client[embedded].ChangeTier(t.Context(), sub, "up-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: to.ID})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", done.Status, "%+v", done)
 	require.Len(t, w.nmi.ledger(""), charges+1)
@@ -145,7 +145,7 @@ func TestNMICardSaveDuplicateRefused(t *testing.T) {
 	before := len(w.nmi.Vaults())
 	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"provider": "nmi", "psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "name_on_card": "E2E Payer"})
 	require.Equal(t, http.StatusConflict, status, "%v", body)
-	require.Equal(t, openrails.CodePaymentDuplicateRefused, errorCode(body), "%v", body)
+	require.Equal(t, billing.CodePaymentDuplicateRefused, errorCode(body), "%v", body)
 	after := len(w.nmi.Vaults())
 	require.Equal(t, before, after, "the refused card's vault is removed")
 	w.advance(nmiDupWindow + time.Second)

@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -20,10 +20,10 @@ import (
 
 // activeEntitlement is one active entitlement window: the entitlement string
 // (lookup_key) plus its window/source fields. source_id is the source's own
-// wire id (openrails.SourceRef), as on EntitlementRecord.
+// wire id (billing.SourceRef), as on EntitlementRecord.
 type activeEntitlement struct {
 	ID         uuid.UUID                    `json:"id"`
-	CustomerID openrails.CustomerID         `json:"customer_id"`
+	CustomerID billing.CustomerID           `json:"customer_id"`
 	LookupKey  string                       `json:"lookup_key"`
 	StartAt    time.Time                    `json:"start_at"`
 	EndAt      *time.Time                   `json:"end_at,omitempty"`
@@ -60,14 +60,14 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 	for _, w := range windows {
 		item := activeEntitlement{
 			ID:         w.ID,
-			CustomerID: openrails.CustomerID(w.CustomerID),
+			CustomerID: billing.CustomerID(w.CustomerID),
 			LookupKey:  w.Entitlement,
 			StartAt:    w.StartAt,
 			EndAt:      w.EndAt,
 			SourceType: w.SourceType,
 		}
 		if w.SourceID != nil {
-			item.SourceID = openrails.SourceRef(string(w.SourceType), w.SourceID.String())
+			item.SourceID = billing.SourceRef(string(w.SourceType), w.SourceID.String())
 		}
 		items = append(items, item)
 	}
@@ -97,8 +97,8 @@ type effectiveTierBody struct {
 }
 
 type effectiveTierRef struct {
-	ID  openrails.ProductID `json:"id"`
-	Key string              `json:"key"`
+	ID  billing.ProductID `json:"id"`
+	Key string            `json:"key"`
 }
 
 // GetMyTier resolves THE effective tier for the authenticated user within one
@@ -139,7 +139,7 @@ func GetMyTier(r *httprequest.Request) {
 			DisplayName: tier.ProductDisplayName,
 			TierRank:    tier.TierRank,
 			Product: effectiveTierRef{
-				ID:  openrails.ProductID(tier.ProductID),
+				ID:  billing.ProductID(tier.ProductID),
 				Key: tier.ProductKey,
 			},
 		}

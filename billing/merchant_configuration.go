@@ -1,4 +1,4 @@
-package openrails
+package billing
 
 import "encoding/json"
 

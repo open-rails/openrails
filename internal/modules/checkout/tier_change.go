@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -85,14 +85,14 @@ func (e *TierChangeError) Is(target error) bool {
 // Idempotency-Key before anything is admitted or mutated: the key is the only
 // handle a client has to read back a lost response.
 func tierChangeKeyRequired() error {
-	return &TierChangeError{HTTPStatus: http.StatusBadRequest, Code: openrails.CodeTierChangeIdempotencyKeyRequired, Message: "Idempotency-Key is required for a tier change"}
+	return &TierChangeError{HTTPStatus: http.StatusBadRequest, Code: billing.CodeTierChangeIdempotencyKeyRequired, Message: "Idempotency-Key is required for a tier change"}
 }
 
 // tierChangeIdempotencyConflict refuses a key that already names a different
 // tier change (another customer, subscription or target). It never carries
 // that operation's result or identity.
 func tierChangeIdempotencyConflict() error {
-	return &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeIdempotencyConflict, Message: "Idempotency-Key already names a different tier change; use a new key"}
+	return &TierChangeError{HTTPStatus: http.StatusConflict, Code: billing.CodeTierChangeIdempotencyConflict, Message: "Idempotency-Key already names a different tier change; use a new key"}
 }
 
 // TierChangeInFlightError: an unresolved tier change already owns the

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -33,10 +33,10 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		ResponseCodes: q.list("response_code"), CardEntries: q.list("card_entry"), Sources: q.list("source"), ObservedVias: q.list("observed_via"),
 		AvsResults: q.list("avs_result"), CvvResults: q.list("cvv_result"), PspID: q.uuid("psp_id"), CustomerID: q.uuid("customer_id"),
 		CheckoutID: q.uuid("checkout_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
-			id, err := openrails.ParseSubscriptionID(s)
+			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
 		}), CycleID: q.typed("cycle_id", func(s string) (uuid.UUID, error) {
-			id, err := openrails.ParseRebillCycleID(s)
+			id, err := billing.ParseRebillCycleID(s)
 			return id.UUID(), err
 		}), Since: q.time("since"), Until: q.time("until"),
 	}
@@ -50,7 +50,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		r.InternalError("payment attempts could not be listed", err)
 		return
 	}
-	out := openrails.Page[openrails.PaymentAttempt]{Object: "list", Data: make([]openrails.PaymentAttempt, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
+	out := billing.Page[billing.PaymentAttempt]{Object: "list", Data: make([]billing.PaymentAttempt, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
 	for _, row := range rows {
 		out.Data = append(out.Data, paymentAttemptToAPI(row.OpenrailsPaymentAttempt))
 		out.Total = row.Total
@@ -67,7 +67,7 @@ func GetPaymentAttempt(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	id, err := openrails.ParsePaymentAttemptID(r.Param("id"))
+	id, err := billing.ParsePaymentAttemptID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment attempt id")
 		return
@@ -107,7 +107,7 @@ func ListRebillCycles(r *httprequest.Request) {
 	params := gen.ListRebillCyclesParams{
 		MerchantID: mid, Now: now, Owners: q.list("owner"), FirstOutcomes: q.list("first_outcome"), MissReasons: q.list("miss_reason"), Outcomes: outcomes,
 		PspID: q.uuid("psp_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
-			id, err := openrails.ParseSubscriptionID(s)
+			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
 		}), DueSince: q.time("due_since"), DueUntil: q.time("due_until"),
 	}
@@ -121,7 +121,7 @@ func ListRebillCycles(r *httprequest.Request) {
 		r.InternalError("rebill cycles could not be listed", err)
 		return
 	}
-	out := openrails.Page[openrails.RebillCycle]{Object: "list", Data: make([]openrails.RebillCycle, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
+	out := billing.Page[billing.RebillCycle]{Object: "list", Data: make([]billing.RebillCycle, 0, len(rows)), Limit: int(params.PageLimit), Offset: int(params.PageOffset)}
 	for _, row := range rows {
 		out.Data = append(out.Data, rebillCycleToAPI(row.OpenrailsRebillCycleFact, now))
 		out.Total = row.Total
@@ -138,7 +138,7 @@ func GetRebillCycle(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	id, err := openrails.ParseRebillCycleID(r.Param("id"))
+	id, err := billing.ParseRebillCycleID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid rebill cycle id")
 		return
@@ -179,10 +179,10 @@ func readScope(r *httprequest.Request) (uuid.UUID, bool) {
 	return mid.UUID(), true
 }
 
-func paymentAttemptToAPI(a gen.OpenrailsPaymentAttempt) openrails.PaymentAttempt {
-	out := openrails.PaymentAttempt{
-		ID: openrails.PaymentAttemptID(a.ID), Object: "payment_attempt", Kind: a.Kind, Owner: a.Owner, CardEntry: a.CardEntry,
-		Source: a.Source, ObservedVia: a.ObservedVia, Category: a.Category, Reason: openrails.DeclineReason(normalize.FromPtr(a.Reason)),
+func paymentAttemptToAPI(a gen.OpenrailsPaymentAttempt) billing.PaymentAttempt {
+	out := billing.PaymentAttempt{
+		ID: billing.PaymentAttemptID(a.ID), Object: "payment_attempt", Kind: a.Kind, Owner: a.Owner, CardEntry: a.CardEntry,
+		Source: a.Source, ObservedVia: a.ObservedVia, Category: a.Category, Reason: billing.DeclineReason(normalize.FromPtr(a.Reason)),
 		Action: normalize.FromPtr(a.Action), ResponseCode: normalize.FromPtr(a.ResponseCode), ResponseText: normalize.FromPtr(a.ResponseText),
 		IssuerCode: normalize.FromPtr(a.IssuerCode), IssuerText: normalize.FromPtr(a.IssuerText), AVSResult: normalize.FromPtr(a.AvsResult),
 		CVVResult: normalize.FromPtr(a.CvvResult), CardBrand: normalize.FromPtr(a.CardBrand), CardLast4: normalize.FromPtr(a.CardLast4),
@@ -194,27 +194,27 @@ func paymentAttemptToAPI(a gen.OpenrailsPaymentAttempt) openrails.PaymentAttempt
 		out.CheckoutID = a.CheckoutID.String()
 	}
 	if a.CycleID != nil {
-		id := openrails.RebillCycleID(*a.CycleID)
+		id := billing.RebillCycleID(*a.CycleID)
 		out.CycleID = &id
 	}
 	if a.SubscriptionID != nil {
-		id := openrails.SubscriptionID(*a.SubscriptionID)
+		id := billing.SubscriptionID(*a.SubscriptionID)
 		out.SubscriptionID = &id
 	}
 	if a.PaymentMethodID != nil {
-		id := openrails.PaymentMethodID(*a.PaymentMethodID)
+		id := billing.PaymentMethodID(*a.PaymentMethodID)
 		out.PaymentMethodID = &id
 	}
 	if a.PaymentID != nil {
-		id := openrails.PaymentID(*a.PaymentID)
+		id := billing.PaymentID(*a.PaymentID)
 		out.PaymentID = &id
 	}
 	return out
 }
 
-func rebillCycleToAPI(c gen.OpenrailsRebillCycleFact, now time.Time) openrails.RebillCycle {
-	out := openrails.RebillCycle{
-		ID: openrails.RebillCycleID(c.ID), Object: "rebill_cycle", SubscriptionID: openrails.SubscriptionID(c.SubscriptionID),
+func rebillCycleToAPI(c gen.OpenrailsRebillCycleFact, now time.Time) billing.RebillCycle {
+	out := billing.RebillCycle{
+		ID: billing.RebillCycleID(c.ID), Object: "rebill_cycle", SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
 		CustomerID: c.CustomerID.String(), PSPID: c.PspID.String(), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
 		Currency: c.Currency, FirstOutcome: c.FirstOutcome, MissedAt: c.MissedAt, MissReason: normalize.FromPtr(c.MissReason),
 		CollectedAt: c.WonAt, RecoveredBy: c.RecoveredBy, ClosesAt: c.ClosedAt,

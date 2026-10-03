@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -68,13 +68,13 @@ func GetMyBalance(r *httprequest.Request) {
 }
 
 type collectionPaymentMethodRequest struct {
-	Currency        string                    `json:"currency"`
-	PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
+	Currency        string                  `json:"currency"`
+	PaymentMethodID billing.PaymentMethodID `json:"payment_method_id"`
 }
 
 type collectionPaymentMethodResponse struct {
-	Currency        string                    `json:"currency"`
-	PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
+	Currency        string                  `json:"currency"`
+	PaymentMethodID billing.PaymentMethodID `json:"payment_method_id"`
 }
 
 // SetMyCollectionPaymentMethod (PUT .../collection-payment-method) selects the

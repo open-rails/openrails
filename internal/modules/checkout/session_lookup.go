@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -70,7 +70,7 @@ func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *Checkou
 		if terminalCheckoutStatus(response.Status) {
 			return &CheckoutSessionResponse{Object: response.Object, ID: response.ID, Status: response.Status}, nil
 		}
-		return nil, openrails.ErrIdempotencyKeyReused
+		return nil, billing.ErrIdempotencyKeyReused
 	}
 	return response, nil
 }

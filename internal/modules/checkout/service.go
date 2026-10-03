@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -47,13 +47,13 @@ import (
 
 // TierChangeResponse represents the response from a tier change operation.
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
-type TierChangeResponse = openrails.TierChangeResponse
+type TierChangeResponse = billing.TierChangeResponse
 
 // TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
 // reports what a confirm WOULD charge now and at the next renewal, without
 // touching Stripe or the local subscription. The frontend renders it as a
 // "Right now: $X / On <date>: $Y" confirmation before calling change-tier.
-type TierChangePreviewResponse = openrails.TierChangePreviewResponse
+type TierChangePreviewResponse = billing.TierChangePreviewResponse
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
@@ -1175,7 +1175,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 		if err != nil {
 			return "", err
 		}
-		id, err := openrails.ParseCheckoutSessionID(params.CheckoutSessionID)
+		id, err := billing.ParseCheckoutSessionID(params.CheckoutSessionID)
 		if err != nil {
 			return "", err
 		}
@@ -1481,7 +1481,7 @@ func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChange
 	now := s.now()
 	resp := &TierChangePreviewResponse{
 		Object:           "tier_change_preview",
-		PriceID:          (openrails.PriceID(newPrice.ID)).String(),
+		PriceID:          (billing.PriceID(newPrice.ID)).String(),
 		Rail:             rail,
 		Currency:         newPrice.Currency,
 		NextChargeAmount: newPrice.Amount,
@@ -1643,7 +1643,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	if existingSub.ScheduledPriceID != nil {
 		return &TierChangeResponse{
 			Object: "tier_change", Status: "blocked", Mode: "tier_change", Action: action,
-			PriceID: (openrails.PriceID(newPrice.ID)).String(), Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
+			PriceID: (billing.PriceID(newPrice.ID)).String(), Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
@@ -1744,7 +1744,7 @@ func (s *CheckoutService) processTierChangeSolana(
 	}
 
 	subID := existingSub.ID
-	subIDStr := openrails.SubscriptionID(subID)
+	subIDStr := billing.SubscriptionID(subID)
 
 	// Solana tier changes are a single ATOMIC on-chain transaction the subscriber
 	// signs (cancel-old + subscribe-new [+ prorated transfer for an upgrade]), so
@@ -1771,7 +1771,7 @@ func (s *CheckoutService) processTierChangeSolana(
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        (openrails.PriceID(newPrice.ID)).String(),
+		PriceID:        (billing.PriceID(newPrice.ID)).String(),
 		Payment:        CheckoutSessionPaymentResponse{Rail: "solana"},
 		SubscriptionID: &subIDStr,
 		Message:        msg,
@@ -1797,7 +1797,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Status:  "blocked",
 			Mode:    "tier_change",
 			Action:  action,
-			PriceID: (openrails.PriceID(newPrice.ID)).String(),
+			PriceID: (billing.PriceID(newPrice.ID)).String(),
 			Payment: CheckoutSessionPaymentResponse{Rail: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
@@ -1810,13 +1810,13 @@ func (s *CheckoutService) processTierChangeCCBill(
 	}
 
 	// Map to TierChangeResponse
-	subID := openrails.SubscriptionID(existingSub.ID)
+	subID := billing.SubscriptionID(existingSub.ID)
 	resp := &TierChangeResponse{
 		Object:         "tier_change",
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        (openrails.PriceID(newPrice.ID)).String(),
+		PriceID:        (billing.PriceID(newPrice.ID)).String(),
 		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
 		Payment: CheckoutSessionPaymentResponse{

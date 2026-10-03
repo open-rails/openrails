@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 func requireFixture(t *testing.T, name string, value any) []byte {
@@ -25,54 +27,54 @@ func requireFixture(t *testing.T, name string, value any) []byte {
 }
 
 func TestCurrencyRegistry(t *testing.T) {
-	requireFixture(t, "currencies.json", CurrencyRegistry{Object: "currencies", Currencies: Currencies()})
-	usd, ok := LookupCurrency(" usd ")
+	requireFixture(t, "currencies.json", billing.CurrencyRegistry{Object: "currencies", Currencies: billing.Currencies()})
+	usd, ok := billing.LookupCurrency(" usd ")
 	require.True(t, ok)
-	require.Equal(t, CurrencyUnits{Code: "USD", Decimals: 6, MinorDecimals: 2}, usd)
+	require.Equal(t, billing.CurrencyUnits{Code: "USD", Decimals: 6, MinorDecimals: 2}, usd)
 	require.Equal(t, 4, usd.NativeShift())
-	jpy, _ := LookupCurrency("JPY")
+	jpy, _ := billing.LookupCurrency("JPY")
 	require.Equal(t, 4, jpy.NativeShift(), "zero-decimal rails still scale into native units")
-	_, ok = LookupCurrency("XYZ")
+	_, ok = billing.LookupCurrency("XYZ")
 	require.False(t, ok, "a scale is never guessed")
 }
 
 func TestHostedCheckoutPlanStampsRegistryScale(t *testing.T) {
 	hours := 720
-	product := &Product{ID: ProductID(uuid.New()).String(), DisplayName: "Premium"}
-	price := &Price{ID: PriceID(uuid.New()).String(), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
-	plan, err := NewHostedCheckoutPlan(product, price)
+	product := &billing.Product{ID: billing.ProductID(uuid.New()).String(), DisplayName: "Premium"}
+	price := &billing.Price{ID: billing.PriceID(uuid.New()).String(), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
+	plan, err := billing.NewHostedCheckoutPlan(product, price)
 	require.NoError(t, err)
-	require.Equal(t, HostedCheckoutPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, PeriodHours: &hours, AutomaticallyRenews: true}, plan)
+	require.Equal(t, billing.HostedCheckoutPlan{DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, PeriodHours: &hours, AutomaticallyRenews: true}, plan)
 	raw, err := json.Marshal(plan)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"unit_amount":"9223372036854775807"`)
 	for _, bad := range []struct {
-		product *Product
-		price   *Price
-	}{{nil, price}, {product, nil}, {product, &Price{Currency: "XYZ"}}} {
-		_, err := NewHostedCheckoutPlan(bad.product, bad.price)
-		require.ErrorIs(t, err, ErrInvalid)
+		product *billing.Product
+		price   *billing.Price
+	}{{nil, price}, {product, nil}, {product, &billing.Price{Currency: "XYZ"}}} {
+		_, err := billing.NewHostedCheckoutPlan(bad.product, bad.price)
+		require.ErrorIs(t, err, billing.ErrInvalid)
 	}
 	// OpenRails advertises the browser driver per option (#1078); an option
 	// no browser can drive carries none.
-	option := CheckoutRailOption{Selector: "solana", PSPID: "psp", Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
+	option := billing.CheckoutRailOption{Selector: "solana", PSPID: "psp", Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
 	raw, err = json.Marshal(option)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"selector":"solana","psp_id":"psp","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
-	raw, err = json.Marshal(CheckoutRailOption{Selector: "stripe", PSPID: "psp", Rail: "stripe", Mode: "subscription"})
+	raw, err = json.Marshal(billing.CheckoutRailOption{Selector: "stripe", PSPID: "psp", Rail: "stripe", Mode: "subscription"})
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "driver")
 }
 
 func TestInvoiceMoneyWireIsLossless(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, 0, 9007199254740993, math.MaxInt64} {
-		invoice := InvoiceDTO{AmountDue: amount, TotalAmount: amount, MoneyMovements: AmountMap{"deposit": amount}, LineItems: []InvoiceLineItemDTO{{Amount: amount}}}
+		invoice := billing.InvoiceDTO{AmountDue: amount, TotalAmount: amount, MoneyMovements: billing.AmountMap{"deposit": amount}, LineItems: []billing.InvoiceLineItemDTO{{Amount: amount}}}
 		raw, err := json.Marshal(invoice)
 		require.NoError(t, err)
 		var browser map[string]any
 		require.NoError(t, json.Unmarshal(raw, &browser))
 		require.IsType(t, "", browser["amount_due"])
-		var read InvoiceDTO
+		var read billing.InvoiceDTO
 		require.NoError(t, json.Unmarshal(raw, &read))
 		require.Equal(t, invoice.AmountDue, read.AmountDue)
 		require.Equal(t, invoice.TotalAmount, read.TotalAmount)
@@ -80,7 +82,7 @@ func TestInvoiceMoneyWireIsLossless(t *testing.T) {
 		require.Equal(t, amount, read.LineItems[0].Amount)
 	}
 	for _, raw := range []string{`{"deposit":9007199254740993}`, `{"deposit":"9223372036854775808"}`, `{"deposit":"1.5"}`} {
-		var out AmountMap
+		var out billing.AmountMap
 		require.Error(t, json.Unmarshal([]byte(raw), &out), raw)
 	}
 }
@@ -89,28 +91,28 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 	when := time.Date(2026, 9, 16, 12, 0, 0, 123456000, time.UTC)
 	cost, rated := int64(math.MaxInt64), int64(math.MaxInt64)
 	body := []byte(`{"contract":"openrails/pass-through-provider-cost"}`)
-	digest := SHA256(sha256.Sum256(body))
+	digest := billing.SHA256(sha256.Sum256(body))
 	merchantID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	value := ProviderBillingQualification{
+	value := billing.ProviderBillingQualification{
 		OperationID: "rental/create", MerchantID: merchantID,
-		Lifecycle: ProviderBillingLifecycleEvidence{
+		Lifecycle: billing.ProviderBillingLifecycleEvidence{
 			Provider: "runpod", ProviderResourceID: "pod-1",
 			ProviderLifetimeStart: when.Add(-2 * time.Hour), ProviderLifetimeEnd: when.Add(-time.Hour),
 			ProviderAbsentAt: when, ProviderAbsenceReference: "absence:1", BillingStopReference: "stop:1",
 			WindowsClosedAt: when, WindowsClosedReference: "windows:1", LifecycleEvidenceBody: []byte(`{}`),
 		},
-		LifecycleEvidenceSHA256: SHA256(sha256.Sum256([]byte(`{}`))),
+		LifecycleEvidenceSHA256: billing.SHA256(sha256.Sum256([]byte(`{}`))),
 		QuiescenceSeconds:       86400,
-		State:                   ProviderBillingQualificationEligible,
-		Reason:                  ProviderBillingEligible,
+		State:                   billing.ProviderBillingQualificationEligible,
+		Reason:                  billing.ProviderBillingEligible,
 		BaselineObservationID:   "obs-1", QualifiedObservationID: "obs-2",
 		QualifiedProviderCostUSDMicros: &cost,
 		QualifiedAt:                    &when,
-		Authorization: OperationAuthorization{
+		Authorization: billing.OperationAuthorization{
 			OperationID: "rental/create", MerchantID: merchantID,
-			Payer: CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
+			Payer: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
 			AuthorizedUSDMicros: math.MaxInt64, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
-			AuthorizationBodySHA256: SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: OperationAuthorizationSettled,
+			AuthorizationBodySHA256: billing.SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: billing.OperationAuthorizationSettled,
 			TerminalReference: "sha256:" + digest.String(), SettlementProviderCostUSDMicros: &cost,
 			SettlementRatedUSDMicros: &rated, SettlementBody: body, SettlementBodySHA256: &digest,
 			CreatedAt: when, SettledAt: &when,
@@ -118,21 +120,21 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 		CreatedAt: when, UpdatedAt: when,
 	}
 	raw := requireFixture(t, "provider_billing_qualification.json", value)
-	var got ProviderBillingQualification
+	var got billing.ProviderBillingQualification
 	require.NoError(t, json.Unmarshal(raw, &got))
 	require.True(t, reflect.DeepEqual(value, got), "qualification lost precision or null semantics: %#v", got)
 
-	open := OperationAuthorization{State: OperationAuthorizationOpen, CreatedAt: when}
+	open := billing.OperationAuthorization{State: billing.OperationAuthorizationOpen, CreatedAt: when}
 	raw, err := json.Marshal(open)
 	require.NoError(t, err)
 	for _, field := range []string{`"settlement_rated_usd_micros":null`, `"settlement_body":null`, `"settlement_body_sha256":null`} {
 		require.Contains(t, string(raw), field, "unsettled authorization must encode explicit nulls")
 	}
-	var openGot OperationAuthorization
+	var openGot billing.OperationAuthorization
 	require.NoError(t, json.Unmarshal(raw, &openGot))
 	require.True(t, reflect.DeepEqual(open, openGot))
 
-	var d SHA256
+	var d billing.SHA256
 	valid := strings.Repeat("ab", sha256.Size)
 	require.NoError(t, d.UnmarshalText([]byte(valid)))
 	require.Equal(t, valid, d.String())
@@ -163,7 +165,7 @@ func TestProviderObligationRequestsCarryNoRatedAmount(t *testing.T) {
 			walk(field.Type, path+"."+field.Name)
 		}
 	}
-	for _, request := range []any{OperationAuthorizationRequest{}, ReleaseOperationAuthorizationRequest{}, ProviderBillingObservationRequest{}} {
+	for _, request := range []any{billing.OperationAuthorizationRequest{}, billing.ReleaseOperationAuthorizationRequest{}, billing.ProviderBillingObservationRequest{}} {
 		walk(reflect.TypeOf(request), reflect.TypeOf(request).Name())
 	}
 }
@@ -174,13 +176,13 @@ func TestProviderOperationPathIsOneSegment(t *testing.T) {
 	require.Equal(t, "/v1/merchant/provider-operations/rental%2F1%3F%23%25%2Fcreate", path)
 	for _, id := range []string{"", " ", ".", "..", " x"} {
 		_, err := providerOperationPath(id)
-		require.ErrorIs(t, err, ErrInvalid, "%q", id)
+		require.ErrorIs(t, err, billing.ErrInvalid, "%q", id)
 	}
 }
 
 func TestMerchantConfigurationDocument(t *testing.T) {
 	valid := "application_id: initial\nexpected_revision: revision\ndisplay_name: Shop\nsettings:\n  profile:\n    support_url: https://help.example.test\n"
-	params, err := ParseMerchantConfigurationYAML([]byte(valid))
+	params, err := billing.ParseMerchantConfigurationYAML([]byte(valid))
 	require.NoError(t, err)
 	require.Equal(t, "https://help.example.test", params.Settings.Profile.SupportURL)
 	for _, document := range []string{
@@ -189,38 +191,38 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 		valid + "other: &anchor value\n",
 		valid + "---\napplication_id: extra\n",
 		"application_id: missing-revision\n",
-		strings.Repeat(" ", MaxMerchantConfigurationBytes+1),
+		strings.Repeat(" ", billing.MaxMerchantConfigurationBytes+1),
 		`{"application_id":"a","application_id":"b","expected_revision":"r"}`,
 		`{"application_id":"a","expected_revision":"r","settings":{"profile":{"unknown":1}}}`,
 	} {
-		_, err := ParseMerchantConfigurationYAML([]byte(document))
+		_, err := billing.ParseMerchantConfigurationYAML([]byte(document))
 		require.Error(t, err, document)
 	}
-	_, err = ParseMerchantConfigurationJSON([]byte(`{"application_id":"a","application_id":"b","expected_revision":"r"}`))
+	_, err = billing.ParseMerchantConfigurationJSON([]byte(`{"application_id":"a","application_id":"b","expected_revision":"r"}`))
 	require.Error(t, err)
 }
 
 // Explicit empty lists mean "clear"; absent lists mean "unchanged".
 func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	revision, amount := "before", int64(9007199254740993)
-	params := MerchantConfigurationApplyParams{ApplicationID: "clear", ExpectedRevision: &revision, Settings: &MerchantSettings{
+	params := billing.MerchantConfigurationApplyParams{ApplicationID: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 		InvoiceCollectionThreshold: &amount,
-		BillingPolicies:            []BillingPolicyInput{}, BillingPolicyBindings: []BillingPolicyBindingInput{}, DelegatedInvokerWastedSpendLimits: []BudgetWindowInput{},
+		BillingPolicies:            []billing.BillingPolicyInput{}, BillingPolicyBindings: []billing.BillingPolicyBindingInput{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindowInput{},
 	}}
 	body, err := json.Marshal(params)
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"collection_threshold":"9007199254740993"`)
-	decoded, err := ParseMerchantConfigurationJSON(body)
+	decoded, err := billing.ParseMerchantConfigurationJSON(body)
 	require.NoError(t, err)
 	require.Equal(t, amount, *decoded.Settings.InvoiceCollectionThreshold)
 	require.NotNil(t, decoded.Settings.BillingPolicies)
 	require.NotNil(t, decoded.Settings.BillingPolicyBindings)
 	require.NotNil(t, decoded.Settings.DelegatedInvokerWastedSpendLimits)
 
-	params.Settings = &MerchantSettings{}
+	params.Settings = &billing.MerchantSettings{}
 	body, err = json.Marshal(params)
 	require.NoError(t, err)
-	decoded, err = ParseMerchantConfigurationJSON(body)
+	decoded, err = billing.ParseMerchantConfigurationJSON(body)
 	require.NoError(t, err)
 	require.Nil(t, decoded.Settings.BillingPolicies)
 }

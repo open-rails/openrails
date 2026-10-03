@@ -45,7 +45,7 @@ in #983/#1002 before the final freeze.
 
 A host that sells through the `openrails-checkout` browser package serves that
 package one session document (`GET .../checkout/sessions/{id}`) and accepts
-its pay request. The Go shape is `openrails.HostedCheckoutSession` (with
+its pay request. The Go shape is `billing.HostedCheckoutSession` (with
 `HostedCheckoutPayRequest`/`HostedCheckoutPayResult`); the canonical fixture
 is `testdata/wire/hosted_checkout_session.json` and the package decodes the
 same file. The host owns the session (id, expiry, attempts, Redis or SQL);
@@ -54,8 +54,8 @@ OpenRails owns the shape so every host renders the same checkout.
 Money is exact: `plan.unit_amount`, `line_items[].amount`, `tax` and
 `due_today` are int64 decimal strings of `plan.currency`'s native unit, and
 `plan.unit_decimals` is that currency's registered scale. Build the plan with
-`openrails.NewHostedCheckoutPlan(product, price)`, which stamps the scale from
-the registry (`openrails.LookupCurrency`, the same table as
+`billing.NewHostedCheckoutPlan(product, price)`, which stamps the scale from
+the registry (`billing.LookupCurrency`, the same table as
 `GET /v1/currencies`) and refuses an unregistered currency; never hardcode a
 scale. `ListCheckoutRailOptions` lists exactly the armed PSPs whose rail can
 make this sale, each with its browser `driver` and `public_config`; copy them

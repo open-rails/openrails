@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // newTestRemote serves h and returns a client with a static key and a default merchant.
@@ -44,7 +46,7 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 		"blank key":                {WithAPIKey("  ")},
 		"nil credential provider":  {WithCredentialProvider(nil)},
 		"nil token provider":       {WithTokenProvider(nil)},
-		"zero merchant ID":         {WithAPIKey("k"), WithMerchantID(MerchantID{})},
+		"zero merchant ID":         {WithAPIKey("k"), WithMerchantID(billing.MerchantID{})},
 		"empty default merchant":   {WithAPIKey("k"), WithDefaultMerchant("")},
 		"invalid default merchant": {WithAPIKey("k"), WithDefaultMerchant("a/b")},
 	} {
@@ -53,7 +55,7 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 		require.Nil(t, client, name)
 	}
 	_, err := NewRemote("https://openrails.test", WithAPIKey("k"), WithDefaultMerchant(""))
-	require.ErrorIs(t, err, ErrInvalid)
+	require.ErrorIs(t, err, billing.ErrInvalid)
 
 	var seen atomic.Value
 	client := newTestRemote(t, func(w http.ResponseWriter, r *http.Request) {
@@ -73,42 +75,42 @@ func TestClientDecodesTheErrorEnvelope(t *testing.T) {
 	cases := []struct {
 		name    string
 		resp    response
-		want    ErrorDetails
+		want    billing.ErrorDetails
 		retry   string
 		classes []error
 	}{{
 		name: "canonical envelope keeps exact metadata and proxy headers",
 		resp: response{http.StatusConflict, map[string]string{"X-Request-ID": "header-request", "Retry-After": "12"},
 			`{"error":{"type":"invalid_request_error","code":"idempotency_key_reused","message":"These terms differ","param":"amount","metadata":{"original_amount":9223372036854775807,"nested":{"minimum":-9223372036854775808}}}}`},
-		want: ErrorDetails{Type: "invalid_request_error", Code: "idempotency_key_reused", Message: "These terms differ", RequestID: "header-request", Param: new("amount"),
+		want: billing.ErrorDetails{Type: "invalid_request_error", Code: "idempotency_key_reused", Message: "These terms differ", RequestID: "header-request", Param: new("amount"),
 			Metadata: map[string]any{"original_amount": json.Number("9223372036854775807"), "nested": map[string]any{"minimum": json.Number("-9223372036854775808")}}},
 		retry:   "12",
-		classes: []error{ErrConflict, ErrIdempotencyKeyReused},
+		classes: []error{billing.ErrConflict, billing.ErrIdempotencyKeyReused},
 	}, {
 		name:    "body request id wins over the header",
 		resp:    response{http.StatusNotFound, map[string]string{"X-Request-ID": "header"}, `{"error":{"type":"invalid_request_error","code":"resource_missing","message":"gone","request_id":"body"}}`},
-		want:    ErrorDetails{Type: "invalid_request_error", Code: "resource_missing", Message: "gone", RequestID: "body"},
-		classes: []error{ErrNotFound},
+		want:    billing.ErrorDetails{Type: "invalid_request_error", Code: "resource_missing", Message: "gone", RequestID: "body"},
+		classes: []error{billing.ErrNotFound},
 	}, {
 		name:    "foreign proxy page is a one-line excerpt without a code",
 		resp:    response{http.StatusBadGateway, nil, "<html>\n\t<body>Bad Gateway\r\n  detail </body>\n</html>"},
-		want:    ErrorDetails{Message: "<html> <body>Bad Gateway detail </body> </html>"},
-		classes: []error{ErrInternal, ErrUnreachable},
+		want:    billing.ErrorDetails{Message: "<html> <body>Bad Gateway detail </body> </html>"},
+		classes: []error{billing.ErrInternal, billing.ErrUnreachable},
 	}, {
 		name:    "retired top-level shape is opaque",
 		resp:    response{http.StatusBadRequest, nil, `{"code":"insufficient_credits","message":"m"}`},
-		want:    ErrorDetails{Message: `{"code":"insufficient_credits","message":"m"}`},
-		classes: []error{ErrInvalid},
+		want:    billing.ErrorDetails{Message: `{"code":"insufficient_credits","message":"m"}`},
+		classes: []error{billing.ErrInvalid},
 	}, {
 		name:    "envelope with trailing data is opaque",
 		resp:    response{http.StatusPaymentRequired, nil, `{"error":{"code":"insufficient_credits"}} {}`},
-		want:    ErrorDetails{Message: `{"error":{"code":"insufficient_credits"}} {}`},
-		classes: []error{ErrPaymentRefused},
+		want:    billing.ErrorDetails{Message: `{"error":{"code":"insufficient_credits"}} {}`},
+		classes: []error{billing.ErrPaymentRefused},
 	}, {
 		name:    "empty body",
 		resp:    response{http.StatusServiceUnavailable, map[string]string{"Retry-After": "3"}, ""},
 		retry:   "3",
-		classes: []error{ErrInternal, ErrUnreachable},
+		classes: []error{billing.ErrInternal, billing.ErrUnreachable},
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,7 +122,7 @@ func TestClientDecodesTheErrorEnvelope(t *testing.T) {
 				_, _ = w.Write([]byte(tc.resp.body))
 			})
 			_, err := client.GetMerchantSettings(t.Context())
-			var status *StatusError
+			var status *billing.StatusError
 			require.ErrorAs(t, err, &status)
 			require.Equal(t, tc.resp.status, status.Status)
 			require.Equal(t, tc.want, status.ErrorDetails)
@@ -130,7 +132,7 @@ func TestClientDecodesTheErrorEnvelope(t *testing.T) {
 			}
 			require.NotContains(t, err.Error(), "\n")
 			if tc.want.Code == "" {
-				require.NotErrorIs(t, err, ErrInsufficientCredits, "a code is never inferred from an opaque body")
+				require.NotErrorIs(t, err, billing.ErrInsufficientCredits, "a code is never inferred from an opaque body")
 			}
 		})
 	}
@@ -150,11 +152,11 @@ func TestPaymentFailureCrossesTheClient(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"type":"card_error","code":"card_declined","message":"x","metadata":{"failure":{"reason":"expired_card","message":"Card expired","field":"exp"}}}}`))
 	})
 	_, err := client.GetMerchantSettings(t.Context())
-	require.ErrorIs(t, err, ErrCardDeclined)
-	failure, ok := PaymentFailureFrom(err)
+	require.ErrorIs(t, err, billing.ErrCardDeclined)
+	failure, ok := billing.PaymentFailureFrom(err)
 	require.True(t, ok)
-	require.Equal(t, PaymentFailure{Reason: "expired_card", Message: "Card expired", Field: "exp"}, *failure)
-	_, ok = PaymentFailureFrom(&StatusError{Status: 402, ErrorDetails: ErrorDetails{Code: CodePaymentMethodStale, Metadata: map[string]any{"failure": map[string]any{"reason": "r"}}}})
+	require.Equal(t, billing.PaymentFailure{Reason: "expired_card", Message: "Card expired", Field: "exp"}, *failure)
+	_, ok = billing.PaymentFailureFrom(&billing.StatusError{Status: 402, ErrorDetails: billing.ErrorDetails{Code: billing.CodePaymentMethodStale, Metadata: map[string]any{"failure": map[string]any{"reason": "r"}}}})
 	require.False(t, ok, "only card_declined carries a customer-facing failure")
 }
 
@@ -173,8 +175,8 @@ func TestClientTransportFailuresAreUnreachable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := newTestRemote(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
 			_, err := client.GetMerchantSettings(t.Context())
-			require.ErrorIs(t, err, ErrUnreachable)
-			var status *StatusError
+			require.ErrorIs(t, err, billing.ErrUnreachable)
+			var status *billing.StatusError
 			require.False(t, errors.As(err, &status))
 		})
 	}
@@ -184,8 +186,8 @@ func TestClientTransportFailuresAreUnreachable(t *testing.T) {
 	cancel()
 	err := client.Verify(ctx)
 	require.ErrorIs(t, err, context.Canceled)
-	require.ErrorIs(t, err, ErrUnreachable)
-	var status *StatusError
+	require.ErrorIs(t, err, billing.ErrUnreachable)
+	var status *billing.StatusError
 	require.False(t, errors.As(err, &status))
 	expired, cancelExpired := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancelExpired()
@@ -196,7 +198,7 @@ func TestClientTransportFailuresAreUnreachable(t *testing.T) {
 	server.Close()
 	closed, err := NewRemote(server.URL, WithAPIKey("k"), WithDefaultMerchant("fixture"))
 	require.NoError(t, err)
-	require.ErrorIs(t, closed.Verify(t.Context()), ErrUnreachable)
+	require.ErrorIs(t, closed.Verify(t.Context()), billing.ErrUnreachable)
 }
 
 func TestClientDeadlineOwnership(t *testing.T) {
@@ -254,7 +256,7 @@ func TestClientDeadlineOwnership(t *testing.T) {
 				return
 			}
 			require.ErrorIs(t, err, tc.wantErr)
-			require.ErrorIs(t, err, ErrUnreachable)
+			require.ErrorIs(t, err, billing.ErrUnreachable)
 			if !tc.cancel {
 				require.NoError(t, ctx.Err(), "the child timeout must not cancel the caller")
 			}

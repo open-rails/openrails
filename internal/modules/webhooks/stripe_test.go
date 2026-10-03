@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -201,7 +201,7 @@ func TestStripeWebhookRouting(t *testing.T) {
 	sessionID := uuid.New()
 	store := &recordingCheckoutSessionStore{}
 	svc := &StripeWebhookService{CheckoutSessionService: store}
-	meta := map[string]any{"metadata": map[string]string{"checkout_session_id": openrails.CheckoutSessionID(sessionID).String()}}
+	meta := map[string]any{"metadata": map[string]string{"checkout_session_id": billing.CheckoutSessionID(sessionID).String()}}
 	require.NoError(t, svc.HandleStripeWebhook(ctx, stripeEventJSON(t, "checkout.session.async_payment_failed", meta)))
 	require.Equal(t, sessionID, store.closedID)
 	require.Equal(t, models.CheckoutSessionStatusFailed, store.closedStatus)

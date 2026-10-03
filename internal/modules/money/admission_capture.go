@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -18,11 +18,11 @@ import (
 
 // CaptureAdmission commits the actual charge, immutable capture terms, and any
 // usage event together. Payer, invoker, and unit come from the original admission.
-func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, amount int64, usage *openrails.CaptureUsage) (*openrails.CaptureReceipt, error) {
+func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, amount int64, usage *billing.CaptureUsage) (*billing.CaptureReceipt, error) {
 	if amount < 0 {
 		return nil, fmt.Errorf("captured amount must be nonnegative")
 	}
-	var u openrails.CaptureUsage
+	var u billing.CaptureUsage
 	if usage != nil {
 		u = *usage
 	}
@@ -44,7 +44,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 	}
 	gate := spendgate.New(s.db)
 	gate.SetClock(s.now)
-	var result *openrails.CaptureReceipt
+	var result *billing.CaptureReceipt
 	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.OpenrailsAdmissionOperation) error {
 		replayed := row.State == "captured"
 		if replayed {
@@ -77,7 +77,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 				return err
 			}
 		}
-		receipt := &openrails.CaptureReceipt{RequestID: requestID, CustomerID: (openrails.CustomerID(row.PayerID)).String(), Currency: row.Currency, Amount: amount, Replayed: replayed}
+		receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: (billing.CustomerID(row.PayerID)).String(), Currency: row.Currency, Amount: amount, Replayed: replayed}
 		if amount > 0 {
 			payer := identity.CustomerID(row.PayerID)
 			transaction, err := NewMoneyService(d, s.clock).CaptureAuthorized(ctx, SpendParams{

@@ -1,9 +1,6 @@
-package openrails
+package billing
 
 import (
-	"context"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,49 +68,4 @@ type PlanMigrationCancelResult struct {
 	Canceled            int              `json:"canceled"`
 	RailReleaseRequired []SubscriptionID `json:"rail_release_required,omitempty"`
 	Warning             string           `json:"warning,omitempty"`
-}
-
-// PreviewPlanMigration classifies the affected subscriptions without writing.
-func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigrationRequest, requestOptions ...RequestOption) (*PlanMigrationResult, error) {
-	if err := request.requirePrices(); err != nil {
-		return nil, err
-	}
-	var out PlanMigrationResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/preview", request, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CreatePlanMigration schedules the migration and records its batch.
-func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationRequest, requestOptions ...RequestOption) (*PlanMigrationResult, error) {
-	if err := request.requirePrices(); err != nil {
-		return nil, err
-	}
-	var out PlanMigrationResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations", request, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// requirePrices is the server's first check, applied before any I/O.
-func (r PlanMigrationRequest) requirePrices() error {
-	if strings.TrimSpace(r.SourcePrice) == "" || strings.TrimSpace(r.TargetPrice) == "" {
-		return invalidErr("source_price and target_price required")
-	}
-	return nil
-}
-
-// CancelPlanMigration cancels the batch's still-scheduled subscriptions.
-func (c *Client) CancelPlanMigration(ctx context.Context, batchID uuid.UUID, requestOptions ...RequestOption) (*PlanMigrationCancelResult, error) {
-	batch, err := requireUUID("batch_id", batchID)
-	if err != nil {
-		return nil, err
-	}
-	var out PlanMigrationCancelResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/"+batch+"/cancel", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

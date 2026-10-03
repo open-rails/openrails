@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -16,12 +16,12 @@ import (
 // Tx form rides a transaction owned by an embedding host, which alone commits
 // or rolls it back.
 
-func (s *Service) OpenOperationAuthorization(ctx context.Context, req openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	var out *openrails.OperationAuthorization
+	var out *billing.OperationAuthorization
 	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		out, err = s.OpenOperationAuthorizationTx(ctx, tx, req)
 		return err
@@ -29,7 +29,7 @@ func (s *Service) OpenOperationAuthorization(ctx context.Context, req openrails.
 	return out, err
 }
 
-func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func (s *Service) GetOperationAuthorization(ctx context.Context, operationID string) (*openrails.OperationAuthorization, error) {
+func (s *Service) GetOperationAuthorization(ctx context.Context, operationID string) (*billing.OperationAuthorization, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func (s *Service) GetOperationAuthorization(ctx context.Context, operationID str
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*openrails.OperationAuthorization, error) {
+func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -90,12 +90,12 @@ func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, op
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req openrails.ReleaseOperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	var out *openrails.OperationAuthorization
+	var out *billing.OperationAuthorization
 	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		out, err = s.ReleaseOperationAuthorizationTx(ctx, tx, req)
 		return err
@@ -103,7 +103,7 @@ func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req openrai
 	return out, err
 }
 
-func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req openrails.ReleaseOperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationRequest) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -123,17 +123,17 @@ func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *openrails.OperationAuthorization {
-	out := &openrails.OperationAuthorization{
+func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billing.OperationAuthorization {
+	out := &billing.OperationAuthorization{
 		OperationID:                     auth.OperationID,
 		MerchantID:                      auth.MerchantID,
-		Payer:                           openrails.CustomerID(auth.Payer),
+		Payer:                           billing.CustomerID(auth.Payer),
 		RecordOwner:                     auth.RecordOwner,
 		AuthorizedUSDMicros:             auth.AuthorizedUSDMicros,
 		ClaimReference:                  auth.ClaimReference,
 		AuthorizationBody:               auth.AuthorizationBody,
 		AuthorizationBodySHA256:         auth.AuthorizationBodySHA256,
-		State:                           openrails.OperationAuthorizationState(auth.State),
+		State:                           billing.OperationAuthorizationState(auth.State),
 		TerminalReference:               auth.TerminalReference,
 		SettlementProviderCostUSDMicros: auth.SettlementProviderCostUSDMicros,
 		SettlementRatedUSDMicros:        auth.SettlementRatedUSDMicros,
@@ -143,7 +143,7 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *openra
 		Replayed:                        auth.Replayed,
 	}
 	if auth.State == money.OperationAuthorizationSettled {
-		digest := openrails.SHA256(auth.SettlementBodySHA256)
+		digest := billing.SHA256(auth.SettlementBodySHA256)
 		out.SettlementBody = auth.SettlementBody
 		out.SettlementBodySHA256 = &digest
 	}

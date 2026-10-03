@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingimport"
@@ -173,7 +173,7 @@ func TestCatalogDecodeErrorIsCodedAndNamesTheField(t *testing.T) {
 		{decode(`{"price":"7"}`), 400, api.CodeInvalidParam, "price is invalid", "price"},
 		{decode(``), 400, api.CodeInvalidParam, "empty_request_body", ""},
 		{decode(`{"key":`), 400, api.CodeInvalidParam, "invalid_request", ""},
-		{&http.MaxBytesError{Limit: 1}, 413, openrails.CodeRequestBodyTooLarge, "request body too large", ""},
+		{&http.MaxBytesError{Limit: 1}, 413, billing.CodeRequestBodyTooLarge, "request body too large", ""},
 	} {
 		got := catalogDecodeError(tc.err)
 		param := ""
@@ -226,7 +226,7 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 		checkout.ErrCheckoutSessionExpired:                     410,
 		checkout.ErrCheckoutSessionValidation:                  400,
 		checkout.ErrCheckoutCaptureUnavailable:                 503,
-		fmt.Errorf("x: %w", openrails.ErrIdempotencyKeyReused): 409,
+		fmt.Errorf("x: %w", billing.ErrIdempotencyKeyReused):   409,
 	}
 	for err, status := range checkoutStatus {
 		got := render(t, func(r *httprequest.Request) { writeCheckoutSessionError(r, err, checkoutSessionErrorContext{}) })
@@ -256,7 +256,7 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 	got := render(t, func(r *httprequest.Request) {
 		writeChangeTierError(r, &checkout.TierChangeInFlightError{OperationID: op})
 	})
-	require.Equal(t, []any{409, openrails.CodeTierChangeInFlight, op.String()}, []any{got.Status, got.Code, got.Metadata["operation_id"]})
+	require.Equal(t, []any{409, billing.CodeTierChangeInFlight, op.String()}, []any{got.Status, got.Code, got.Metadata["operation_id"]})
 
 	got = render(t, func(r *httprequest.Request) {
 		writeChangeTierError(r, &checkout.TierChangeError{HTTPStatus: 402, Code: "insufficient_funds", Message: "Your card has insufficient funds."})

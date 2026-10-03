@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // A hosted checkout (#1085) relays the customer's one "Subscribe" click with a
@@ -24,28 +24,28 @@ type hostedPay struct {
 	price string
 }
 
-func (h hostedPay) pay(key string, payment openrails.CheckoutPaymentOptions) (*openrails.CheckoutSession, error) {
+func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*billing.CheckoutSession, error) {
 	h.w.t.Helper()
 	payment.PSPID, payment.Rail = h.w.psp["nmi"], "nmi"
 	if payment.PaymentToken != "" {
 		payment.NameOnCard, payment.Zip, payment.Country = "Hosted Payer", "10001", "US"
 	}
-	return h.w.client[h.tp].CreateCheckoutSession(h.w.t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: h.c.id}, PriceID: h.price, IdempotencyKey: key,
+	return h.w.client[h.tp].CreateCheckoutSession(h.w.t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: h.c.id}, PriceID: h.price, IdempotencyKey: key,
 		PaymentOptions: payment, Confirm: true,
 	})
 }
 
-func (h hostedPay) methods() []openrails.PaymentMethod {
+func (h hostedPay) methods() []billing.PaymentMethod {
 	h.w.t.Helper()
-	page, err := h.w.client[embedded].ListPaymentMethods(h.w.t.Context(), h.c.id, openrails.PageOptions{Limit: 100})
+	page, err := h.w.client[embedded].ListPaymentMethods(h.w.t.Context(), h.c.id, billing.PageOptions{Limit: 100})
 	require.NoError(h.w.t, err)
 	return page.Data
 }
 
-func (h hostedPay) subscriptions() []openrails.Subscription {
+func (h hostedPay) subscriptions() []billing.Subscription {
 	h.w.t.Helper()
-	subs, err := h.w.client[embedded].ListSubscriptions(h.w.t.Context(), openrails.SubscriptionFilter{CustomerID: h.c.id})
+	subs, err := h.w.client[embedded].ListSubscriptions(h.w.t.Context(), billing.SubscriptionFilter{CustomerID: h.c.id})
 	require.NoError(h.w.t, err)
 	return subs.Data
 }
@@ -63,7 +63,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			h := hostedPay{w: w, c: w.newCustomer(), tp: tp, price: w.membership("content:members", 9_990_000).ID}
 			token := w.nmi.Tokenize(visa)
 
-			session, err := h.pay("pay-1", openrails.CheckoutPaymentOptions{PaymentToken: token})
+			session, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", session.Status)
 			require.NotNil(t, session.SubscriptionID)
@@ -86,12 +86,12 @@ func TestHostedNewCardSubscription(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					again, err := h.pay("pay-1", openrails.CheckoutPaymentOptions{PaymentToken: token})
+					again, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
 					if err == nil {
 						require.Equal(t, session.ID, again.ID)
 						require.Equal(t, "succeeded", again.Status)
 					} else {
-						require.ErrorIs(t, err, openrails.ErrConflict, "a concurrent duplicate is refused, never charged")
+						require.ErrorIs(t, err, billing.ErrConflict, "a concurrent duplicate is refused, never charged")
 					}
 				}()
 			}
@@ -112,11 +112,11 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: w.membership("content:members", 9_990_000).ID}
 	vaults := w.vaultCount()
 
-	_, err := h.pay("pay-declined", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
-	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
-	var status *openrails.StatusError
+	_, err := h.pay("pay-declined", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
+	require.ErrorIs(t, err, billing.ErrPaymentRefused)
+	var status *billing.StatusError
 	require.True(t, errors.As(err, &status))
-	require.Equal(t, openrails.CodeCardDeclined, status.Code)
+	require.Equal(t, billing.CodeCardDeclined, status.Code)
 	w.settle()
 	require.Empty(t, h.subscriptions())
 	require.Empty(t, h.methods(), "the declined card is not kept")
@@ -124,7 +124,7 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	require.False(t, h.c.entitled("content:members"))
 
 	// The next attempt with another card succeeds.
-	session, err := h.pay("pay-retry", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	session, err := h.pay("pay-retry", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)
 	require.Len(t, h.subscriptions(), 1)
@@ -141,9 +141,9 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
-			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-				Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
-				PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method}, Confirm: true,
+			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
+				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method}, Confirm: true,
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
@@ -161,9 +161,9 @@ func TestHostedNewCardQuoteThenConfirm(t *testing.T) {
 	w := newWorld(t)
 	c := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)
-	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "quote-" + uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Quoted Payer", Zip: "10001", Country: "US"},
+	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: "quote-" + uuid.NewString(),
+		PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Quoted Payer", Zip: "10001", Country: "US"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", session.Status)
@@ -179,12 +179,12 @@ func TestHostedNewCardOneTimeSale(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	client := w.client[embedded]
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
-	session, err := h.pay("sale-1", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	session, err := h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)
 	w.settle()

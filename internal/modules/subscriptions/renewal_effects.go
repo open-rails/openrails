@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -97,7 +97,7 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			}
 		}
 	}
-	data := openrails.NotificationData{SubscriptionID: openrails.SubscriptionID(sub.ID), PeriodStart: &effects.PeriodStart, PeriodEnd: &effects.PeriodEnd}
+	data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID), PeriodStart: &effects.PeriodStart, PeriodEnd: &effects.PeriodEnd}
 	if effects.Downgrade {
 		data.DowngradeApplied, data.NewProduct = true, effects.ProductName
 	} else if due, err := renewalReceiptDue(ctx, d, sub, effects.PeriodStart); err != nil || !due {
@@ -135,7 +135,7 @@ func renewalReceiptDue(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	if sub.StartedAt.After(since) {
 		return false, nil
 	}
-	recent, err := d.Gen(ctx).RenewalReceiptSince(ctx, gen.RenewalReceiptSinceParams{CustomerID: sub.CustomerID, SubscriptionID: openrails.SubscriptionID(sub.ID).String(), Since: since})
+	recent, err := d.Gen(ctx).RenewalReceiptSince(ctx, gen.RenewalReceiptSinceParams{CustomerID: sub.CustomerID, SubscriptionID: billing.SubscriptionID(sub.ID).String(), Since: since})
 	if err != nil {
 		return false, fmt.Errorf("read last renewal receipt: %w", err)
 	}

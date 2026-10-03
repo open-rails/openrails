@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/hostconfig"
@@ -61,7 +62,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var params openrails.MerchantConfigurationApplyParams
+			var params billing.MerchantConfigurationApplyParams
 			if apply {
 				if file == "" {
 					return fmt.Errorf("--file is required for an application document with application_id and expected_revision")
@@ -71,11 +72,11 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 					return err
 				}
 				defer input.Close()
-				raw, err := io.ReadAll(io.LimitReader(input, openrails.MaxMerchantConfigurationBytes+1))
+				raw, err := io.ReadAll(io.LimitReader(input, billing.MaxMerchantConfigurationBytes+1))
 				if err != nil {
 					return err
 				}
-				parsed, err := openrails.ParseMerchantConfigurationYAML(raw)
+				parsed, err := billing.ParseMerchantConfigurationYAML(raw)
 				if err != nil {
 					return err
 				}

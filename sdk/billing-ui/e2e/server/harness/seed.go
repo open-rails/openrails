@@ -10,6 +10,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -29,13 +30,13 @@ type Catalog struct {
 
 func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, merchant solanago.PublicKey) (Catalog, error) {
 	month := 720
-	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", &openrails.PriceCreateParams{
+	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", &billing.PriceCreateParams{
 		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, AutoRenew: true,
 	})
 	if err != nil {
 		return Catalog{}, err
 	}
-	once, oncePrice, err := product(ctx, c, "e2e-lifetime", "Lifetime pass", &openrails.PriceCreateParams{
+	once, oncePrice, err := product(ctx, c, "e2e-lifetime", "Lifetime pass", &billing.PriceCreateParams{
 		Key: "e2e-lifetime-once", UnitAmount: 19_990_000, Currency: "USD",
 	})
 	if err != nil {
@@ -58,7 +59,7 @@ func seedCards(ctx context.Context, c *openrails.Client) (string, string, error)
 	if err != nil {
 		return "", "", err
 	}
-	params, err := openrails.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: billing-ui-e2e-cards
 expected_revision: %d
 products:
@@ -108,7 +109,7 @@ func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node
 	if err != nil {
 		return "", "", err
 	}
-	params, err := openrails.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: billing-ui-e2e-crypto
 expected_revision: %d
 products:
@@ -151,8 +152,8 @@ products:
 	return pass.ID, monthly.ID, nil
 }
 
-func product(ctx context.Context, c *openrails.Client, key, name string, price *openrails.PriceCreateParams) (string, string, error) {
-	p, err := c.Products.Create(ctx, &openrails.ProductCreateParams{Key: key, DisplayName: name, EntitlementsSpec: map[string]*int{key: nil}})
+func product(ctx context.Context, c *openrails.Client, key, name string, price *billing.PriceCreateParams) (string, string, error) {
+	p, err := c.Products.Create(ctx, &billing.ProductCreateParams{Key: key, DisplayName: name, EntitlementsSpec: map[string]*int{key: nil}})
 	if err != nil {
 		return "", "", err
 	}
@@ -186,10 +187,10 @@ func (r *Runtime) CreateUser(ctx context.Context) (User, error) {
 }
 
 type Seeded struct {
-	SubscriptionSourceID string                         `json:"subscription_source_id"`
-	PaymentMethodRef     string                         `json:"payment_method_ref"`
-	TransactionID        string                         `json:"transaction_id"`
-	Import               *openrails.BillingImportResult `json:"import"`
+	SubscriptionSourceID string                       `json:"subscription_source_id"`
+	PaymentMethodRef     string                       `json:"payment_method_ref"`
+	TransactionID        string                       `json:"transaction_id"`
+	Import               *billing.BillingImportResult `json:"import"`
 }
 
 // SeedBilling lands an active subscription, its settled sale and a saved card
@@ -199,28 +200,28 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 	if err != nil {
 		return Seeded{}, fmt.Errorf("user_id: %w", err)
 	}
-	price, err := openrails.ParsePriceID(r.Catalog.SubscriptionPrice)
+	price, err := billing.ParsePriceID(r.Catalog.SubscriptionPrice)
 	if err != nil {
 		return Seeded{}, err
 	}
-	customer := openrails.CustomerID(uid)
+	customer := billing.CustomerID(uid)
 	now := time.Now().UTC().Truncate(time.Second)
 	started, paidThrough := now.Add(-24*time.Hour), now.Add(29*24*time.Hour)
 	railSub, railCustomer, railMethod, txn := "e2e-sub-"+userID, "e2e-cus-"+userID, "e2e-pm-"+userID, "e2e-txn-"+userID
-	result, err := r.Client.ImportBilling(ctx, openrails.DeclaredBilling{
+	result, err := r.Client.ImportBilling(ctx, billing.DeclaredBilling{
 		AsOf:       now,
-		DefaultPSP: openrails.PSPRef{Key: PSPKey},
-		Customers:  []openrails.DeclaredCustomer{{Customer: customer}},
-		PaymentMethods: []openrails.DeclaredPaymentMethod{{
+		DefaultPSP: billing.PSPRef{Key: PSPKey},
+		Customers:  []billing.DeclaredCustomer{{Customer: customer}},
+		PaymentMethods: []billing.DeclaredPaymentMethod{{
 			Customer: customer, Rail: PSPRail, RailCustomerRef: railCustomer, RailMethodRef: railMethod,
 			LastFour: "4242", CardType: "visa", ExpiryDate: "1230", CreatedAt: started,
 		}},
-		Subscriptions: []openrails.DeclaredSubscription{{
+		Subscriptions: []billing.DeclaredSubscription{{
 			SourceID: railSub, Customer: customer, Price: price, Rail: PSPRail, RailSubscriptionID: railSub,
 			StartedAt: started, PaidThrough: &paidThrough,
-			PaymentMethod: &openrails.PaymentMethodRef{Rail: PSPRail, RailCustomerRef: railCustomer, RailMethodRef: railMethod},
+			PaymentMethod: &billing.PaymentMethodRef{Rail: PSPRail, RailCustomerRef: railCustomer, RailMethodRef: railMethod},
 		}},
-		Transactions: []openrails.DeclaredTransaction{{
+		Transactions: []billing.DeclaredTransaction{{
 			RailSubscriptionID: railSub, TransactionID: txn, Type: "sale", Success: true,
 			AmountCents: 999, Currency: "USD", OccurredAt: started,
 		}},
@@ -237,8 +238,8 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 // CheckoutOffer is what a host serves its checkout page for one price: the
 // plan and OpenRails' advertised options, passed through unchanged.
 type CheckoutOffer struct {
-	Plan    openrails.HostedCheckoutPlan   `json:"plan"`
-	Options []openrails.CheckoutRailOption `json:"options"`
+	Plan    billing.HostedCheckoutPlan   `json:"plan"`
+	Options []billing.CheckoutRailOption `json:"options"`
 }
 
 func (r *Runtime) CheckoutOffer(ctx context.Context, priceID string) (CheckoutOffer, error) {
@@ -250,7 +251,7 @@ func (r *Runtime) CheckoutOffer(ctx context.Context, priceID string) (CheckoutOf
 	if err != nil {
 		return CheckoutOffer{}, err
 	}
-	plan, err := openrails.NewHostedCheckoutPlan(product, price)
+	plan, err := billing.NewHostedCheckoutPlan(product, price)
 	if err != nil {
 		return CheckoutOffer{}, err
 	}
@@ -286,13 +287,13 @@ func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, erro
 	if key == "" {
 		key = uuid.NewString()
 	}
-	session, err := r.Client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: in.CustomerID}, PriceID: in.PriceID, IdempotencyKey: key, Confirm: true,
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.Selector, PSPID: in.PSPID, TokenSymbol: in.TokenSymbol, Flow: "transaction_request",
+	session, err := r.Client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: in.CustomerID}, PriceID: in.PriceID, IdempotencyKey: key, Confirm: true,
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: in.Selector, PSPID: in.PSPID, TokenSymbol: in.TokenSymbol, Flow: "transaction_request",
 			PaymentToken: in.PaymentToken, NameOnCard: in.NameOnCard, Zip: in.Zip, Country: in.Country},
 		SuccessURL: r.BaseURL + "/done", CancelURL: r.BaseURL + "/cancel",
 	})
-	if errors.Is(err, openrails.ErrPaymentRefused) {
+	if errors.Is(err, billing.ErrPaymentRefused) {
 		return map[string]any{"status": "failed", "failure_message": "Your card was declined. Try another card."}, nil
 	}
 	if err != nil {
@@ -313,18 +314,18 @@ func (r *Runtime) Pay(ctx context.Context, in CheckoutPay) (map[string]any, erro
 
 // CustomerBilling is what the customer holds after checkout.
 type CustomerBilling struct {
-	Subscriptions  []openrails.Subscription  `json:"subscriptions"`
-	PaymentMethods []openrails.PaymentMethod `json:"payment_methods"`
-	Sales          []nmimock.Sale            `json:"sales"`
-	Vaults         int                       `json:"vaults"`
+	Subscriptions  []billing.Subscription  `json:"subscriptions"`
+	PaymentMethods []billing.PaymentMethod `json:"payment_methods"`
+	Sales          []nmimock.Sale          `json:"sales"`
+	Vaults         int                     `json:"vaults"`
 }
 
 func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (CustomerBilling, error) {
-	subs, err := r.Client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: customerID})
+	subs, err := r.Client.ListSubscriptions(ctx, billing.SubscriptionFilter{CustomerID: customerID})
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	methods, err := r.Client.ListPaymentMethods(ctx, customerID, openrails.PageOptions{Limit: 100})
+	methods, err := r.Client.ListPaymentMethods(ctx, customerID, billing.PageOptions{Limit: 100})
 	if err != nil {
 		return CustomerBilling{}, err
 	}

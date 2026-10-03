@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
 )
@@ -38,7 +38,7 @@ func CreateStripeMethodSetup(r *httprequest.Request) {
 }
 func GetStripeMethodSetup(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	id, err := openrails.ParseCheckoutSessionID(r.Param("id"))
+	id, err := billing.ParseCheckoutSessionID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid setup id")
 		return
@@ -56,7 +56,7 @@ func GetStripeMethodSetup(r *httprequest.Request) {
 }
 func ConfirmStripeMethodSetup(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	id, err := openrails.ParseCheckoutSessionID(r.Param("id"))
+	id, err := billing.ParseCheckoutSessionID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid setup id")
 		return

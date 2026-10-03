@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
@@ -21,7 +21,7 @@ func GetMerchantConfiguration(r *httprequest.Request) {
 }
 
 func ApplyMerchantConfiguration(r *httprequest.Request) {
-	var params openrails.MerchantConfigurationApplyParams
+	var params billing.MerchantConfigurationApplyParams
 	if !r.BindJSON(&params) {
 		return
 	}

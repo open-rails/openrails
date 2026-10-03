@@ -23,7 +23,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
@@ -39,10 +39,10 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	client := w.client[tp]
 	plan := "legacy_plan_" + uuid.NewString()[:8]
 	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Legacy " + plan, Amount: "9.99", Days: days})
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy", EntitlementsSpec: map[string]*int{l.ent: nil}})
 	require.NoError(t, err)
 	hours := days * 24
-	l.price, err = client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true,
+	l.price, err = client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true,
 		AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(t, err)
 	cycle := time.Duration(hours) * time.Hour
@@ -51,23 +51,23 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	l.railCust = w.nmi.AddVault(visa)
 	l.railSub = w.nmi.AddSchedule(nmimock.Schedule{Vault: l.railCust, Plan: plan, Amount: "9.99", Days: days, Months: 0, NextBilling: end})
 	paid := w.nmi.AddScheduleSale(l.railSub, start)
-	customerID, err := openrails.ParseCustomerID(c.id)
+	customerID, err := billing.ParseCustomerID(c.id)
 	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(l.price.ID)
+	priceID, err := billing.ParsePriceID(l.price.ID)
 	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
-	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
-		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
-		PaymentMethods: []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef,
+	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
+	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
+		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
+		PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef,
 			InitialTransactionID: paid.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub,
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 	require.NoError(t, err)
 	for _, sub := range subs.Data {
 		if sub.RailSubscriptionID == l.railSub {

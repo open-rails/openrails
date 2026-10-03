@@ -8,12 +8,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Every table row names a reason with a policy, and every reason is used.
 func TestTablesAreComplete(t *testing.T) {
-	used := map[openrails.DeclineReason]bool{openrails.DeclineUnknown: true}
+	used := map[billing.DeclineReason]bool{billing.DeclineUnknown: true}
 	for rail, table := range rails {
 		for code, reason := range table.codes {
 			_, ok := reasons[reason]
@@ -21,7 +21,7 @@ func TestTablesAreComplete(t *testing.T) {
 			used[reason] = true
 		}
 	}
-	require.ElementsMatch(t, openrails.DeclineReasons(), slices.Collect(maps.Keys(reasons)), "every public reason has a policy")
+	require.ElementsMatch(t, billing.DeclineReasons(), slices.Collect(maps.Keys(reasons)), "every public reason has a policy")
 	for reason := range reasons {
 		require.True(t, used[reason], "reason %q is in no rail table", reason)
 	}
@@ -54,21 +54,21 @@ func TestNMIActions(t *testing.T) {
 func TestClassifyEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		e      Evidence
-		reason openrails.DeclineReason
+		reason billing.DeclineReason
 		cov    Coverage
 	}{
-		{Evidence{Rail: "nmi", Code: "200", CVV: "N"}, openrails.DeclineIncorrectCVC, Mapped},
-		{Evidence{Rail: "nmi", Code: "nmi_do_not_honor", AVS: "N"}, openrails.DeclineIncorrectZip, Mapped},
-		{Evidence{Rail: "nmi", Code: "200", AVS: "W"}, openrails.DeclineIncorrectAddress, Mapped},
-		{Evidence{Rail: "nmi", Code: "202", AVS: "N"}, openrails.DeclineInsufficientFunds, Mapped},
-		{Evidence{Rail: "nmi", Code: "252", CVV: "N"}, openrails.DeclineStolenCard, Mapped},
-		{Evidence{Rail: "nmi", Code: "300", Text: "Duplicate transaction REFID:1"}, openrails.DeclineDuplicateTransaction, Mapped},
-		{Evidence{Rail: "stripe", Code: "", FallbackCode: "expired_card"}, openrails.DeclineExpiredCard, Mapped},
-		{Evidence{Rail: "stripe", Code: "generic_decline", CVV: "fail"}, openrails.DeclineIncorrectCVC, Mapped},
-		{Evidence{Rail: "ccbill", Code: "BE-950"}, openrails.DeclineProcessingError, Mapped},
-		{Evidence{Rail: "nmi", Code: "999"}, openrails.DeclineUnknown, Unmapped},
-		{Evidence{Rail: "nmi", Code: ""}, openrails.DeclineUnknown, NoCode},
-		{Evidence{Rail: "vaulted_card", Code: "202"}, openrails.DeclineUnknown, NoCode},
+		{Evidence{Rail: "nmi", Code: "200", CVV: "N"}, billing.DeclineIncorrectCVC, Mapped},
+		{Evidence{Rail: "nmi", Code: "nmi_do_not_honor", AVS: "N"}, billing.DeclineIncorrectZip, Mapped},
+		{Evidence{Rail: "nmi", Code: "200", AVS: "W"}, billing.DeclineIncorrectAddress, Mapped},
+		{Evidence{Rail: "nmi", Code: "202", AVS: "N"}, billing.DeclineInsufficientFunds, Mapped},
+		{Evidence{Rail: "nmi", Code: "252", CVV: "N"}, billing.DeclineStolenCard, Mapped},
+		{Evidence{Rail: "nmi", Code: "300", Text: "Duplicate transaction REFID:1"}, billing.DeclineDuplicateTransaction, Mapped},
+		{Evidence{Rail: "stripe", Code: "", FallbackCode: "expired_card"}, billing.DeclineExpiredCard, Mapped},
+		{Evidence{Rail: "stripe", Code: "generic_decline", CVV: "fail"}, billing.DeclineIncorrectCVC, Mapped},
+		{Evidence{Rail: "ccbill", Code: "BE-950"}, billing.DeclineProcessingError, Mapped},
+		{Evidence{Rail: "nmi", Code: "999"}, billing.DeclineUnknown, Unmapped},
+		{Evidence{Rail: "nmi", Code: ""}, billing.DeclineUnknown, NoCode},
+		{Evidence{Rail: "vaulted_card", Code: "202"}, billing.DeclineUnknown, NoCode},
 	} {
 		r := ClassifyEvidence(tc.e)
 		require.Equal(t, tc.reason, r.Reason, "%+v", tc.e)
@@ -109,5 +109,5 @@ func TestPaymentFailure(t *testing.T) {
 		require.Equal(t, tc.field, got.Field, "%+v", tc.e)
 		require.NotEmpty(t, got.Message)
 	}
-	require.Equal(t, openrails.DeclineGeneric.Failure(), openrails.DeclineReason("not_a_reason").Failure())
+	require.Equal(t, billing.DeclineGeneric.Failure(), billing.DeclineReason("not_a_reason").Failure())
 }

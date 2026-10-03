@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -69,7 +69,7 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
@@ -139,7 +139,7 @@ func ResumeSubscription(r *httprequest.Request) {
 		return
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return

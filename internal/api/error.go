@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Error types matching Stripe's error taxonomy
@@ -49,7 +49,7 @@ const (
 )
 
 // ErrorDetails contains the detailed error information (nested under "error" key)
-type ErrorDetails = openrails.ErrorDetails
+type ErrorDetails = billing.ErrorDetails
 
 // ErrorResponse is the top-level error response wrapper
 type ErrorResponse struct {

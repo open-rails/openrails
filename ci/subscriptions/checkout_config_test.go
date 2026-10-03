@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // One PSP whose credentials cannot be checked never takes checkout down: the
@@ -24,14 +24,14 @@ func TestCheckoutConfigDegradesOnePSP(t *testing.T) {
 	for _, tp := range []topology{embedded, remote} {
 		cfg, err := w.client[tp].GetCheckoutConfig(t.Context())
 		require.NoError(t, err, "%s: the document is served", tp)
-		byRail := map[string]openrails.CheckoutPSPConfig{}
+		byRail := map[string]billing.CheckoutPSPConfig{}
 		for _, psp := range cfg.PSPs {
 			byRail[psp.Rail] = psp
 		}
 		require.Empty(t, byRail["stripe"].Status, "%s: the other PSPs stay available", tp)
 		nmi, ok := byRail["nmi"]
 		require.True(t, ok, "%s: the failing PSP is still listed: %+v", tp, cfg.PSPs)
-		require.Equal(t, openrails.CheckoutPSPTemporarilyUnavailable, nmi.Status, tp)
+		require.Equal(t, billing.CheckoutPSPTemporarilyUnavailable, nmi.Status, tp)
 		require.Positive(t, nmi.RetryAfter, tp)
 		require.Empty(t, nmi.Config, "%s: no values to drive an unavailable PSP", tp)
 	}

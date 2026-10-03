@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -25,11 +25,11 @@ type offerCursor struct {
 // ListOffersForEntitlements is a bounded exact reverse catalog lookup: one
 // query returns a page of offers for every requested key. Access is checked
 // separately against retained grants, never against this live catalog.
-func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []string, params openrails.OfferListParams) (map[string]openrails.OfferList, error) {
-	if len(keys) > openrails.MaxEntitlementChecks {
+func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []string, params billing.OfferListParams) (map[string]billing.OfferList, error) {
+	if len(keys) > billing.MaxEntitlementChecks {
 		return nil, apperr.Invalidf("at most 100 entitlements are allowed")
 	}
-	if params.Kind != openrails.OfferPermanent && params.Kind != openrails.OfferFinite && params.Kind != openrails.OfferRecurring {
+	if params.Kind != billing.OfferPermanent && params.Kind != billing.OfferFinite && params.Kind != billing.OfferRecurring {
 		return nil, apperr.Invalidf("kind must be permanent, finite or recurring")
 	}
 	if params.Limit < 0 || params.Limit > 100 {
@@ -46,7 +46,7 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]openrails.OfferList, len(keys))
+	result := make(map[string]billing.OfferList, len(keys))
 	scopes := make(map[string]string, len(keys))
 	arg := gen.ListOffersForEntitlementsParams{MerchantID: mid.UUID(), CatalogID: catalogID, Kind: string(params.Kind), PreferredCurrency: preferred, PageLimit: int32(params.Limit + 1)}
 	for _, key := range keys {
@@ -56,7 +56,7 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 		if _, seen := result[key]; seen {
 			continue
 		}
-		result[key] = openrails.OfferList{Data: []openrails.CatalogOffer{}}
+		result[key] = billing.OfferList{Data: []billing.CatalogOffer{}}
 		rawScope, _ := json.Marshal([]any{mid.String(), catalogID, key, params.Kind, preferred})
 		digest := sha256.Sum256(rawScope)
 		scopes[key] = hex.EncodeToString(digest[:])
@@ -95,7 +95,7 @@ func ListOffersForEntitlements(ctx context.Context, database *db.DB, keys []stri
 			continue
 		}
 		last[row.Entitlement] = offerCursor{Scope: scopes[row.Entitlement], Currency: row.Currency, PriceID: row.PriceID}
-		offer := openrails.CatalogOffer{Kind: params.Kind, ProductID: openrails.ProductID(row.ProductID).String(), ProductKey: row.ProductKey, ProductName: row.ProductName, PriceID: openrails.PriceID(row.PriceID).String(), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency, AutoRenew: row.AutoRenew}
+		offer := billing.CatalogOffer{Kind: params.Kind, ProductID: billing.ProductID(row.ProductID).String(), ProductKey: row.ProductKey, ProductName: row.ProductName, PriceID: billing.PriceID(row.PriceID).String(), PriceKey: row.PriceKey, UnitAmount: row.UnitAmount, Currency: row.Currency, AutoRenew: row.AutoRenew}
 		if row.AccessDurationHours != nil {
 			value := int(*row.AccessDurationHours)
 			offer.AccessDurationHours = &value

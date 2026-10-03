@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/solanafake"
@@ -41,17 +41,17 @@ products:
   entitlements_spec:
     %s: null
 `, key, revision.Revision, key, strings.ReplaceAll(prices, "{key}", key), key)
-	params, err := openrails.ParseCatalogApplicationYAML([]byte(doc))
+	params, err := billing.ParseCatalogApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)
 	_, err = client.Catalog.Apply(w.t.Context(), params)
 	return key, err
 }
 
-func (w *world) options(priceKey string) map[string]openrails.CheckoutRailOption {
+func (w *world) options(priceKey string) map[string]billing.CheckoutRailOption {
 	w.t.Helper()
 	list, err := w.client[remote].ListCheckoutRailOptionsByKey(w.t.Context(), priceKey)
 	require.NoError(w.t, err)
-	out := map[string]openrails.CheckoutRailOption{}
+	out := map[string]billing.CheckoutRailOption{}
 	for _, option := range list {
 		out[option.Rail] = option
 	}
@@ -130,10 +130,10 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	// The advertised Solana option is sellable: a subscription session opens
 	// a Solana Pay request for the published plan.
 	buyer := w.newCustomer()
-	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: priceID(t, w, key+"-monthly"),
+	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: buyer.id}, PriceID: priceID(t, w, key+"-monthly"),
 		IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: solana.Selector, PSPID: solana.PSPID, TokenSymbol: solana.PublicConfig["token_symbol"]},
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: solana.Selector, PSPID: solana.PSPID, TokenSymbol: solana.PublicConfig["token_symbol"]},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
@@ -186,14 +186,14 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	require.Contains(t, options, "nmi")
 
 	buyer := w.newCustomer()
-	_, err = w.client[embedded].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer: openrails.CheckoutCustomerIdentity{ID: buyer.id, VerifiedEmail: "buyer@e2e.test"}, PriceID: priceID(t, w, key+"-monthly"),
+	_, err = w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: buyer.id, VerifiedEmail: "buyer@e2e.test"}, PriceID: priceID(t, w, key+"-monthly"),
 		IdempotencyKey: "ccbill-" + uuid.NewString(),
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "E2E Payer", Zip: "10001", Country: "US"},
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "E2E Payer", Zip: "10001", Country: "US"},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.Error(t, err, "a named CCBill PSP still cannot enroll")
-	require.True(t, errors.Is(err, openrails.ErrInvalid), "%v", err)
+	require.True(t, errors.Is(err, billing.ErrInvalid), "%v", err)
 	require.Contains(t, err.Error(), "mode_unsupported")
 }
 
@@ -217,7 +217,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
         recurring_billing_option_id: "%s"
 `, ccbillFormName, ccbillFlexID, ccbillRBO))
 	require.Error(t, err)
-	var status *openrails.StatusError
+	var status *billing.StatusError
 	require.True(t, errors.As(err, &status), "%v", err)
 	require.Equal(t, "price_not_sellable", status.Code, "%v", err)
 

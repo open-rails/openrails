@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -55,7 +55,7 @@ type CatalogPage[T any] struct {
 }
 
 // GetProduct returns a product by ID.
-func (s *Service) GetProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+func (s *Service) GetProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -152,13 +152,13 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 }
 
 // ActivateProduct sets status=active on a product.
-func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+func (s *Service) ActivateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
 		return scoped.activateProduct(ctx, id)
 	})
 }
 
-func (s *Service) activateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+func (s *Service) activateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -191,13 +191,13 @@ func (s *Service) activateProduct(ctx context.Context, id openrails.ProductID) (
 
 // DeactivateProduct archives a product. Existing subscriptions on its prices
 // are grandfathered and keep billing.
-func (s *Service) DeactivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+func (s *Service) DeactivateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
 		return scoped.deactivateProduct(ctx, id)
 	})
 }
 
-func (s *Service) deactivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+func (s *Service) deactivateProduct(ctx context.Context, id billing.ProductID) (*CatalogProduct, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (s *Service) deactivateProduct(ctx context.Context, id openrails.ProductID)
 }
 
 // GetPrice returns a price by ID.
-func (s *Service) GetPrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+func (s *Service) GetPrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -254,7 +254,7 @@ func (s *Service) GetPrice(ctx context.Context, id openrails.PriceID) (*CatalogP
 }
 
 // ListPricesByProduct returns all prices belonging to a product. Set activeOnly=true to filter inactive.
-func (s *Service) ListPricesByProduct(ctx context.Context, id openrails.ProductID, activeOnly bool) ([]CatalogPrice, error) {
+func (s *Service) ListPricesByProduct(ctx context.Context, id billing.ProductID, activeOnly bool) ([]CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -350,13 +350,13 @@ func (s *Service) propagatePriceActiveToStripeCommitted(ctx context.Context, pri
 // (merchant_id, key) WHERE NOT archived allows only one live holder), then
 // this row is un-archived, then one pointer-movement log entry records the
 // move. Activating an already-active row is a no-op (no movement logged).
-func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+func (s *Service) ActivatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
 		return scoped.activatePrice(ctx, id)
 	})
 }
 
-func (s *Service) activatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+func (s *Service) activatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -416,13 +416,13 @@ func (s *Service) activatePrice(ctx context.Context, id openrails.PriceID) (*Cat
 
 // DeactivatePrice archives a price. Existing subscriptions on this price are
 // grandfathered and keep billing; new purchases are rejected.
-func (s *Service) DeactivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+func (s *Service) DeactivatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
 		return scoped.deactivatePrice(ctx, id)
 	})
 }
 
-func (s *Service) deactivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+func (s *Service) deactivatePrice(ctx context.Context, id billing.PriceID) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}

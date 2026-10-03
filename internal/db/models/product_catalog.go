@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Product represents a product offering (e.g., Premium Membership)
@@ -319,9 +319,9 @@ func (p *Price) ForPSP(pspID uuid.UUID) *Price {
 }
 
 // Summary is the product identity embedded in subscription and payment views.
-func (p *Product) Summary() *openrails.ProductSummary {
+func (p *Product) Summary() *billing.ProductSummary {
 	if p == nil {
 		return nil
 	}
-	return &openrails.ProductSummary{ID: openrails.ProductID(p.ID).String(), Key: p.Key, DisplayName: p.DisplayName, Description: p.Description, TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived}
+	return &billing.ProductSummary{ID: billing.ProductID(p.ID).String(), Key: p.Key, DisplayName: p.DisplayName, Description: p.Description, TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived}
 }

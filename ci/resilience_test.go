@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
@@ -114,7 +115,7 @@ func probe(t *testing.T, rt *embed.Runtime, name string) error {
 	return nil
 }
 
-func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (openrails.CheckoutPSPConfig, bool) {
+func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.CheckoutPSPConfig, bool) {
 	t.Helper()
 	cfg, err := client.GetCheckoutConfig(t.Context())
 	require.NoError(t, err)
@@ -123,7 +124,7 @@ func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (openrails
 			return psp, true
 		}
 	}
-	return openrails.CheckoutPSPConfig{}, false
+	return billing.CheckoutPSPConfig{}, false
 }
 
 func sign(t *testing.T, rt *embed.Runtime) ([]byte, error) {
@@ -135,27 +136,27 @@ func sign(t *testing.T, rt *embed.Runtime) ([]byte, error) {
 // recurring price and returns the HTTP status of the refusal (0 on success).
 func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool) int {
 	t.Helper()
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", EntitlementsSpec: map[string]*int{"content:sol": nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", EntitlementsSpec: map[string]*int{"content:sol": nil}})
 	require.NoError(t, err)
-	params := &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
-	kind := openrails.OfferPermanent
+	params := &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
+	kind := billing.OfferPermanent
 	if recurring {
 		hours := 720
-		params.AccessDurationHours, params.AutoRenew, kind = &hours, true, openrails.OfferRecurring
+		params.AccessDurationHours, params.AutoRenew, kind = &hours, true, billing.OfferRecurring
 	}
 	price, err := client.Prices.Create(t.Context(), params)
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
+	_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:sol",
 		OfferKind:      kind,
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "solana", TokenSymbol: "USDC", Flow: "transfer_request"},
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "solana", TokenSymbol: "USDC", Flow: "transfer_request"},
 		IdempotencyKey: "sol-" + uuid.NewString(),
 		SuccessURL:     "https://e2e.test/success",
 		CancelURL:      "https://e2e.test/cancel",
 	})
-	var status *openrails.StatusError
+	var status *billing.StatusError
 	if err == nil {
 		return 0
 	}
@@ -170,16 +171,16 @@ func waitReady(t *testing.T, rt *embed.Runtime) {
 
 func stripeCheckout(t *testing.T, client *openrails.Client) {
 	t.Helper()
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
 	require.NoError(t, err)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
+	session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:post",
-		OfferKind:      openrails.OfferPermanent,
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+		OfferKind:      billing.OfferPermanent,
+		PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
 		IdempotencyKey: "checkout-" + uuid.NewString(),
 		SuccessURL:     "https://e2e.test/success",
 		CancelURL:      "https://e2e.test/cancel",
@@ -343,7 +344,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
 	psp, ok := checkoutPSP(t, client, "solana")
 	require.True(t, ok)
-	require.Equal(t, openrails.CheckoutPSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
+	require.Equal(t, billing.CheckoutPSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
 	active, _ := solanaRows(rotated)
 	require.Zero(t, active, "an unapproved identity never receives money")
 

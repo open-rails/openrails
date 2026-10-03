@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -19,7 +19,7 @@ import (
 // per-subscription ledger), POST /:id/cancel. Mounted next to the #773
 // reprice routes — same authz, same error vocabulary.
 
-func planMigrationServiceRequest(r *httprequest.Request, b openrails.PlanMigrationRequest) (subscriptions.PlanMigrationRequest, bool) {
+func planMigrationServiceRequest(r *httprequest.Request, b billing.PlanMigrationRequest) (subscriptions.PlanMigrationRequest, bool) {
 	var out subscriptions.PlanMigrationRequest
 	if strings.TrimSpace(b.SourcePrice) == "" || strings.TrimSpace(b.TargetPrice) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "source_price and target_price required")
@@ -75,7 +75,7 @@ func writePlanMigrationError(r *httprequest.Request, err error) {
 // CreatePlanMigration commits a plan migration: batch + per-subscription
 // rows, source archive, rail pushes, schedule-time notices.
 func CreatePlanMigration(r *httprequest.Request) {
-	var body openrails.PlanMigrationRequest
+	var body billing.PlanMigrationRequest
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -95,7 +95,7 @@ func CreatePlanMigration(r *httprequest.Request) {
 // per-rail auto/requires-action/skip counts the operator reviews BEFORE
 // committing.
 func PreviewPlanMigration(r *httprequest.Request) {
-	var body openrails.PlanMigrationRequest
+	var body billing.PlanMigrationRequest
 	if !r.BindJSON(&body) {
 		return
 	}

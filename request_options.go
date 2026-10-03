@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -22,7 +23,7 @@ const (
 type CredentialTarget struct {
 	Scope        CredentialScope
 	MerchantSlug string
-	MerchantID   MerchantID
+	MerchantID   billing.MerchantID
 }
 
 // RequestOption configures one operation without changing the shared Client.
@@ -60,7 +61,7 @@ func WithMerchant(slug string) RequestOption {
 
 // ForMerchantID selects a stable merchant UUID for a single operation. Use it
 // for stored merchant identities; use WithMerchant for human-facing slugs.
-func ForMerchantID(id MerchantID) RequestOption {
+func ForMerchantID(id billing.MerchantID) RequestOption {
 	var err error
 	if id.IsZero() {
 		err = invalidErr("merchant ID must not be zero")
@@ -81,7 +82,7 @@ func WithDefaultMerchant(slug string) ClientOption {
 			return
 		}
 		c.merchantSlug = slug
-		c.merchantID = MerchantID{}
+		c.merchantID = billing.MerchantID{}
 	}
 }
 

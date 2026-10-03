@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -70,7 +70,7 @@ type ccbillNotice struct {
 	providerStopped bool
 	revoke          models.EntitlementRevokeReason
 	ended           subscriptions.PremiumEndReason
-	data            openrails.NotificationData
+	data            billing.NotificationData
 }
 
 func (n ccbillNotice) build(sub *models.Subscription, kind lifecycle.NoticeKind) *models.NotificationQueue {
@@ -110,7 +110,7 @@ func sameTime(a, b *time.Time) bool {
 const ccbillReactivationUnappliedFinding = "life.ccbill.reactivation_unapplied"
 
 func raiseCCBillFinding(ctx context.Context, d *db.DB, sub *models.Subscription, findingType, action string, evidence map[string]any) error {
-	evidence["subscription_id"] = openrails.SubscriptionID(sub.ID).String()
+	evidence["subscription_id"] = billing.SubscriptionID(sub.ID).String()
 	evidence["rail_subscription_id"] = sub.RailSubscriptionID
 	evidence["local_status"] = string(sub.Status)
 	raw, err := json.Marshal(evidence)

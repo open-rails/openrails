@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // defaults reads the invariant straight from the database: how many of the
@@ -37,13 +37,13 @@ func (c *customer) requireOneDefault(what string) string {
 	}
 	parsed, err := uuid.Parse(id)
 	require.NoError(c.w.t, err)
-	return openrails.PaymentMethodID(parsed).String()
+	return billing.PaymentMethodID(parsed).String()
 }
 
 // listedDefault is the default as the Client reports it; it is listed first.
 func (c *customer) listedDefault(tp topology) string {
 	c.w.t.Helper()
-	page, err := c.w.client[tp].ListPaymentMethods(c.w.t.Context(), c.id, openrails.PageOptions{Limit: 100})
+	page, err := c.w.client[tp].ListPaymentMethods(c.w.t.Context(), c.id, billing.PageOptions{Limit: 100})
 	require.NoError(c.w.t, err)
 	var out []string
 	for i, m := range page.Data {
@@ -96,7 +96,7 @@ func (c *customer) removeCard(method string) {
 
 func (c *customer) setDefault(tp topology, method string) {
 	c.w.t.Helper()
-	id, err := openrails.ParsePaymentMethodID(method)
+	id, err := billing.ParsePaymentMethodID(method)
 	require.NoError(c.w.t, err)
 	out, err := c.w.client[tp].SetDefaultPaymentMethod(c.w.t.Context(), c.id, id)
 	require.NoError(c.w.t, err)

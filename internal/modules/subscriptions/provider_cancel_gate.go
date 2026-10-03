@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -21,12 +21,12 @@ import (
 // ErrProviderCancelHeld refuses a cancel that needs the provider's billing
 // schedule deleted while destructive provider actions are disarmed: the local
 // row would say cancelled while the provider kept charging.
-var ErrProviderCancelHeld = apperr.New(http.StatusConflict, openrails.CodeProviderCancelHeld,
+var ErrProviderCancelHeld = apperr.New(http.StatusConflict, billing.CodeProviderCancelHeld,
 	"cancellation needs the provider's billing schedule deleted and destructive provider actions are not armed for this merchant; an operator has been notified")
 
 // ErrPaymentMethodSameVault refuses repointing an NMI subscription at another
 // card of the vault it already bills: NMI charges the vault's primary card.
-var ErrPaymentMethodSameVault = apperr.New(http.StatusConflict, openrails.CodePaymentMethodSameVault,
+var ErrPaymentMethodSameVault = apperr.New(http.StatusConflict, billing.CodePaymentMethodSameVault,
 	"this card is stored in the same provider vault the subscription already bills; save it as a new payment method to use it")
 
 // ProviderCancelHeldFindingType is the operator finding a held cancel raises,
@@ -63,7 +63,7 @@ func RequireProviderCancelArmed(ctx context.Context, d *db.DB, sub *models.Subsc
 
 func raiseProviderCancelHeld(ctx context.Context, d *db.DB, sub *models.Subscription, reason string, accountDeletion bool) error {
 	evidence, err := json.Marshal(map[string]any{
-		"subscription_id":      openrails.SubscriptionID(sub.ID).String(),
+		"subscription_id":      billing.SubscriptionID(sub.ID).String(),
 		"customer_id":          sub.CustomerID.String(),
 		"rail":                 string(sub.Rail),
 		"rail_subscription_id": sub.RailSubscriptionID,

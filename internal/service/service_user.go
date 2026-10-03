@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -111,7 +111,7 @@ func (s *Service) lookupCheckoutSession(ctx context.Context, user *checkout.User
 	return checkoutSessionFromResponse(resp), nil
 }
 
-func (s *Service) CreatePaymentMethodSessionForCustomer(ctx context.Context, req openrails.CreatePaymentMethodSessionRequest) (*CheckoutSession, error) {
+func (s *Service) CreatePaymentMethodSessionForCustomer(ctx context.Context, req billing.CreatePaymentMethodSessionRequest) (*CheckoutSession, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -121,7 +121,7 @@ func (s *Service) CreatePaymentMethodSessionForCustomer(ctx context.Context, req
 	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "payment_method", "", "")
 }
 
-func (s *Service) CreateSolanaCancelSessionForCustomer(ctx context.Context, req openrails.CreateSolanaCancelSessionRequest) (*CheckoutSession, error) {
+func (s *Service) CreateSolanaCancelSessionForCustomer(ctx context.Context, req billing.CreateSolanaCancelSessionRequest) (*CheckoutSession, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -131,7 +131,7 @@ func (s *Service) CreateSolanaCancelSessionForCustomer(ctx context.Context, req 
 	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "solana_cancel", req.SubscriptionID, "")
 }
 
-func (s *Service) CreateSolanaTierChangeSessionForCustomer(ctx context.Context, req openrails.CreateSolanaTierChangeSessionRequest) (*CheckoutSession, error) {
+func (s *Service) CreateSolanaTierChangeSessionForCustomer(ctx context.Context, req billing.CreateSolanaTierChangeSessionRequest) (*CheckoutSession, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -185,7 +185,7 @@ func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer
 }
 
 func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIdentity, error) {
-	customerID, err := openrails.ParseCustomerID(customer.ID)
+	customerID, err := billing.ParseCustomerID(customer.ID)
 	if err != nil || customerID.IsZero() {
 		return nil, fmt.Errorf("user_id required")
 	}
@@ -344,7 +344,7 @@ func (s *Service) ResolveEffectiveTier(ctx context.Context, userID, group string
 		Entitlement: tier.Entitlement,
 		DisplayName: tier.ProductDisplayName,
 		TierRank:    tier.TierRank,
-		ProductID:   openrails.ProductID(tier.ProductID).String(),
+		ProductID:   billing.ProductID(tier.ProductID).String(),
 		ProductKey:  tier.ProductKey,
 	}, nil
 }
@@ -444,7 +444,7 @@ func checkoutResponseID[T interface{ String() string }](id *T) *string {
 
 func checkoutCreateRequest(req CreateCheckoutSessionRequest, mode, subscriptionID, newPriceID string) (*checkout.CheckoutSessionCreateRequest, error) {
 	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
-		id, err := openrails.ParsePaymentMethodID(raw)
+		id, err := billing.ParsePaymentMethodID(raw)
 		if err != nil || id.IsZero() {
 			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutSessionValidation)
 		}
@@ -459,7 +459,7 @@ func checkoutCreateRequest(req CreateCheckoutSessionRequest, mode, subscriptionI
 	}
 	if mode == "" {
 		req.PriceID = strings.TrimSpace(req.PriceID)
-		if priceID, err := openrails.ParsePriceID(req.PriceID); err == nil && !priceID.IsZero() {
+		if priceID, err := billing.ParsePriceID(req.PriceID); err == nil && !priceID.IsZero() {
 			req.PriceID = priceID.String()
 		}
 	}

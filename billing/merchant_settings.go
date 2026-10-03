@@ -1,4 +1,4 @@
-package openrails
+package billing
 
 // CheckoutRoutingRule is one processor-preference rule (or#288). Rules are
 // evaluated in declaration order and the FIRST whose Match accepts the routing

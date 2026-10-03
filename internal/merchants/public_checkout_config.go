@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -107,8 +107,8 @@ var publicRailProfiles = map[string]railPublicProfile{
 
 // PublicPSPConfig and PublicCheckoutConfig are the shared client wire types.
 type (
-	PublicPSPConfig      = openrails.CheckoutPSPConfig
-	PublicCheckoutConfig = openrails.CheckoutConfig
+	PublicPSPConfig      = billing.CheckoutPSPConfig
+	PublicCheckoutConfig = billing.CheckoutConfig
 )
 
 // PublicPSPConfigFor projects an armed PSP onto its public browser config.
@@ -259,7 +259,7 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 					cfg.PSPID, cfg.Rail, cfg.Key = scope.ID.String(), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
 				}
 				cfg.Config = nil
-				cfg.Status, cfg.RetryAfter = openrails.CheckoutPSPTemporarilyUnavailable, checkoutRetryAfterSeconds
+				cfg.Status, cfg.RetryAfter = billing.CheckoutPSPTemporarilyUnavailable, checkoutRetryAfterSeconds
 				out = append(out, cfg)
 				continue
 			}

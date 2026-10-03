@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -13,7 +13,7 @@ import (
 
 // commerceCustomer resolves a customer id from a request body field or a
 // path/query string and enforces the caller's customer scope.
-func commerceCustomer(r *httprequest.Request, customerID openrails.CustomerID) (identity.CustomerID, bool) {
+func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (identity.CustomerID, bool) {
 	id := servicePayer(customerID)
 	if id == nil {
 		r.ErrorJSON(http.StatusBadRequest, "valid customer_id required")
@@ -28,7 +28,7 @@ func commerceCustomer(r *httprequest.Request, customerID openrails.CustomerID) (
 func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	var input struct {
-		openrails.CreateCheckoutSessionRequest
+		billing.CreateCheckoutSessionRequest
 		Mode           json.RawMessage `json:"mode"`
 		SubscriptionID json.RawMessage `json:"subscription_id"`
 		NewPriceID     json.RawMessage `json:"new_price_id"`
@@ -37,7 +37,7 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 		return
 	}
 	if raw := input.PaymentOptions.PaymentMethodID; raw != "" {
-		id, err := openrails.ParsePaymentMethodID(raw)
+		id, err := billing.ParsePaymentMethodID(raw)
 		if err != nil || id.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
 			return
@@ -72,7 +72,7 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 
 func ServiceLookupCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input openrails.CreateCheckoutSessionRequest
+	var input billing.CreateCheckoutSessionRequest
 	if !r.BindJSON(&input) {
 		return
 	}
@@ -124,7 +124,7 @@ func ServiceGetCheckoutSession(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	typedId, err := openrails.ParseCheckoutSessionID(r.Param("id"))
+	typedId, err := billing.ParseCheckoutSessionID(r.Param("id"))
 	if err != nil || typedId.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
@@ -145,7 +145,7 @@ func ServiceGetCheckoutSession(r *httprequest.Request) {
 
 func ServiceConfirmCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input openrails.ConfirmCheckoutSessionRequest
+	var input billing.ConfirmCheckoutSessionRequest
 	if !r.BindJSON(&input) {
 		return
 	}
@@ -153,7 +153,7 @@ func ServiceConfirmCheckoutSession(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	typedId, err := openrails.ParseCheckoutSessionID(r.Param("id"))
+	typedId, err := billing.ParseCheckoutSessionID(r.Param("id"))
 	if err != nil || typedId.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
@@ -219,39 +219,39 @@ func ServiceResolveEffectiveTier(r *httprequest.Request) {
 }
 
 func ServiceCreatePaymentMethodSession(r *httprequest.Request) {
-	var input openrails.CreatePaymentMethodSessionRequest
+	var input billing.CreatePaymentMethodSessionRequest
 	if !r.BindJSON(&input) {
 		return
 	}
 	input.IdempotencyKey = r.Header("Idempotency-Key")
-	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*openrails.CheckoutSession, error) {
+	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*billing.CheckoutSession, error) {
 		return svc.CreatePaymentMethodSessionForCustomer(r.Request.Context(), input)
 	})
 }
 
 func ServiceCreateSolanaCancelSession(r *httprequest.Request) {
-	var input openrails.CreateSolanaCancelSessionRequest
+	var input billing.CreateSolanaCancelSessionRequest
 	if !r.BindJSON(&input) {
 		return
 	}
 	input.IdempotencyKey = r.Header("Idempotency-Key")
-	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*openrails.CheckoutSession, error) {
+	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*billing.CheckoutSession, error) {
 		return svc.CreateSolanaCancelSessionForCustomer(r.Request.Context(), input)
 	})
 }
 
 func ServiceCreateSolanaTierChangeSession(r *httprequest.Request) {
-	var input openrails.CreateSolanaTierChangeSessionRequest
+	var input billing.CreateSolanaTierChangeSessionRequest
 	if !r.BindJSON(&input) {
 		return
 	}
 	input.IdempotencyKey = r.Header("Idempotency-Key")
-	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*openrails.CheckoutSession, error) {
+	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*billing.CheckoutSession, error) {
 		return svc.CreateSolanaTierChangeSessionForCustomer(r.Request.Context(), input)
 	})
 }
 
-func serviceCreateCheckoutAction(r *httprequest.Request, customer openrails.CheckoutCustomerIdentity, key string, payment openrails.CheckoutPaymentOptions, create func(*billingservice.Service) (*openrails.CheckoutSession, error)) {
+func serviceCreateCheckoutAction(r *httprequest.Request, customer billing.CheckoutCustomerIdentity, key string, payment billing.CheckoutPaymentOptions, create func(*billingservice.Service) (*billing.CheckoutSession, error)) {
 	r.SetHeader("Cache-Control", "no-store")
 	if _, ok := commerceCustomer(r, customerIDParam(customer.ID)); !ok {
 		return

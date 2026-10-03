@@ -3,38 +3,38 @@ package api
 import (
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // ProductObject represents a product resource
 type ProductObject struct {
-	ID               openrails.ProductID `json:"id"`
-	Object           string              `json:"object"` // Always "product"
-	Key              string              `json:"key"`
-	Name             string              `json:"name"`
-	Description      string              `json:"description"`
-	EntitlementsSpec map[string]*int     `json:"entitlements_spec,omitempty"`
-	TierGroup        *string             `json:"tier_group,omitempty"`
-	TierRank         int                 `json:"tier_rank"`
-	Active           bool                `json:"active"`
-	Metadata         map[string]string   `json:"metadata,omitempty"`
-	CreatedAt        time.Time           `json:"created_at"`
-	UpdatedAt        time.Time           `json:"updated_at"`
-	Prices           []PriceObject       `json:"prices,omitempty"`
+	ID               billing.ProductID `json:"id"`
+	Object           string            `json:"object"` // Always "product"
+	Key              string            `json:"key"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	EntitlementsSpec map[string]*int   `json:"entitlements_spec,omitempty"`
+	TierGroup        *string           `json:"tier_group,omitempty"`
+	TierRank         int               `json:"tier_rank"`
+	Active           bool              `json:"active"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	Prices           []PriceObject     `json:"prices,omitempty"`
 }
 
 // These aliases share the public Client wire types.
 type (
-	PriceObject        = openrails.PublicPrice
-	RecurringInfo      = openrails.PriceRecurrence
-	PaymentObject      = openrails.Payment
-	PaymentRefundsList = openrails.PaymentList
+	PriceObject        = billing.PublicPrice
+	RecurringInfo      = billing.PriceRecurrence
+	PaymentObject      = billing.Payment
+	PaymentRefundsList = billing.PaymentList
 )
 
 // List is a Stripe-style list response with offset/limit pagination. It mirrors
 // the Gin response package shape without importing Gin, keeping pkg/embedded
 // usable from pure net/http callers (#285).
-type List[T any] = openrails.Page[T]
+type List[T any] = billing.Page[T]
 
 // NewList creates a List response with has_more calculated automatically.
 func NewList[T any](data []T, total int64, limit, offset int) List[T] {

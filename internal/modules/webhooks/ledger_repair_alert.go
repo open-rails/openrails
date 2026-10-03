@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -45,14 +45,14 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 
 	userID := strings.TrimSpace(alert.UserID)
 
-	data := openrails.NotificationData{
+	data := billing.NotificationData{
 		Kind:          "billing_ledger_repair_required",
 		Provider:      strings.TrimSpace(alert.Provider),
 		Operation:     strings.TrimSpace(alert.Operation),
 		TransactionID: strings.TrimSpace(alert.TransactionID),
 	}
 	if userID != "" {
-		affected, err := openrails.ParseCustomerID(userID)
+		affected, err := billing.ParseCustomerID(userID)
 		if err != nil {
 			return fmt.Errorf("ledger repair alert: affected customer: %w", err)
 		}
@@ -62,10 +62,10 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 		data.Error = alert.Err.Error()
 	}
 	if alert.OriginalPaymentID != nil {
-		data.OriginalPaymentID = openrails.PaymentID(*alert.OriginalPaymentID)
+		data.OriginalPaymentID = billing.PaymentID(*alert.OriginalPaymentID)
 	}
 	if alert.SubscriptionID != nil {
-		data.SubscriptionID = openrails.SubscriptionID(*alert.SubscriptionID)
+		data.SubscriptionID = billing.SubscriptionID(*alert.SubscriptionID)
 	}
 	for key, value := range alert.Metadata {
 		if strings.TrimSpace(key) == "" {

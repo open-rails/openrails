@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -35,7 +35,7 @@ func GetSolanaPay(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
@@ -80,7 +80,7 @@ func PostSolanaPay(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	typedParsedID, err := billing.ParseCheckoutSessionID(sessionID)
 	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return

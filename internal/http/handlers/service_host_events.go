@@ -6,13 +6,13 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	service "github.com/open-rails/openrails/internal/service"
 )
 
 func writeHostEventError(r *httprequest.Request, err error) {
-	var status *openrails.StatusError
+	var status *billing.StatusError
 	if errors.As(err, &status) {
 		r.JSON(status.Status, map[string]any{"error": status.ErrorDetails})
 		return
@@ -26,7 +26,7 @@ func ServiceListHostEvents(r *httprequest.Request) {
 		writeHostEventError(r, err)
 		return
 	}
-	options := openrails.HostEventListOptions{Type: openrails.HostEventType(r.Query("type"))}
+	options := billing.HostEventListOptions{Type: billing.HostEventType(r.Query("type"))}
 	if value := r.Query("limit"); value != "" {
 		options.Limit, err = strconv.Atoi(value)
 		if err != nil {
@@ -42,7 +42,7 @@ func ServiceListHostEvents(r *httprequest.Request) {
 		}
 	}
 	if value := r.Query("payment_id"); value != "" {
-		options.PaymentID, err = openrails.ParsePaymentID(value)
+		options.PaymentID, err = billing.ParsePaymentID(value)
 		if err != nil || options.PaymentID.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid payment_id")
 			return

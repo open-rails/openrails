@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -404,7 +404,7 @@ func chargeAttempt(t TransactionType) bool {
 // recordUnlinkedReversalFinding surfaces a refund or chargeback the mirror
 // could not attach to its original sale. Best-effort, like every finding.
 func recordUnlinkedReversalFinding(ctx context.Context, q *gen.Queries, sub *models.Subscription, t RemoteTransaction) {
-	action := fmt.Sprintf("a %s of %d cents (transaction %s) was reported for subscription %s without its original sale; record it against the sale it reverses", t.Type, t.AmountCents, t.TransactionID, openrails.SubscriptionID(sub.ID).String())
+	action := fmt.Sprintf("a %s of %d cents (transaction %s) was reported for subscription %s without its original sale; record it against the sale it reverses", t.Type, t.AmountCents, t.TransactionID, billing.SubscriptionID(sub.ID).String())
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        sub.MerchantID,
 		FindingType:       string(FindingReversalUnlinked),

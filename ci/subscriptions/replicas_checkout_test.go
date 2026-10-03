@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // #1099: an embedded CreateCheckoutSession claims its request key in
@@ -36,10 +36,10 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 				}
 				return len(f.base.nmi.ledger(""))
 			}
-			request := func(c *customer, method, key string) openrails.CreateCheckoutSessionRequest {
-				return openrails.CreateCheckoutSessionRequest{
-					OfferKind: openrails.OfferPermanent, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
-					IdempotencyKey: key, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
+			request := func(c *customer, method, key string) billing.CreateCheckoutSessionRequest {
+				return billing.CreateCheckoutSessionRequest{
+					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID,
+					IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
@@ -49,7 +49,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			req := request(racer, racer.saveCard(rail, visa), "checkout:"+uuid.NewString()+":1")
 			before := charges()
 			start := make(chan struct{})
-			sessions := make([]*openrails.CheckoutSession, 16)
+			sessions := make([]*billing.CheckoutSession, 16)
 			errs := make([]error, 16)
 			var wg sync.WaitGroup
 			for i := range 16 {
@@ -65,7 +65,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			var id string
 			for i := range 16 {
 				if errs[i] != nil {
-					var status *openrails.StatusError
+					var status *billing.StatusError
 					require.True(t, errors.As(errs[i], &status), "%v", errs[i])
 					require.Equal(t, http.StatusConflict, status.Status, "only in-progress refusals: %v", errs[i])
 					continue
@@ -100,14 +100,14 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			f.unhold()
 
 			_, err = b.client[embedded].CreateCheckoutSession(t.Context(), req)
-			var status *openrails.StatusError
+			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "the dead replica's claim holds until its lease lapses: %v", err)
 			require.Equal(t, http.StatusConflict, status.Status)
 
 			f.lapseCheckoutClaims(victim.id)
 			f.recover()
 			f.settle()
-			var retried *openrails.CheckoutSession
+			var retried *billing.CheckoutSession
 			require.Eventually(t, func() bool {
 				retried, err = b.client[embedded].CreateCheckoutSession(t.Context(), req)
 				if err == nil && retried.Status == "succeeded" {
@@ -142,9 +142,9 @@ func (f *fleet) lapseCheckoutClaims(customerID string) {
 	require.NoError(f.t, err)
 }
 
-func requireStatus(t *testing.T, err error, want int) *openrails.StatusError {
+func requireStatus(t *testing.T, err error, want int) *billing.StatusError {
 	t.Helper()
-	var status *openrails.StatusError
+	var status *billing.StatusError
 	require.True(t, errors.As(err, &status), "%v", err)
 	require.Equal(t, want, status.Status, "%v", err)
 	return status
@@ -160,10 +160,10 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	a, b := f.replicas[0], f.replicas[1]
 	price := a.permanent("content:pass")
 	charges := func() int { return len(f.base.nmi.ledger("")) }
-	request := func(c *customer, key, token string) openrails.CreateCheckoutSessionRequest {
-		return openrails.CreateCheckoutSessionRequest{
-			Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
-			PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: token, NameOnCard: "Pass Payer", Zip: "10001", Country: "US"},
+	request := func(c *customer, key, token string) billing.CreateCheckoutSessionRequest {
+		return billing.CreateCheckoutSessionRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
+			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: token, NameOnCard: "Pass Payer", Zip: "10001", Country: "US"},
 		}
 	}
 	firstSessionStatus := func(c *customer) string {
@@ -225,7 +225,7 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	req3 := request(d, "checkout:"+uuid.NewString()+":1", f.base.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"}))
 	_, err = b.client[embedded].CreateCheckoutSession(t.Context(), req3)
 	declined := requireStatus(t, err, http.StatusPaymentRequired)
-	require.Equal(t, openrails.CodeCardDeclined, declined.Code)
+	require.Equal(t, billing.CodeCardDeclined, declined.Code)
 	for _, r := range []*world{a, b} {
 		_, err = r.client[embedded].CreateCheckoutSession(t.Context(), req3)
 		again := requireStatus(t, err, http.StatusPaymentRequired)
@@ -255,14 +255,14 @@ func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	price := a.membership("content:members", 9_990_000)
 	charges := func() int { return len(f.base.nmi.Ledger("")) }
 	subscriptions := func(c *customer) int {
-		subs, err := b.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+		subs, err := b.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 		require.NoError(t, err)
 		return len(subs.Data)
 	}
-	request := func(c *customer, key string) openrails.CreateCheckoutSessionRequest {
-		return openrails.CreateCheckoutSessionRequest{
-			Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
-			PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
+	request := func(c *customer, key string) billing.CreateCheckoutSessionRequest {
+		return billing.CreateCheckoutSessionRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID, IdempotencyKey: key, Confirm: true,
+			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: a.psp["nmi"], Rail: "nmi", PaymentToken: f.base.nmi.Tokenize(visa), NameOnCard: "Member Payer", Zip: "10001", Country: "US"},
 		}
 	}
 	c := a.newCustomer()

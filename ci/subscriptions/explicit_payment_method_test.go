@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
@@ -31,18 +31,18 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 			member := w.membership("content:members", 9_990_000)
 			for _, offer := range []struct {
 				price, entitlement string
-				kind               openrails.OfferKind
-			}{{sale.ID, "content:post", openrails.OfferPermanent}, {member.ID, "content:members", openrails.OfferRecurring}} {
-				_, err := w.client[tp].CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{
-					OfferKind: offer.kind, Customer: openrails.CheckoutCustomerIdentity{ID: c.id}, Entitlement: offer.entitlement, PriceID: offer.price,
-					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi"}, Confirm: true,
+				kind               billing.OfferKind
+			}{{sale.ID, "content:post", billing.OfferPermanent}, {member.ID, "content:members", billing.OfferRecurring}} {
+				_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+					OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: offer.entitlement, PriceID: offer.price,
+					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi"}, Confirm: true,
 				})
-				require.ErrorIs(t, err, openrails.ErrPaymentMethodRequired)
-				require.ErrorIs(t, err, openrails.ErrInvalid)
-				var status *openrails.StatusError
+				require.ErrorIs(t, err, billing.ErrPaymentMethodRequired)
+				require.ErrorIs(t, err, billing.ErrInvalid)
+				var status *billing.StatusError
 				require.ErrorAs(t, err, &status)
 				require.Equal(t, http.StatusBadRequest, status.Status)
-				require.Equal(t, openrails.CodePaymentMethodRequired, status.Code)
+				require.Equal(t, billing.CodePaymentMethodRequired, status.Code)
 				require.NotNil(t, status.Param)
 				require.Equal(t, "payment_method_id", *status.Param)
 			}

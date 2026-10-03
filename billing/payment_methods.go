@@ -1,6 +1,8 @@
-package openrails
+package billing
 
-import "time"
+import (
+	"time"
+)
 
 type PaymentMethodSubscription struct {
 	ID          string    `json:"id"`
@@ -61,3 +63,7 @@ type CardDetails struct {
 	ExpMonth *int    `json:"exp_month,omitempty"`
 	ExpYear  *int    `json:"exp_year,omitempty"`
 }
+
+// PaymentMethodDeletion distinguishes completed deletion from a durable
+// operation awaiting provider reconciliation. Pending is never reported deleted.
+type PaymentMethodDeletion struct{ Pending bool }

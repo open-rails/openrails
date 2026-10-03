@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"github.com/open-rails/openrails/billing"
 )
 
-func pageQuery(options PageOptions) url.Values {
+func pageQuery(options billing.PageOptions) url.Values {
 	limit := options.Limit
 	if limit == 0 {
 		limit = 50
@@ -16,7 +18,7 @@ func pageQuery(options PageOptions) url.Values {
 	return url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(options.Offset)}}
 }
 
-func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilter, requestOptions ...RequestOption) (*Page[Subscription], error) {
+func (c *Client) ListSubscriptions(ctx context.Context, filter billing.SubscriptionFilter, requestOptions ...RequestOption) (*billing.Page[billing.Subscription], error) {
 	q := pageQuery(filter.PageOptions)
 	if filter.CustomerID != "" {
 		q.Set("customer_id", filter.CustomerID)
@@ -27,14 +29,14 @@ func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilte
 	if filter.Rail != "" {
 		q.Set("rail", filter.Rail)
 	}
-	var out Page[Subscription]
+	var out billing.Page[billing.Subscription]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func subscriptionPath(id SubscriptionID) (string, error) {
+func subscriptionPath(id billing.SubscriptionID) (string, error) {
 	subscription, err := requireTypedID("subscription_id", id)
 	if err != nil {
 		return "", err
@@ -50,19 +52,19 @@ func customerPath(customerID string) (string, error) {
 	return "/v1/merchant/customers/" + customer, nil
 }
 
-func (c *Client) GetSubscription(ctx context.Context, id SubscriptionID, requestOptions ...RequestOption) (*Subscription, error) {
+func (c *Client) GetSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) (*billing.Subscription, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
-	var out Subscription
+	var out billing.Subscription
 	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) CancelSubscription(ctx context.Context, id SubscriptionID, request CancelSubscriptionRequest, requestOptions ...RequestOption) error {
+func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, request billing.CancelSubscriptionRequest, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return err
@@ -72,7 +74,7 @@ func (c *Client) CancelSubscription(ctx context.Context, id SubscriptionID, requ
 
 // ResumeSubscription queues recovery. A successful return confirms durable
 // acceptance; GetSubscription reads the resulting state after worker execution.
-func (c *Client) ResumeSubscription(ctx context.Context, id SubscriptionID, requestOptions ...RequestOption) error {
+func (c *Client) ResumeSubscription(ctx context.Context, id billing.SubscriptionID, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return err
@@ -80,7 +82,7 @@ func (c *Client) ResumeSubscription(ctx context.Context, id SubscriptionID, requ
 	return c.do(ctx, http.MethodPost, path+"/resume", nil, nil, requestOptions...)
 }
 
-func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id SubscriptionID, request UpdateSubscriptionPaymentMethodRequest, requestOptions ...RequestOption) error {
+func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, request billing.UpdateSubscriptionPaymentMethodRequest, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return err
@@ -91,7 +93,7 @@ func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id Subscri
 	return c.do(ctx, http.MethodPut, path+"/payment-method", request, nil, requestOptions...)
 }
 
-func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, request ChangeTierRequest, requestOptions ...RequestOption) (*TierChangePreviewResponse, error) {
+func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionID, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangePreviewResponse, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
@@ -99,14 +101,14 @@ func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, reque
 	if _, err := resourcePriceID(request.PriceID); err != nil {
 		return nil, err
 	}
-	var out TierChangePreviewResponse
+	var out billing.TierChangePreviewResponse
 	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, request ChangeTierRequest, requestOptions ...RequestOption) (*TierChangeResponse, error) {
+func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, key string, request billing.ChangeTierRequest, requestOptions ...RequestOption) (*billing.TierChangeResponse, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
@@ -114,19 +116,19 @@ func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, 
 	if _, err := resourcePriceID(request.PriceID); err != nil {
 		return nil, err
 	}
-	var out TierChangeResponse
+	var out billing.TierChangeResponse
 	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options PageOptions, requestOptions ...RequestOption) (*Page[PaymentMethod], error) {
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options billing.PageOptions, requestOptions ...RequestOption) (*billing.Page[billing.PaymentMethod], error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
 	}
-	var out Page[PaymentMethod]
+	var out billing.Page[billing.PaymentMethod]
 	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+pageQuery(options).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -135,7 +137,7 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, opti
 
 // SetDefaultPaymentMethod makes one of the customer's usable methods its
 // default; the previous default stops being one in the same transaction.
-func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string, methodID PaymentMethodID, requestOptions ...RequestOption) (*PaymentMethod, error) {
+func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethod, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -144,18 +146,14 @@ func (c *Client) SetDefaultPaymentMethod(ctx context.Context, customerID string,
 	if err != nil {
 		return nil, err
 	}
-	var out PaymentMethod
+	var out billing.PaymentMethod
 	if err := c.do(ctx, http.MethodPut, path+"/default-payment-method", map[string]string{"payment_method_id": method}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// PaymentMethodDeletion distinguishes completed deletion from a durable
-// operation awaiting provider reconciliation. Pending is never reported deleted.
-type PaymentMethodDeletion struct{ Pending bool }
-
-func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID PaymentMethodID, requestOptions ...RequestOption) (*PaymentMethodDeletion, error) {
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethodDeletion, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -170,10 +168,10 @@ func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, met
 	}
 	switch response.status {
 	case http.StatusNoContent:
-		return &PaymentMethodDeletion{}, nil
+		return &billing.PaymentMethodDeletion{}, nil
 	case http.StatusAccepted:
-		return &PaymentMethodDeletion{Pending: true}, nil
+		return &billing.PaymentMethodDeletion{Pending: true}, nil
 	default:
-		return nil, fmt.Errorf("%w: unexpected payment deletion status %d", ErrUnreachable, response.status)
+		return nil, fmt.Errorf("%w: unexpected payment deletion status %d", billing.ErrUnreachable, response.status)
 	}
 }

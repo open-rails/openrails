@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // The portable billing archive's schema check classifies every subscription
@@ -82,8 +82,8 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID}
-	_, err := h.pay("pay-nsf", openrails.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
-	require.ErrorIs(t, err, openrails.ErrPaymentRefused)
+	_, err := h.pay("pay-nsf", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
+	require.ErrorIs(t, err, billing.ErrPaymentRefused)
 	w.settle()
 	refusedTable := func() string {
 		status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")

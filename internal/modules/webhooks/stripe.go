@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -842,7 +842,7 @@ func parseCheckoutSessionID(metadata map[string]string) uuid.UUID {
 	if raw == "" {
 		return uuid.Nil
 	}
-	id, err := openrails.ParseCheckoutSessionID(raw)
+	id, err := billing.ParseCheckoutSessionID(raw)
 	if err != nil {
 		return uuid.Nil
 	}

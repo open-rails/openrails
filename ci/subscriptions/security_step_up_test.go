@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // SEC (secaudit round 2, D1): an operation that moves money or grants access
@@ -86,7 +86,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	// A read needs no step-up, and neither does the host's in-process client.
 	status, body := call(stale, http.MethodGet, "/v2/merchant/customers/"+member.id, nil)
 	require.Equal(t, http.StatusOK, status, "%v", body)
-	_, err := w.client[embedded].GrantEntitlement(t.Context(), member.id, openrails.GrantEntitlementRequest{Entitlement: "content:host"})
+	_, err := w.client[embedded].GrantEntitlement(t.Context(), member.id, billing.GrantEntitlementRequest{Entitlement: "content:host"})
 	require.NoError(t, err)
 	require.True(t, member.entitled("content:host"))
 

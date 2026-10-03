@@ -22,7 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
@@ -36,20 +36,20 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// The declared-facts vocabulary is the shared Client wire (openrails.DeclaredBilling);
+// The declared-facts vocabulary is the shared Client wire (billing.DeclaredBilling);
 // these aliases keep the engine-side names.
 type (
-	DeclaredCustomer      = openrails.DeclaredCustomer
-	PSPRef                = openrails.PSPRef
-	DeclaredPaymentMethod = openrails.DeclaredPaymentMethod
-	PaymentMethodRef      = openrails.PaymentMethodRef
-	CancelEvidence        = openrails.CancelEvidence
-	DunningEvidence       = openrails.DunningEvidence
-	DeclaredTransaction   = openrails.DeclaredTransaction
-	DeclaredSubscription  = openrails.DeclaredSubscription
-	DeclaredAdminGrant    = openrails.DeclaredAdminGrant
-	DeclaredBilling       = openrails.DeclaredBilling
-	Result                = openrails.BillingImportResult
+	DeclaredCustomer      = billing.DeclaredCustomer
+	PSPRef                = billing.PSPRef
+	DeclaredPaymentMethod = billing.DeclaredPaymentMethod
+	PaymentMethodRef      = billing.PaymentMethodRef
+	CancelEvidence        = billing.CancelEvidence
+	DunningEvidence       = billing.DunningEvidence
+	DeclaredTransaction   = billing.DeclaredTransaction
+	DeclaredSubscription  = billing.DeclaredSubscription
+	DeclaredAdminGrant    = billing.DeclaredAdminGrant
+	DeclaredBilling       = billing.DeclaredBilling
+	Result                = billing.BillingImportResult
 )
 
 // Options retains the runtime database and its bound River producer. Import

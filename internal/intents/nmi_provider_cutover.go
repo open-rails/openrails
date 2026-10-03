@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -32,10 +32,10 @@ type nmiCutoverRequest struct {
 	ExpectedTargetPSPID   uuid.UUID `json:"expected_target_psp_id"`
 }
 
-func normalizeCutoverRequest(body openrails.ProviderCutoverRequest) (nmiCutoverRequest, error) {
+func normalizeCutoverRequest(body billing.ProviderCutoverRequest) (nmiCutoverRequest, error) {
 	id := body.TargetPaymentMethodID.UUID()
 	if id == uuid.Nil || body.ExpectedSourcePSPID == uuid.Nil || body.ExpectedTargetPSPID == uuid.Nil {
-		return nmiCutoverRequest{}, openrails.ErrInvalid
+		return nmiCutoverRequest{}, billing.ErrInvalid
 	}
 	return nmiCutoverRequest{id, body.ExpectedSourcePSPID, body.ExpectedTargetPSPID}, nil
 }
@@ -112,7 +112,7 @@ func cutoverConflict(reason string) error {
 }
 func cutoverKey(key string) (string, error) {
 	if key == "" || key != strings.TrimSpace(key) || len(key) > 255 || strings.ContainsAny(key, "\r\n\t") {
-		return "", openrails.ErrInvalid
+		return "", billing.ErrInvalid
 	}
 	return TypeNMIProviderCutover + ":" + key, nil
 }
@@ -218,7 +218,7 @@ func cutoverCredentialFingerprint(client *nmi.NMIClient) string {
 	return providerqualification.Fingerprint(client.SecurityKey)
 }
 
-func (h *NMIProviderCutover) Preview(ctx context.Context, id uuid.UUID, body openrails.ProviderCutoverRequest) (*openrails.ProviderCutover, error) {
+func (h *NMIProviderCutover) Preview(ctx context.Context, id uuid.UUID, body billing.ProviderCutoverRequest) (*billing.ProviderCutover, error) {
 	req, err := normalizeCutoverRequest(body)
 	if err != nil {
 		return nil, err
@@ -237,7 +237,7 @@ func (h *NMIProviderCutover) Preview(ctx context.Context, id uuid.UUID, body ope
 	return cutoverResult(gen.OpenrailsRailIntent{MerchantID: mid.UUID(), Status: "ready"}, p, nmiCutoverProgress{}), nil
 }
 
-func (h *NMIProviderCutover) Get(ctx context.Context, id uuid.UUID, key string) (*openrails.ProviderCutover, error) {
+func (h *NMIProviderCutover) Get(ctx context.Context, id uuid.UUID, key string) (*billing.ProviderCutover, error) {
 	k, err := cutoverKey(key)
 	if err != nil {
 		return nil, err
@@ -256,7 +256,7 @@ func (h *NMIProviderCutover) Get(ctx context.Context, id uuid.UUID, key string) 
 	return cutoverResult(in, p, progress), nil
 }
 
-func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid.UUID, key string, body openrails.ProviderCutoverRequest, origin Origin) (*openrails.ProviderCutover, error) {
+func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid.UUID, key string, body billing.ProviderCutoverRequest, origin Origin) (*billing.ProviderCutover, error) {
 	req, err := normalizeCutoverRequest(body)
 	if err != nil {
 		return nil, err
@@ -372,8 +372,8 @@ func decodeCutover(in gen.OpenrailsRailIntent) (nmiCutoverPayload, nmiCutoverPro
 	}
 	return p, progress, nil
 }
-func cutoverResult(in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) *openrails.ProviderCutover {
-	r := &openrails.ProviderCutover{ID: in.ID, MerchantID: in.MerchantID, SubscriptionID: openrails.SubscriptionID(p.SubscriptionID), SourcePSPID: p.Request.ExpectedSourcePSPID, TargetPSPID: p.Request.ExpectedTargetPSPID, TargetPaymentMethodID: openrails.PaymentMethodID(p.Request.TargetPaymentMethodID), Anchor: p.Anchor, Status: in.Status, Stage: "pending"}
+func cutoverResult(in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) *billing.ProviderCutover {
+	r := &billing.ProviderCutover{ID: in.ID, MerchantID: in.MerchantID, SubscriptionID: billing.SubscriptionID(p.SubscriptionID), SourcePSPID: p.Request.ExpectedSourcePSPID, TargetPSPID: p.Request.ExpectedTargetPSPID, TargetPaymentMethodID: billing.PaymentMethodID(p.Request.TargetPaymentMethodID), Anchor: p.Anchor, Status: in.Status, Stage: "pending"}
 	if !g.BillingAnchor.IsZero() {
 		r.Anchor = g.BillingAnchor
 	}

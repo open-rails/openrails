@@ -1,4 +1,4 @@
-package openrails
+package billing
 
 import (
 	"github.com/google/uuid"

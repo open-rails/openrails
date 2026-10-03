@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // #1094: Stripe bills the subscriptions it owns; OpenRails mirrors them and a
@@ -27,12 +27,12 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	w.converge()
 	client := w.client[embedded]
 	premium := "content:premium"
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
 	w.stripe.legacyPrice(stripePrice, 1999)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 
@@ -64,12 +64,12 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	w.converge()
 	client := w.client[embedded]
 	premium := "content:premium"
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", EntitlementsSpec: map[string]*int{l.ent: nil, premium: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
 	w.stripe.legacyPrice(stripePrice, 1999)
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 	paidBefore := len(completed(w.payments(embedded, l.c.id)))
@@ -84,7 +84,7 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	paid := completed(w.payments(embedded, l.c.id))
 	require.Len(t, paid, paidBefore+1, "the proration charge is a payment")
 	charge := w.stripe.latestCharge(l.railSub)
-	var proration *openrails.Payment
+	var proration *billing.Payment
 	for i := range paid {
 		if paid[i].TransactionID == charge {
 			proration = &paid[i]

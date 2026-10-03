@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // NotificationEventType represents the type of notification event
@@ -72,7 +72,7 @@ type NotificationQueue struct {
 	CustomerID uuid.UUID
 	EventType  NotificationEventType
 	// Data is the typed event payload; it is stored as JSONB and served verbatim.
-	Data      openrails.NotificationData
+	Data      billing.NotificationData
 	Seen      bool
 	CreatedAt time.Time
 }
@@ -81,8 +81,8 @@ type NotificationQueue struct {
 func (nq *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(nq.Data) }
 
 // View is the wire shape of the row.
-func (nq *NotificationQueue) View() openrails.Notification {
-	return openrails.Notification{ID: nq.ID, CustomerID: openrails.CustomerID(nq.CustomerID).String(), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
+func (nq *NotificationQueue) View() billing.Notification {
+	return billing.Notification{ID: nq.ID, CustomerID: billing.CustomerID(nq.CustomerID).String(), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
 }
 
 // IsSeen checks if the notification has been seen by the user

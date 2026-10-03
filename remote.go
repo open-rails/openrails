@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -29,7 +30,7 @@ type Client struct {
 	PaymentProviders      *PaymentProviderClient
 	MerchantConfiguration *MerchantConfigurationClient
 	baseURL               string
-	merchantID            MerchantID
+	merchantID            billing.MerchantID
 	merchantSlug          string
 	ownCatalog            bool
 	catalogOwner          string
@@ -65,7 +66,7 @@ func (c *Client) catalogPath() string {
 
 // WithMerchantID supplies an immutable default merchant UUID. Request options
 // may override it, but the server still enforces credential and runtime scope.
-func WithMerchantID(id MerchantID) ClientOption {
+func WithMerchantID(id billing.MerchantID) ClientOption {
 	return func(c *Client) {
 		if id.IsZero() {
 			c.setupErr = fmt.Errorf("openrails: merchant ID must not be zero")
@@ -78,7 +79,7 @@ func WithMerchantID(id MerchantID) ClientOption {
 
 // MerchantID returns the Client's default UUID, or zero when its default is a
 // slug or each operation supplies its own selector.
-func (c *Client) MerchantID() MerchantID { return c.merchantID }
+func (c *Client) MerchantID() billing.MerchantID { return c.merchantID }
 
 // WithHTTPClient injects a transport (custom TLS or connection pooling). When
 // unset, the client uses Go's default HTTP transport. An explicit WithTimeout
@@ -186,7 +187,7 @@ func (c *Client) Verify(ctx context.Context, requestOptions ...RequestOption) er
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
 // matches ErrInvalid identically to the embedded transport (#338).
 func invalidErr(msg string) error {
-	return &StatusError{Status: http.StatusBadRequest, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
+	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
 }
 
 // requireID trims a caller-supplied identifier and refuses a blank one with
@@ -256,13 +257,13 @@ func (c *Client) bearer(ctx context.Context, target CredentialTarget) (string, e
 }
 
 // DepositCredits implements Client (handler ServiceDepositCredits).
-func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest, requestOptions ...RequestOption) (*CreditTransaction, error) {
+func (c *Client) DepositCredits(ctx context.Context, req billing.DepositCreditsRequest, requestOptions ...RequestOption) (*billing.CreditTransaction, error) {
 	currency := normalizeCurrency(req.Currency)
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
 	}
 	req.Currency = currency
-	var out CreditTransaction
+	var out billing.CreditTransaction
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/deposit", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -271,7 +272,7 @@ func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest, 
 
 // GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
 // never committed returns an error matching ErrNotFound.
-func (c *Client) GetDeposit(ctx context.Context, customerID string, sourceID string, requestOptions ...RequestOption) (*CreditTransaction, error) {
+func (c *Client) GetDeposit(ctx context.Context, customerID string, sourceID string, requestOptions ...RequestOption) (*billing.CreditTransaction, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
@@ -285,7 +286,7 @@ func (c *Client) GetDeposit(ctx context.Context, customerID string, sourceID str
 	q := url.Values{}
 	q.Set("customer_id", customer)
 	q.Set("source_id", sourceID)
-	var out CreditTransaction
+	var out billing.CreditTransaction
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/deposit?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -294,16 +295,16 @@ func (c *Client) GetDeposit(ctx context.Context, customerID string, sourceID str
 
 // Capture settles an original admission. Exact retries return the original
 // receipt; changed amount or usage terms return ErrIdempotencyKeyReused.
-func (c *Client) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage, requestOptions ...RequestOption) (*CaptureReceipt, error) {
+func (c *Client) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *billing.CaptureUsage, requestOptions ...RequestOption) (*billing.CaptureReceipt, error) {
 	if strings.TrimSpace(requestID) == "" {
 		return nil, invalidErr("request_id is required")
 	}
-	body := CaptureRequest{Amount: &capturedAmount}
+	body := billing.CaptureRequest{Amount: &capturedAmount}
 	if usage != nil {
 		body.CaptureUsage = *usage
 	}
 	path := admissionActionPath(requestID, "capture")
-	var out CaptureReceipt
+	var out billing.CaptureReceipt
 	if err := c.do(ctx, http.MethodPost, path, body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -345,7 +346,7 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 }
 
 // Balance implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) Balance(ctx context.Context, customerID string, requestOptions ...RequestOption) (*BalanceResponse, error) {
+func (c *Client) Balance(ctx context.Context, customerID string, requestOptions ...RequestOption) (*billing.BalanceResponse, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
@@ -355,7 +356,7 @@ func (c *Client) Balance(ctx context.Context, customerID string, requestOptions 
 	if c.currency != "" {
 		q.Set("currency", c.currency)
 	}
-	var out BalanceResponse
+	var out billing.BalanceResponse
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -363,7 +364,7 @@ func (c *Client) Balance(ctx context.Context, customerID string, requestOptions 
 }
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) GetCreditAccount(ctx context.Context, customerID string, currency string, requestOptions ...RequestOption) (*CreditAccount, error) {
+func (c *Client) GetCreditAccount(ctx context.Context, customerID string, currency string, requestOptions ...RequestOption) (*billing.CreditAccount, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
@@ -371,7 +372,7 @@ func (c *Client) GetCreditAccount(ctx context.Context, customerID string, curren
 	q := url.Values{}
 	q.Set("customer_id", customer)
 	q.Set("currency", normalizeCurrency(currency))
-	var out CreditAccount
+	var out billing.CreditAccount
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -379,13 +380,13 @@ func (c *Client) GetCreditAccount(ctx context.Context, customerID string, curren
 }
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
-func (c *Client) UsageRollup(ctx context.Context, customerID string, currency string, from, to time.Time, groupBy string, requestOptions ...RequestOption) ([]UsageRollupRow, error) {
+func (c *Client) UsageRollup(ctx context.Context, customerID string, currency string, from, to time.Time, groupBy string, requestOptions ...RequestOption) ([]billing.UsageRollupRow, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
 	}
 	var resp struct {
-		Rows []UsageRollupRow `json:"rows"`
+		Rows []billing.UsageRollupRow `json:"rows"`
 	}
 	body := map[string]any{
 		"customer_id": customer,
@@ -420,8 +421,8 @@ func (c *Client) GetTrustLevel(ctx context.Context, customerID string, currency 
 }
 
 // ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
-func (c *Client) ReportWastedSpend(ctx context.Context, report WastedSpendReport, requestOptions ...RequestOption) (*WastedSpendResponse, error) {
-	var out WastedSpendResponse
+func (c *Client) ReportWastedSpend(ctx context.Context, report billing.WastedSpendReport, requestOptions ...RequestOption) (*billing.WastedSpendResponse, error) {
+	var out billing.WastedSpendResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", report, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -429,7 +430,7 @@ func (c *Client) ReportWastedSpend(ctx context.Context, report WastedSpendReport
 }
 
 // RecordUsage implements Client (handler ServiceRecordUsage, #797).
-func (c *Client) RecordUsage(ctx context.Context, report UsageReport, requestOptions ...RequestOption) error {
+func (c *Client) RecordUsage(ctx context.Context, report billing.UsageReport, requestOptions ...RequestOption) error {
 	currency := normalizeCurrency(report.Currency)
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
@@ -444,7 +445,7 @@ func (c *Client) SetCreditLimit(ctx context.Context, customerID string, currency
 	if _, err := requireCustomerID(customerID); err != nil {
 		return err
 	}
-	body := CreditLimitRequest{CustomerID: customerID, Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
+	body := billing.CreditLimitRequest{CustomerID: customerID, Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
 	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil, requestOptions...)
 }
 
@@ -467,8 +468,8 @@ func (c *Client) GetCreditLimit(ctx context.Context, customerID string, currency
 }
 
 // Admit is the single-request form of AdmitBatch on every transport.
-func (c *Client) Admit(ctx context.Context, request AdmitRequest, requestOptions ...RequestOption) (*AdmitResponse, error) {
-	verdicts, err := c.AdmitBatch(ctx, []AdmitRequest{request}, requestOptions...)
+func (c *Client) Admit(ctx context.Context, request billing.AdmitRequest, requestOptions ...RequestOption) (*billing.AdmitResponse, error) {
+	verdicts, err := c.AdmitBatch(ctx, []billing.AdmitRequest{request}, requestOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +480,7 @@ func (c *Client) Admit(ctx context.Context, request AdmitRequest, requestOptions
 		return verdicts[0].Result, nil
 	}
 	if verdicts[0].Error != nil {
-		return nil, &StatusError{Status: verdicts[0].Status, ErrorDetails: *verdicts[0].Error}
+		return nil, &billing.StatusError{Status: verdicts[0].Status, ErrorDetails: *verdicts[0].Error}
 	}
 	return nil, fmt.Errorf("openrails: admission returned neither a decision nor an error")
 }
@@ -487,12 +488,12 @@ func (c *Client) Admit(ctx context.Context, request AdmitRequest, requestOptions
 // AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
 // itself answers 200 with positional per-item verdicts; batch-level validation
 // (empty / oversized) is the server's, so both transports reject identically.
-func (c *Client) AdmitBatch(ctx context.Context, items []AdmitRequest, requestOptions ...RequestOption) ([]AdmitBatchVerdict, error) {
+func (c *Client) AdmitBatch(ctx context.Context, items []billing.AdmitRequest, requestOptions ...RequestOption) ([]billing.AdmitBatchVerdict, error) {
 	var out struct {
-		Items []AdmitBatchVerdict `json:"items"`
+		Items []billing.AdmitBatchVerdict `json:"items"`
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admissions", struct {
-		Items []AdmitRequest `json:"items"`
+		Items []billing.AdmitRequest `json:"items"`
 	}{Items: items}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -500,8 +501,8 @@ func (c *Client) AdmitBatch(ctx context.Context, items []AdmitRequest, requestOp
 }
 
 // GetMerchantSettings reads the merchant settings document.
-func (c *Client) GetMerchantSettings(ctx context.Context, requestOptions ...RequestOption) (*MerchantSettings, error) {
-	var out MerchantSettings
+func (c *Client) GetMerchantSettings(ctx context.Context, requestOptions ...RequestOption) (*billing.MerchantSettings, error) {
+	var out billing.MerchantSettings
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -509,17 +510,17 @@ func (c *Client) GetMerchantSettings(ctx context.Context, requestOptions ...Requ
 }
 
 // SetMerchantSettings replaces merchant-owned settings in one validated document.
-func (c *Client) SetMerchantSettings(ctx context.Context, settings MerchantSettings, requestOptions ...RequestOption) error {
+func (c *Client) SetMerchantSettings(ctx context.Context, settings billing.MerchantSettings, requestOptions ...RequestOption) error {
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil, requestOptions...)
 }
 
 // GetCustomerBillingPolicy reads the explicit assignment, not the resolved tier/default policy.
-func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID string, requestOptions ...RequestOption) (*CustomerBillingPolicyAssignment, error) {
+func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID string, requestOptions ...RequestOption) (*billing.CustomerBillingPolicyAssignment, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
 	}
-	var out CustomerBillingPolicyAssignment
+	var out billing.CustomerBillingPolicyAssignment
 	if err := c.do(ctx, http.MethodGet, path+"/billing-policy", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -528,7 +529,7 @@ func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID string
 
 // SetCustomerBillingPolicy assigns a declared policy; nil explicitly clears the
 // assignment and restores tier/default inheritance. It never creates a customer.
-func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID string, policyName *string, requestOptions ...RequestOption) (*CustomerBillingPolicyAssignment, error) {
+func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID string, policyName *string, requestOptions ...RequestOption) (*billing.CustomerBillingPolicyAssignment, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -536,7 +537,7 @@ func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID string
 	body := struct {
 		PolicyName *string `json:"policy_name"`
 	}{PolicyName: policyName}
-	var out CustomerBillingPolicyAssignment
+	var out billing.CustomerBillingPolicyAssignment
 	if err := c.do(ctx, http.MethodPut, path+"/billing-policy", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -545,7 +546,7 @@ func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID string
 
 // SetCustomerSpendDelegations replaces the customer's complete delegation
 // document over the machine-authenticated merchant surface.
-func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput, requestOptions ...RequestOption) error {
+func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []billing.SpendDelegationInput, requestOptions ...RequestOption) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -555,7 +556,7 @@ func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID str
 }
 
 // SetCustomerSpendDelegation atomically upserts one customer delegation.
-func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput, requestOptions ...RequestOption) error {
+func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation billing.SpendDelegationInput, requestOptions ...RequestOption) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -585,26 +586,26 @@ func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID s
 // ListActiveEntitlements returns active records for up to 500 subjects, keyed
 // by every requested subject after trim and dedupe; unknown subjects map to an
 // empty slice. A zero at means now.
-func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time, requestOptions ...RequestOption) (map[string][]EntitlementRecord, error) {
+func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time, requestOptions ...RequestOption) (map[string][]billing.EntitlementRecord, error) {
 	body := map[string]any{
 		"subjects": subjects,
 	}
 	if !at.IsZero() {
 		body["at"] = at.UTC().Format(time.RFC3339Nano)
 	}
-	var out map[string][]EntitlementRecord
+	var out map[string][]billing.EntitlementRecord
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	if out == nil {
-		out = map[string][]EntitlementRecord{}
+		out = map[string][]billing.EntitlementRecord{}
 	}
 	return out, nil
 }
 
 // ListEntitlements implements Client as the single-subject form of
 // ListActiveEntitlements.
-func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time, requestOptions ...RequestOption) ([]EntitlementRecord, error) {
+func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time, requestOptions ...RequestOption) ([]billing.EntitlementRecord, error) {
 	if strings.TrimSpace(subject) == "" {
 		return nil, invalidErr("subject is required")
 	}
@@ -666,14 +667,14 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
-func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time, requestOptions ...RequestOption) (*ResourceRevenueResponse, error) {
+func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time, requestOptions ...RequestOption) (*billing.ResourceRevenueResponse, error) {
 	body := map[string]any{
 		"resource": strings.TrimSpace(resource),
 		"currency": normalizeCurrency(currency),
 		"from":     from.UTC().Format(time.RFC3339Nano),
 		"to":       to.UTC().Format(time.RFC3339Nano),
 	}
-	var out ResourceRevenueResponse
+	var out billing.ResourceRevenueResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage/resource-revenue", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
@@ -694,17 +695,17 @@ func normalizeCurrency(currency string) string {
 // responses retain a bounded diagnostic excerpt but never gain a machine code.
 func statusErrorFromBody(status int, raw []byte) error {
 	var envelope struct {
-		Error *ErrorDetails `json:"error"`
+		Error *billing.ErrorDetails `json:"error"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&envelope); err == nil && envelope.Error != nil {
 		var extra any
 		if decoder.Decode(&extra) == io.EOF {
-			return &StatusError{Status: status, ErrorDetails: *envelope.Error}
+			return &billing.StatusError{Status: status, ErrorDetails: *envelope.Error}
 		}
 	}
-	return &StatusError{Status: status, ErrorDetails: ErrorDetails{Message: excerptErrorBody(raw)}}
+	return &billing.StatusError{Status: status, ErrorDetails: billing.ErrorDetails{Message: excerptErrorBody(raw)}}
 }
 
 // maxErrorMessageBytes bounds the excerpt taken from an unrecognized (non-
@@ -776,10 +777,10 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 	err := c.withHTTPResponse(ctx, method, path, rdr, headers, func(resp *http.Response) error {
 		out, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 		if err != nil {
-			return fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
+			return fmt.Errorf("%w: read response: %w", billing.ErrUnreachable, err)
 		}
 		if len(out) > 1<<20 {
-			return fmt.Errorf("%w: response exceeds 1 MiB", ErrUnreachable)
+			return fmt.Errorf("%w: response exceeds 1 MiB", billing.ErrUnreachable)
 		}
 		response = &clientResponse{status: resp.StatusCode, header: resp.Header, body: out}
 		return nil
@@ -792,7 +793,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error, requestOptions ...RequestOption) error {
 	if c.catalogOwner != "" && path != "/v1/catalog" && !strings.HasPrefix(path, "/v1/catalog/") {
-		return &StatusError{Status: http.StatusForbidden, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients only support catalog operations"}}
+		return &billing.StatusError{Status: http.StatusForbidden, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients only support catalog operations"}}
 	}
 	target, err := c.requestTarget(requestOptions)
 	if err != nil {
@@ -815,7 +816,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 			return invalidErr("merchant slug selection cannot be combined with an ambient merchant ID assertion")
 		}
 		if pinned != expectedMerchant {
-			return &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "resource_conflict",
+			return &billing.StatusError{Status: http.StatusConflict, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: "resource_conflict",
 				Message: fmt.Sprintf("openrails: call pinned to merchant %s but operation selects merchant %s", pinned, expectedMerchant)}}
 		}
 	}
@@ -833,7 +834,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		defer cancel()
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
 	}
 	bearer, berr := c.bearer(ctx, target)
 	if berr != nil {
@@ -867,14 +868,14 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if err := consume(resp); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)
 	}
 	return nil
 }
@@ -894,11 +895,11 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 		decoder := json.NewDecoder(bytes.NewReader(response.body))
 		decoder.UseNumber()
 		if err := decoder.Decode(out); err != nil {
-			return fmt.Errorf("%w: decode response: %w", ErrUnreachable, err)
+			return fmt.Errorf("%w: decode response: %w", billing.ErrUnreachable, err)
 		}
 		var extra any
 		if err := decoder.Decode(&extra); err != io.EOF {
-			return fmt.Errorf("%w: response must contain one JSON value", ErrUnreachable)
+			return fmt.Errorf("%w: response must contain one JSON value", billing.ErrUnreachable)
 		}
 	}
 	return nil
@@ -912,7 +913,7 @@ func (c *Client) doResponse(ctx context.Context, method, path string, body any, 
 		return nil, err
 	}
 	if response.status < 200 || response.status >= 300 {
-		failure := statusErrorFromBody(response.status, response.body).(*StatusError)
+		failure := statusErrorFromBody(response.status, response.body).(*billing.StatusError)
 		if failure.RequestID == "" {
 			failure.RequestID = response.header.Get("X-Request-ID")
 		}

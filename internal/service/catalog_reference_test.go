@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -85,7 +85,7 @@ func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
 	require.NoError(t, err)
 	svc := &Service{} // unwired: any DB/provider access would panic
 	tier, rank := "premium", 1
-	product, price := openrails.ProductID(uuid.New()), openrails.PriceID(uuid.New())
+	product, price := billing.ProductID(uuid.New()), billing.PriceID(uuid.New())
 	for name, call := range map[string]func() error{
 		"create entitlements": func() error {
 			_, err := svc.CreateProduct(ctx, CreateProductRequest{EntitlementsSpec: map[string]*int{}})
@@ -123,8 +123,8 @@ func TestCreatorCatalogRefusalsBeforeSideEffects(t *testing.T) {
 	} {
 		require.ErrorIs(t, call(), catalog.ErrOwnerOperation, name)
 	}
-	_, err = svc.CreateProduct(ctx, CreateProductRequest{CatalogID: openrails.CatalogID(uuid.New())})
+	_, err = svc.CreateProduct(ctx, CreateProductRequest{CatalogID: billing.CatalogID(uuid.New())})
 	require.ErrorIs(t, err, catalog.ErrOwnerScope, "a creator cannot target another catalog")
-	_, err = svc.GetProduct(merchant.WithID(ctx, merchant.ID(uuid.New())), openrails.ProductID(uuid.New()))
+	_, err = svc.GetProduct(merchant.WithID(ctx, merchant.ID(uuid.New())), billing.ProductID(uuid.New()))
 	require.ErrorIs(t, err, catalog.ErrOwnerScope, "changing the merchant must not widen a captured owner scope")
 }

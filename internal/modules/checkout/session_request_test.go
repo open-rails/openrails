@@ -14,7 +14,7 @@ import (
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -43,7 +43,7 @@ func TestCheckoutSessionFingerprint(t *testing.T) {
 		"cancel url":        func(r *CheckoutSessionCreateRequest) { r.CancelURL = "https://other.example/cancel" },
 		"name on card":      func(r *CheckoutSessionCreateRequest) { r.Payment.NameOnCard = "María José" },
 		"metadata value":    func(r *CheckoutSessionCreateRequest) { r.Metadata = map[string]string{"post": "post-124"} },
-		"offer kind":        func(r *CheckoutSessionCreateRequest) { r.OfferKind = openrails.OfferRecurring },
+		"offer kind":        func(r *CheckoutSessionCreateRequest) { r.OfferKind = billing.OfferRecurring },
 	} {
 		changed := base
 		mutate(&changed)
@@ -72,7 +72,7 @@ func TestCheckoutSessionFingerprint(t *testing.T) {
 	require.Equal(t, response, got)
 	_, err = decodeCheckoutSessionIdempotencyResult(payload, &otherBrowser, &UserIdentity{ID: "user_123", Email: &changedVerified})
 	require.ErrorIs(t, err, ErrCheckoutSessionConflict)
-	require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
+	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	_, err = decodeCheckoutSessionIdempotencyResult(json.RawMessage(`{}`), &ccbill, user)
 	require.Error(t, err)
 }
@@ -172,17 +172,17 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 		name  string
 		price *models.Price
 		key   string
-		kind  openrails.OfferKind
+		kind  billing.OfferKind
 		ok    bool
 	}{
 		{"no assertion", recurring, "", "", true},
-		{"permanent", permanent, "forever", openrails.OfferPermanent, true},
-		{"finite", finite, "timed", openrails.OfferFinite, true},
-		{"recurring", recurring, "timed", openrails.OfferRecurring, true},
-		{"timed entitlement is not permanent", permanent, "timed", openrails.OfferPermanent, false},
-		{"finite price is not permanent", finite, "", openrails.OfferPermanent, false},
-		{"recurring price is not finite", recurring, "", openrails.OfferFinite, false},
-		{"one-off price is not recurring", finite, "", openrails.OfferRecurring, false},
+		{"permanent", permanent, "forever", billing.OfferPermanent, true},
+		{"finite", finite, "timed", billing.OfferFinite, true},
+		{"recurring", recurring, "timed", billing.OfferRecurring, true},
+		{"timed entitlement is not permanent", permanent, "timed", billing.OfferPermanent, false},
+		{"finite price is not permanent", finite, "", billing.OfferPermanent, false},
+		{"recurring price is not finite", recurring, "", billing.OfferFinite, false},
+		{"one-off price is not recurring", finite, "", billing.OfferRecurring, false},
 		{"entitlement not granted", recurring, "other", "", false},
 		{"blank entitlement", recurring, "  ", "", false},
 		{"NUL in entitlement", recurring, "for\x00ever", "", false},

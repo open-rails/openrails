@@ -11,7 +11,7 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -334,7 +334,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 				number = *inv.InvoiceNumber
 			}
 			amountDue := inv.AmountDue
-			data, err := json.Marshal(openrails.NotificationData{InvoiceID: inv.ID, InvoiceNumber: number, AmountDue: &amountDue, Currency: inv.Currency, DueAt: inv.DueAt})
+			data, err := json.Marshal(billing.NotificationData{InvoiceID: inv.ID, InvoiceNumber: number, AmountDue: &amountDue, Currency: inv.Currency, DueAt: inv.DueAt})
 			if err != nil {
 				return err
 			}

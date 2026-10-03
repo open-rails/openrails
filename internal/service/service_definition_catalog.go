@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -25,7 +25,7 @@ import (
 
 // ProviderStatus is the per-provider attachment state surfaced in admin
 // responses. Issue #208 defines these four values.
-type ProviderStatus = openrails.ProviderStatus
+type ProviderStatus = billing.ProviderStatus
 
 const (
 	ProviderStatusLinked            ProviderStatus = "linked"
@@ -37,7 +37,7 @@ const (
 // SyncStatus is the per-provider freshness/drift state. Populated only by
 // paths that perform a live retrieve (?verify=true reads or reconcile);
 // otherwise defaults to "unknown".
-type SyncStatus = openrails.SyncStatus
+type SyncStatus = billing.SyncStatus
 
 const (
 	SyncStatusUnknown      SyncStatus = "unknown"
@@ -50,11 +50,11 @@ const (
 
 // ProviderState is the uniform per-provider response surface. Replaces the
 // pre-#208 stripe-specific StripeRailState.
-type ProviderState = openrails.ProviderState
+type ProviderState = billing.ProviderState
 
 // DriftField describes a single divergent field discovered by verify/reconcile.
 // Replaces the pre-#208 RailDriftField (Stripe-only).
-type DriftField = openrails.DriftField
+type DriftField = billing.DriftField
 
 // CatalogProduct is the OpenRails-side view of a product. Products are pure
 // OpenRails concepts and have NO direct provider linkage in the user-facing
@@ -65,9 +65,9 @@ type DriftField = openrails.DriftField
 // denormalized onto price rows and managed implicitly by price-level
 // operations. There is no product-level provider field, no product-level
 // verify/reconcile, no product-level reconcile route.
-type CatalogProduct = openrails.CatalogProduct
+type CatalogProduct = billing.CatalogProduct
 
-type CreateProductRequest = openrails.CreateProductRequest
+type CreateProductRequest = billing.CreateProductRequest
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
 	owned, err := catalogOwnerRequest(ctx)
@@ -141,9 +141,9 @@ var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 // change only with their Set flag: true plus nil sets SQL NULL, true plus an empty
 // map sets an empty definition, and false omits the field regardless of its value.
 // Same-field concurrent patches use last-committed-write wins.
-type UpdateProductRequest = openrails.UpdateProductRequest
+type UpdateProductRequest = billing.UpdateProductRequest
 
-func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
+func (s *Service) UpdateProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req
 	})
 }
 
-func (s *Service) updateProduct(ctx context.Context, id openrails.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
+func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -284,8 +284,8 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 
 func productToCatalogProduct(p *models.Product) *CatalogProduct {
 	return &CatalogProduct{
-		ID:               openrails.ProductID(p.ID),
-		CatalogID:        openrails.CatalogID(p.CatalogID),
+		ID:               billing.ProductID(p.ID),
+		CatalogID:        billing.CatalogID(p.CatalogID),
 		Key:              p.Key,
 		DisplayName:      p.DisplayName,
 		Description:      p.Description,
@@ -300,7 +300,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 
 // CatalogPrice is the OpenRails-side view of a price. The declarative
 // `providers` shape is the only rail configuration surface.
-type CatalogPrice = openrails.CatalogPrice
+type CatalogPrice = billing.CatalogPrice
 
 // CreatePriceRequest is the declarative-shape create request introduced in
 // issue #208. Callers state which providers a price should exist in (Providers)
@@ -313,7 +313,7 @@ type CatalogPrice = openrails.CatalogPrice
 //     price is created in OpenRails with a pending_manual_link status for
 //     that provider; the response carries a PendingAction telling the operator
 //     what to do.
-type CreatePriceRequest = openrails.CreatePriceRequest
+type CreatePriceRequest = billing.CreatePriceRequest
 
 // priceNaturalKeyNull is the canonical encoding of a SQL NULL price field for
 // id derivation (#662). The unique_prices_product_amount_window index is
@@ -434,7 +434,7 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 	if err != nil {
 		return nil, productLookup(err)
 	}
-	req.ProductID = openrails.ProductID(product.ID)
+	req.ProductID = billing.ProductID(product.ID)
 
 	// #662: the price id is a pure function of its immutable financial tuple —
 	// exactly the unique_prices_product_amount_window columns. A reprice hashes
@@ -525,9 +525,9 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 // UpdatePriceRequest is the declarative-shape PATCH for a price. Add or rotate
 // PSP links via `psp_links` (partial merge into the existing map). To clear a
 // PSP entirely, supply an empty inner map for it and set ReplacePSPLinks=true.
-type UpdatePriceRequest = openrails.UpdatePriceRequest
+type UpdatePriceRequest = billing.UpdatePriceRequest
 
-func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
@@ -547,7 +547,7 @@ func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req Upd
 	return s.updatePrice(ctx, id, req)
 }
 
-func (s *Service) updatePrice(ctx context.Context, id openrails.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
 
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -727,9 +727,9 @@ func (s *Service) updatePrice(ctx context.Context, id openrails.PriceID, req Upd
 // values.
 func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
-		ID:                  openrails.PriceID(p.ID),
+		ID:                  billing.PriceID(p.ID),
 		Key:                 p.Key,
-		ProductID:           openrails.ProductID(p.ProductID),
+		ProductID:           billing.ProductID(p.ProductID),
 		Archived:            p.Archived,
 		UnitAmount:          p.Amount,
 		Currency:            p.Currency,

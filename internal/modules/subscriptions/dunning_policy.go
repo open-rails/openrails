@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
@@ -15,7 +15,7 @@ import (
 
 // PolicyOf converts and validates a declared dunning policy. Nil is the
 // built-in schedule; a policy that declares no tiers keeps the built-in ones.
-func PolicyOf(declared *openrails.DunningPolicy) (collection.Policy, error) {
+func PolicyOf(declared *billing.DunningPolicy) (collection.Policy, error) {
 	if declared == nil {
 		return collection.DefaultPolicy, nil
 	}
@@ -34,18 +34,18 @@ func PolicyOf(declared *openrails.DunningPolicy) (collection.Policy, error) {
 		p.Transient = append(p.Transient, time.Duration(m)*time.Minute)
 	}
 	switch declared.AccessDuringDunning {
-	case "", openrails.DunningAccessKeep:
-	case openrails.DunningAccessSuspend:
+	case "", billing.DunningAccessKeep:
+	case billing.DunningAccessSuspend:
 		p.SuspendAccess = true
 	default:
-		return collection.Policy{}, fmt.Errorf("dunning_policy: access_during_dunning must be %q or %q", openrails.DunningAccessKeep, openrails.DunningAccessSuspend)
+		return collection.Policy{}, fmt.Errorf("dunning_policy: access_during_dunning must be %q or %q", billing.DunningAccessKeep, billing.DunningAccessSuspend)
 	}
 	switch declared.AccessWhileRenewalHeld {
-	case "", openrails.DunningAccessKeep:
-	case openrails.DunningAccessSuspend:
+	case "", billing.DunningAccessKeep:
+	case billing.DunningAccessSuspend:
 		p.SuspendWhenHeld = true
 	default:
-		return collection.Policy{}, fmt.Errorf("dunning_policy: access_while_renewal_held must be %q or %q", openrails.DunningAccessKeep, openrails.DunningAccessSuspend)
+		return collection.Policy{}, fmt.Errorf("dunning_policy: access_while_renewal_held must be %q or %q", billing.DunningAccessKeep, billing.DunningAccessSuspend)
 	}
 	if err := p.Validate(); err != nil {
 		return collection.Policy{}, fmt.Errorf("dunning_policy: %w", err)
@@ -65,10 +65,10 @@ func DunningPolicy(ctx context.Context, d *db.DB) (collection.Policy, error) {
 
 // DeclaredOf is the declared form of a resolved policy: what a dunning case
 // records, so it reads back exactly as it was (#1102).
-func DeclaredOf(p collection.Policy) openrails.DunningPolicy {
-	out := openrails.DunningPolicy{AccessDuringDunning: openrails.DunningAccessKeep, AccessWhileRenewalHeld: openrails.DunningAccessKeep}
+func DeclaredOf(p collection.Policy) billing.DunningPolicy {
+	out := billing.DunningPolicy{AccessDuringDunning: billing.DunningAccessKeep, AccessWhileRenewalHeld: billing.DunningAccessKeep}
 	for _, t := range p.Tiers {
-		tier := openrails.DunningTier{MaxCycleHours: int(t.MaxCycle / time.Hour)}
+		tier := billing.DunningTier{MaxCycleHours: int(t.MaxCycle / time.Hour)}
 		for _, o := range t.Offsets {
 			tier.RetryAfterHours = append(tier.RetryAfterHours, int(o/time.Hour))
 		}
@@ -78,10 +78,10 @@ func DeclaredOf(p collection.Policy) openrails.DunningPolicy {
 		out.TransientRetryMinutes = append(out.TransientRetryMinutes, int(d/time.Minute))
 	}
 	if p.SuspendAccess {
-		out.AccessDuringDunning = openrails.DunningAccessSuspend
+		out.AccessDuringDunning = billing.DunningAccessSuspend
 	}
 	if p.SuspendWhenHeld {
-		out.AccessWhileRenewalHeld = openrails.DunningAccessSuspend
+		out.AccessWhileRenewalHeld = billing.DunningAccessSuspend
 	}
 	return out
 }
@@ -90,7 +90,7 @@ func DeclaredOf(p collection.Policy) openrails.DunningPolicy {
 // recorded when it opened, else the merchant's current policy.
 func CasePolicy(ctx context.Context, d *db.DB, sub *models.Subscription) (collection.Policy, error) {
 	if sub != nil && len(sub.DunningPolicy) > 0 {
-		var declared openrails.DunningPolicy
+		var declared billing.DunningPolicy
 		if err := json.Unmarshal(sub.DunningPolicy, &declared); err != nil {
 			return collection.Policy{}, fmt.Errorf("subscription %s dunning policy: %w", sub.ID, err)
 		}

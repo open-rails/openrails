@@ -4,11 +4,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 type railTable struct {
-	codes     map[string]openrails.DeclineReason
+	codes     map[string]billing.DeclineReason
 	canonical func(code string) string
 }
 
@@ -21,7 +21,7 @@ var rails = map[string]railTable{
 
 // nmiCode is one published NMI response_code.
 type nmiCode struct {
-	reason       openrails.DeclineReason
+	reason       billing.DeclineReason
 	localization string
 	message      string
 }
@@ -30,39 +30,39 @@ type nmiCode struct {
 // (docs.nmi.com/reference/response-codes).
 var nmiCodes = map[int]nmiCode{
 	100: {"", "transaction_was_approved", "Transaction was approved."},
-	200: {openrails.DeclineGeneric, "transaction_was_declined_by_processor", "Transaction was declined by processor."},
-	201: {openrails.DeclineDoNotHonor, "do_not_honor", "Do not honor."},
-	202: {openrails.DeclineInsufficientFunds, "insufficient_funds", "Insufficient funds."},
-	203: {openrails.DeclineOverLimit, "over_limit", "Over limit."},
-	204: {openrails.DeclineTransactionNotAllowed, "transaction_not_allowed", "Transaction not allowed."},
-	220: {openrails.DeclineIncorrectNumber, "incorrect_payment_information", "Incorrect payment information."},
-	221: {openrails.DeclineNoSuchIssuer, "no_such_card_issuer", "No such card issuer."},
-	222: {openrails.DeclineInvalidAccount, "no_card_number_on_file_with_issuer", "No card number on file with issuer."},
-	223: {openrails.DeclineExpiredCard, "expired_card", "Expired card."},
-	224: {openrails.DeclineInvalidExpiry, "invalid_expiration_date", "Invalid expiration date."},
-	225: {openrails.DeclineIncorrectCVC, "invalid_card_security_code", "Invalid card security code."},
-	226: {openrails.DeclineInvalidPIN, "invalid_pin", "Invalid PIN."},
-	240: {openrails.DeclineCallIssuer, "call_issuer_for_further_information", "Call issuer for further information."},
-	250: {openrails.DeclinePickupCard, "pick_up_card", "Pick up card."},
-	251: {openrails.DeclineLostCard, "lost_card", "Lost card."},
-	252: {openrails.DeclineStolenCard, "stolen_card", "Stolen card."},
-	253: {openrails.DeclineFraudulent, "fraudulent_card", "Fraudulent card."},
-	260: {openrails.DeclineGeneric, "declined_with_further_instructions_available_see_response_text", "Declined with further instructions available. (See response text)"},
-	261: {openrails.DeclineStopRecurring, "declined_stop_all_recurring_payments", "Declined-Stop all recurring payments."},
-	262: {openrails.DeclineStopRecurring, "declined_stop_this_recurring_program", "Declined-Stop this recurring program."},
-	263: {openrails.DeclineUpdateCardholderData, "declined_update_cardholder_data_available", "Declined-Update cardholder data available."},
-	264: {openrails.DeclineRetryLater, "declined_retry_in_a_few_days", "Declined-Retry in a few days."},
-	300: {openrails.DeclineGatewayRejected, "transaction_was_rejected_by_gateway", "Transaction was rejected by gateway."},
-	400: {openrails.DeclineProcessingError, "transaction_error_returned_by_processor", "Transaction error returned by processor."},
-	410: {openrails.DeclineMerchantConfig, "invalid_merchant_configuration", "Invalid merchant configuration."},
-	411: {openrails.DeclineMerchantConfig, "merchant_account_is_inactive", "Merchant account is inactive."},
-	420: {openrails.DeclineCommunicationError, "communication_error", "Communication error."},
-	421: {openrails.DeclineCommunicationError, "communication_error_with_issuer", "Communication error with issuer."},
-	430: {openrails.DeclineDuplicateTransaction, "duplicate_transaction_at_processor", "Duplicate transaction at processor."},
-	440: {openrails.DeclineInvalidRequest, "processor_format_error", "Processor format error."},
-	441: {openrails.DeclineInvalidRequest, "invalid_transaction_information", "Invalid transaction information."},
-	460: {openrails.DeclineInvalidRequest, "processor_feature_not_available", "Processor feature not available."},
-	461: {openrails.DeclineCardNotSupported, "unsupported_card_type", "Unsupported card type."},
+	200: {billing.DeclineGeneric, "transaction_was_declined_by_processor", "Transaction was declined by processor."},
+	201: {billing.DeclineDoNotHonor, "do_not_honor", "Do not honor."},
+	202: {billing.DeclineInsufficientFunds, "insufficient_funds", "Insufficient funds."},
+	203: {billing.DeclineOverLimit, "over_limit", "Over limit."},
+	204: {billing.DeclineTransactionNotAllowed, "transaction_not_allowed", "Transaction not allowed."},
+	220: {billing.DeclineIncorrectNumber, "incorrect_payment_information", "Incorrect payment information."},
+	221: {billing.DeclineNoSuchIssuer, "no_such_card_issuer", "No such card issuer."},
+	222: {billing.DeclineInvalidAccount, "no_card_number_on_file_with_issuer", "No card number on file with issuer."},
+	223: {billing.DeclineExpiredCard, "expired_card", "Expired card."},
+	224: {billing.DeclineInvalidExpiry, "invalid_expiration_date", "Invalid expiration date."},
+	225: {billing.DeclineIncorrectCVC, "invalid_card_security_code", "Invalid card security code."},
+	226: {billing.DeclineInvalidPIN, "invalid_pin", "Invalid PIN."},
+	240: {billing.DeclineCallIssuer, "call_issuer_for_further_information", "Call issuer for further information."},
+	250: {billing.DeclinePickupCard, "pick_up_card", "Pick up card."},
+	251: {billing.DeclineLostCard, "lost_card", "Lost card."},
+	252: {billing.DeclineStolenCard, "stolen_card", "Stolen card."},
+	253: {billing.DeclineFraudulent, "fraudulent_card", "Fraudulent card."},
+	260: {billing.DeclineGeneric, "declined_with_further_instructions_available_see_response_text", "Declined with further instructions available. (See response text)"},
+	261: {billing.DeclineStopRecurring, "declined_stop_all_recurring_payments", "Declined-Stop all recurring payments."},
+	262: {billing.DeclineStopRecurring, "declined_stop_this_recurring_program", "Declined-Stop this recurring program."},
+	263: {billing.DeclineUpdateCardholderData, "declined_update_cardholder_data_available", "Declined-Update cardholder data available."},
+	264: {billing.DeclineRetryLater, "declined_retry_in_a_few_days", "Declined-Retry in a few days."},
+	300: {billing.DeclineGatewayRejected, "transaction_was_rejected_by_gateway", "Transaction was rejected by gateway."},
+	400: {billing.DeclineProcessingError, "transaction_error_returned_by_processor", "Transaction error returned by processor."},
+	410: {billing.DeclineMerchantConfig, "invalid_merchant_configuration", "Invalid merchant configuration."},
+	411: {billing.DeclineMerchantConfig, "merchant_account_is_inactive", "Merchant account is inactive."},
+	420: {billing.DeclineCommunicationError, "communication_error", "Communication error."},
+	421: {billing.DeclineCommunicationError, "communication_error_with_issuer", "Communication error with issuer."},
+	430: {billing.DeclineDuplicateTransaction, "duplicate_transaction_at_processor", "Duplicate transaction at processor."},
+	440: {billing.DeclineInvalidRequest, "processor_format_error", "Processor format error."},
+	441: {billing.DeclineInvalidRequest, "invalid_transaction_information", "Invalid transaction information."},
+	460: {billing.DeclineInvalidRequest, "processor_feature_not_available", "Processor feature not available."},
+	461: {billing.DeclineCardNotSupported, "unsupported_card_type", "Unsupported card type."},
 }
 
 var nmiByLocalization = func() map[string]int {
@@ -73,8 +73,8 @@ var nmiByLocalization = func() map[string]int {
 	return m
 }()
 
-func nmiReasons() map[string]openrails.DeclineReason {
-	m := make(map[string]openrails.DeclineReason, len(nmiCodes))
+func nmiReasons() map[string]billing.DeclineReason {
+	m := make(map[string]billing.DeclineReason, len(nmiCodes))
 	for code, c := range nmiCodes {
 		if c.reason != "" {
 			m[strconv.Itoa(code)] = c.reason
@@ -106,76 +106,76 @@ func NMILocalizationID(code int) string { return nmiCodes[code].localization }
 // NMIMessage is NMI's published text for a response code ("" if none).
 func NMIMessage(code int) string { return nmiCodes[code].message }
 
-var stripeCodes = map[string]openrails.DeclineReason{
-	"generic_decline":                       openrails.DeclineGeneric,
-	"card_declined":                         openrails.DeclineGeneric,
-	"do_not_honor":                          openrails.DeclineDoNotHonor,
-	"no_action_taken":                       openrails.DeclineDoNotHonor,
-	"call_issuer":                           openrails.DeclineCallIssuer,
-	"insufficient_funds":                    openrails.DeclineInsufficientFunds,
-	"withdrawal_count_limit_exceeded":       openrails.DeclineOverLimit,
-	"card_velocity_exceeded":                openrails.DeclineOverLimit,
-	"try_again_later":                       openrails.DeclineTryAgainLater,
-	"reenter_transaction":                   openrails.DeclineTryAgainLater,
-	"approve_with_id":                       openrails.DeclineTryAgainLater,
-	"security_violation":                    openrails.DeclineSecurityViolation,
-	"restricted_card":                       openrails.DeclineRestrictedCard,
-	"incorrect_number":                      openrails.DeclineIncorrectNumber,
-	"invalid_number":                        openrails.DeclineIncorrectNumber,
-	"invalid_account":                       openrails.DeclineInvalidAccount,
-	"no_account":                            openrails.DeclineInvalidAccount,
-	"expired_card":                          openrails.DeclineExpiredCard,
-	"invalid_expiry_month":                  openrails.DeclineInvalidExpiry,
-	"invalid_expiry_year":                   openrails.DeclineInvalidExpiry,
-	"incorrect_cvc":                         openrails.DeclineIncorrectCVC,
-	"invalid_cvc":                           openrails.DeclineIncorrectCVC,
-	"incorrect_zip":                         openrails.DeclineIncorrectZip,
-	"incorrect_address":                     openrails.DeclineIncorrectAddress,
-	"incorrect_pin":                         openrails.DeclineInvalidPIN,
-	"invalid_pin":                           openrails.DeclineInvalidPIN,
-	"pin_try_exceeded":                      openrails.DeclineInvalidPIN,
-	"offline_pin_required":                  openrails.DeclineInvalidPIN,
-	"online_or_offline_pin_required":        openrails.DeclineInvalidPIN,
-	"transaction_not_allowed":               openrails.DeclineTransactionNotAllowed,
-	"not_permitted":                         openrails.DeclineTransactionNotAllowed,
-	"card_not_supported":                    openrails.DeclineCardNotSupported,
-	"currency_not_supported":                openrails.DeclineCurrencyNotSupported,
-	"authentication_required":               openrails.DeclineAuthenticationRequired,
-	"payment_intent_authentication_failure": openrails.DeclineAuthenticationRequired,
-	"pickup_card":                           openrails.DeclinePickupCard,
-	"lost_card":                             openrails.DeclineLostCard,
-	"stolen_card":                           openrails.DeclineStolenCard,
-	"fraudulent":                            openrails.DeclineFraudulent,
-	"stop_payment_order":                    openrails.DeclineStopRecurring,
-	"revocation_of_authorization":           openrails.DeclineStopRecurring,
-	"revocation_of_all_authorizations":      openrails.DeclineStopRecurring,
-	"merchant_blacklist":                    openrails.DeclineBlockedByPSP,
-	"processing_error":                      openrails.DeclineProcessingError,
-	"issuer_not_available":                  openrails.DeclineIssuerUnavailable,
-	"duplicate_transaction":                 openrails.DeclineDuplicateTransaction,
+var stripeCodes = map[string]billing.DeclineReason{
+	"generic_decline":                       billing.DeclineGeneric,
+	"card_declined":                         billing.DeclineGeneric,
+	"do_not_honor":                          billing.DeclineDoNotHonor,
+	"no_action_taken":                       billing.DeclineDoNotHonor,
+	"call_issuer":                           billing.DeclineCallIssuer,
+	"insufficient_funds":                    billing.DeclineInsufficientFunds,
+	"withdrawal_count_limit_exceeded":       billing.DeclineOverLimit,
+	"card_velocity_exceeded":                billing.DeclineOverLimit,
+	"try_again_later":                       billing.DeclineTryAgainLater,
+	"reenter_transaction":                   billing.DeclineTryAgainLater,
+	"approve_with_id":                       billing.DeclineTryAgainLater,
+	"security_violation":                    billing.DeclineSecurityViolation,
+	"restricted_card":                       billing.DeclineRestrictedCard,
+	"incorrect_number":                      billing.DeclineIncorrectNumber,
+	"invalid_number":                        billing.DeclineIncorrectNumber,
+	"invalid_account":                       billing.DeclineInvalidAccount,
+	"no_account":                            billing.DeclineInvalidAccount,
+	"expired_card":                          billing.DeclineExpiredCard,
+	"invalid_expiry_month":                  billing.DeclineInvalidExpiry,
+	"invalid_expiry_year":                   billing.DeclineInvalidExpiry,
+	"incorrect_cvc":                         billing.DeclineIncorrectCVC,
+	"invalid_cvc":                           billing.DeclineIncorrectCVC,
+	"incorrect_zip":                         billing.DeclineIncorrectZip,
+	"incorrect_address":                     billing.DeclineIncorrectAddress,
+	"incorrect_pin":                         billing.DeclineInvalidPIN,
+	"invalid_pin":                           billing.DeclineInvalidPIN,
+	"pin_try_exceeded":                      billing.DeclineInvalidPIN,
+	"offline_pin_required":                  billing.DeclineInvalidPIN,
+	"online_or_offline_pin_required":        billing.DeclineInvalidPIN,
+	"transaction_not_allowed":               billing.DeclineTransactionNotAllowed,
+	"not_permitted":                         billing.DeclineTransactionNotAllowed,
+	"card_not_supported":                    billing.DeclineCardNotSupported,
+	"currency_not_supported":                billing.DeclineCurrencyNotSupported,
+	"authentication_required":               billing.DeclineAuthenticationRequired,
+	"payment_intent_authentication_failure": billing.DeclineAuthenticationRequired,
+	"pickup_card":                           billing.DeclinePickupCard,
+	"lost_card":                             billing.DeclineLostCard,
+	"stolen_card":                           billing.DeclineStolenCard,
+	"fraudulent":                            billing.DeclineFraudulent,
+	"stop_payment_order":                    billing.DeclineStopRecurring,
+	"revocation_of_authorization":           billing.DeclineStopRecurring,
+	"revocation_of_all_authorizations":      billing.DeclineStopRecurring,
+	"merchant_blacklist":                    billing.DeclineBlockedByPSP,
+	"processing_error":                      billing.DeclineProcessingError,
+	"issuer_not_available":                  billing.DeclineIssuerUnavailable,
+	"duplicate_transaction":                 billing.DeclineDuplicateTransaction,
 }
 
 // ccbillCodes is CCBill's own BE-nnn vocabulary
 // (ccbill.com/kb/list-of-credit-card-declined-codes). BE-900..999 are system
 // errors.
-func ccbillCodes() map[string]openrails.DeclineReason {
-	m := map[string]openrails.DeclineReason{
-		"be101": openrails.DeclineMerchantConfig,
-		"be102": openrails.DeclinePickupCard,
-		"be103": openrails.DeclineDoNotHonor,
-		"be105": openrails.DeclineInvalidRequest,
-		"be107": openrails.DeclineIncorrectNumber,
-		"be112": openrails.DeclineInvalidAccount,
-		"be113": openrails.DeclineInsufficientFunds,
-		"be114": openrails.DeclineExpiredCard,
-		"be116": openrails.DeclineTransactionNotAllowed,
-		"be119": openrails.DeclineOverLimit,
-		"be130": openrails.DeclineInvalidRequest,
-		"be132": openrails.DeclineBlockedByPSP, // card blocked by CCBill
-		"be146": openrails.DeclineBlockedByPSP, // blocked country
+func ccbillCodes() map[string]billing.DeclineReason {
+	m := map[string]billing.DeclineReason{
+		"be101": billing.DeclineMerchantConfig,
+		"be102": billing.DeclinePickupCard,
+		"be103": billing.DeclineDoNotHonor,
+		"be105": billing.DeclineInvalidRequest,
+		"be107": billing.DeclineIncorrectNumber,
+		"be112": billing.DeclineInvalidAccount,
+		"be113": billing.DeclineInsufficientFunds,
+		"be114": billing.DeclineExpiredCard,
+		"be116": billing.DeclineTransactionNotAllowed,
+		"be119": billing.DeclineOverLimit,
+		"be130": billing.DeclineInvalidRequest,
+		"be132": billing.DeclineBlockedByPSP, // card blocked by CCBill
+		"be146": billing.DeclineBlockedByPSP, // blocked country
 	}
 	for n := 900; n <= 999; n++ {
-		m["be"+strconv.Itoa(n)] = openrails.DeclineProcessingError
+		m["be"+strconv.Itoa(n)] = billing.DeclineProcessingError
 	}
 	return m
 }
@@ -193,17 +193,17 @@ func canonicalCCBill(code string) string {
 
 // solanaCodes are the Solana crank's failure codes. A revoked delegate is the
 // crank's own terminal case; the rest are retried or never reach dunning.
-var solanaCodes = map[string]openrails.DeclineReason{
-	"insufficient_funds":                   openrails.DeclineInsufficientFunds,
-	"do_not_honor":                         openrails.DeclineDoNotHonor,
-	"generic_decline":                      openrails.DeclineGeneric,
-	"declined_update_cardholder_data":      openrails.DeclineUpdateCardholderData,
-	"declined_stop_all_recurring_payments": openrails.DeclineStopRecurring,
-	"declined_stop_this_recurring_program": openrails.DeclineStopRecurring,
-	"duplicate_transaction":                openrails.DeclineDuplicateTransaction,
-	"merchant_configuration_error":         openrails.DeclineMerchantConfig,
-	"communication_error":                  openrails.DeclineCommunicationError,
-	"processing_error":                     openrails.DeclineProcessingError,
+var solanaCodes = map[string]billing.DeclineReason{
+	"insufficient_funds":                   billing.DeclineInsufficientFunds,
+	"do_not_honor":                         billing.DeclineDoNotHonor,
+	"generic_decline":                      billing.DeclineGeneric,
+	"declined_update_cardholder_data":      billing.DeclineUpdateCardholderData,
+	"declined_stop_all_recurring_payments": billing.DeclineStopRecurring,
+	"declined_stop_this_recurring_program": billing.DeclineStopRecurring,
+	"duplicate_transaction":                billing.DeclineDuplicateTransaction,
+	"merchant_configuration_error":         billing.DeclineMerchantConfig,
+	"communication_error":                  billing.DeclineCommunicationError,
+	"processing_error":                     billing.DeclineProcessingError,
 }
 
 func lower(code string) string { return strings.ToLower(strings.TrimSpace(code)) }

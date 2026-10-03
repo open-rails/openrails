@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -37,7 +37,7 @@ type createSubscriptionRepriceRequest struct {
 // CreateSubscriptionReprice schedules subscription.PriceID -> to_price,
 // effective at the subscription's first renewal on/after effective_at.
 func CreateSubscriptionReprice(r *httprequest.Request) {
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription id")
 		return
@@ -181,7 +181,7 @@ func ListSubscriptionReprices(r *httprequest.Request) {
 	}
 	var filter subscriptions.SubscriptionRepriceFilter
 	if raw := strings.TrimSpace(r.Query("subscription_id")); raw != "" {
-		id, err := openrails.ParseSubscriptionID(raw)
+		id, err := billing.ParseSubscriptionID(raw)
 		if err != nil || id.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid subscription_id")
 			return

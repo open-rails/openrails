@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // SEC-33: the provider's notice of a refund OpenRails issued can arrive before
@@ -26,7 +26,7 @@ func TestSecurityRefundNoticeDuringOwnRefundCountsOnce(t *testing.T) {
 		g := w.refundGateServed(rail)
 		done := make(chan error, 1)
 		go func() {
-			_, err := w.client[tp].RefundPayment(context.WithoutCancel(t.Context()), payment.ID, openrails.RefundPaymentParams{Amount: 4_000_000, Reason: "requested_by_customer", IdempotencyKey: "partial-" + payment.ID.String()})
+			_, err := w.client[tp].RefundPayment(context.WithoutCancel(t.Context()), payment.ID, billing.RefundPaymentParams{Amount: 4_000_000, Reason: "requested_by_customer", IdempotencyKey: "partial-" + payment.ID.String()})
 			done <- err
 		}()
 		select {
@@ -65,7 +65,7 @@ func TestSecurityNMIChargebackRevokesOneTimePurchase(t *testing.T) {
 	price := w.finitePass("content:pass")
 	c := w.newCustomer()
 	method := c.saveCard("nmi", card{Brand: "visa", Last4: "5100"})
-	c.buyWith("nmi", method, price, openrails.OfferFinite, "content:pass")
+	c.buyWith("nmi", method, price, billing.OfferFinite, "content:pass")
 	paid := completed(w.payments(embedded, c.id))
 	require.Len(t, paid, 1)
 	require.True(t, c.entitled("content:pass"))
@@ -86,7 +86,7 @@ func TestSecurityNMIChargebackRevokesOneTimePurchase(t *testing.T) {
 	}
 }
 
-func stripeDisputeEvent(kind, id, status string, p openrails.Payment) obj {
+func stripeDisputeEvent(kind, id, status string, p billing.Payment) obj {
 	return stripeEvent(kind, obj{"object": "dispute", "id": id, "charge": p.TransactionID, "payment_intent": p.TransactionID,
 		"amount": p.Amount / 10_000, "currency": "usd", "status": status, "reason": "fraudulent"})
 }
@@ -118,7 +118,7 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		price := w.finitePass("content:pass")
 		c := w.newCustomer()
 		method := c.saveCard("stripe", visa)
-		c.buyWith("stripe", method, price, openrails.OfferFinite, "content:pass")
+		c.buyWith("stripe", method, price, billing.OfferFinite, "content:pass")
 		p := completed(w.payments(embedded, c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_won2", "won", p)))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_won2", "needs_response", p)))

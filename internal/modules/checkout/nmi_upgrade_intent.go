@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	paymentattempts "github.com/open-rails/openrails/internal/modules/attempts"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -203,7 +203,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		if callErr != nil {
 			if errors.Is(callErr, nmi.ErrDuplicateTransaction) {
 				// NMI's duplicate check refused this unique order unprocessed.
-				progress.Proration.refuseUnexecuted(openrails.CodePaymentDuplicateRefused, duplicateProrationRefusal)
+				progress.Proration.refuseUnexecuted(billing.CodePaymentDuplicateRefused, duplicateProrationRefusal)
 				if err = save("proration", progress.Proration); err != nil {
 					return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
 				}
@@ -404,7 +404,7 @@ func (h *NMIUpgradeIntentHandler) absentProration(ctx context.Context, in gen.Op
 		h.raiseProrationUnresolved(ctx, in, p, "the provider's transaction search failed: "+err.Error())
 		return intents.Ambiguous("tier change proration cannot be read: " + err.Error())
 	case order.Transactions == 0:
-		step.refuseUnexecuted(openrails.CodeTierChangeRefused, absentProrationRefusal)
+		step.refuseUnexecuted(billing.CodeTierChangeRefused, absentProrationRefusal)
 	case order.Declined:
 		refusal := &nmi.CustomerVaultError{Message: "sale declined", ResponseCode: order.DeclineCode, LocalizationID: decline.NMILocalizationID(order.DeclineCode)}
 		step.refuse(refusal)
@@ -432,7 +432,7 @@ func (h *NMIUpgradeIntentHandler) closeFinding(ctx context.Context, merchantID u
 }
 
 func (h *NMIUpgradeIntentHandler) raiseProrationUnresolved(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, reason string) {
-	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": openrails.SubscriptionID(p.OldSubscriptionID).String(), "order_id": in.ID.String(), "reason": reason})
+	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": billing.SubscriptionID(p.OldSubscriptionID).String(), "order_id": in.ID.String(), "reason": reason})
 	action := fmt.Sprintf("A tier change charge (order %s) cannot be settled from NMI: %s. Nothing further is charged while this stands. Confirm at NMI, then run `openrails intents resolve --intent %s --step proration --receipt <transaction id>` if it was charged, or `--not-executed` if NMI holds no transaction for the order.", in.ID, reason, in.ID)
 	wctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
@@ -441,7 +441,7 @@ func (h *NMIUpgradeIntentHandler) raiseProrationUnresolved(ctx context.Context, 
 }
 
 func (h *NMIUpgradeIntentHandler) raiseUpdateStuck(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, cause error) {
-	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": openrails.SubscriptionID(p.OldSubscriptionID).String(),
+	raw, _ := json.Marshal(map[string]any{"operation_id": in.ID.String(), "subscription_id": billing.SubscriptionID(p.OldSubscriptionID).String(),
 		"rail_subscription_id": p.OldProviderSubscriptionID, "action": p.Action, "error": cause.Error()})
 	action := "A tier change could not move the NMI schedule to its new amount; NMI still bills the previous amount. If the schedule is on a named NMI plan, link the target price to an NMI plan of the same amount and cycle; the operation keeps retrying and completes once NMI accepts the change."
 	wctx, cancel := intents.LedgerWriteContext(ctx)
@@ -498,7 +498,7 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 		if attempts.Transactions != 0 {
 			return intents.Outcome{}, intents.RejectResolution("NMI holds %d transaction(s) under this order; resolve with its receipt", attempts.Transactions)
 		}
-		step.refuseUnexecuted(openrails.CodeTierChangeRefused, absentProrationRefusal)
+		step.refuseUnexecuted(billing.CodeTierChangeRefused, absentProrationRefusal)
 		step.Resolution = resolution.Record(h.Checkout.now())
 		if err := store.RecordProgress(ctx, in.ID, map[string]any{"proration": step}); err != nil {
 			return intents.Outcome{}, fmt.Errorf("persist resolved proration step: %w", err)
@@ -583,14 +583,14 @@ func nmiUpgradeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeRespon
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
 	}
-	subID := openrails.SubscriptionID(p.OldSubscriptionID)
+	subID := billing.SubscriptionID(p.OldSubscriptionID)
 	end := p.PeriodEnd
 	action := "upgrade"
 	if p.Downgrade() {
 		action = "downgrade"
 	}
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: action, Effective: effectiveOf(action), PriceID: (openrails.PriceID(p.PriceID)).String(),
+		Object: "tier_change", Mode: "tier_change", Action: action, Effective: effectiveOf(action), PriceID: (billing.PriceID(p.PriceID)).String(),
 		Payment: CheckoutSessionPaymentResponse{Rail: in.Rail}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(),

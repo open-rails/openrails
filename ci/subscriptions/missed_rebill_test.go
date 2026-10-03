@@ -17,7 +17,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/nmimock"
@@ -37,7 +37,7 @@ func (w *world) watchRebills() {
 }
 
 // missReason is the recorded miss of the subscription's cycle due at due, or "".
-func (w *world) missReason(sub openrails.SubscriptionID, due time.Time) string {
+func (w *world) missReason(sub billing.SubscriptionID, due time.Time) string {
 	w.t.Helper()
 	var reason *string
 	err := w.pool.QueryRow(w.t.Context(), `SELECT miss_reason FROM `+pgx.Identifier{w.schema}.Sanitize()+`.rebill_cycles

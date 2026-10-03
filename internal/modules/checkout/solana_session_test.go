@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -91,7 +91,7 @@ func TestSolanaSessionFlows(t *testing.T) {
 		svc := &CheckoutSessionService{config: &config.Config{PublicBillingBaseURL: tc.base}, rails: solanaRails()}
 		session := mk(models.RailSolana, models.CheckoutSessionModeOneOff, "transaction_request")
 		url := svc.sessionToResponse(session).Payment.SolanaPayURL
-		require.Equal(t, fmt.Sprintf("%s%s/solana-pay", tc.prefix, openrails.CheckoutSessionID(session.ID)), url, tc.base)
+		require.Equal(t, fmt.Sprintf("%s%s/solana-pay", tc.prefix, billing.CheckoutSessionID(session.ID)), url, tc.base)
 	}
 
 	require.True(t, isSolanaTransferRequestFlow(mk(models.RailSolana, "", " Transfer_Request ")))

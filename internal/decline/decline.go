@@ -1,5 +1,5 @@
 // Package decline is the one table for payment refusals (#1109). Every rail
-// code maps to one openrails.DeclineReason; this package fixes each reason's
+// code maps to one billing.DeclineReason; this package fixes each reason's
 // category and dunning action, and the public type what the buyer is told.
 // Nothing else in OpenRails maps a decline code.
 package decline
@@ -11,7 +11,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Category is what failed.
@@ -78,7 +78,7 @@ type Result struct {
 	// Code is the rail code in its canonical form (NMI: the numeric
 	// response_code).
 	Code      string
-	Reason    openrails.DeclineReason
+	Reason    billing.DeclineReason
 	Category  Category
 	Action    Action
 	Transient bool
@@ -134,19 +134,19 @@ func ClassifyEvidence(e Evidence) Result {
 	if r.Reason.FraudSignal() {
 		return r
 	}
-	generic := r.Reason == openrails.DeclineGeneric || r.Reason == openrails.DeclineDoNotHonor || r.Reason == openrails.DeclineIncorrectNumber || r.Coverage != Mapped
+	generic := r.Reason == billing.DeclineGeneric || r.Reason == billing.DeclineDoNotHonor || r.Reason == billing.DeclineIncorrectNumber || r.Coverage != Mapped
 	switch {
 	case cvvMismatch(r.Rail, e.CVV):
-		r = r.with(openrails.DeclineIncorrectCVC)
+		r = r.with(billing.DeclineIncorrectCVC)
 	case generic && zipMismatch(r.Rail, e.AVS):
-		r = r.with(openrails.DeclineIncorrectZip)
+		r = r.with(billing.DeclineIncorrectZip)
 	case generic && addressMismatch(r.Rail, e.AVS):
-		r = r.with(openrails.DeclineIncorrectAddress)
+		r = r.with(billing.DeclineIncorrectAddress)
 	}
 	return r
 }
 
-func (r Result) with(reason openrails.DeclineReason) Result {
+func (r Result) with(reason billing.DeclineReason) Result {
 	spec := reasons[reason]
 	r.Reason, r.Category, r.Action, r.Transient = reason, spec.category, spec.action, spec.transient
 	return r
@@ -157,16 +157,16 @@ func lookup(rail, code, text string) Result {
 	table, ok := rails[r.Rail]
 	if !ok || r.Code == "" {
 		r.Coverage = NoCode
-		return r.with(openrails.DeclineUnknown)
+		return r.with(billing.DeclineUnknown)
 	}
 	r.Code = table.canonical(r.Code)
 	reason, found := table.codes[r.Code]
 	if !found {
 		r.Coverage = Unmapped
-		return r.with(openrails.DeclineUnknown)
+		return r.with(billing.DeclineUnknown)
 	}
 	if r.Rail == "nmi" && r.Code == "300" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "duplicate transaction") {
-		reason = openrails.DeclineDuplicateTransaction
+		reason = billing.DeclineDuplicateTransaction
 	}
 	r.Coverage = Mapped
 	return r.with(reason)

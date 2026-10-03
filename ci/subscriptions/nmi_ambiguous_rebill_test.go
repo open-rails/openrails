@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 )
 
@@ -19,7 +19,7 @@ import (
 func TestNMIRecoveryDuplicateRefusalIsNotResent(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	l := importLegacy(t, w, "nmi", embedded, func(book *openrails.DeclaredBilling) {
+	l := importLegacy(t, w, "nmi", embedded, func(book *billing.DeclaredBilling) {
 		declareRecurringAnchor(book)
 	})
 	w.converge()

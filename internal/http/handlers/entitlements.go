@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -46,7 +46,7 @@ func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
 }
 
 // ServiceEntitlementRecord is the shared client entitlement wire type.
-type ServiceEntitlementRecord = openrails.EntitlementRecord
+type ServiceEntitlementRecord = billing.EntitlementRecord
 
 type adminUserEntitlementsPath struct {
 	UserID string `uri:"customer_id" binding:"required"`
@@ -258,7 +258,7 @@ func grantAdminEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	var req openrails.GrantEntitlementRequest
+	var req billing.GrantEntitlementRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -334,10 +334,10 @@ func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
 	return false
 }
 
-func entitlementRecordFromModel(e *models.Entitlement) openrails.EntitlementRecord {
-	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID).String(), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+func entitlementRecordFromModel(e *models.Entitlement) billing.EntitlementRecord {
+	rec := billing.EntitlementRecord{ID: e.ID.String(), CustomerID: billing.CustomerID(e.CustomerID).String(), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 	if e.SourceID != nil {
-		source := openrails.SourceRef(string(e.SourceType), e.SourceID.String())
+		source := billing.SourceRef(string(e.SourceType), e.SourceID.String())
 		rec.SourceID = &source
 	}
 	if e.RevokeReason != nil {
@@ -398,7 +398,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID).String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: billing.CustomerID(e.CustomerID).String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}

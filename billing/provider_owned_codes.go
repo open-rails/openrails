@@ -1,4 +1,4 @@
-package openrails
+package billing
 
 // Refusals for member actions on provider-owned (legacy NMI-billed)
 // subscriptions. Each is a 409 and changes nothing locally or at the provider.

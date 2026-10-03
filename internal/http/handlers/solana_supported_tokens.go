@@ -11,7 +11,7 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -326,19 +326,19 @@ func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailC
 
 // solanaCheckoutConfig projects the armed Solana rail onto the shared
 // checkout-config document; nil when Solana is not armed for the merchant.
-func solanaCheckoutConfig(r *httprequest.Request) (*openrails.SolanaCheckoutConfig, error) {
+func solanaCheckoutConfig(r *httprequest.Request) (*billing.SolanaCheckoutConfig, error) {
 	solanaConf, err := effectiveSolanaRailConfig(r)
 	if err != nil || solanaConf == nil {
 		return nil, err
 	}
 	network := normalizeSolanaNetwork(solanaConf.Network)
 	accepted := acceptedSolanaTokens(r, solanaConf)
-	tokens := make([]openrails.SolanaCheckoutToken, 0, len(accepted))
+	tokens := make([]billing.SolanaCheckoutToken, 0, len(accepted))
 	for _, t := range accepted {
-		tokens = append(tokens, openrails.SolanaCheckoutToken{Symbol: t.Symbol, Name: t.Name, Mint: t.Mint,
+		tokens = append(tokens, billing.SolanaCheckoutToken{Symbol: t.Symbol, Name: t.Name, Mint: t.Mint,
 			Decimals: t.Decimals, Preferred: t.Preferred, RecurringEligible: t.RecurringEligible})
 	}
-	return &openrails.SolanaCheckoutConfig{Network: network, Chain: "solana:" + network,
+	return &billing.SolanaCheckoutConfig{Network: network, Chain: "solana:" + network,
 		PreferredToken: solanatokens.PreferredStablecoin, Tokens: tokens}, nil
 }
 
@@ -379,7 +379,7 @@ func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr 
 		return 0, "", "price service unavailable"
 	}
 
-	typedPriceID, err := openrails.ParsePriceID(priceIDStr)
+	typedPriceID, err := billing.ParsePriceID(priceIDStr)
 	if err != nil || typedPriceID.IsZero() {
 		return 0, "", fmt.Sprintf("invalid price_id: %v", err)
 	}
@@ -398,7 +398,7 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", "checkout session service unavailable"
 	}
 
-	typedSessionID, err := openrails.ParseCheckoutSessionID(sessionIDStr)
+	typedSessionID, err := billing.ParseCheckoutSessionID(sessionIDStr)
 	if err != nil || typedSessionID.IsZero() {
 		return 0, "", fmt.Sprintf("invalid checkout_session_id: %v", err)
 	}

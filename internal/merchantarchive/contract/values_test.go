@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 const testMerchant = "10000000-0000-0000-0000-000000000001"
@@ -145,7 +145,7 @@ func TestCatalogApplicationReceiptMatchesRow(t *testing.T) {
 		return map[string]string{
 			"application_id": "deploy-1", "catalog_id": catalog.String(), "request_sha256": `\x` + strings.Repeat("ab", 32),
 			"base_revision": "4", "applied_revision": "5", "applied_at": "2026-01-01 00:00:00+00",
-			"result": `{"application_id":"deploy-1","catalog_id":"` + openrails.CatalogID(catalog).String() + `","base_revision":4,"applied_revision":5,"replayed":false,"products_changed":1,"prices_changed":0}`,
+			"result": `{"application_id":"deploy-1","catalog_id":"` + billing.CatalogID(catalog).String() + `","base_revision":4,"applied_revision":5,"replayed":false,"products_changed":1,"prices_changed":0}`,
 		}
 	}
 	cases := []rowCase{{"exact receipt", "catalog_applications", base(), true}}
@@ -163,7 +163,7 @@ func TestCatalogApplicationReceiptMatchesRow(t *testing.T) {
 		},
 		"missing result": func(m map[string]string) { delete(m, "result") },
 		"unprefixed catalog": func(m map[string]string) {
-			m["result"] = strings.Replace(m["result"], openrails.CatalogID(catalog).String(), catalog.String(), 1)
+			m["result"] = strings.Replace(m["result"], billing.CatalogID(catalog).String(), catalog.String(), 1)
 		},
 	} {
 		m := base()

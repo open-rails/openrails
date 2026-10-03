@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -24,7 +24,7 @@ import (
 const providerCancelHeld = "life.provider_cancel.held"
 
 // meCancel is the member cancelling one subscription on /v1/me.
-func (l *legacy) meCancel(sub openrails.SubscriptionID) (int, map[string]any) {
+func (l *legacy) meCancel(sub billing.SubscriptionID) (int, map[string]any) {
 	return l.c.call(http.MethodPost, "/subscriptions/"+sub.String()+"/cancel", "", map[string]any{"feedback": "too expensive"})
 }
 
@@ -78,11 +78,11 @@ func TestLegacyNMICancel(t *testing.T) {
 						w.settle()
 						return status, errorCode(body)
 					}
-					err := w.client[tp].CancelSubscription(t.Context(), l.sub, openrails.CancelSubscriptionRequest{Reason: "member asked", RevokeAccess: row.revoke, AccountDeletion: row.account})
+					err := w.client[tp].CancelSubscription(t.Context(), l.sub, billing.CancelSubscriptionRequest{Reason: "member asked", RevokeAccess: row.revoke, AccountDeletion: row.account})
 					w.settle()
 					if err != nil {
-						requireCode(t, err, http.StatusConflict, openrails.CodeProviderCancelHeld)
-						return http.StatusConflict, openrails.CodeProviderCancelHeld
+						requireCode(t, err, http.StatusConflict, billing.CodeProviderCancelHeld)
+						return http.StatusConflict, billing.CodeProviderCancelHeld
 					}
 					return http.StatusOK, ""
 				}
@@ -90,7 +90,7 @@ func TestLegacyNMICancel(t *testing.T) {
 				status, code := cancel()
 				if !row.armed && !row.account {
 					require.Equal(t, http.StatusConflict, status)
-					require.Equal(t, openrails.CodeProviderCancelHeld, code)
+					require.Equal(t, billing.CodeProviderCancelHeld, code)
 					require.Equal(t, "active", w.subscription(tp, l.sub).Status, "a refused cancel changes nothing")
 					require.Contains(t, w.openFindings(providerCancelHeld), l.sub.UUID().String())
 					w.advance(time.Hour)
@@ -140,35 +140,35 @@ func TestLegacyNMICancel(t *testing.T) {
 
 // importAnother lands a second legacy NMI subscription, on another product,
 // for the same customer and vault.
-func (l *legacy) importAnother(t *testing.T) (openrails.SubscriptionID, string, string) {
+func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, string) {
 	t.Helper()
 	w, client := l.w, l.w.client[l.tp]
 	ent := "content:legacy-other"
-	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "legacy-other-" + uuid.NewString()[:8], DisplayName: "Legacy extra", EntitlementsSpec: map[string]*int{ent: nil}})
+	product, err := client.Products.Create(t.Context(), &billing.ProductCreateParams{Key: "legacy-other-" + uuid.NewString()[:8], DisplayName: "Legacy extra", EntitlementsSpec: map[string]*int{ent: nil}})
 	require.NoError(t, err)
 	hours := monthHours
 	plan := "legacy_plan_" + uuid.NewString()[:8]
-	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
+	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})
 	require.NoError(t, err)
 	start := w.clock.Now().Add(-5 * day)
 	end := start.Add(monthHours * time.Hour)
 	railSub := w.nmi.AddSchedule(nmimock.Schedule{Vault: l.railCust, Plan: plan, Amount: "9.99", NextBilling: end})
-	customerID, err := openrails.ParseCustomerID(l.c.id)
+	customerID, err := billing.ParseCustomerID(l.c.id)
 	require.NoError(t, err)
-	priceID, err := openrails.ParsePriceID(price.ID)
+	priceID, err := billing.ParsePriceID(price.ID)
 	require.NoError(t, err)
-	method := &openrails.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
-	result, err := client.ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
-		Customers: []openrails.DeclaredCustomer{{Customer: customerID}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: "legacy-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
+	method := &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: w.nmi.Vault(l.railCust).BillingID}
+	result, err := client.ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
+		Customers: []billing.DeclaredCustomer{{Customer: customerID}},
+		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []openrails.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: l.railCust, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)
 	w.settle()
-	subs, err := client.ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: l.c.id})
+	subs, err := client.ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: l.c.id})
 	require.NoError(t, err)
 	require.Len(t, subs.Data, 2)
 	for _, s := range subs.Data {
@@ -177,7 +177,7 @@ func (l *legacy) importAnother(t *testing.T) (openrails.SubscriptionID, string, 
 		}
 	}
 	t.Fatal("second legacy subscription not listed")
-	return openrails.SubscriptionID{}, "", ""
+	return billing.SubscriptionID{}, "", ""
 }
 
 // A member with two legacy subscriptions cancels exactly the one they named
@@ -229,9 +229,9 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 					}
 					return nil
 				}
-				id, err := openrails.ParsePaymentMethodID(method)
+				id, err := billing.ParsePaymentMethodID(method)
 				require.NoError(t, err)
-				return w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), l.sub, openrails.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id})
+				return w.client[tp].UpdateSubscriptionPaymentMethod(t.Context(), l.sub, billing.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: id})
 			}
 			updates := func() []providerCall {
 				return calls(w.nmi.CallsTo(http.MethodPost, "transact.php", func(f url.Values) bool { return f.Get("recurring") == "update_subscription" }))
@@ -239,12 +239,12 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 
 			// Another card of the same vault: refused, no NMI write.
 			other := w.nmi.AddCard(l.railCust, mastercard)
-			customerID, err := openrails.ParseCustomerID(l.c.id)
+			customerID, err := billing.ParseCustomerID(l.c.id)
 			require.NoError(t, err)
-			_, err = w.client[tp].ImportBilling(t.Context(), openrails.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: openrails.PSPRef{Key: "nmi"},
-				PaymentMethods: []openrails.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: other, LastFour: mastercard.Last4, CardType: "mastercard", ExpiryDate: "12/35"}}})
+			_, err = w.client[tp].ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
+				PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: other, LastFour: mastercard.Last4, CardType: "mastercard", ExpiryDate: "12/35"}}})
 			require.NoError(t, err)
-			methods, err := w.client[tp].ListPaymentMethods(t.Context(), l.c.id, openrails.PageOptions{Limit: 20})
+			methods, err := w.client[tp].ListPaymentMethods(t.Context(), l.c.id, billing.PageOptions{Limit: 20})
 			require.NoError(t, err)
 			sameVault := ""
 			for _, m := range methods.Data {
@@ -256,9 +256,9 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 			err = update(sameVault)
 			require.Error(t, err)
 			if by == "member" {
-				require.Equal(t, "409 "+openrails.CodePaymentMethodSameVault, err.Error())
+				require.Equal(t, "409 "+billing.CodePaymentMethodSameVault, err.Error())
 			} else {
-				requireCode(t, err, http.StatusConflict, openrails.CodePaymentMethodSameVault)
+				requireCode(t, err, http.StatusConflict, billing.CodePaymentMethodSameVault)
 			}
 			require.Empty(t, updates(), "a refused swap never reaches NMI")
 
@@ -327,7 +327,7 @@ func TestLegacyNMIRefund(t *testing.T) {
 			paid := completed(w.payments(tp, l.c.id))
 			require.Len(t, paid, 1, "the imported legacy charge")
 			legacy := paid[0]
-			params := openrails.RefundPaymentParams{Amount: row.amount, Full: row.amount == 0, Reason: "requested_by_customer", RevokeAccess: row.revoke, IdempotencyKey: "refund-" + legacy.ID.String()}
+			params := billing.RefundPaymentParams{Amount: row.amount, Full: row.amount == 0, Reason: "requested_by_customer", RevokeAccess: row.revoke, IdempotencyKey: "refund-" + legacy.ID.String()}
 			refund, err := w.client[tp].RefundPayment(t.Context(), legacy.ID, params)
 			require.NoError(t, err)
 			w.settle()

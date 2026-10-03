@@ -1,4 +1,4 @@
-package openrails
+package billing
 
 type CatalogPage[T any] struct {
 	Items  []T   `json:"items"`

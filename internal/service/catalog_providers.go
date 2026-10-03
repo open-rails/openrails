@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -35,7 +35,7 @@ import (
 // PendingAction describes a manual step the operator must complete to bring a
 // pending_manual_link provider to linked status. Surfaced on CreatePrice and on
 // GetPrice/Reconcile responses when at least one provider is still pending.
-type PendingAction = openrails.PendingAction
+type PendingAction = billing.PendingAction
 
 // providerLookupKey is the conventional key under which an adapter stores its
 // canonical lookup key on the rails[provider] map (when one exists).

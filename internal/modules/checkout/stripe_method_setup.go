@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
@@ -26,11 +26,11 @@ import (
 // StripeMethodSetupResponse is an owned setup resource. No payment, subscription
 // or entitlement exists until a separate priced agreement is confirmed and paid.
 type StripeMethodSetupResponse struct {
-	ID              openrails.CheckoutSessionID `json:"id"`
-	Status          string                      `json:"status"`
-	SetupIntentID   string                      `json:"setup_intent_id,omitempty"`
-	ClientSecret    string                      `json:"client_secret,omitempty"`
-	PaymentMethodID *openrails.PaymentMethodID  `json:"payment_method_id,omitempty"`
+	ID              billing.CheckoutSessionID `json:"id"`
+	Status          string                    `json:"status"`
+	SetupIntentID   string                    `json:"setup_intent_id,omitempty"`
+	ClientSecret    string                    `json:"client_secret,omitempty"`
+	PaymentMethodID *billing.PaymentMethodID  `json:"payment_method_id,omitempty"`
 }
 
 func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal) (merchant.ID, uuid.UUID, error) {
@@ -123,7 +123,7 @@ func (s *CheckoutService) submitStripeMethodSetup(ctx context.Context, session *
 	if first == 1 {
 		result, err := service.CreateEngineSetup(ctx, p)
 		if err != nil {
-			return StripeMethodSetupResponse{ID: openrails.CheckoutSessionID(p.SessionID), Status: "processing"}, nil
+			return StripeMethodSetupResponse{ID: billing.CheckoutSessionID(p.SessionID), Status: "processing"}, nil
 		}
 		if _, err = d.Gen(ctx).RetainStripeMethodSetup(ctx, gen.RetainStripeMethodSetupParams{MerchantID: p.MerchantID, ID: p.SessionID, Reference: &result.ID, Now: s.now().UTC()}); err != nil {
 			return StripeMethodSetupResponse{}, err
@@ -157,14 +157,14 @@ func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, p
 	if err != nil {
 		return StripeMethodSetupResponse{}, err
 	}
-	out := StripeMethodSetupResponse{ID: openrails.CheckoutSessionID(id), Status: string(session.Status)}
+	out := StripeMethodSetupResponse{ID: billing.CheckoutSessionID(id), Status: string(session.Status)}
 	if session.Status == models.CheckoutSessionStatusSucceeded {
 		ref, _ := session.RailState["payment_method_id"].(string)
 		method, err := uuid.Parse(ref)
 		if err != nil {
 			return out, ErrCheckoutSessionConflict
 		}
-		typed := openrails.PaymentMethodID(method)
+		typed := billing.PaymentMethodID(method)
 		out.PaymentMethodID = &typed
 		return out, nil
 	}

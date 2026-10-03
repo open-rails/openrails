@@ -413,7 +413,7 @@ For a creator, pass an identity obtained from your authenticated user:
 ```go
 author, err := client.ForCatalogOwner(verifiedSubject)
 if err != nil { return err }
-product, err := author.Products.Create(ctx, &openrails.ProductCreateParams{
+product, err := author.Products.Create(ctx, &billing.ProductCreateParams{
     Key: "post-" + postID, DisplayName: title,
 })
 ```
@@ -651,19 +651,19 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
 
 ```go
-verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-    CustomerID:      openrails.CustomerID(customerID), // the host's subject UUID
+verdicts, err := client.AdmitBatch(ctx, []billing.AdmitRequest{{
+    CustomerID:      billing.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
     RequestID:       requestID, // idempotency key
 }})
-receipt, err := client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
+receipt, err := client.Capture(ctx, requestID, 43_000, &billing.CaptureUsage{EventType: "chat.completion"})
 ents, err := client.ListActiveEntitlements(ctx, []string{userID}, time.Now())
 ```
 
 Entitlement lookups address subjects by the ids your auth system already holds
-(self-service users are keyed under `openrails.SelfIssuer`); a user who never touched
+(self-service users are keyed under `billing.SelfIssuer`); a user who never touched
 billing is an empty slice, never an error. Deny verdicts are `(Allowed=false, nil
 error)`.
 
@@ -705,12 +705,12 @@ acknowledged feed you drain:
 ```go
 // client is returned by runtime.Client(openrails.WithDefaultMerchant("my-store"))
 // or openrails.NewRemote(...); both use the same operations.
-for _, kind := range []openrails.HostEventType{
-    openrails.HostEventDelinquencyGrace,
-    openrails.HostEventDelinquencyEntered,
-    openrails.HostEventDelinquencyCleared,
+for _, kind := range []billing.HostEventType{
+    billing.HostEventDelinquencyGrace,
+    billing.HostEventDelinquencyEntered,
+    billing.HostEventDelinquencyCleared,
 } {
-    events, err := client.ListHostEvents(ctx, openrails.HostEventListOptions{Type: kind, Limit: 100})
+    events, err := client.ListHostEvents(ctx, billing.HostEventListOptions{Type: kind, Limit: 100})
     if err != nil { return err }
     for _, event := range events {
         if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {

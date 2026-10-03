@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Engine-owned tier changes (#1071). An upgrade is one engine charge of new
@@ -20,7 +20,7 @@ import (
 // downgrade takes effect at period end: nothing is charged or refunded now,
 // and the renewal bills the new price for a period of its cadence.
 
-func (w *world) engineMember(rail string, tp topology, from tier) (*customer, openrails.SubscriptionID) {
+func (w *world) engineMember(rail string, tp topology, from tier) (*customer, billing.SubscriptionID) {
 	w.t.Helper()
 	c := w.newCustomer()
 	sub := c.subscribeAgain(tp, rail, from.ID, from.ent, c.saveCard(rail, visa))
@@ -83,7 +83,7 @@ func TestEngineTierUpgrade(t *testing.T) {
 			group := "g" + uuid.NewString()[:8]
 			from := w.tierPrice(group, 1, row.oldCents, row.oldCycle, false)
 			to := w.tierPrice(group, 2, row.newCents, row.newCycle, false)
-			req := openrails.ChangeTierRequest{PriceID: to.ID}
+			req := billing.ChangeTierRequest{PriceID: to.ID}
 			c, sub := w.engineMember(rail, tp, from)
 			w.advance(w.subscription(tp, sub).CurrentPeriodEndsAt.Sub(w.clock.Now()) - row.left)
 			charges := len(w.railLedger(rail))
@@ -158,7 +158,7 @@ func TestEngineTierDowngrade(t *testing.T) {
 			low := w.tierPrice(group, 2, 1000, row.newCycle, false)
 			high := w.tierPrice(group, 3, 2000, row.oldCycle, false)
 			top := w.tierPrice(group, 4, 3000, row.oldCycle, false)
-			req := openrails.ChangeTierRequest{PriceID: low.ID}
+			req := billing.ChangeTierRequest{PriceID: low.ID}
 			c, sub := w.engineMember(rail, tp, high)
 			end := *w.subscription(tp, sub).CurrentPeriodEndsAt
 			w.advance(time.Hour)
@@ -183,8 +183,8 @@ func TestEngineTierDowngrade(t *testing.T) {
 			again, err := w.client[other(tp)].ChangeTier(t.Context(), sub, key, req)
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", again.Status, "the same downgrade replays")
-			_, err = w.client[tp].ChangeTier(t.Context(), sub, "downgrade-"+uuid.NewString(), openrails.ChangeTierRequest{PriceID: lowest.ID})
-			requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeAlreadyScheduled)
+			_, err = w.client[tp].ChangeTier(t.Context(), sub, "downgrade-"+uuid.NewString(), billing.ChangeTierRequest{PriceID: lowest.ID})
+			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeAlreadyScheduled)
 
 			current := w.subscription(tp, sub)
 			require.Equal(t, high.ID, current.PriceID, "the current plan stays until period end")
@@ -193,8 +193,8 @@ func TestEngineTierDowngrade(t *testing.T) {
 			require.Len(t, w.railLedger(rail), charges, "nothing is charged or refunded now")
 
 			w.advance(end.Sub(w.clock.Now()) + time.Second)
-			_, err = w.client[tp].PreviewTierChange(t.Context(), sub, openrails.ChangeTierRequest{PriceID: top.ID})
-			requireCode(t, err, http.StatusConflict, openrails.CodeTierChangeRenewalDue)
+			_, err = w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierRequest{PriceID: top.ID})
+			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRenewalDue)
 			w.runRenewals()
 			ledger := w.railLedger(rail)
 			require.Len(t, ledger, charges+1)
@@ -225,7 +225,7 @@ func TestEngineTierUpgradeDecline(t *testing.T) {
 			group := "g" + uuid.NewString()[:8]
 			from := w.tierPrice(group, 1, 1000, 720, false)
 			to := w.tierPrice(group, 2, 2000, 720, false)
-			req := openrails.ChangeTierRequest{PriceID: to.ID}
+			req := billing.ChangeTierRequest{PriceID: to.ID}
 			c, sub := w.engineMember(rail, embedded, from)
 			end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
 			w.advance(360 * time.Hour)
@@ -238,7 +238,7 @@ func TestEngineTierUpgradeDecline(t *testing.T) {
 				_, refusal = w.client[remote].ChangeTier(t.Context(), sub, key, req)
 				return refusal != nil
 			}, "the declined upgrade resolves as a refusal")
-			var status *openrails.StatusError
+			var status *billing.StatusError
 			require.True(t, errors.As(refusal, &status), "%v", refusal)
 			require.Equal(t, http.StatusPaymentRequired, status.Status, "%v", refusal)
 			require.NotEmpty(t, status.Code)
@@ -250,7 +250,7 @@ func TestEngineTierUpgradeDecline(t *testing.T) {
 			require.True(t, c.entitled(from.ent))
 			require.False(t, c.entitled(to.ent))
 			require.Len(t, w.railLedger(rail), charges)
-			subs, err := w.client[embedded].ListSubscriptions(t.Context(), openrails.SubscriptionFilter{CustomerID: c.id})
+			subs, err := w.client[embedded].ListSubscriptions(t.Context(), billing.SubscriptionFilter{CustomerID: c.id})
 			require.NoError(t, err)
 			require.Len(t, subs.Data, 1, "no successor membership")
 
@@ -278,7 +278,7 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 
 	w.stripe.setDecline(visa.Last4, "auth")
 	key := "challenged-" + uuid.NewString()
-	req := openrails.ChangeTierRequest{PriceID: to.ID}
+	req := billing.ChangeTierRequest{PriceID: to.ID}
 	pending, err := w.client[embedded].ChangeTier(t.Context(), sub, key, req)
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status, "%+v", pending)

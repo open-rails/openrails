@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
@@ -21,7 +21,7 @@ func (s *Service) CheckEntitlements(ctx context.Context, customer string, keys [
 	return rt.EntitlementService.CheckMany(ctx, customer, keys, at)
 }
 
-func (s *Service) ListOffersForEntitlements(ctx context.Context, keys []string, params openrails.OfferListParams) (map[string]openrails.OfferList, error) {
+func (s *Service) ListOffersForEntitlements(ctx context.Context, keys []string, params billing.OfferListParams) (map[string]billing.OfferList, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err

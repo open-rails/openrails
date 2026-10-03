@@ -5,7 +5,7 @@
 package service
 
 import (
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 )
 
 // -------------------------------- Pagination --------------------------------
@@ -30,27 +30,27 @@ type PaginatedResult[T any] struct {
 // Selector is the exact value accepted by CheckoutPayment.Rail; PSPID is the
 // stable provider identity used for server-side method matching; Rail is the
 // canonical gateway and Mode is "one_off" or "subscription".
-type CheckoutRailOption = openrails.CheckoutRailOption
+type CheckoutRailOption = billing.CheckoutRailOption
 
 // CheckoutCustomerIdentity is the host-resolved customer identity used by
 // checkout rails that require verified account attributes in addition to the
 // stable customer ID.
-type CheckoutCustomerIdentity = openrails.CheckoutCustomerIdentity
+type CheckoutCustomerIdentity = billing.CheckoutCustomerIdentity
 
 // CreateCheckoutSessionRequest specifies checkout session creation parameters.
-type CreateCheckoutSessionRequest = openrails.CreateCheckoutSessionRequest
+type CreateCheckoutSessionRequest = billing.CreateCheckoutSessionRequest
 
 // CheckoutPayment specifies payment details for checkout.
-type CheckoutPaymentOptions = openrails.CheckoutPaymentOptions
+type CheckoutPaymentOptions = billing.CheckoutPaymentOptions
 
 // CheckoutSession represents a checkout session.
-type CheckoutSession = openrails.CheckoutSession
+type CheckoutSession = billing.CheckoutSession
 
 // ConfirmCheckoutSessionRequest specifies checkout confirmation parameters.
-type ConfirmCheckoutSessionRequest = openrails.ConfirmCheckoutSessionRequest
+type ConfirmCheckoutSessionRequest = billing.ConfirmCheckoutSessionRequest
 
 // ConfirmPayment specifies payment confirmation details (primarily for Solana).
-type ConfirmPayment = openrails.ConfirmPayment
+type ConfirmPayment = billing.ConfirmPayment
 
 // -------------------------------- Billing Status --------------------------------
 
@@ -58,7 +58,7 @@ type ConfirmPayment = openrails.ConfirmPayment
 // (or#912). Entitlement and ProductKey are IMMUTABLE identifiers — hosts key
 // policy documents and token claims on Entitlement; DisplayName is mutable
 // and for display only.
-type EffectiveTier = openrails.EffectiveTier
+type EffectiveTier = billing.EffectiveTier
 
 // -------------------------------- Credits --------------------------------
 

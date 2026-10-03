@@ -36,7 +36,7 @@ admin grants, and grace. See [Entitlements](#entitlements).
 ### Applying through the Go Client
 
 Use `client.Catalog.Apply(ctx, params)` for embedded and remote Clients. Decode
-YAML with `openrails.ParseCatalogApplicationYAML`; both encodings share the same
+YAML with `billing.ParseCatalogApplicationYAML`; both encodings share the same
 validation and authorization as individual writes. The HTTP operation is
 `POST /v1/merchant/catalog/applications`; read the required base revision through
 `client.Catalog.Revision(ctx)` or `GET /v1/merchant/catalog/revision`.

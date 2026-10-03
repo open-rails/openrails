@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/query"
@@ -55,7 +55,7 @@ func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 		return
 	}
 
-	out := make([]openrails.Subscription, 0, len(subscriptions))
+	out := make([]billing.Subscription, 0, len(subscriptions))
 	for _, sub := range subscriptions {
 		out = append(out, sub.View())
 	}
@@ -75,7 +75,7 @@ func GetSubscription(r *httprequest.Request) {
 		return
 	}
 
-	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	typedSubscriptionID, err := billing.ParseSubscriptionID(subscriptionIDStr)
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
