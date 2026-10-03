@@ -1,4 +1,4 @@
-package config
+package hostconfig
 
 import (
 	"path/filepath"

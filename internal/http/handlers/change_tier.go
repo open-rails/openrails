@@ -7,11 +7,11 @@ import (
 
 	"github.com/open-rails/openrails"
 
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 type ChangeTierRequest = openrails.ChangeTierRequest

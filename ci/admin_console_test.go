@@ -14,8 +14,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -43,7 +43,7 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		cp, err := controlplane.Attach(t.Context(), rt, controlplane.Options{Auth: &hostconfig.AuthConfig{
+		cp, err := embedcontrolplane.Attach(t.Context(), rt, embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
 			Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true,
 			AllowMemory: true, AllowMissingSenders: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 		}})

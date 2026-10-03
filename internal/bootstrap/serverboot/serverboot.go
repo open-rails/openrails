@@ -16,16 +16,16 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
+	"github.com/open-rails/openrails/internal/cache"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	server "github.com/open-rails/openrails/internal/http"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/retry"
 	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

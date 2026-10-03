@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
 
 	"github.com/jackc/pgx/v5"

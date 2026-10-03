@@ -19,9 +19,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -53,13 +53,13 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = rt.Close(context.Background()) })
-			opts := controlplane.Options{Auth: &hostconfig.AuthConfig{
+			opts := embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
 			if hosted {
 				opts.HostedPosture, opts.EmailSender = true, new(authtest.Outbox).Email()
 			}
-			cp, err := controlplane.Attach(ctx, rt, opts)
+			cp, err := embedcontrolplane.Attach(ctx, rt, opts)
 			require.NoError(t, err)
 			require.NoError(t, app.HostGraph(rt).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 			core := cp.Core()
@@ -73,7 +73,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			email := "owner-" + id + "@e2e.test"
 			owner, err := core.CreateUser(ctx, iam.NewUser{Email: email, Username: "owner_" + id, Password: authtest.Password, EmailVerified: true})
 			require.NoError(t, err)
-			_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
+			_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
 			require.NoError(t, err)
 			handler, err := cp.Handler()
 			require.NoError(t, err)

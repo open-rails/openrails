@@ -26,7 +26,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/operator"
+	"github.com/open-rails/openrails/internal/embedoperator"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -767,7 +767,7 @@ func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 
 	var mid uuid.UUID
 	require.NoError(t, p.w.pool.QueryRow(t.Context(), p.sql(`SELECT id FROM $schema.merchants WHERE slug = $1`), p.w.slug).Scan(&mid))
-	require.NoError(t, operator.New(p.w.rt).ResolveSolanaPayReview(t.Context(), merchant.ID(mid), second, "refunded in tx RefundSig"))
+	require.NoError(t, embedoperator.New(p.w.rt).ResolveSolanaPayReview(t.Context(), merchant.ID(mid), second, "refunded in tx RefundSig"))
 	require.NotEqual(t, "solana_pay_receipts", refusedBy(), "a resolved review no longer holds the archive")
 }
 

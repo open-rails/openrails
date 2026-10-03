@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingimport"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -29,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 func newTestRequest(method, target string, body io.Reader, rt *app.Runtime) (*httprequest.Request, *httptest.ResponseRecorder) {

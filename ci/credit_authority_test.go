@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed/controlplane"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
 )
 
 // SEC: minting money is owner authority. The machine credit deposit and the
@@ -28,7 +28,7 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 
 	owner := newAccount(t, cp)
 	shop := uniqueName("credit")
-	_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	mid, _, err := cp.ResolveMerchantForGroup(ctx, shop)
 	require.NoError(t, err)

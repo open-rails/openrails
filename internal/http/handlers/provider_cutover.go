@@ -7,11 +7,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/providerqualification"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 func ProviderCutover(r *httprequest.Request)          { providerCutover(r, false, false) }

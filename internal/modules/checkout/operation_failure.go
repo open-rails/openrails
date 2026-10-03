@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/decline"
 )
 
 // operationFailure renders a refused card operation's retained provider

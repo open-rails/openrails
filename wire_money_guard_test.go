@@ -88,6 +88,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/http/handlers/admin_catalog.go:paginatedResponse.Limit limit":                                                                          notMoneyPageSize,
 	"internal/http/handlers/admin_findings.go:findingsListResponse.Limit limit":                                                                      notMoneyPageSize,
 	"internal/integrations/nmi/v5.go:v5PaymentRequest.Amount amount":                                                                                 notHTTPProviderWire,
+	"internal/nmimock/v5.go:func v5.Amount amount":                                                                                                   notHTTPProviderWire,
+	"internal/nmimock/v5.go:func v5.Amount plan_amount":                                                                                              notHTTPProviderWire,
 	"internal/integrations/nmi/v5.go:v5PlanCreateRequest.PlanAmount plan_amount":                                                                     notHTTPProviderWire,
 	"internal/modules/abuse/wasted_spend.go:WindowUsage.Limit limit":                                                                                 notHTTPInternalRow,
 	"internal/modules/abuse/wasted_spend.go:WindowUsage.Used used":                                                                                   notHTTPInternalRow,
@@ -139,7 +141,7 @@ var pendingNumericMoney = map[string]string{
 
 	"invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
 
-	"pkg/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
+	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
 	"remote_catalog.go:CatalogPage.Limit limit": notMoneyPageSize,
 

@@ -180,7 +180,7 @@ func AlertUnmapped(ctx context.Context, r Result) {
 		return
 	}
 	log.WithContext(ctx).WithFields(log.Fields{"rail": r.Rail, "failure_code": r.Code}).
-		Error("UNMAPPED decline code: retried by doctrine. Map it in internal/billing/decline")
+		Error("UNMAPPED decline code: retried by doctrine. Map it in internal/decline")
 }
 
 // NMIResponseCode is the numeric NMI code of any recorded form (225,

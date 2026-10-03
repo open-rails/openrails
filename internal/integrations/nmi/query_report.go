@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 )
 
 // TransactionReport is the Query API's transaction report (query.php,

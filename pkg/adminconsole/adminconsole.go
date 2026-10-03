@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/internal/api"
 )
 
 // Config is the SPA bootstrap document served at /admin/config.json.

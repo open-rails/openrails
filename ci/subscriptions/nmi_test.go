@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // nmiFake is the world's NMI gateway: nmimock plus conversions to this

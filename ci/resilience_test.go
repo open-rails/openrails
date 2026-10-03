@@ -22,10 +22,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/operator"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/embedoperator"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -313,7 +313,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
-	mid, _, err := operator.New(first).ResolveMerchant(t.Context(), slug)
+	mid, _, err := embedoperator.New(first).ResolveMerchant(t.Context(), slug)
 	require.NoError(t, err)
 	require.NoError(t, first.Close(context.Background()))
 
@@ -385,7 +385,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.Zero(t, active)
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved)
 
-	require.NoError(t, operator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
+	require.NoError(t, embedoperator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
 	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))
 	require.NoError(t, railConfig(second, mid))
 	pub, err := signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)

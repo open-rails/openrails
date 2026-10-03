@@ -15,9 +15,9 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/cache"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/retry"
-	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -215,7 +215,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	// The OpenRails-owned AuthKit control plane (#224) is no longer built here
 	// (#284): the core stays AuthKit-free. The standalone/opt-in path builds it and
-	// attaches via SetControlPlane (see embed/controlplane.Attach).
+	// attaches via SetControlPlane (see internal/embedcontrolplane.Attach).
 
 	return app, nil
 }

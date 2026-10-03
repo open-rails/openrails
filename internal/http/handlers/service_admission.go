@@ -11,12 +11,12 @@ import (
 	"github.com/open-rails/openrails"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/api"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // maxAdmitBatchItems bounds one /v1/merchant/admissions request (#335).

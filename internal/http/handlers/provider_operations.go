@@ -7,9 +7,9 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Provider-operation routes are the Client form of the provider obligation

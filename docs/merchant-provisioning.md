@@ -87,7 +87,7 @@ each); hosts use `ControlPlane.ListUserMerchants`.
 ### Hosted creation recipe (registration is provisioning)
 
 A hosted product (openrails-saas shape) wires everything through
-`controlplane.Options.MerchantCreation` (`embed/controlplane`):
+`controlplane.Options.MerchantCreation` (`internal/embedcontrolplane`):
 
 ```go
 cp, err := controlplane.Attach(ctx, rt, controlplane.Options{

@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/open-rails/openrails/pkg/cache"
+	"github.com/open-rails/openrails/internal/cache"
 	"github.com/stretchr/testify/require"
 )
 

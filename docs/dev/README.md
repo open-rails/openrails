@@ -85,7 +85,7 @@ a fresh build of the new one).
 ## Repo layout
 
 - `client.go`, `remote.go`, `errors.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `embed.Runtime.Client` over the in-process transport)
-- `embed/` — the in-process runtime (`pkg/billingauth` neutral authentication, `embed/controlplane` for explicit standalone AuthKit composition)
+- `embed/` — the in-process runtime (`pkg/billingauth` neutral authentication, `internal/embedcontrolplane` for explicit standalone AuthKit composition)
 - `cmd/openrails/` — the binary: server + CLI (catalog/merchant-config/bootstrap apply, reconcile)
 - `pkg/` — importable packages (api, billingauth, catalog, merchant, adminconsole, query, …)
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/`, `controlplane/`

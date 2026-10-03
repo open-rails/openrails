@@ -24,7 +24,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -372,11 +372,11 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 					return err
 				}
 				defer close()
-				cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
+				cp, err := embedcontrolplane.Attach(ctx, rt, embedcontrolplane.Options{})
 				if err != nil {
 					return err
 				}
-				if _, err := cp.ProvisionMerchantForRestore(ctx, controlplane.ProvisionMerchantForRestoreRequest{
+				if _, err := cp.ProvisionMerchantForRestore(ctx, embedcontrolplane.ProvisionMerchantForRestoreRequest{
 					MerchantID: mid, Slug: strings.TrimSpace(slug), ExistingGroupID: strings.TrimSpace(groupID), OwnerUserID: strings.TrimSpace(ownerID),
 				}); err != nil {
 					return err

@@ -14,8 +14,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/embed/operator"
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // legacy is one imported provider-owned membership: the provider owns the
@@ -228,7 +228,7 @@ func (l *legacy) staleNotice() obj {
 // grants and entitlement windows.
 func (w *world) converge() {
 	w.t.Helper()
-	res, err := operator.New(w.rt).Converge(w.t.Context(), w.client[embedded].MerchantID())
+	res, err := embedoperator.New(w.rt).Converge(w.t.Context(), w.client[embedded].MerchantID())
 	require.NoError(w.t, err)
 	w.t.Logf("converge: %+v", res)
 	w.settle()

@@ -17,9 +17,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	userauth "github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -30,7 +30,7 @@ import (
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is
-// fatal. Embedded hosts opt in via embed/controlplane.Attach.
+// fatal. Embedded hosts opt in via internal/embedcontrolplane.Attach.
 type ControlPlane struct {
 	client *authkit.Client
 	hosted bool
@@ -78,7 +78,7 @@ type Option func(*options)
 
 // WithHostedPosture opens AuthKit registration and mounts the full AuthKit API.
 // Standalone never passes this; hosted products opt in through
-// embed/controlplane.
+// internal/embedcontrolplane.
 func WithHostedPosture() Option {
 	return func(o *options) { o.hosted = true }
 }

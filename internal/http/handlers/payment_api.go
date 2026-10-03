@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {

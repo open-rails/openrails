@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Catalog declarations reject unknown fields so retired benefits cannot be silently ignored.

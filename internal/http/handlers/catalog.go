@@ -4,10 +4,10 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 type catalogPaginationParams struct {

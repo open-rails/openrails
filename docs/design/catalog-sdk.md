@@ -94,13 +94,13 @@ through `Options.HTTP` when it is known at construction. Obtain one client from
 catalog scoping through `client.ForCatalogOwner(subject)`.
 
 Filesystem manifests, provider reconciliation and preserved-identity restoration
-are explicit local maintenance tools in `embed/operator`. They are outside the
+are explicit local maintenance tools in `internal/embedoperator`. They are outside the
 ordinary HTTP client contract. Shared host database commits use the explicit
 `embed.NewHostTransactions(runtime)` extension. Neither exposes a database
 handle or adds domain methods to Runtime.
 
 A multi-merchant host may learn a merchant ID only after its local control plane
-provisions it. During setup, `embed/operator.New(runtime).DeclarePSP` supplies
+provisions it. During setup, `internal/embedoperator.New(runtime).DeclarePSP` supplies
 attribution for that merchant's imported trial or historical facts. It shares
 constructor declaration behavior: existing identity, alias, archive state,
 custody and evidence are preserved; mismatched ownership or aliases refuse.

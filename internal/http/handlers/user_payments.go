@@ -8,7 +8,7 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/pkg/query"
+	"github.com/open-rails/openrails/internal/query"
 )
 
 func GetUserPayments(r *httprequest.Request) {

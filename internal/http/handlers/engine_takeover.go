@@ -5,10 +5,10 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 func PreviewEngineTakeover(r *httprequest.Request) { engineTakeover(r, "preview") }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"

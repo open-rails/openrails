@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

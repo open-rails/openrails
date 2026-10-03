@@ -9,8 +9,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/operator"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/embedoperator"
 )
 
 // newSolanaPayCmd groups the Solana Pay operator commands.
@@ -55,7 +55,7 @@ func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, 
 	if err != nil {
 		return err
 	}
-	if err := operator.New(rt).ResolveSolanaPayReview(ctx, mid, signature, resolution); err != nil {
+	if err := embedoperator.New(rt).ResolveSolanaPayReview(ctx, mid, signature, resolution); err != nil {
 		return err
 	}
 	fmt.Printf("resolved Solana Pay review %s for merchant %s\n", signature, mid)

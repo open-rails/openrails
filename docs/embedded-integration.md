@@ -171,10 +171,10 @@ for _, p := range rt.Probes() { // openrails_vault, openrails_psp_posture
 }
 ``` Merchant
 and PSP declarations belong in `Options.Merchant`. One-off manifest and restore
-tooling belongs to `embed/operator.New(rt)`; the host transaction extension is
+tooling belongs to `internal/embedoperator.New(rt)`; the host transaction extension is
 constructed with `embed.NewHostTransactions(rt)`. Storage remains internal.
 Hosts that use OpenRails' own AuthKit control plane (standalone-shaped or
-hosted products) attach it with `embed/controlplane`. `EmailSender` and
+hosted products) attach it with `internal/embedcontrolplane`. `EmailSender` and
 `SMSSender` are AuthKit sender objects (`authkit.EmailSender`, with `Send` and
 `CheckHealth`; AuthKit's `adapters/twilio` provides both):
 

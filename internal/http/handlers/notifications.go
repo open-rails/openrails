@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/query"
+	"github.com/open-rails/openrails/internal/query"
 )
 
 func GetNotifications(r *httprequest.Request) {

@@ -7,10 +7,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/cache"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	embcp "github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/pkg/cache"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/redis/go-redis/v9"
 )

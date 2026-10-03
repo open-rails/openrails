@@ -54,7 +54,7 @@ explicitly call `PrincipalFromVerifiedClaims` for that same unchanged request.
 Ordinary `AuthenticateRequest` never reads ambient claims. Admission liveness is
 explicit through `AuthenticateRequestLive`; ordinary native JWT bans remain lazy.
 
-Billing config no longer has an Auth field. Standalone `hostauth/config.Config`
+Billing config no longer has an Auth field. Standalone `internal/hostconfig.Config`
 composes billing config with Auth config, which is passed explicitly through
 control-plane construction. A standalone route bundle comes from the attached
 control plane (`controlplane.HTTPRoutes`), while `embed.Runtime.HTTPRoutes` is

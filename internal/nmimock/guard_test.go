@@ -13,9 +13,9 @@ import (
 // Only tests, test harnesses and the sandbox command may import the mock:
 // production code paths must never reach a fake gateway.
 func TestOnlyTestsAndSandboxImportTheMock(t *testing.T) {
-	const self = "github.com/open-rails/openrails/nmimock"
-	allowed := []string{"nmimock/", "cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
-	root, err := filepath.Abs("..")
+	const self = "github.com/open-rails/openrails/internal/nmimock"
+	allowed := []string{"internal/nmimock/", "cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
+	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}

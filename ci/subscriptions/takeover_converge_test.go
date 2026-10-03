@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed/operator"
+	"github.com/open-rails/openrails/internal/embedoperator"
 	"github.com/open-rails/openrails/internal/failpoint"
 )
 
@@ -32,7 +32,7 @@ func TestNMIEngineTakeoverConvergesMidFlight(t *testing.T) {
 				if s.Point != point || s.Subscription != legacy || s.Kind != "nmi_engine_takeover" {
 					return nil
 				}
-				res, err := operator.New(w.rt).Converge(context.Background(), w.client[embedded].MerchantID())
+				res, err := embedoperator.New(w.rt).Converge(context.Background(), w.client[embedded].MerchantID())
 				if err != nil {
 					t.Errorf("mid-takeover converge: %v", err)
 				}

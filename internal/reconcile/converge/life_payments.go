@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
@@ -240,7 +240,7 @@ func (p *lifePass) unmappedDeclines(ctx context.Context, now time.Time) ([]Conve
 			Type: findingDeclineUnmapped, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityMedium,
 			SubjectKey: "decline:" + rail + ":" + code, Provider: "self",
 			Evidence: map[string]any{"rail": rail, "code": code, "declines": n, "lookback_days": int(unmappedLookback.Hours()) / 24},
-			RecommendedAction: fmt.Sprintf("%s decline code %q is in no table: it is retried as an ordinary decline and reads as \"unknown\". Map it in internal/billing/decline.",
+			RecommendedAction: fmt.Sprintf("%s decline code %q is in no table: it is retried as an ordinary decline and reads as \"unknown\". Map it in internal/decline.",
 				rail, code),
 		})
 	}

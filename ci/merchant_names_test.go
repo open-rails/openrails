@@ -20,14 +20,14 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 // attachControlPlane builds a runtime with an attached control plane that
 // mints real user tokens over the shared AuthKit schema.
-func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) controlplane.Options) *controlplane.ControlPlane {
+func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) embedcontrolplane.Options) *embedcontrolplane.ControlPlane {
 	t.Helper()
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	rt, err := embed.New(t.Context(), embed.Options{
@@ -47,14 +47,14 @@ func (f *fixture) attachControlPlane(t *testing.T, options func(*embed.Runtime) 
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 	}
-	cp, err := controlplane.Attach(t.Context(), rt, opts)
+	cp, err := embedcontrolplane.Attach(t.Context(), rt, opts)
 	require.NoError(t, err)
 	return cp
 }
 
 // newUser creates an AuthKit user with an unverified email and returns its id
 // and a bearer access token.
-func newUser(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
+func newUser(t *testing.T, cp *embedcontrolplane.ControlPlane) (string, string) {
 	t.Helper()
 	username := "u" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	u, err := cp.Core().CreateUser(t.Context(), iam.NewUser{Email: username + "@e2e.test", Username: username})
@@ -66,14 +66,14 @@ func newUser(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
 
 // newOwner is a verified account signed in with its password: owner
 // operations need a recent sign-in, which a minted token is not.
-func newOwner(t *testing.T, cp *controlplane.ControlPlane) (string, string) {
+func newOwner(t *testing.T, cp *embedcontrolplane.ControlPlane) (string, string) {
 	t.Helper()
 	u := newAccount(t, cp)
 	return u.ID, authtest.SignIn(t, cp.Core(), u).AccessToken
 }
 
 // verifyEmail marks the user's email proven, as the system.
-func verifyEmail(t *testing.T, cp *controlplane.ControlPlane, userID string) {
+func verifyEmail(t *testing.T, cp *embedcontrolplane.ControlPlane, userID string) {
 	t.Helper()
 	verified := true
 	_, err := cp.Core().UpdateUser(t.Context(), iam.SystemActor(), userID, iam.UserUpdate{EmailVerified: &verified})
@@ -82,9 +82,9 @@ func verifyEmail(t *testing.T, cp *controlplane.ControlPlane, userID string) {
 
 func uniqueName(prefix string) string { return prefix + "-" + uuid.NewString()[:8] }
 
-func reserving(names ...string) func(*embed.Runtime) controlplane.Options {
-	return func(*embed.Runtime) controlplane.Options {
-		return controlplane.Options{MerchantCreation: &controlplane.MerchantCreationConfig{ReservedSlugs: names}}
+func reserving(names ...string) func(*embed.Runtime) embedcontrolplane.Options {
+	return func(*embed.Runtime) embedcontrolplane.Options {
+		return embedcontrolplane.Options{MerchantCreation: &embedcontrolplane.MerchantCreationConfig{ReservedSlugs: names}}
 	}
 }
 
@@ -117,21 +117,21 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	other, _ := newUser(t, cp)
 
 	acme := uniqueName("acme")
-	created, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: owner})
+	created, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: owner})
 	require.NoError(t, err)
 	require.True(t, created.Created)
 	group, err := cp.Core().Group(ctx, iam.GroupByID(created.GroupID))
 	require.NoError(t, err)
 	require.Equal(t, created.MerchantID.String(), group.ID, "the AuthKit group is keyed by the merchant and carries no name")
 
-	again, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
+	again, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
 	require.False(t, again.Created, "a taken name never becomes another merchant")
 	require.Equal(t, created.MerchantID, again.MerchantID)
 
-	_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: reserved, OwnerUserID: owner})
-	require.ErrorIs(t, err, controlplane.ErrSlugReserved)
-	platform, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: reserved})
+	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: reserved, OwnerUserID: owner})
+	require.ErrorIs(t, err, embedcontrolplane.ErrSlugReserved)
+	platform, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: reserved})
 	require.NoError(t, err, "operators claim reserved names")
 	require.True(t, platform.Created)
 
@@ -143,14 +143,14 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 		require.Equal(t, created.MerchantID, mid, "the former name forwards")
 		require.Equal(t, renamed, current)
 	}
-	blocked, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
+	blocked, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: acme, OwnerUserID: other})
 	require.NoError(t, err)
 	require.False(t, blocked.Created, "a former name is not claimable by another merchant")
 	var pgErr *pgconn.PgError
 	_, err = f.pool.Exec(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1)", acme)
 	require.ErrorAs(t, err, &pgErr, "the database guards the namespace for every writer")
 	require.Equal(t, "merchant_slug_aliases_pkey", pgErr.ConstraintName)
-	require.ErrorIs(t, cp.RenameMerchant(ctx, platform.MerchantID, acme), controlplane.ErrMerchantNameTaken)
+	require.ErrorIs(t, cp.RenameMerchant(ctx, platform.MerchantID, acme), embedcontrolplane.ErrMerchantNameTaken)
 	require.NoError(t, cp.RenameMerchant(ctx, created.MerchantID, acme), "a merchant takes its own former name back")
 	mid, current, err := cp.ResolveMerchantForGroup(ctx, renamed)
 	require.NoError(t, err)
@@ -161,8 +161,8 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	require.True(t, result.Retired)
 	for _, released := range []string{acme, renamed} {
 		_, _, err := cp.ResolveMerchantForGroup(ctx, released)
-		require.ErrorIs(t, err, controlplane.ErrMerchantUnresolved, released)
-		reclaimed, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: released, OwnerUserID: other})
+		require.ErrorIs(t, err, embedcontrolplane.ErrMerchantUnresolved, released)
+		reclaimed, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: released, OwnerUserID: other})
 		require.NoError(t, err)
 		require.True(t, reclaimed.Created, "retirement releases the name and its former names")
 		require.NotEqual(t, created.MerchantID, reclaimed.MerchantID)
@@ -178,10 +178,10 @@ func TestMerchantRenameRoute(t *testing.T) {
 	ctx := t.Context()
 	owner, token := newOwner(t, cp)
 	shop := uniqueName("shop")
-	m, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner})
+	m, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner})
 	require.NoError(t, err)
 	taken := uniqueName("taken")
-	_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: taken})
+	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: taken})
 	require.NoError(t, err)
 	handler, err := cp.Handler()
 	require.NoError(t, err)
