@@ -13,7 +13,7 @@ import (
 )
 
 const countPurchaseReviews = `-- name: CountPurchaseReviews :one
-SELECT count(*) FROM openrails.reconciliation_findings
+SELECT count(*) FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND finding_type = $2::text
   AND status = ANY($3::text[])
   AND ($4::text = '' OR evidence -> 'local' ->> 'product_archive_id' = $4::text)
@@ -40,8 +40,8 @@ func (q *Queries) CountPurchaseReviews(ctx context.Context, arg CountPurchaseRev
 
 const getProductArchiveByID = `-- name: GetProductArchiveByID :one
 SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
-FROM openrails.product_archive_operations o
-JOIN openrails.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
+FROM billing.product_archive_operations o
+JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = $1::uuid AND o.id = $2::uuid
 `
 
@@ -79,8 +79,8 @@ func (q *Queries) GetProductArchiveByID(ctx context.Context, arg GetProductArchi
 
 const getProductArchiveByKey = `-- name: GetProductArchiveByKey :one
 SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchased_since, o.reason, o.created_at, o.request_sha256
-FROM openrails.product_archive_operations o
-JOIN openrails.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
+FROM billing.product_archive_operations o
+JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = $1::uuid AND o.idempotency_key = $2::text
 `
 
@@ -118,7 +118,7 @@ func (q *Queries) GetProductArchiveByKey(ctx context.Context, arg GetProductArch
 
 const getPurchaseReviewByID = `-- name: GetPurchaseReviewByID :one
 SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM openrails.reconciliation_findings
+FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND finding_type = $2::text AND id = $3::uuid
 `
 
@@ -153,7 +153,7 @@ func (q *Queries) GetPurchaseReviewByID(ctx context.Context, arg GetPurchaseRevi
 
 const getPurchaseReviewBySubject = `-- name: GetPurchaseReviewBySubject :one
 SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM openrails.reconciliation_findings
+FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND finding_type = $2::text AND subject_key = $3::text
 `
 
@@ -187,7 +187,7 @@ func (q *Queries) GetPurchaseReviewBySubject(ctx context.Context, arg GetPurchas
 }
 
 const insertProductArchive = `-- name: InsertProductArchive :exec
-INSERT INTO openrails.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchased_since, reason)
+INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchased_since, reason)
 VALUES ($1::uuid, $2::text, $3::bytea, $4::uuid,
         $5::text, $6::timestamptz, $7::text)
 `
@@ -216,7 +216,7 @@ func (q *Queries) InsertProductArchive(ctx context.Context, arg InsertProductArc
 }
 
 const insertPurchaseReview = `-- name: InsertPurchaseReview :exec
-INSERT INTO openrails.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
+INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status, recommended_action, evidence)
 VALUES ($1::uuid, $2::text, $3::text, 'medium', 'requires_review',
         $4::text, $5::jsonb)
 ON CONFLICT (merchant_id, finding_type, subject_key) DO NOTHING
@@ -244,8 +244,8 @@ func (q *Queries) InsertPurchaseReview(ctx context.Context, arg InsertPurchaseRe
 
 const listProductArchivePurchases = `-- name: ListProductArchivePurchases :many
 SELECT pay.id, pay.customer_id, pay.amount, pay.currency, pay.purchased_at, pay.money_movement
-FROM openrails.payments pay
-JOIN openrails.prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
+FROM billing.payments pay
+JOIN billing.prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
 WHERE pay.merchant_id = $1::uuid AND pr.product_id = $2::uuid
   AND pay.purchased_at >= $3::timestamptz
   AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'completed'
@@ -301,7 +301,7 @@ func (q *Queries) ListProductArchivePurchases(ctx context.Context, arg ListProdu
 
 const listPurchaseReviews = `-- name: ListPurchaseReviews :many
 SELECT id, status, evidence, operator_notes, created_at, resolved_at
-FROM openrails.reconciliation_findings
+FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND finding_type = $2::text
   AND status = ANY($3::text[])
   AND ($4::text = '' OR evidence -> 'local' ->> 'product_archive_id' = $4::text)

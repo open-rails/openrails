@@ -170,7 +170,7 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 	// work-list read evaluated nothing and reported success). Reentrant, so the
 	// worker's outer scope stands.
 	var overdue []gen.ListOverdueInvoiceAggregatesRow
-	var parked []gen.OpenrailsCustomerDelinquency
+	var parked []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		var qErr error
@@ -446,7 +446,7 @@ func (s *Service) ListForCustomer(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return nil, err
 	}
-	var rows []gen.OpenrailsCustomerDelinquency
+	var rows []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var qErr error
 		rows, qErr = s.db.Gen(ctx).ListCustomerDelinquency(ctx, gen.ListCustomerDelinquencyParams{
@@ -481,7 +481,7 @@ func (s *Service) List(ctx context.Context, state State, limit int) ([]Snapshot,
 		v := string(state)
 		filter = &v
 	}
-	var rows []gen.OpenrailsCustomerDelinquency
+	var rows []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var qErr error
 		rows, qErr = s.db.Gen(ctx).ListDelinquentCustomers(ctx, gen.ListDelinquentCustomersParams{
@@ -494,7 +494,7 @@ func (s *Service) List(ctx context.Context, state State, limit int) ([]Snapshot,
 	return snapshots(rows), nil
 }
 
-func snapshots(rows []gen.OpenrailsCustomerDelinquency) []Snapshot {
+func snapshots(rows []gen.BillingCustomerDelinquency) []Snapshot {
 	out := make([]Snapshot, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, Snapshot{

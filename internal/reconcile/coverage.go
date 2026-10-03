@@ -53,7 +53,7 @@ func (r *RunResult) PullProofs() PullProofs {
 }
 
 // MarkReconciledSourceDomains flips the §3.2 confirmed-absence gate
-// (openrails.reconciliation_state) for every source domain the given pull
+// (billing.reconciliation_state) for every source domain the given pull
 // proofs actually PROVE, and returns the domains flipped. The rule (#665):
 //
 //   - Absence proofs need EXHAUSTIVE coverage (SnapshotCoverage), never mere
@@ -84,7 +84,7 @@ func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID
 	if len(accounts) == 0 {
 		return nil, nil
 	}
-	byRail := map[string][]gen.OpenrailsPsp{}
+	byRail := map[string][]gen.BillingPsp{}
 	for i := range accounts {
 		byRail[accounts[i].Rail] = append(byRail[accounts[i].Rail], accounts[i])
 	}

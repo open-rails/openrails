@@ -36,15 +36,15 @@ func (s *exactSecrets) GetVersion(ctx context.Context, owner merchant.ID, name s
 // environment must all match before any credential is read.
 func TestHyperSwitchCredentialResolution(t *testing.T) {
 	owner := merchant.ID(uuid.New())
-	base := gen.OpenrailsCustodian{ID: uuid.New(), MerchantID: owner.UUID(), Kind: "hyperswitch", Environment: "test", AccountID: "merchant_A",
+	base := gen.BillingCustodian{ID: uuid.New(), MerchantID: owner.UUID(), Kind: "hyperswitch", Environment: "test", AccountID: "merchant_A",
 		Settings: []byte(`{"public_api_key":"public_A","profile_id":"profile_A"}`), CredentialVersions: []byte(`{"api_key":2}`)}
 	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, HyperSwitch: &config.HyperSwitchConfig{APIBaseURL: "https://owned-custody.example"}}
-	versions := func(v string) func(*gen.OpenrailsCustodian) {
-		return func(r *gen.OpenrailsCustodian) { r.CredentialVersions = []byte(v) }
+	versions := func(v string) func(*gen.BillingCustodian) {
+		return func(r *gen.BillingCustodian) { r.CredentialVersions = []byte(v) }
 	}
 	for _, tc := range []struct {
 		name    string
-		mutate  func(*gen.OpenrailsCustodian)
+		mutate  func(*gen.BillingCustodian)
 		version int
 		secret  string
 		err     error
@@ -52,21 +52,21 @@ func TestHyperSwitchCredentialResolution(t *testing.T) {
 		floor   int
 	}{
 		{name: "current key", version: 2, secret: "k", ok: true, floor: 2},
-		{name: "archived still addressable", mutate: func(r *gen.OpenrailsCustodian) { r.Archived = true }, version: 2, secret: "k", ok: true, floor: 2},
+		{name: "archived still addressable", mutate: func(r *gen.BillingCustodian) { r.Archived = true }, version: 2, secret: "k", ok: true, floor: 2},
 		{name: "unrotated declaration", mutate: versions(`{}`), version: 1, secret: "k", ok: true},
 		{name: "missing versions document", mutate: versions(""), version: 2, secret: "k"},
 		{name: "null versions document", mutate: versions(`null`), version: 2, secret: "k"},
 		{name: "string floor", mutate: versions(`{"api_key":"2"}`), version: 2, secret: "k"},
 		{name: "null floor", mutate: versions(`{"api_key":null}`), version: 2, secret: "k"},
 		{name: "negative floor", mutate: versions(`{"api_key":-1}`), version: 2, secret: "k"},
-		{name: "null settings", mutate: func(r *gen.OpenrailsCustodian) { r.Settings = []byte(`null`) }, version: 2, secret: "k"},
+		{name: "null settings", mutate: func(r *gen.BillingCustodian) { r.Settings = []byte(`null`) }, version: 2, secret: "k"},
 		{name: "stale key", version: 1, secret: "k", floor: 2},
 		{name: "newer unpublished key", version: 3, secret: "k", floor: 2},
 		{name: "empty key", version: 2, secret: " ", floor: 2},
 		{name: "missing secret", err: merchants.ErrSecretNotFound, floor: 2},
-		{name: "foreign owner", mutate: func(r *gen.OpenrailsCustodian) { r.MerchantID = uuid.New() }, version: 2, secret: "k"},
-		{name: "live row under sandbox", mutate: func(r *gen.OpenrailsCustodian) { r.Environment = "live" }, version: 2, secret: "k"},
-		{name: "wrong kind", mutate: func(r *gen.OpenrailsCustodian) { r.Kind = "basis_theory" }, version: 2, secret: "k"},
+		{name: "foreign owner", mutate: func(r *gen.BillingCustodian) { r.MerchantID = uuid.New() }, version: 2, secret: "k"},
+		{name: "live row under sandbox", mutate: func(r *gen.BillingCustodian) { r.Environment = "live" }, version: 2, secret: "k"},
+		{name: "wrong kind", mutate: func(r *gen.BillingCustodian) { r.Kind = "basis_theory" }, version: 2, secret: "k"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			row := base

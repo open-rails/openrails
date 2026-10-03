@@ -12,7 +12,7 @@ import (
 )
 
 const completeCredentialPublication = `-- name: CompleteCredentialPublication :exec
-UPDATE openrails.credential_publications
+UPDATE billing.credential_publications
 SET state = 'published', result = $3, published_at = now()
 WHERE merchant_id = $1 AND operation_id = $2
 `
@@ -30,7 +30,7 @@ func (q *Queries) CompleteCredentialPublication(ctx context.Context, arg Complet
 
 const createCredentialPublication = `-- name: CreateCredentialPublication :exec
 
-INSERT INTO openrails.credential_publications (
+INSERT INTO billing.credential_publications (
     merchant_id, operation_id, rail, environment, account_id, expected_revision, request_metadata
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
@@ -62,7 +62,7 @@ func (q *Queries) CreateCredentialPublication(ctx context.Context, arg CreateCre
 
 const getCredentialPublication = `-- name: GetCredentialPublication :one
 SELECT rail, environment, account_id, expected_revision, request_metadata, result
-FROM openrails.credential_publications
+FROM billing.credential_publications
 WHERE merchant_id = $1 AND operation_id = $2
 `
 
@@ -96,7 +96,7 @@ func (q *Queries) GetCredentialPublication(ctx context.Context, arg GetCredentia
 
 const lockCredentialPublication = `-- name: LockCredentialPublication :one
 SELECT rail, environment, account_id, expected_revision, request_metadata, result
-FROM openrails.credential_publications
+FROM billing.credential_publications
 WHERE merchant_id = $1 AND operation_id = $2
 FOR UPDATE
 `
@@ -130,7 +130,7 @@ func (q *Queries) LockCredentialPublication(ctx context.Context, arg LockCredent
 }
 
 const lockCredentialPublicationResult = `-- name: LockCredentialPublicationResult :one
-SELECT result FROM openrails.credential_publications
+SELECT result FROM billing.credential_publications
 WHERE merchant_id = $1 AND operation_id = $2
 FOR UPDATE
 `
@@ -148,7 +148,7 @@ func (q *Queries) LockCredentialPublicationResult(ctx context.Context, arg LockC
 }
 
 const lockPSPForCredentialPublication = `-- name: LockPSPForCredentialPublication :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM billing.psps
 WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4
 FOR UPDATE
 `
@@ -160,14 +160,14 @@ type LockPSPForCredentialPublicationParams struct {
 	AccountID   string
 }
 
-func (q *Queries) LockPSPForCredentialPublication(ctx context.Context, arg LockPSPForCredentialPublicationParams) (OpenrailsPsp, error) {
+func (q *Queries) LockPSPForCredentialPublication(ctx context.Context, arg LockPSPForCredentialPublicationParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, lockPSPForCredentialPublication,
 		arg.MerchantID,
 		arg.Rail,
 		arg.Environment,
 		arg.AccountID,
 	)
-	var i OpenrailsPsp
+	var i BillingPsp
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,

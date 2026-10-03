@@ -96,7 +96,7 @@ func RevokeReasonPtr(r *EntitlementRevokeReason) *string {
 	return &s
 }
 
-func PaymentFromGen(p gen.OpenrailsPayment) (*Payment, error) {
+func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	m := &Payment{
 		ID:                p.ID,
 		CustomerID:        p.CustomerID,
@@ -135,7 +135,7 @@ func PaymentFromGen(p gen.OpenrailsPayment) (*Payment, error) {
 	return m, nil
 }
 
-func PaymentsFromGen(rows []gen.OpenrailsPayment) ([]*Payment, error) {
+func PaymentsFromGen(rows []gen.BillingPayment) ([]*Payment, error) {
 	out := make([]*Payment, 0, len(rows))
 	for _, r := range rows {
 		m, err := PaymentFromGen(r)
@@ -147,7 +147,7 @@ func PaymentsFromGen(rows []gen.OpenrailsPayment) ([]*Payment, error) {
 	return out, nil
 }
 
-func PriceFromGen(p gen.OpenrailsPrice) (*Price, error) {
+func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 	m := &Price{
 		ID:                  p.ID,
 		MerchantID:          p.MerchantID,
@@ -166,7 +166,7 @@ func PriceFromGen(p gen.OpenrailsPrice) (*Price, error) {
 	return m, nil
 }
 
-func ProductFromGen(p gen.OpenrailsProduct) (*Product, error) {
+func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 	m := &Product{
 		ID:          p.ID,
 		MerchantID:  p.MerchantID,
@@ -186,7 +186,7 @@ func ProductFromGen(p gen.OpenrailsProduct) (*Product, error) {
 	return m, nil
 }
 
-func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
+func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 	m := &Subscription{
 		ID:                    s.ID,
 		MerchantID:            s.MerchantID,
@@ -231,7 +231,7 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 	return m, nil
 }
 
-func SubscriptionsFromGen(rows []gen.OpenrailsSubscription) ([]*Subscription, error) {
+func SubscriptionsFromGen(rows []gen.BillingSubscription) ([]*Subscription, error) {
 	out := make([]*Subscription, 0, len(rows))
 	for _, r := range rows {
 		m, err := SubscriptionFromGen(r)
@@ -243,7 +243,7 @@ func SubscriptionsFromGen(rows []gen.OpenrailsSubscription) ([]*Subscription, er
 	return out, nil
 }
 
-func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) {
+func PaymentMethodFromGen(p gen.BillingPaymentMethod) (*PaymentMethod, error) {
 	m := &PaymentMethod{
 		ID:              p.ID,
 		CustomerID:      p.CustomerID,
@@ -278,7 +278,7 @@ func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) 
 	return m, nil
 }
 
-func PaymentMethodsFromGen(rows []gen.OpenrailsPaymentMethod) ([]*PaymentMethod, error) {
+func PaymentMethodsFromGen(rows []gen.BillingPaymentMethod) ([]*PaymentMethod, error) {
 	out := make([]*PaymentMethod, 0, len(rows))
 	for _, r := range rows {
 		m, err := PaymentMethodFromGen(r)
@@ -290,7 +290,7 @@ func PaymentMethodsFromGen(rows []gen.OpenrailsPaymentMethod) ([]*PaymentMethod,
 	return out, nil
 }
 
-func CheckoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*CheckoutSession, error) {
+func CheckoutSessionFromGen(c gen.BillingCheckoutSession) (*CheckoutSession, error) {
 	m := &CheckoutSession{
 		ID:             c.ID,
 		CustomerID:     c.CustomerID,
@@ -331,7 +331,7 @@ func CheckoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*CheckoutSession, e
 	return m, nil
 }
 
-func EntitlementFromGen(e gen.OpenrailsEntitlement) *Entitlement {
+func EntitlementFromGen(e gen.BillingEntitlement) *Entitlement {
 	sourceID := e.SourceID
 	m := &Entitlement{
 		ID:          e.ID,
@@ -354,7 +354,7 @@ func EntitlementFromGen(e gen.OpenrailsEntitlement) *Entitlement {
 	return m
 }
 
-func EntitlementsFromGen(rows []gen.OpenrailsEntitlement) []Entitlement {
+func EntitlementsFromGen(rows []gen.BillingEntitlement) []Entitlement {
 	out := make([]Entitlement, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, *EntitlementFromGen(r))
@@ -363,7 +363,7 @@ func EntitlementsFromGen(rows []gen.OpenrailsEntitlement) []Entitlement {
 }
 
 // NotificationFromGen maps a generated notifications row onto the model.
-func NotificationFromGen(n gen.OpenrailsNotification) (*NotificationQueue, error) {
+func NotificationFromGen(n gen.BillingNotification) (*NotificationQueue, error) {
 	if n.RecipientKind != "customer" || n.CustomerID == nil {
 		return nil, fmt.Errorf("notification %s is not a customer notification", n.ID)
 	}
@@ -381,7 +381,7 @@ func NotificationFromGen(n gen.OpenrailsNotification) (*NotificationQueue, error
 }
 
 // PriceKeyMovementFromGen maps a generated price_key_movements row (#774).
-func PriceKeyMovementFromGen(r gen.OpenrailsPriceKeyMovement) *PriceKeyMovement {
+func PriceKeyMovementFromGen(r gen.BillingPriceKeyMovement) *PriceKeyMovement {
 	return &PriceKeyMovement{
 		Archived:    r.Archived,
 		ID:          r.ID,
@@ -393,7 +393,7 @@ func PriceKeyMovementFromGen(r gen.OpenrailsPriceKeyMovement) *PriceKeyMovement 
 	}
 }
 
-func PriceKeyMovementsFromGen(rows []gen.OpenrailsPriceKeyMovement) []*PriceKeyMovement {
+func PriceKeyMovementsFromGen(rows []gen.BillingPriceKeyMovement) []*PriceKeyMovement {
 	out := make([]*PriceKeyMovement, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, PriceKeyMovementFromGen(r))
@@ -402,7 +402,7 @@ func PriceKeyMovementsFromGen(rows []gen.OpenrailsPriceKeyMovement) []*PriceKeyM
 }
 
 // SubscriptionRepriceFromGen maps a generated subscription_reprices row (#773).
-func SubscriptionRepriceFromGen(r gen.OpenrailsSubscriptionReprice) *SubscriptionReprice {
+func SubscriptionRepriceFromGen(r gen.BillingSubscriptionReprice) *SubscriptionReprice {
 	return &SubscriptionReprice{
 		ID:                      r.ID,
 		MerchantID:              r.MerchantID,
@@ -421,7 +421,7 @@ func SubscriptionRepriceFromGen(r gen.OpenrailsSubscriptionReprice) *Subscriptio
 	}
 }
 
-func SubscriptionRepricesFromGen(rows []gen.OpenrailsSubscriptionReprice) []*SubscriptionReprice {
+func SubscriptionRepricesFromGen(rows []gen.BillingSubscriptionReprice) []*SubscriptionReprice {
 	out := make([]*SubscriptionReprice, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, SubscriptionRepriceFromGen(r))
@@ -432,7 +432,7 @@ func SubscriptionRepricesFromGen(rows []gen.OpenrailsSubscriptionReprice) []*Sub
 // RepriceBatchFromGen maps a generated reprice_batches row (#773). The
 // int32->int widenings are always exact (Go's int is 64-bit on every
 // platform this project targets).
-func RepriceBatchFromGen(r gen.OpenrailsRepriceBatch) *RepriceBatch {
+func RepriceBatchFromGen(r gen.BillingRepriceBatch) *RepriceBatch {
 	return &RepriceBatch{
 		ID:                     r.ID,
 		MerchantID:             r.MerchantID,

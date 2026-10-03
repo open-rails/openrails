@@ -31,7 +31,7 @@ type secretStoreGetter struct {
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID merchant.ID, name string) (string, error) {
 	if name == "private_key" && g.database != nil {
 		var (
-			account gen.OpenrailsPsp
+			account gen.BillingPsp
 			ok      bool
 			err     error
 		)
@@ -170,7 +170,7 @@ func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID merchant.
 // signerApproved refuses a PSP whose Transit signer reports an unapproved
 // identity (#1101): nothing is signed for, or paid to, it until an operator
 // approves the change.
-func signerApproved(account gen.OpenrailsPsp) error {
+func signerApproved(account gen.BillingPsp) error {
 	if account.PendingSignerPublicKey != nil && *account.PendingSignerPublicKey != "" {
 		return fmt.Errorf("solana: PSP %s signer now reports %s: %w", account.AccountID, *account.PendingSignerPublicKey, vault.ErrSignerUnapproved)
 	}
@@ -192,15 +192,15 @@ func signerConfigFromEvidence(raw []byte) solanaSignerConfig {
 	return evidence.Signer
 }
 
-func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.OpenrailsPsp, bool, error) {
+func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID merchant.ID, environment string) (gen.BillingPsp, bool, error) {
 	if database == nil || merchantID.IsZero() {
-		return gen.OpenrailsPsp{}, false, nil
+		return gen.BillingPsp{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: PSP environment is required")
+		return gen.BillingPsp{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
 		row, err = database.Gen(ctx).GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{
@@ -211,22 +211,22 @@ func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID merchant.
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPsp{}, false, nil
+			return gen.BillingPsp{}, false, nil
 		}
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup active PSP: %w", err)
+		return gen.BillingPsp{}, false, fmt.Errorf("solana: lookup active PSP: %w", err)
 	}
 	return row, true, nil
 }
 
-func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.OpenrailsPsp, bool, error) {
+func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID merchant.ID, environment, accountID string) (gen.BillingPsp, bool, error) {
 	if database == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
-		return gen.OpenrailsPsp{}, false, nil
+		return gen.BillingPsp{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: PSP environment is required")
+		return gen.BillingPsp{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		var err error
 		row, err = database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{
@@ -238,9 +238,9 @@ func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID mercha
 		return err
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPsp{}, false, nil
+			return gen.BillingPsp{}, false, nil
 		}
-		return gen.OpenrailsPsp{}, false, fmt.Errorf("solana: lookup PSP %s: %w", accountID, err)
+		return gen.BillingPsp{}, false, fmt.Errorf("solana: lookup PSP %s: %w", accountID, err)
 	}
 	return row, true, nil
 }

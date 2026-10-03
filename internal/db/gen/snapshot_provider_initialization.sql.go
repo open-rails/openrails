@@ -12,7 +12,7 @@ import (
 )
 
 const insertSnapshotCustodian = `-- name: InsertSnapshotCustodian :exec
-INSERT INTO openrails.custodians(merchant_id,key,kind,environment,account_id,settings,archived)
+INSERT INTO billing.custodians(merchant_id,key,kind,environment,account_id,settings,archived)
 VALUES($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb,$7::boolean)
 ON CONFLICT(kind,environment,account_id) DO NOTHING
 `
@@ -41,7 +41,7 @@ func (q *Queries) InsertSnapshotCustodian(ctx context.Context, arg InsertSnapsho
 }
 
 const insertSnapshotPSP = `-- name: InsertSnapshotPSP :exec
-INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key,archived,evidence,custodian_id)
+INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,archived,evidence,custodian_id)
 VALUES($1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::text,$7::boolean,$8::jsonb,$9::uuid)
 ON CONFLICT(rail,environment,account_id) DO NOTHING
 `

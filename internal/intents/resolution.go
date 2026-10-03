@@ -48,7 +48,7 @@ var (
 // operator evidence. A returned error rejects the evidence and leaves the
 // operation unchanged; an Outcome is applied exactly like a verifier result.
 type OperatorResolver interface {
-	Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error)
+	Resolve(ctx context.Context, intent gen.BillingRailIntent, resolution Resolution) (Outcome, error)
 }
 
 // UnsentResolver is implemented by handlers whose pending or retryable
@@ -57,7 +57,7 @@ type OperatorResolver interface {
 // operation holding a local claim). The handler must reject any operation
 // carrying a submission fence; only its verifier may close those.
 type UnsentResolver interface {
-	ResolveUnsent(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error)
+	ResolveUnsent(ctx context.Context, intent gen.BillingRailIntent, resolution Resolution) (Outcome, error)
 }
 
 func (r Resolution) normalized() (Resolution, error) {
@@ -131,21 +131,21 @@ func RejectResolution(format string, args ...any) error {
 // Resolve applies operator evidence to one unknown operation in the caller's
 // merchant scope. The handler validates the evidence and derives the outcome;
 // local effects then commit through the same paths a provider receipt uses.
-func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolution) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolution) (gen.BillingRailIntent, error) {
 	resolution, err := resolution.normalized()
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	row, err := r.Store.Get(ctx, id)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if row.MerchantID != mid.UUID() {
-		return gen.OpenrailsRailIntent{}, fmt.Errorf("%w: operation belongs to another merchant", ErrResolutionInvalid)
+		return gen.BillingRailIntent{}, fmt.Errorf("%w: operation belongs to another merchant", ErrResolutionInvalid)
 	}
 	if resolution.RequalifyAccount != "" && (row.IntentType != TypeNMIProviderCutover || (resolution.Step != "source" && resolution.Step != "target")) {
 		return row, ErrResolutionUnsupported
@@ -185,7 +185,7 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		return row, fmt.Errorf("%w: %s", ErrResolutionUnsupported, row.IntentType)
 	}
 	now := r.now()
-	var claimed gen.OpenrailsRailIntent
+	var claimed gen.BillingRailIntent
 	if pending {
 		claimed, ok, err = r.Store.ClaimByID(ctx, id, now, now.Add(r.lease()))
 	} else {
@@ -221,7 +221,7 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 // resolveUnsent releases a never-submitted operation on operator NotExecuted
 // evidence. The lease is the executor's; a rejection parks the operation back
 // exactly as it was.
-func (r *Runner) resolveUnsent(ctx context.Context, row gen.OpenrailsRailIntent, resolution Resolution) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) resolveUnsent(ctx context.Context, row gen.BillingRailIntent, resolution Resolution) (gen.BillingRailIntent, error) {
 	resolver, ok := r.Registry.Lookup(row.IntentType).(UnsentResolver)
 	if !ok || !resolution.NotExecuted {
 		return row, fmt.Errorf("%w (status=%s)", ErrResolutionNotUnknown, row.Status)
@@ -249,13 +249,13 @@ func (r *Runner) resolveUnsent(ctx context.Context, row gen.OpenrailsRailIntent,
 	return r.applyResolution(ctx, logEntry, claimed, resolution, outcome, now)
 }
 
-func (r *Runner) resolutionLog(ctx context.Context, claimed gen.OpenrailsRailIntent, resolution Resolution) *log.Entry {
+func (r *Runner) resolutionLog(ctx context.Context, claimed gen.BillingRailIntent, resolution Resolution) *log.Entry {
 	return log.WithContext(ctx).WithFields(log.Fields{
 		"intent_id": claimed.ID, "intent_type": claimed.IntentType, "provider": claimed.Rail, "actor": resolution.Actor,
 	})
 }
 
-func (r *Runner) applyResolution(ctx context.Context, logEntry *log.Entry, claimed gen.OpenrailsRailIntent, resolution Resolution, outcome Outcome, now time.Time) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) applyResolution(ctx context.Context, logEntry *log.Entry, claimed gen.BillingRailIntent, resolution Resolution, outcome Outcome, now time.Time) (gen.BillingRailIntent, error) {
 	record := resolution.Record(now)
 	evidence := map[string]any{"operator_resolution": record}
 	for k, v := range outcome.Evidence {

@@ -140,7 +140,7 @@ func (p *LocalMutationPolicy) allows(f *Finding) bool {
 }
 
 // PSPBinding is the account row a provider-pull is authorized to
-// treat as authoritative. ID is openrails.psps.id; AccountID is
+// treat as authoritative. ID is billing.psps.id; AccountID is
 // the raw provider-returned account identifier.
 type PSPBinding struct {
 	ID        uuid.UUID `json:"id"`

@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context, in gen.OpenrailsRailIntent) (*subscriptions.StripeService, error) {
+func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context, in gen.BillingRailIntent) (*subscriptions.StripeService, error) {
 	resolver, ok := h.Resolver.(intents.StripeEngineServiceResolver)
 	if !ok {
 		return nil, errors.New("Stripe engine resolver unavailable")
@@ -26,7 +26,7 @@ func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context,
 	return service, nil
 }
 
-func (h *SubscriptionCollectionHandler) executeStripeEngine(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
+func (h *SubscriptionCollectionHandler) executeStripeEngine(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload) intents.Outcome {
 	service, err := h.stripeEngineService(ctx, in)
 	if err != nil {
 		return intents.Parked(err.Error())
@@ -53,7 +53,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngine(ctx context.Context,
 
 // dispatchStripe creates the PaymentIntent under the operation's idempotency
 // key. Only the writer of a fresh submission or resend fence calls it.
-func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams, proof intents.CollectionNonexecutionProof) intents.Outcome {
+func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams, proof intents.CollectionNonexecutionProof) intents.Outcome {
 	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -79,7 +79,7 @@ func (h *SubscriptionCollectionHandler) dispatchStripe(ctx context.Context, in g
 	return h.executeStripeEngineDecline(ctx, in)
 }
 
-func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, reference string) intents.Outcome {
+func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, in gen.BillingRailIntent, p subscriptions.SubscriptionCollectionPayload, reference string) intents.Outcome {
 	service, err := h.stripeEngineService(ctx, in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -131,7 +131,7 @@ func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, 
 
 // Cancellation uses the original submission fence and the normal Execute lease.
 // Recovery always reads the same payment before considering another cancel.
-func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	current, err := intents.NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -192,7 +192,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 
 // resendLostStripeSubmission sends an armed resend with the original
 // idempotency key: Stripe replays the first PaymentIntent if it ever existed.
-func (h *SubscriptionCollectionHandler) resendLostStripeSubmission(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams) intents.Outcome {
+func (h *SubscriptionCollectionHandler) resendLostStripeSubmission(ctx context.Context, in gen.BillingRailIntent, service *subscriptions.StripeService, params subscriptions.StripeEnginePaymentParams) intents.Outcome {
 	attempt := armedResend(in)
 	if attempt == 0 {
 		return h.Verify(ctx, in)

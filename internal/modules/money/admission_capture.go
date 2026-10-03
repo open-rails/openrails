@@ -45,7 +45,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 	gate := spendgate.New(s.db)
 	gate.SetClock(s.now)
 	var result *billing.CaptureReceipt
-	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.OpenrailsAdmissionOperation) error {
+	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
 		replayed := row.State == "captured"
 		if replayed {
 			if row.CapturedAmount == nil || *row.CapturedAmount != amount {

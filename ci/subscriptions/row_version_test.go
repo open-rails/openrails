@@ -28,7 +28,7 @@ func TestStaleSubscriptionImageNeverReverts(t *testing.T) {
 		repo := subscriptions.NewSubscriptionRepo(d)
 		stale, err := repo.GetByID(ctx, id)
 		require.NoError(t, err)
-		_, err = w.pool.Exec(ctx, w.q(`UPDATE openrails.subscriptions SET next_retry_at = $2 WHERE id = $1`), id, retry)
+		_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.subscriptions SET next_retry_at = $2 WHERE id = $1`), id, retry)
 		require.NoError(t, err)
 		email := "stale@example.test"
 		stale.UserEmail = &email

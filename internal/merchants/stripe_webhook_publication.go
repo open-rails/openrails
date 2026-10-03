@@ -24,7 +24,7 @@ type StripeWebhookPublication struct {
 	service  *Service
 	merchant merchant.ID
 	account  string
-	row      gen.OpenrailsPsp
+	row      gen.BillingPsp
 	loaded   bool
 }
 

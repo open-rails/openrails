@@ -82,7 +82,7 @@ func (s *Service) applyCatalog(ctx context.Context, params billing.CatalogApplyP
 			return nil, err
 		}
 		repo := catalogmodule.NewCatalogRepo(scoped.catalogDatabase())
-		var target gen.OpenrailsCatalog
+		var target gen.BillingCatalog
 		if params.CatalogID == "" {
 			target, err = repo.Ensure(ctx, nil)
 		} else {

@@ -10,7 +10,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns the `openrails` schema. | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
 | **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), captcha escalation of card abuse (with a captcha configured), and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). If Redis is configured but unreachable, boot and readiness are unaffected; the cache switches to Redis once it answers. Redis holds only transient counters — nothing durable. |
-| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
+| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `billing.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
 (file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
@@ -87,7 +87,7 @@ OpenRails' workers converge state around that:
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
-| Worker health check | 5 min | seeds `openrails.worker_state`, raises repair alerts when a kind stops completing |
+| Worker health check | 5 min | seeds `billing.worker_state`, raises repair alerts when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; `?verbose=1` adds per-dependency detail). Readiness requires only
@@ -237,7 +237,7 @@ checkout_routing:
   evidence; `openrails intents-log` is the durable audit trail of provider
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.
-- **Worker health**: `openrails.worker_state` rows per job kind; the 5-minute
+- **Worker health**: `billing.worker_state` rows per job kind; the 5-minute
   checker raises durable repair alerts when a periodic kind stops completing.
 - **Notifications**: reconciliation findings raise deduplicated console
   notifications and, by severity, outbound webhooks / the alert email

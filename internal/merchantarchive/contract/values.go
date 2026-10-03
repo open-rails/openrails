@@ -310,7 +310,7 @@ func ValidateValues(p Profile, values []*string) error {
 			if payload == nil {
 				return fmt.Errorf("refund operation has no accepted payload")
 			}
-			if _, err := intents.DecodeRefundPayload(gen.OpenrailsRailIntent{Payload: []byte(*payload)}); err != nil {
+			if _, err := intents.DecodeRefundPayload(gen.BillingRailIntent{Payload: []byte(*payload)}); err != nil {
 				return fmt.Errorf("invalid accepted refund payload: %w", err)
 			}
 		}
@@ -337,7 +337,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	}
 	id, _ := uuid.Parse(field("id"))
 	merchant, _ := uuid.Parse(field("merchant_id"))
-	row := gen.OpenrailsRailIntent{ID: id, MerchantID: merchant, Rail: field("rail"), IntentType: typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), Origin: field("origin"), IdempotencyKey: field("idempotency_key")}
+	row := gen.BillingRailIntent{ID: id, MerchantID: merchant, Rail: field("rail"), IntentType: typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), Origin: field("origin"), IdempotencyKey: field("idempotency_key")}
 	if actor := field("actor"); actor != "" {
 		row.Actor = &actor
 	}

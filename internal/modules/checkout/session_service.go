@@ -111,7 +111,7 @@ type solanaPaymentService interface {
 	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
 	// RegisterReference gives a transaction-request attempt its one reference
 	// (the transfer-request flow registers inside GeneratePayment).
-	RegisterReference(ctx context.Context, kind solanamodule.ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.OpenrailsSolanaPayReference, error)
+	RegisterReference(ctx context.Context, kind solanamodule.ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.BillingSolanaPayReference, error)
 }
 
 type solanaTransactionService interface {
@@ -872,7 +872,7 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 // map[string]any database roundtrip. No quote is financial authority.
 const initialMembershipQuoteKey = "initial_membership_quote"
 
-func quoteInitialMembership(ctx context.Context, session *models.CheckoutSession, price *models.Price, product *models.Product, method gen.OpenrailsPaymentMethod, now time.Time) error {
+func quoteInitialMembership(ctx context.Context, session *models.CheckoutSession, price *models.Price, product *models.Product, method gen.BillingPaymentMethod, now time.Time) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutSessionModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || method.PspID != session.PspID || !((method.Custodian == models.CustodianHyperSwitch && method.CustodianID != nil && method.Rail == "nmi") || (method.Custodian == models.CustodianPSP && method.CustodianID == nil)) || method.RailCustomerRef == "" || method.RailMethodRef == "" || method.ParkReason != "" || method.Rail != string(session.Rail) {
 		return ErrCheckoutSessionConflict
@@ -3028,7 +3028,7 @@ func (s *CheckoutSessionService) BuildSolanaPayTransaction(ctx context.Context, 
 // same transaction back, so a wallet cannot be handed a second payable one.
 // A new one is built only once the chain can no longer include the previous
 // one and nothing has landed on the reference.
-func (s *CheckoutSessionService) offerSolanaTransaction(ctx context.Context, ref gen.OpenrailsSolanaPayReference, req *solanamodule.PaymentTransactionBuildRequest) (string, error) {
+func (s *CheckoutSessionService) offerSolanaTransaction(ctx context.Context, ref gen.BillingSolanaPayReference, req *solanamodule.PaymentTransactionBuildRequest) (string, error) {
 	if ref.Status != solanamodule.ReferencePending {
 		return "", ErrCheckoutSessionAlreadyCompleted
 	}
@@ -3074,9 +3074,9 @@ func (s *CheckoutSessionService) offerSolanaTransaction(ctx context.Context, ref
 }
 
 // registerSolanaReference puts the session's bound reference under watch.
-func (s *CheckoutSessionService) registerSolanaReference(ctx context.Context, kind solanamodule.ReferenceKind, session *models.CheckoutSession) (gen.OpenrailsSolanaPayReference, error) {
+func (s *CheckoutSessionService) registerSolanaReference(ctx context.Context, kind solanamodule.ReferenceKind, session *models.CheckoutSession) (gen.BillingSolanaPayReference, error) {
 	if s.solanaPayService == nil || session.Reference == nil {
-		return gen.OpenrailsSolanaPayReference{}, fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutSessionValidation)
+		return gen.BillingSolanaPayReference{}, fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutSessionValidation)
 	}
 	expires := s.now().Add(defaultCheckoutSessionTTL)
 	if session.ExpiresAt != nil {

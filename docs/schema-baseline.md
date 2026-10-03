@@ -1,10 +1,10 @@
 # Fresh pre-v1 schema baseline
 
 OpenRails installs one baseline, `internal/migrate/postgres/0001_schema.up.sql`.
-AuthKit and River retain independent schemas and migration ownership. Runtime
-billing defaults to `billing`; its source SQL remains authored in canonical
-`openrails` and is rewritten to the configured namespace. Managed River defaults
-to `public`. The role that applies the migrations owns every object and is the
+AuthKit and River retain independent schemas and migration ownership. All
+OpenRails SQL is authored in `billing`, the default `db.schema`, and runs there
+verbatim; another schema is reached by one token-aware rewrite (see
+docs/runtime-configuration.md). Managed River defaults to `public`. The role that applies the migrations owns every object and is the
 role OpenRails runs as; libraries create no roles and issue no grants. The owner
 has declared all pre-v1 OpenRails data disposable: this release targets fresh
 databases, with no legacy upgrade or backfill path. A database built by an

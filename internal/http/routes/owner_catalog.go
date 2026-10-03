@@ -98,7 +98,7 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 				return
 			}
 			repo := catalog.NewCatalogRepo(rt.DB)
-			var row gen.OpenrailsCatalog
+			var row gen.BillingCatalog
 			var err error
 			if r.Request.Method == http.MethodGet || r.Request.Method == http.MethodHead {
 				row, err = repo.GetByOwner(r.Request.Context(), subject)

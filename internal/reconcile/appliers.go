@@ -197,7 +197,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	}
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
 		MerchantID:         tid.UUID(),
-		Status:             gen.OpenrailsSubscriptionStatus(a.Status),
+		Status:             gen.BillingSubscriptionStatus(a.Status),
 		Rail:               a.Rail,
 		RailSubscriptionID: a.RailSubscriptionID,
 		UserEmail:          emailPtr,

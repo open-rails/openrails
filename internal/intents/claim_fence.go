@@ -30,7 +30,7 @@ func (c *claim) lose() { c.lost.Store(true) }
 
 type claimKey struct{}
 
-func withClaim(ctx context.Context, in gen.OpenrailsRailIntent) (context.Context, *claim) {
+func withClaim(ctx context.Context, in gen.BillingRailIntent) (context.Context, *claim) {
 	c := &claim{id: in.ID, status: in.Status, attempts: in.Attempts}
 	return context.WithValue(ctx, claimKey{}, c), c
 }

@@ -68,7 +68,7 @@ type CustodianIdentity struct {
 	AccountID   string
 }
 
-func custodianScopeFrom(row gen.OpenrailsCustodian) CustodianScope {
+func custodianScopeFrom(row gen.BillingCustodian) CustodianScope {
 	return CustodianScope{
 		ID:          row.ID,
 		Key:         strings.TrimSpace(row.Key),
@@ -110,7 +110,7 @@ func (s *Service) CustodianScopeByKey(ctx context.Context, id merchant.ID, key s
 	if s == nil || s.pool == nil || id.IsZero() || key == "" {
 		return CustodianScope{}, false, nil
 	}
-	var row gen.OpenrailsCustodian
+	var row gen.BillingCustodian
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).GetCustodianByKey(ctx, gen.GetCustodianByKeyParams{
@@ -134,7 +134,7 @@ func (s *Service) CustodianScopeByID(ctx context.Context, id merchant.ID, custod
 	if s == nil || s.pool == nil || id.IsZero() || custodianID == uuid.Nil {
 		return CustodianScope{}, false, nil
 	}
-	var row gen.OpenrailsCustodian
+	var row gen.BillingCustodian
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: id.UUID(), ID: custodianID})
@@ -162,7 +162,7 @@ func (s *Service) CustodianScopeByIdentity(ctx context.Context, id merchant.ID, 
 	if environment == "" {
 		return CustodianScope{}, false, errors.New("merchants: custodian environment must be live or test")
 	}
-	var row gen.OpenrailsCustodian
+	var row gen.BillingCustodian
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).GetCustodianByIdentity(ctx, gen.GetCustodianByIdentityParams{
@@ -187,7 +187,7 @@ func (s *Service) ListCustodians(ctx context.Context, id merchant.ID) ([]Custodi
 	if s == nil || s.pool == nil || id.IsZero() {
 		return nil, nil
 	}
-	var rows []gen.OpenrailsCustodian
+	var rows []gen.BillingCustodian
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		rows, err = gen.New(tx).ListCustodiansForMerchant(ctx, id.UUID())
@@ -236,7 +236,7 @@ func (s *Service) UpsertCustodian(ctx context.Context, id merchant.ID, entry con
 	if err := AssertCustodianUnowned(ctx, gen.New(s.pool), id.UUID(), kind, environment, entry.AccountID); err != nil {
 		return CustodianScope{}, err
 	}
-	var row gen.OpenrailsCustodian
+	var row gen.BillingCustodian
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).UpsertCustodian(ctx, gen.UpsertCustodianParams{

@@ -17,12 +17,12 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
-	Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error)
-	Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error)
-	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error)
-	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
-	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
-	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error)
+	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error)
+	Get(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, error)
+	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingRailIntent, bool, error)
+	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingRailIntent, error)
+	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingRailIntent, error)
+	ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingRailIntent, bool, error)
 	ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error)
 	RenewClaim(ctx context.Context, id uuid.UUID, status string, attempts int32, now, leaseUntil time.Time) (bool, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
@@ -180,7 +180,7 @@ func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent, stats *Stats) {
+func (r *Runner) executeOne(ctx context.Context, intent gen.BillingRailIntent, stats *Stats) {
 	logEntry := log.WithContext(ctx).WithFields(log.Fields{
 		"intent_id":   intent.ID,
 		"intent_type": intent.IntentType,
@@ -270,7 +270,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 // ledger transition — on a context detached from the caller's cancellation
 // (LedgerWriteContext): the provider call is already made, so its outcome must
 // land even when the caller has since timed out.
-func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, reason string, verifying bool) {
+func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.BillingRailIntent, outcome Outcome, reason string, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), reason, outcome.Evidence); err != nil {
@@ -293,10 +293,10 @@ func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, 
 // (succeeded, terminal, mid-lease, expired) the row is returned UNTOUCHED so
 // the caller can act on the durable prior outcome (e.g. the dunning worker's
 // repair-from-successful-rebill path).
-func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	return r.ExecuteByID(ctx, row.ID)
 }
@@ -305,22 +305,22 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Op
 // may already name another request: owns sees the canonical row the enqueue
 // returned (the existing row when the key was taken) and refuses it before
 // anything executes or is returned.
-func (r *Runner) EnqueueOwnedAndExecute(ctx context.Context, p EnqueueParams, owns func(gen.OpenrailsRailIntent) error) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) EnqueueOwnedAndExecute(ctx context.Context, p EnqueueParams, owns func(gen.BillingRailIntent) error) (gen.BillingRailIntent, error) {
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if err := owns(row); err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	return r.ExecuteByID(ctx, row.ID)
 }
 
 // ExecuteByID runs committed work without enqueuing or changing its payload.
-func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, error) {
 	row, err := r.Store.Get(ctx, id)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	switch row.Status {
 	case StatusPending, StatusFailedRetryable:
@@ -332,7 +332,7 @@ func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRa
 	now := r.now()
 	claimed, ok, err := r.Store.ClaimByID(ctx, row.ID, now, now.Add(r.lease()))
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if !ok {
 		// Raced into an unclaimable state (another executor's lease, expiry
@@ -398,7 +398,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 // refused (RequireClaim). The handler's outcome is still recorded, guarded by
 // the next executor's verify-before-write. Renewal errors (DB unreachable) are
 // logged and retried on the next beat.
-func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in gen.OpenrailsRailIntent) (context.Context, func()) {
+func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in gen.BillingRailIntent) (context.Context, func()) {
 	ctx, held := withClaim(ctx, in)
 	lease := r.lease()
 	hbCtx, cancel := context.WithCancel(ctx)
@@ -432,7 +432,7 @@ func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in ge
 	}
 }
 
-func subscriptionOf(in gen.OpenrailsRailIntent) uuid.UUID {
+func subscriptionOf(in gen.BillingRailIntent) uuid.UUID {
 	if in.SubscriptionID == nil {
 		return uuid.Nil
 	}
@@ -454,7 +454,7 @@ func (r *Runner) newTicker(d time.Duration) clockwork.Ticker {
 // opt in; the marker never bypasses durable-state readback.
 type terminalCommitter interface{ CommitsTerminalOutcome() bool }
 
-func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, verifying bool) {
+func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.BillingRailIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = r.transitionContext(ctx)
@@ -597,7 +597,7 @@ func (r *Runner) supersede(ctx context.Context, logEntry *log.Entry, stats *Stat
 	logEntry.WithField("reason", reason).Info("intent superseded (no longer applicable)")
 }
 
-func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
+func (r *Runner) logExternalMutation(ctx context.Context, intent gen.BillingRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
 	logger := r.Logger
 	if logger == nil {
 		if fallback, ok := r.Store.(MutationLogger); ok {
@@ -610,7 +610,7 @@ func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRa
 	return logger.LogExternalMutation(ctx, r.mutationLogParams(intent, phase, reason, evidence))
 }
 
-func (r *Runner) mutationLogParams(intent gen.OpenrailsRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) MutationLogParams {
+func (r *Runner) mutationLogParams(intent gen.BillingRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) MutationLogParams {
 	intentID := intent.ID
 	return MutationLogParams{
 		MerchantID:       intent.MerchantID,
@@ -640,7 +640,7 @@ func mutationLogPhase(outcome Outcome) MutationLogPhase {
 	}
 }
 
-func mutationLogEvidence(intent gen.OpenrailsRailIntent, evidence map[string]any) map[string]any {
+func mutationLogEvidence(intent gen.BillingRailIntent, evidence map[string]any) map[string]any {
 	out := map[string]any{}
 	if intent.SubscriptionID != nil {
 		out["subscription_id"] = intent.SubscriptionID.String()
@@ -671,7 +671,7 @@ type DestructiveGate interface {
 // intent row already recorded instead of re-resolving it (or#893). An intent
 // names a PSP, a custodian, or — for a custodian-proxy write — both;
 // rail_intents_addressed guarantees at least one.
-func pinIntentAddress(ctx context.Context, intent gen.OpenrailsRailIntent) context.Context {
+func pinIntentAddress(ctx context.Context, intent gen.BillingRailIntent) context.Context {
 	ctx = db.WithPSPID(ctx, derefUUID(intent.PspID))
 	return db.WithCustodianID(ctx, derefUUID(intent.CustodianID))
 }
@@ -686,11 +686,11 @@ func derefUUID(id *uuid.UUID) uuid.UUID {
 // VerifyByID reconciles one submitted operation on an explicit request replay.
 // It claims the same lease as the scheduled verifier and performs no provider
 // writes. A retryable result may subsequently enter ExecuteByID's write gates.
-func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, error) {
 	now := r.now()
 	in, ok, err := r.Store.ClaimUnknownByID(ctx, id, now, now.Add(r.lease()))
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if !ok {
 		return r.Store.Get(ctx, id)

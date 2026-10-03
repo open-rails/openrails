@@ -1,24 +1,24 @@
-package migrate
+package sqlschema
 
 import (
 	"fmt"
 	"strings"
 )
 
-type schemaToken struct{ start, end, kind int }
+type token struct{ start, end, kind int }
 
 const (
-	schemaPunctuation = iota
-	schemaIdentifier
-	schemaString
+	punctuation = iota
+	identifier
+	literal
 )
 
 // Tokenize only; do not parse or reformat SQL. Comments remain in the original
 // byte gaps, and literals remain whole even when they contain SQL-looking text.
-func schemaTokens(sql string) ([]schemaToken, error) {
-	var tokens []schemaToken
+func tokenize(sql string) ([]token, error) {
+	var toks []token
 	for i := 0; i < len(sql); {
-		start, kind := i, schemaPunctuation
+		start, kind := i, punctuation
 		switch {
 		case strings.ContainsRune(" \t\r\n\f", rune(sql[i])):
 			i++
@@ -53,9 +53,9 @@ func schemaTokens(sql string) ([]schemaToken, error) {
 				i++
 			}
 			quote := sql[i]
-			kind = schemaString
+			kind = literal
 			if quote == '"' {
-				kind = schemaIdentifier
+				kind = identifier
 			}
 			i++
 			closed := false
@@ -80,7 +80,7 @@ func schemaTokens(sql string) ([]schemaToken, error) {
 			}
 		case sql[i] == '$':
 			j := i + 1
-			for j < len(sql) && schemaWord(sql[j]) {
+			for j < len(sql) && wordByte(sql[j]) {
 				j++
 			}
 			if j < len(sql) && sql[j] == '$' && (j == i+1 || sql[i+1] < '0' || sql[i+1] > '9') {
@@ -90,14 +90,14 @@ func schemaTokens(sql string) ([]schemaToken, error) {
 					return nil, fmt.Errorf("unterminated SQL function body")
 				}
 				i = j + 1 + closing + len(delimiter)
-				kind = schemaString
+				kind = literal
 			} else {
 				i++
 			}
-		case schemaWord(sql[i]):
+		case wordByte(sql[i]):
 			i++
-			kind = schemaIdentifier
-			for i < len(sql) && (schemaWord(sql[i]) || sql[i] == '$') {
+			kind = identifier
+			for i < len(sql) && (wordByte(sql[i]) || sql[i] == '$') {
 				i++
 			}
 		case strings.HasPrefix(sql[i:], "::"):
@@ -105,11 +105,11 @@ func schemaTokens(sql string) ([]schemaToken, error) {
 		default:
 			i++
 		}
-		tokens = append(tokens, schemaToken{start, i, kind})
+		toks = append(toks, token{start, i, kind})
 	}
-	return tokens, nil
+	return toks, nil
 }
 
-func schemaWord(c byte) bool {
+func wordByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c >= 128
 }

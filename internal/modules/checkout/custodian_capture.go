@@ -85,7 +85,7 @@ func captureSessionID(owner merchant.ID, customer uuid.UUID, key string) uuid.UU
 func captureCustomerReference(owner merchant.ID, customer uuid.UUID) string {
 	return captureScopedID("openrails/custody-customer/v1", owner, customer, "").String()
 }
-func (s *CheckoutSessionService) captureBinding(owner merchant.ID, psp gen.OpenrailsPsp, custodian gen.OpenrailsCustodian) (models.CheckoutCapture, error) {
+func (s *CheckoutSessionService) captureBinding(owner merchant.ID, psp gen.BillingPsp, custodian gen.BillingCustodian) (models.CheckoutCapture, error) {
 	var empty models.CheckoutCapture
 	if s.config == nil || s.config.HyperSwitch == nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(s.config.IsTestMode()) {
 		return empty, ErrCheckoutCaptureUnavailable
@@ -425,7 +425,7 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 			}
 			return err
 		}
-		current, err := s.captureBinding(owner, accounts.OpenrailsPsp, accounts.OpenrailsCustodian)
+		current, err := s.captureBinding(owner, accounts.BillingPsp, accounts.BillingCustodian)
 		if err != nil || !sameCaptureAccount(canonical, current) {
 			return ErrCheckoutSessionConflict
 		}

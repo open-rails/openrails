@@ -41,7 +41,7 @@ import (
 // (nothing to charge with — the charge fails closed, there is no fallback
 // plane); err = declared but not armable (fail closed).
 type CollectionAdapterResolver interface {
-	ResolveCollectionAdapter(ctx context.Context, method gen.OpenrailsPaymentMethod) (CollectionAdapter, bool, error)
+	ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod) (CollectionAdapter, bool, error)
 }
 
 // CollectionEndpoints overrides provider base URLs on store-armed collection
@@ -70,8 +70,8 @@ type CollectionPlane interface {
 // Nonexecution after possible submission requires provider-supported proof;
 // absence from a search alone never releases a potentially charged operation.
 type CollectionVerifier interface {
-	ReadCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.CollectedReceipt, bool, error)
-	ConfirmCollectionNotExecuted(ctx context.Context, in gen.OpenrailsRailIntent) error
+	ReadCollectionReceipt(ctx context.Context, in gen.BillingRailIntent, reference string) (intents.CollectedReceipt, bool, error)
+	ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingRailIntent) error
 }
 
 // NMIClientResolver is the raw-client NMI leg of the #725 store resolver.
@@ -137,7 +137,7 @@ func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, 
 	return b.nmiFactory().ProxyPosture(mid, scope, settings)
 }
 
-func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.OpenrailsPaymentMethod) (CollectionAdapter, bool, error) {
+func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.BillingPaymentMethod) (CollectionAdapter, bool, error) {
 	svc := b.merchants()
 	if svc == nil || b.DB == nil {
 		return nil, false, nil
@@ -198,7 +198,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 // ConfirmCollectionNotExecuted closes only a provider-provable nonexecution.
 // NMI search absence is not authoritative. Stripe objects can be cleaned up
 // under the same operation key, then read back in an unchargeable state.
-func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, in gen.OpenrailsRailIntent) error {
+func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingRailIntent) error {
 	p, err := intents.DecodeInvoiceCollectionPayload(in)
 	if err != nil {
 		return err
@@ -223,7 +223,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 	return errors.New("NMI search absence cannot prove nonexecution after possible submission")
 }
 
-func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context, in gen.OpenrailsRailIntent) (*subscriptions.StripeService, error) {
+func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context, in gen.BillingRailIntent) (*subscriptions.StripeService, error) {
 	if _, err := intents.DecodeInvoiceCollectionPayload(in); err != nil {
 		return nil, err
 	}
@@ -343,7 +343,7 @@ func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Co
 
 // ReadCollectionReceipt resolves the immutable accepted account before reading
 // provider facts. A boolean reconciliation result cannot settle a collection.
-func (b *MerchantCollectionAdapterBuilder) ReadCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.CollectedReceipt, bool, error) {
+func (b *MerchantCollectionAdapterBuilder) ReadCollectionReceipt(ctx context.Context, in gen.BillingRailIntent, reference string) (intents.CollectedReceipt, bool, error) {
 	p, err := intents.DecodeInvoiceCollectionPayload(in)
 	if err != nil {
 		return intents.CollectedReceipt{}, false, err

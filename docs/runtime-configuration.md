@@ -73,3 +73,15 @@ retire provider schedules. Accepted sessions replay their persisted terms.
 Stripe one-off checkout uses accepted inline product and price data. Native
 catalog requirements follow the operation and rail, independently of stored
 subscription ownership. Explicit historical provider catalog links remain usable.
+
+## Database schema
+
+`db.schema` / `DB_SCHEMA` (default `billing`) names the Postgres schema that
+holds every OpenRails table, function and type. It must be a plain identifier
+(letters, digits, underscore). All OpenRails SQL is authored in `billing` and
+runs there verbatim. Any other schema is reached by one token-aware rewrite,
+applied to migrations and to every statement at runtime: it moves schema
+qualifiers, the name after `SCHEMA`, `SET search_path` values and
+`'billing.x'::regclass` / `to_regclass('billing.x')` literals. Every other string
+literal and comment is data and is never rewritten. River and AuthKit keep their
+own schemas.

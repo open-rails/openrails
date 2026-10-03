@@ -10,8 +10,8 @@
 -- (revoked/expired history rows): referential hygiene, no access at stake.
 -- name: ConOrphanEntitlementSubscriptionSource :many
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM openrails.entitlements ent
-LEFT JOIN openrails.subscriptions sub ON sub.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = sub.id AND sub.deleted_at IS NULL
+FROM billing.entitlements ent
+LEFT JOIN billing.subscriptions sub ON sub.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = sub.id AND sub.deleted_at IS NULL
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
@@ -23,8 +23,8 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
 
 -- name: ConOrphanEntitlementPaymentSource :many
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM openrails.entitlements ent
-LEFT JOIN openrails.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
+FROM billing.entitlements ent
+LEFT JOIN billing.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
@@ -54,8 +54,8 @@ WITH live_ownership AS (
            g.payment_id, g.starts_at, g.created_at,
            pay.amount AS payment_amount, pay.currency AS payment_currency,
            pay.purchased_at
-    FROM openrails.grants g
-    LEFT JOIN openrails.payments pay ON pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pay.id = g.payment_id AND pay.deleted_at IS NULL
+    FROM billing.grants g
+    LEFT JOIN billing.payments pay ON pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pay.id = g.payment_id AND pay.deleted_at IS NULL
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.event = 'grant' AND g.kind = 'ownership'
       AND g.product_id IS NOT NULL
       AND g.source_type IN ('purchase', 'subscription')
@@ -64,11 +64,11 @@ WITH live_ownership AS (
       AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)
       AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
       AND NOT EXISTS (
-          SELECT 1 FROM openrails.grants t
+          SELECT 1 FROM billing.grants t
           WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
       )
       AND (pay.id IS NULL OR (pay.status <> 'refunded' AND NOT EXISTS (
-          SELECT 1 FROM openrails.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = pay.id AND r.deleted_at IS NULL
+          SELECT 1 FROM billing.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = pay.id AND r.deleted_at IS NULL
       )))
 )
 SELECT lo.customer_id, lo.product_id, prod.key AS product_key,
@@ -83,7 +83,7 @@ SELECT lo.customer_id, lo.product_id, prod.key AS product_key,
            'purchased_at', COALESCE(lo.purchased_at, lo.starts_at)
        ) ORDER BY COALESCE(lo.purchased_at, lo.starts_at), lo.created_at) AS purchases
 FROM live_ownership lo
-JOIN openrails.products prod ON prod.id = lo.product_id
+JOIN billing.products prod ON prod.id = lo.product_id
 
 WHERE prod.merchant_id = sqlc.arg(merchant_id)::uuid
 GROUP BY lo.customer_id, lo.product_id, prod.key
@@ -102,9 +102,9 @@ WITH charges AS (
            price.product_id, prod.key AS product_key,
            purch.metadata->>'period_start' AS period_start,
            LEAST(price.access_duration_hours, COALESCE(price.trial_duration_hours, price.access_duration_hours)) AS cycle_hours
-    FROM openrails.payments purch
-    JOIN openrails.prices price ON purch.price_id = price.id
-    JOIN openrails.products prod ON price.product_id = prod.id
+    FROM billing.payments purch
+    JOIN billing.prices price ON purch.price_id = price.id
+    JOIN billing.products prod ON price.product_id = prod.id
     WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.deleted_at IS NULL
       AND purch.subscription_id IS NOT NULL
       AND purch.status = 'completed'
@@ -112,7 +112,7 @@ WITH charges AS (
       AND purch.amount > 0
       AND purch.refunded_payment_id IS NULL
       AND NOT EXISTS (
-          SELECT 1 FROM openrails.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
+          SELECT 1 FROM billing.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
       )
       AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
 ),
@@ -154,7 +154,7 @@ GROUP BY subscription_id, period_key;
 -- name: ResolveVanishedFindings :execrows
 -- Open findings of one type under a subject prefix that the latest full scan
 -- no longer reports close themselves.
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
  WHERE merchant_id = sqlc.arg(merchant_id)::uuid
    AND finding_type = sqlc.arg(finding_type)::text

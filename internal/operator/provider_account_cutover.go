@@ -159,16 +159,16 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	return report, err
 }
 
-func pspRow(ctx context.Context, q *gen.Queries, merchantID merchant.ID, id uuid.UUID) (gen.OpenrailsPsp, error) {
+func pspRow(ctx context.Context, q *gen.Queries, merchantID merchant.ID, id uuid.UUID) (gen.BillingPsp, error) {
 	psp, err := q.GetPSP(ctx, gen.GetPSPParams{ID: id, MerchantID: merchantID.UUID()})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, billing.ErrNotFound)
+			return gen.BillingPsp{}, fmt.Errorf("psp %s: %w", id, billing.ErrNotFound)
 		}
-		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, err)
+		return gen.BillingPsp{}, fmt.Errorf("psp %s: %w", id, err)
 	}
 	if psp.MerchantID != merchantID.UUID() {
-		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, billing.ErrNotFound)
+		return gen.BillingPsp{}, fmt.Errorf("psp %s: %w", id, billing.ErrNotFound)
 	}
 	return psp, nil
 }

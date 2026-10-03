@@ -26,7 +26,7 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
-func notificationsFromGen(rows []gen.OpenrailsNotification) ([]*models.NotificationQueue, error) {
+func notificationsFromGen(rows []gen.BillingNotification) ([]*models.NotificationQueue, error) {
 	out := make([]*models.NotificationQueue, 0, len(rows))
 	for _, r := range rows {
 		m, err := models.NotificationFromGen(r)

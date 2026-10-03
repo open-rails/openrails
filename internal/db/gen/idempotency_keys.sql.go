@@ -14,7 +14,7 @@ import (
 
 const claimIdempotencyKey = `-- name: ClaimIdempotencyKey :one
 
-INSERT INTO openrails.idempotency_keys (merchant_id, operation, idempotency_key, status, token, lease_expires_at, expires_at)
+INSERT INTO billing.idempotency_keys (merchant_id, operation, idempotency_key, status, token, lease_expires_at, expires_at)
 VALUES ($1::uuid, $2::text, $3::text, 'processing', $4::uuid,
         now() + make_interval(secs => $5::float8),
         now() + make_interval(secs => $6::float8))
@@ -34,7 +34,7 @@ type ClaimIdempotencyKeyParams struct {
 // Durable request and webhook-delivery claims (#1099). Every statement names
 // the merchant, and every time is the database's now(): replicas' clocks
 // never decide who owns a key.
-func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (OpenrailsIdempotencyKey, error) {
+func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (BillingIdempotencyKey, error) {
 	row := q.db.QueryRow(ctx, claimIdempotencyKey,
 		arg.MerchantID,
 		arg.Operation,
@@ -43,7 +43,7 @@ func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyK
 		arg.LeaseSeconds,
 		arg.TtlSeconds,
 	)
-	var i OpenrailsIdempotencyKey
+	var i BillingIdempotencyKey
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Operation,
@@ -62,7 +62,7 @@ func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyK
 }
 
 const completeIdempotencyKey = `-- name: CompleteIdempotencyKey :execrows
-UPDATE openrails.idempotency_keys
+UPDATE billing.idempotency_keys
 SET status = 'succeeded', result = $1::jsonb,
     lease_expires_at = now(),
     expires_at = now() + make_interval(secs => $2::float8),
@@ -98,9 +98,9 @@ func (q *Queries) CompleteIdempotencyKey(ctx context.Context, arg CompleteIdempo
 }
 
 const deleteExpiredIdempotencyKeys = `-- name: DeleteExpiredIdempotencyKeys :execrows
-DELETE FROM openrails.idempotency_keys ik
+DELETE FROM billing.idempotency_keys ik
 USING (
-    SELECT merchant_id, operation, idempotency_key FROM openrails.idempotency_keys
+    SELECT merchant_id, operation, idempotency_key FROM billing.idempotency_keys
     WHERE expires_at <= now()
     ORDER BY expires_at
     LIMIT $1::int
@@ -124,7 +124,7 @@ func (q *Queries) DeleteExpiredIdempotencyKeys(ctx context.Context, rowLimit int
 }
 
 const failIdempotencyKey = `-- name: FailIdempotencyKey :execrows
-UPDATE openrails.idempotency_keys
+UPDATE billing.idempotency_keys
 SET status = 'failed', error = $1::text,
     lease_expires_at = now(),
     expires_at = now() + make_interval(secs => $2::float8),
@@ -161,7 +161,7 @@ func (q *Queries) FailIdempotencyKey(ctx context.Context, arg FailIdempotencyKey
 
 const getIdempotencyKey = `-- name: GetIdempotencyKey :one
 SELECT merchant_id, operation, idempotency_key, status, token, claims, result, error, lease_expires_at, expires_at, created_at, updated_at, (status = 'processing' AND lease_expires_at > now())::boolean AS leased
-FROM openrails.idempotency_keys
+FROM billing.idempotency_keys
 WHERE merchant_id = $1::uuid
   AND operation = $2::text
   AND idempotency_key = $3::text
@@ -211,7 +211,7 @@ func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyPa
 }
 
 const holdIdempotencyKeyInTx = `-- name: HoldIdempotencyKeyInTx :one
-SELECT true::boolean AS held FROM openrails.idempotency_keys
+SELECT true::boolean AS held FROM billing.idempotency_keys
 WHERE merchant_id = $1::uuid
   AND operation = $2::text
   AND idempotency_key = $3::text
@@ -242,7 +242,7 @@ func (q *Queries) HoldIdempotencyKeyInTx(ctx context.Context, arg HoldIdempotenc
 }
 
 const reclaimIdempotencyKey = `-- name: ReclaimIdempotencyKey :one
-UPDATE openrails.idempotency_keys
+UPDATE billing.idempotency_keys
 SET status = 'processing', token = $1::uuid, claims = claims + 1, result = NULL, error = NULL,
     lease_expires_at = now() + make_interval(secs => $2::float8),
     expires_at = now() + make_interval(secs => $3::float8),
@@ -268,7 +268,7 @@ type ReclaimIdempotencyKeyParams struct {
 // A failed, expired or lapsed-lease claim passes to exactly one caller: the
 // row lock serializes contenders and the loser re-evaluates the predicate
 // against the winner's row.
-func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempotencyKeyParams) (OpenrailsIdempotencyKey, error) {
+func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempotencyKeyParams) (BillingIdempotencyKey, error) {
 	row := q.db.QueryRow(ctx, reclaimIdempotencyKey,
 		arg.Token,
 		arg.LeaseSeconds,
@@ -277,7 +277,7 @@ func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempote
 		arg.Operation,
 		arg.IdempotencyKey,
 	)
-	var i OpenrailsIdempotencyKey
+	var i BillingIdempotencyKey
 	err := row.Scan(
 		&i.MerchantID,
 		&i.Operation,
@@ -296,7 +296,7 @@ func (q *Queries) ReclaimIdempotencyKey(ctx context.Context, arg ReclaimIdempote
 }
 
 const renewIdempotencyKey = `-- name: RenewIdempotencyKey :execrows
-UPDATE openrails.idempotency_keys
+UPDATE billing.idempotency_keys
 SET lease_expires_at = now() + make_interval(secs => $1::float8),
     expires_at = GREATEST(expires_at, now() + make_interval(secs => $1::float8)),
     updated_at = now()

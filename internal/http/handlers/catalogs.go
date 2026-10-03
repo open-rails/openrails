@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
-func catalogView(row gen.OpenrailsCatalog) billing.Catalog {
+func catalogView(row gen.BillingCatalog) billing.Catalog {
 	return billing.Catalog{ID: billing.CatalogID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), OwnerSubject: row.OwnerSubject, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 const createPlanMigrationBatch = `-- name: CreatePlanMigrationBatch :one
-INSERT INTO openrails.reprice_batches (
+INSERT INTO billing.reprice_batches (
     merchant_id, to_price_id, effective_at, kind, source_price_id, fallback_policy,
     subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, subscriptions_blocked
 ) VALUES (
@@ -38,7 +38,7 @@ type CreatePlanMigrationBatchParams struct {
 }
 
 // #813: header row for one plan-migration operation (kind=plan_change).
-func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMigrationBatchParams) (OpenrailsRepriceBatch, error) {
+func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMigrationBatchParams) (BillingRepriceBatch, error) {
 	row := q.db.QueryRow(ctx, createPlanMigrationBatch,
 		arg.MerchantID,
 		arg.ToPriceID,
@@ -50,7 +50,7 @@ func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMi
 		arg.SubscriptionsSkipped,
 		arg.SubscriptionsBlocked,
 	)
-	var i OpenrailsRepriceBatch
+	var i BillingRepriceBatch
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -71,7 +71,7 @@ func (q *Queries) CreatePlanMigrationBatch(ctx context.Context, arg CreatePlanMi
 
 const createRepriceBatch = `-- name: CreateRepriceBatch :one
 
-INSERT INTO openrails.reprice_batches (
+INSERT INTO billing.reprice_batches (
     merchant_id, price_key, to_price_id, effective_at,
     subscriptions_matched, subscriptions_scheduled, subscriptions_skipped
 ) VALUES (
@@ -91,8 +91,8 @@ type CreateRepriceBatchParams struct {
 	SubscriptionsSkipped   int32
 }
 
-// openrails.reprice_batches (#773): header row for one bulk reprice operation.
-func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatchParams) (OpenrailsRepriceBatch, error) {
+// billing.reprice_batches (#773): header row for one bulk reprice operation.
+func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatchParams) (BillingRepriceBatch, error) {
 	row := q.db.QueryRow(ctx, createRepriceBatch,
 		arg.MerchantID,
 		arg.PriceKey,
@@ -102,7 +102,7 @@ func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatch
 		arg.SubscriptionsScheduled,
 		arg.SubscriptionsSkipped,
 	)
-	var i OpenrailsRepriceBatch
+	var i BillingRepriceBatch
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -122,7 +122,7 @@ func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatch
 }
 
 const getRepriceBatchByID = `-- name: GetRepriceBatchByID :one
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches WHERE merchant_id = $1::uuid AND id = $2::uuid
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM billing.reprice_batches WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
 type GetRepriceBatchByIDParams struct {
@@ -130,9 +130,9 @@ type GetRepriceBatchByIDParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetRepriceBatchByID(ctx context.Context, arg GetRepriceBatchByIDParams) (OpenrailsRepriceBatch, error) {
+func (q *Queries) GetRepriceBatchByID(ctx context.Context, arg GetRepriceBatchByIDParams) (BillingRepriceBatch, error) {
 	row := q.db.QueryRow(ctx, getRepriceBatchByID, arg.MerchantID, arg.ID)
-	var i OpenrailsRepriceBatch
+	var i BillingRepriceBatch
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -152,7 +152,7 @@ func (q *Queries) GetRepriceBatchByID(ctx context.Context, arg GetRepriceBatchBy
 }
 
 const listRepriceBatchesByPriceKey = `-- name: ListRepriceBatchesByPriceKey :many
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM billing.reprice_batches
 WHERE merchant_id = $1::uuid
   AND price_key = $2::text
 ORDER BY created_at DESC
@@ -166,7 +166,7 @@ type ListRepriceBatchesByPriceKeyParams struct {
 	PageLimit  int32
 }
 
-func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepriceBatchesByPriceKeyParams) ([]OpenrailsRepriceBatch, error) {
+func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepriceBatchesByPriceKeyParams) ([]BillingRepriceBatch, error) {
 	rows, err := q.db.Query(ctx, listRepriceBatchesByPriceKey,
 		arg.MerchantID,
 		arg.PriceKey,
@@ -177,9 +177,9 @@ func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepr
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsRepriceBatch
+	var items []BillingRepriceBatch
 	for rows.Next() {
-		var i OpenrailsRepriceBatch
+		var i BillingRepriceBatch
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -206,7 +206,7 @@ func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepr
 }
 
 const updatePlanMigrationBatchCounts = `-- name: UpdatePlanMigrationBatchCounts :execrows
-UPDATE openrails.reprice_batches SET
+UPDATE billing.reprice_batches SET
     subscriptions_scheduled = $1::int,
     subscriptions_blocked = $2::int
 WHERE reprice_batches.merchant_id = $3::uuid AND id = $4

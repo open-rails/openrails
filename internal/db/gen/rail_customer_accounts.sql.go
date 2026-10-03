@@ -13,7 +13,7 @@ import (
 )
 
 const getRailCustomerAccountIDForMerchant = `-- name: GetRailCustomerAccountIDForMerchant :one
-SELECT account_id FROM openrails.rail_customer_accounts
+SELECT account_id FROM billing.rail_customer_accounts
 WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3
 ORDER BY updated_at DESC, id DESC
 LIMIT 1
@@ -36,7 +36,7 @@ func (q *Queries) GetRailCustomerAccountIDForMerchant(ctx context.Context, arg G
 }
 
 const getRailCustomerAccountIDForPSP = `-- name: GetRailCustomerAccountIDForPSP :one
-SELECT account_id FROM openrails.rail_customer_accounts
+SELECT account_id FROM billing.rail_customer_accounts
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND rail = $3::text
@@ -63,7 +63,7 @@ func (q *Queries) GetRailCustomerAccountIDForPSP(ctx context.Context, arg GetRai
 }
 
 const getRailCustomerAccountSubjectForPSP = `-- name: GetRailCustomerAccountSubjectForPSP :one
-SELECT customer_id::text FROM openrails.rail_customer_accounts
+SELECT customer_id::text FROM billing.rail_customer_accounts
 WHERE merchant_id = $1::uuid
   AND psp_id = $2::uuid
   AND account_id = $3::text
@@ -91,7 +91,7 @@ func (q *Queries) GetRailCustomerAccountSubjectForPSP(ctx context.Context, arg G
 
 const upsertRailCustomerAccount = `-- name: UpsertRailCustomerAccount :exec
 
-INSERT INTO openrails.rail_customer_accounts (
+INSERT INTO billing.rail_customer_accounts (
     id, merchant_id, customer_id, rail, psp_id, account_id, created_at, updated_at
 ) VALUES ($1, $7::uuid, $2, $3, $8::uuid, $4, $5, $6)
 ON CONFLICT (merchant_id, customer_id, rail, psp_id) DO UPDATE SET
@@ -110,7 +110,7 @@ type UpsertRailCustomerAccountParams struct {
 	PspID      uuid.UUID
 }
 
-// openrails.rail_customer_accounts: customer <-> rail customer mapping.
+// billing.rail_customer_accounts: customer <-> rail customer mapping.
 // or#893: the mapping is PER-PSP. Two Stripe accounts on one merchant hold two
 // independent rows for the same person; before this, whichever account's
 // webhook landed last overwrote the other.

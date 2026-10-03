@@ -14,8 +14,8 @@ import (
 const countConvergeRestorableForRun = `-- name: CountConvergeRestorableForRun :one
 SELECT
     (SELECT count(*)
-       FROM openrails.destructive_run_before_images b
-       JOIN openrails.subscriptions s
+       FROM billing.destructive_run_before_images b
+       JOIN billing.subscriptions s
          ON s.merchant_id = b.merchant_id AND s.id = b.row_id
       WHERE b.merchant_id = $1::uuid
         AND b.destructive_run_id = $2::uuid
@@ -23,16 +23,16 @@ SELECT
         AND b.restored_at IS NULL
         AND s.deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*)
-       FROM openrails.destructive_run_before_images b
-       JOIN openrails.entitlements e
+       FROM billing.destructive_run_before_images b
+       JOIN billing.entitlements e
          ON e.merchant_id = b.merchant_id AND e.id = b.row_id
       WHERE b.merchant_id = $1::uuid
         AND b.destructive_run_id = $2::uuid
         AND b.table_name = 'entitlements'
         AND e.deleted_at IS NULL)::bigint AS entitlements_to_invalidate,
     (SELECT count(*)
-       FROM openrails.destructive_run_before_images b
-       JOIN openrails.subscriptions s
+       FROM billing.destructive_run_before_images b
+       JOIN billing.subscriptions s
          ON s.merchant_id = b.merchant_id AND s.id = b.row_id
       WHERE b.merchant_id = $1::uuid
         AND b.destructive_run_id = $2::uuid
@@ -66,19 +66,19 @@ func (q *Queries) CountConvergeRestorableForRun(ctx context.Context, arg CountCo
 const countPruneRestorableForRun = `-- name: CountPruneRestorableForRun :one
 
 SELECT
-    (SELECT count(*) FROM openrails.subscriptions
+    (SELECT count(*) FROM billing.subscriptions
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
         AND deleted_at IS NOT NULL)::bigint AS subscriptions,
-    (SELECT count(*) FROM openrails.payments
+    (SELECT count(*) FROM billing.payments
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
         AND deleted_at IS NOT NULL)::bigint AS payments,
-    (SELECT count(*) FROM openrails.checkout_sessions
+    (SELECT count(*) FROM billing.checkout_sessions
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
         AND deleted_at IS NOT NULL)::bigint AS checkout_sessions,
-    (SELECT count(*) FROM openrails.entitlements
+    (SELECT count(*) FROM billing.entitlements
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
         AND deleted_at IS NOT NULL)::bigint AS entitlements
@@ -118,15 +118,15 @@ func (q *Queries) CountPruneRestorableForRun(ctx context.Context, arg CountPrune
 
 const countUnattributedProviderRows = `-- name: CountUnattributedProviderRows :one
 SELECT
-    (SELECT count(*) FROM openrails.subscriptions
+    (SELECT count(*) FROM billing.subscriptions
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS subscriptions,
-    (SELECT count(*) FROM openrails.payments
+    (SELECT count(*) FROM billing.payments
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL
         AND rail NOT IN ('manual', 'admin'))::bigint AS payments,
-    (SELECT count(*) FROM openrails.checkout_sessions
+    (SELECT count(*) FROM billing.checkout_sessions
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND deleted_at IS NULL)::bigint AS checkout_sessions,
     -- payment_methods carries no soft-delete column; every row is live.
-    (SELECT count(*) FROM openrails.payment_methods
+    (SELECT count(*) FROM billing.payment_methods
       WHERE merchant_id = $1::uuid AND psp_id IS NULL)::bigint AS payment_methods,
     -- rail_intents excludes the CUSTODIAN-addressed lane (or#795's batch
     -- account updater): those rows carry no psp_id because the write goes to a
@@ -134,7 +134,7 @@ SELECT
     -- supposed to reach them. rail_intents_addressed guarantees they name a
     -- custodian instead, which is what makes the exclusion safe rather than a
     -- second blind spot.
-    (SELECT count(*) FROM openrails.rail_intents
+    (SELECT count(*) FROM billing.rail_intents
       WHERE merchant_id = $1::uuid AND psp_id IS NULL
         AND custodian_id IS NULL
         AND status IN ('pending', 'failed_retryable'))::bigint AS unfired_intents

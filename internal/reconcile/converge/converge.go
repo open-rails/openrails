@@ -393,7 +393,7 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeF
 // persist upserts a finding into the shared ledger, returning the upserted row
 // so the caller can feed it to a FindingNotifier (#787). finding_type is the
 // self-describing qualified slug; shape/class + finding details ride in evidence.
-func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) (gen.OpenrailsReconciliationFinding, error) {
+func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) (gen.BillingReconciliationFinding, error) {
 	meta := map[string]any{
 		"shape": string(f.Shape), "class": string(f.Class),
 	}
@@ -409,7 +409,7 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 	}
 	evidence, err := json.Marshal(payload)
 	if err != nil {
-		return gen.OpenrailsReconciliationFinding{}, fmt.Errorf("converge: marshal evidence %s: %w", f.Type, err)
+		return gen.BillingReconciliationFinding{}, fmt.Errorf("converge: marshal evidence %s: %w", f.Type, err)
 	}
 	var recommended *string
 	if f.RecommendedAction != "" {
@@ -426,7 +426,7 @@ func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scop
 		RunID:             &runID,
 	})
 	if err != nil {
-		return gen.OpenrailsReconciliationFinding{}, fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)
+		return gen.BillingReconciliationFinding{}, fmt.Errorf("converge: upsert finding %s (%s): %w", f.Type, f.SubjectKey, err)
 	}
 	return row, nil
 }

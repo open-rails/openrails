@@ -111,7 +111,7 @@ func UnscheduledMIT(priorRef string) Context {
 }
 
 // Instrument identifies the stored payment credential to charge, by its
-// rail-scoped handles (mirrors openrails.payment_methods).
+// rail-scoped handles (mirrors billing.payment_methods).
 type Instrument struct {
 	// PaymentMethodID is the local payment_methods row id (uuid.Nil when the
 	// caller only holds rail handles).

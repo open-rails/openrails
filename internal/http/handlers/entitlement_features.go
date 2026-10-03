@@ -16,7 +16,7 @@ import (
 // Active-entitlements SELF read (issue #245). #528 retired the admin
 // feature/product-feature CRUD surface; #702 dropped the feature-definition
 // tables entirely — entitlements are plain strings (product.EntitlementsSpec
-// keys). The openrails.entitlements window ledger is the source of truth.
+// keys). The billing.entitlements window ledger is the source of truth.
 
 // activeEntitlement is one active entitlement window: the entitlement string
 // (lookup_key) plus its window/source fields. source_id is the source's own

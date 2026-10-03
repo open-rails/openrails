@@ -14,10 +14,10 @@ import (
 
 const upsertAdmissionDenials = `-- name: UpsertAdmissionDenials :exec
 
-INSERT INTO openrails.admission_denials_hourly (merchant_id, customer_id, denial_reason, hour_at, denials, updated_at)
+INSERT INTO billing.admission_denials_hourly (merchant_id, customer_id, denial_reason, hour_at, denials, updated_at)
 VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (merchant_id, customer_id, denial_reason, hour_at)
-DO UPDATE SET denials = openrails.admission_denials_hourly.denials + EXCLUDED.denials, updated_at = now()
+DO UPDATE SET denials = billing.admission_denials_hourly.denials + EXCLUDED.denials, updated_at = now()
 `
 
 type UpsertAdmissionDenialsParams struct {
@@ -28,7 +28,7 @@ type UpsertAdmissionDenialsParams struct {
 	Denials      int64
 }
 
-// openrails.admission_denials_hourly — #733 aggregated admission-denial
+// billing.admission_denials_hourly — #733 aggregated admission-denial
 // counters, flushed periodically from Redis (never per-request).
 func (q *Queries) UpsertAdmissionDenials(ctx context.Context, arg UpsertAdmissionDenialsParams) error {
 	_, err := q.db.Exec(ctx, upsertAdmissionDenials,

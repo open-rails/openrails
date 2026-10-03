@@ -34,7 +34,7 @@ func TestQualificationBindsOnlyServerCredentialAndItsVersion(t *testing.T) {
 	id := uuid.New()
 	record := Record{PSPID: id, Environment: "test", Contract: NMIContract, EvidenceRef: "operator-proof"}
 	input := manifest(t, record)
-	row := gen.OpenrailsPsp{ID: id, Rail: "nmi", Environment: "test", Evidence: []byte(`{"credential_versions":{"security_key":7,"webhook_signing_secret":2}}`)}
+	row := gen.BillingPsp{ID: id, Rail: "nmi", Environment: "test", Evidence: []byte(`{"credential_versions":{"security_key":7,"webhook_signing_secret":2}}`)}
 	bound, err := BindManifest(row, input, func(version int) (string, error) {
 		require.Equal(t, 7, version)
 		return " current credential ", nil
@@ -74,7 +74,7 @@ func TestQualificationBindsOnlyServerCredentialAndItsVersion(t *testing.T) {
 
 func TestQualificationRecordValidation(t *testing.T) {
 	id := uuid.New()
-	row := gen.OpenrailsPsp{ID: id, Rail: "nmi", Environment: "live"}
+	row := gen.BillingPsp{ID: id, Rail: "nmi", Environment: "live"}
 	good := Record{PSPID: id, Environment: "live", Contract: NMIContract, EvidenceRef: "ticket:OPS-1/run_2"}
 	for name, mut := range map[string]func(*Record){
 		"other psp":           func(r *Record) { r.PSPID = uuid.New() },
@@ -91,11 +91,11 @@ func TestQualificationRecordValidation(t *testing.T) {
 		_, err := BindManifest(row, manifest(t, rec), func(int) (string, error) { return "k", nil })
 		require.ErrorIs(t, err, ErrInvalid, name)
 	}
-	_, err := BindManifest(gen.OpenrailsPsp{ID: id, Rail: "stripe", Environment: "live"}, manifest(t, good), func(int) (string, error) { return "k", nil })
+	_, err := BindManifest(gen.BillingPsp{ID: id, Rail: "stripe", Environment: "live"}, manifest(t, good), func(int) (string, error) { return "k", nil })
 	require.ErrorIs(t, err, ErrInvalid, "only NMI accounts qualify")
 	_, err = BindManifest(row, manifest(t, map[string]any{"psp_id": id, "environment": "live", "contract": NMIContract, "evidence_ref": "x", "extra": 1}), nil)
 	require.ErrorIs(t, err, ErrInvalid, "unknown fields are refused")
-	_, err = BindManifest(gen.OpenrailsPsp{ID: id, Rail: "nmi", Environment: "live", Evidence: []byte(`{"credential_versions":{"security_key":-1}}`)}, manifest(t, good), nil)
+	_, err = BindManifest(gen.BillingPsp{ID: id, Rail: "nmi", Environment: "live", Evidence: []byte(`{"credential_versions":{"security_key":-1}}`)}, manifest(t, good), nil)
 	require.ErrorIs(t, err, ErrInvalid)
 
 	// Absence is "unqualified", passed through untouched; it is never an error.

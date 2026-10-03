@@ -47,7 +47,7 @@ func validateSubscriptionCollectionReferences(ctx context.Context, tx pgx.Tx, mi
 	return nil
 }
 
-func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries, op gen.OpenrailsRailIntent) error {
+func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries, op gen.BillingRailIntent) error {
 	if err := intents.ValidateSubscriptionCollectionTerminal(op); err != nil {
 		return err
 	}

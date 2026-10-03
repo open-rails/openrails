@@ -14,7 +14,7 @@ import (
 
 const countUsageMeterOverrides = `-- name: CountUsageMeterOverrides :one
 SELECT count(*)
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
   AND customer_id IS NOT NULL
@@ -34,7 +34,7 @@ func (q *Queries) CountUsageMeterOverrides(ctx context.Context, arg CountUsageMe
 
 const countUsageMeters = `-- name: CountUsageMeters :one
 SELECT count(*)
-FROM openrails.catalog_meters
+FROM billing.catalog_meters
 WHERE merchant_id = $1
 `
 
@@ -46,7 +46,7 @@ func (q *Queries) CountUsageMeters(ctx context.Context, merchantID uuid.UUID) (i
 }
 
 const deleteDefaultUsageRateCard = `-- name: DeleteDefaultUsageRateCard :exec
-DELETE FROM openrails.catalog_rate_cards
+DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
   AND customer_id IS NULL
@@ -64,7 +64,7 @@ func (q *Queries) DeleteDefaultUsageRateCard(ctx context.Context, arg DeleteDefa
 
 const getActiveMeteringProductForShare = `-- name: GetActiveMeteringProductForShare :one
 SELECT id
-FROM openrails.products
+FROM billing.products
 WHERE merchant_id = $1
   AND id = $2
   AND NOT archived
@@ -86,7 +86,7 @@ func (q *Queries) GetActiveMeteringProductForShare(ctx context.Context, arg GetA
 const getDefaultUsageRateCardDeleteState = `-- name: GetDefaultUsageRateCardDeleteState :one
 SELECT count(*) FILTER (WHERE customer_id IS NULL) > 0 AS default_exists,
        count(*) FILTER (WHERE customer_id IS NOT NULL) AS override_count
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
 `
@@ -112,7 +112,7 @@ func (q *Queries) GetDefaultUsageRateCardDeleteState(ctx context.Context, arg Ge
 
 const getDefaultUsageRateCardPriceForUpdate = `-- name: GetDefaultUsageRateCardPriceForUpdate :one
 SELECT price
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
   AND customer_id IS NULL
@@ -133,7 +133,7 @@ func (q *Queries) GetDefaultUsageRateCardPriceForUpdate(ctx context.Context, arg
 
 const getDefaultUsageRateCardStateForUpdate = `-- name: GetDefaultUsageRateCardStateForUpdate :one
 SELECT filter, allowance, price
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
   AND customer_id IS NULL
@@ -165,7 +165,7 @@ SELECT key,
        COALESCE(aggregation, '') AS aggregation,
        COALESCE(unit, '') AS unit,
        group_by
-FROM openrails.catalog_meters
+FROM billing.catalog_meters
 WHERE merchant_id = $1
   AND key = $2
 FOR UPDATE
@@ -202,12 +202,12 @@ func (q *Queries) GetUsageMeterForUpdate(ctx context.Context, arg GetUsageMeterF
 const getUsageMeterWithCatalog = `-- name: GetUsageMeterWithCatalog :one
 WITH activity AS (
     SELECT event_type, count(*) AS event_count, max(occurred_at) AS last_event_at
-    FROM openrails.usage_events
+    FROM billing.usage_events
     WHERE merchant_id = $1
     GROUP BY event_type
 ), override_counts AS (
     SELECT meter_key, count(*) AS override_count
-    FROM openrails.catalog_rate_cards
+    FROM billing.catalog_rate_cards
     WHERE merchant_id = $1 AND customer_id IS NOT NULL
     GROUP BY meter_key
 )
@@ -231,16 +231,16 @@ SELECT meter.key,
        card.allowance,
        card.created_at AS card_created_at,
        card.updated_at AS card_updated_at
-FROM openrails.catalog_meters meter
+FROM billing.catalog_meters meter
 LEFT JOIN activity
   ON activity.event_type = COALESCE(NULLIF(meter.event_type, ''), meter.key)
 LEFT JOIN override_counts
   ON override_counts.meter_key = meter.key
-LEFT JOIN openrails.catalog_rate_cards card
+LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
  AND card.customer_id IS NULL
-LEFT JOIN openrails.products product
+LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
 WHERE meter.merchant_id = $1
@@ -308,7 +308,7 @@ SELECT COALESCE(
     array_agg(DISTINCT upper(COALESCE(price ->> 'currency', ''))),
     ARRAY[]::text[]
 )::text[] AS currencies
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND allowance ->> 'accrue_from' = $2::text
 `
@@ -326,7 +326,7 @@ func (q *Queries) GetUsageRateCardAllowanceDependencyCurrencies(ctx context.Cont
 }
 
 const insertUsageMeter = `-- name: InsertUsageMeter :exec
-INSERT INTO openrails.catalog_meters
+INSERT INTO billing.catalog_meters
     (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
 VALUES (
     $1,
@@ -367,7 +367,7 @@ SELECT card.customer_id,
        card.customer_id::text AS subject,
        COALESCE((
            SELECT BTRIM(subscription.user_email)
-           FROM openrails.subscriptions subscription
+           FROM billing.subscriptions subscription
            WHERE subscription.merchant_id = card.merchant_id
              AND subscription.customer_id = card.customer_id
              AND subscription.deleted_at IS NULL
@@ -379,7 +379,7 @@ SELECT card.customer_id,
        card.allowance,
        card.created_at,
        card.updated_at
-FROM openrails.catalog_rate_cards card
+FROM billing.catalog_rate_cards card
 WHERE card.merchant_id = $1
   AND card.meter_key = $2::text
   AND card.customer_id IS NOT NULL
@@ -440,12 +440,12 @@ func (q *Queries) ListUsageMeterOverrides(ctx context.Context, arg ListUsageMete
 const listUsageMetersWithCatalog = `-- name: ListUsageMetersWithCatalog :many
 WITH activity AS (
     SELECT event_type, count(*) AS event_count, max(occurred_at) AS last_event_at
-    FROM openrails.usage_events
+    FROM billing.usage_events
     WHERE merchant_id = $1
     GROUP BY event_type
 ), override_counts AS (
     SELECT meter_key, count(*) AS override_count
-    FROM openrails.catalog_rate_cards
+    FROM billing.catalog_rate_cards
     WHERE merchant_id = $1 AND customer_id IS NOT NULL
     GROUP BY meter_key
 )
@@ -469,16 +469,16 @@ SELECT meter.key,
        card.allowance,
        card.created_at AS card_created_at,
        card.updated_at AS card_updated_at
-FROM openrails.catalog_meters meter
+FROM billing.catalog_meters meter
 LEFT JOIN activity
   ON activity.event_type = COALESCE(NULLIF(meter.event_type, ''), meter.key)
 LEFT JOIN override_counts
   ON override_counts.meter_key = meter.key
-LEFT JOIN openrails.catalog_rate_cards card
+LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
  AND card.customer_id IS NULL
-LEFT JOIN openrails.products product
+LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
 WHERE meter.merchant_id = $1
@@ -558,7 +558,7 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 
 const listUsageRateCardPricesForUpdate = `-- name: ListUsageRateCardPricesForUpdate :many
 SELECT customer_id, price
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
 FOR UPDATE
@@ -595,7 +595,7 @@ func (q *Queries) ListUsageRateCardPricesForUpdate(ctx context.Context, arg List
 }
 
 const lockUsageEventsForMeterCorrection = `-- name: LockUsageEventsForMeterCorrection :exec
-LOCK TABLE openrails.usage_events IN SHARE ROW EXCLUSIVE MODE
+LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE
 `
 
 func (q *Queries) LockUsageEventsForMeterCorrection(ctx context.Context) error {
@@ -624,7 +624,7 @@ func (q *Queries) LockUsageRateCardProduct(ctx context.Context, lockKey string) 
 }
 
 const updateUsageMeter = `-- name: UpdateUsageMeter :exec
-UPDATE openrails.catalog_meters
+UPDATE billing.catalog_meters
 SET event_type = NULLIF($1::text, ''),
     value_property = NULLIF($2::text, ''),
     aggregation = $3::text,
@@ -659,18 +659,18 @@ func (q *Queries) UpdateUsageMeter(ctx context.Context, arg UpdateUsageMeterPara
 }
 
 const upsertDefaultUsageRateCard = `-- name: UpsertDefaultUsageRateCard :exec
-INSERT INTO openrails.catalog_rate_cards
+INSERT INTO billing.catalog_rate_cards
     (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price)
 VALUES (
     $1,
     $2::uuid,
     COALESCE(
-        (SELECT ordinal FROM openrails.catalog_rate_cards
+        (SELECT ordinal FROM billing.catalog_rate_cards
          WHERE merchant_id = $1
            AND product_id = $2::uuid
            AND meter_key = $3::text
            AND customer_id IS NULL),
-        (SELECT MAX(ordinal) + 1 FROM openrails.catalog_rate_cards
+        (SELECT MAX(ordinal) + 1 FROM billing.catalog_rate_cards
          WHERE merchant_id = $1
            AND product_id = $2::uuid
            AND customer_id IS NULL),
@@ -711,7 +711,7 @@ func (q *Queries) UpsertDefaultUsageRateCard(ctx context.Context, arg UpsertDefa
 }
 
 const upsertPayerUsageRateCard = `-- name: UpsertPayerUsageRateCard :exec
-INSERT INTO openrails.catalog_rate_cards
+INSERT INTO billing.catalog_rate_cards
     (merchant_id, product_id, customer_id, ordinal, meter_key, payment_term, filter, allowance, price)
 VALUES (
     $1, NULL, $2::uuid, 1,
@@ -749,7 +749,7 @@ func (q *Queries) UpsertPayerUsageRateCard(ctx context.Context, arg UpsertPayerU
 const usageEventsExistForTypes = `-- name: UsageEventsExistForTypes :one
 SELECT EXISTS (
     SELECT 1
-    FROM openrails.usage_events
+    FROM billing.usage_events
     WHERE merchant_id = $1
       AND event_type = ANY($2::text[])
 )
@@ -770,7 +770,7 @@ func (q *Queries) UsageEventsExistForTypes(ctx context.Context, arg UsageEventsE
 const usageMeterExists = `-- name: UsageMeterExists :one
 SELECT EXISTS (
     SELECT 1
-    FROM openrails.catalog_meters
+    FROM billing.catalog_meters
     WHERE merchant_id = $1
       AND key = $2
 )
@@ -791,7 +791,7 @@ func (q *Queries) UsageMeterExists(ctx context.Context, arg UsageMeterExistsPara
 const usageRateCardCurrencyConflict = `-- name: UsageRateCardCurrencyConflict :one
 SELECT EXISTS (
     SELECT 1
-    FROM openrails.catalog_rate_cards
+    FROM billing.catalog_rate_cards
     WHERE merchant_id = $1
       AND meter_key = $2::text
       AND customer_id IS NOT NULL

@@ -12,7 +12,7 @@ import (
 )
 
 const bindUnboundMerchantGroup = `-- name: BindUnboundMerchantGroup :execrows
-UPDATE openrails.merchants SET permission_group_id=$1::text,updated_at=now()
+UPDATE billing.merchants SET permission_group_id=$1::text,updated_at=now()
 WHERE id=$2::uuid AND permission_group_id IS NULL AND deleted_at IS NULL
 `
 
@@ -31,7 +31,7 @@ func (q *Queries) BindUnboundMerchantGroup(ctx context.Context, arg BindUnboundM
 
 const getMerchantDirectoryByID = `-- name: GetMerchantDirectoryByID :one
 SELECT id,slug,status,permission_group_id,display_name,api_host
-FROM openrails.merchants WHERE id=$1::uuid AND deleted_at IS NULL
+FROM billing.merchants WHERE id=$1::uuid AND deleted_at IS NULL
 `
 
 type GetMerchantDirectoryByIDRow struct {
@@ -58,12 +58,12 @@ func (q *Queries) GetMerchantDirectoryByID(ctx context.Context, id uuid.UUID) (G
 }
 
 const registerUnboundMerchant = `-- name: RegisterUnboundMerchant :one
-INSERT INTO openrails.merchants (slug, status, display_name)
+INSERT INTO billing.merchants (slug, status, display_name)
 VALUES ($1, 'active', $2)
 ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
-    display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
+    display_name = COALESCE(EXCLUDED.display_name, billing.merchants.display_name),
     updated_at = now()
-WHERE openrails.merchants.permission_group_id IS NULL
+WHERE billing.merchants.permission_group_id IS NULL
 RETURNING id
 `
 

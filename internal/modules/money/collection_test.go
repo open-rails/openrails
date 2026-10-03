@@ -23,7 +23,7 @@ import (
 // is not registered; normalisation is allowed, substitution never.
 func TestCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	ctx := context.Background()
-	method := gen.OpenrailsPaymentMethod{
+	method := gen.BillingPaymentMethod{
 		ID: uuid.New(), Rail: "nmi", RailCustomerRef: "vault-123", RailMethodRef: "bt-token-123",
 		StoredCredentialUnscheduledRef: "approved-unscheduled",
 	}

@@ -9,12 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -38,7 +36,7 @@ func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount
 }
 
 func (w *world) sql(query string) string {
-	return strings.ReplaceAll(query, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
+	return inSchema(w.schema, query)
 }
 
 // Default price keys are exact per cadence: neighbouring cadences never share
@@ -88,7 +86,7 @@ func TestCadencePriceKeys(t *testing.T) {
 
 	// The schema trigger's label is the Go label for every cadence up to a
 	// leap year.
-	rows, err := w.pool.Query(t.Context(), w.sql(`SELECT h, openrails.price_interval_label(h, true), openrails.price_interval_label(h, false) FROM generate_series(1, 8784) h`))
+	rows, err := w.pool.Query(t.Context(), w.sql(`SELECT h, billing.price_interval_label(h, true), billing.price_interval_label(h, false) FROM generate_series(1, 8784) h`))
 	require.NoError(t, err)
 	seen := map[string]int{}
 	for rows.Next() {
@@ -223,7 +221,7 @@ func TestCadenceMetrics(t *testing.T) {
 		c.subscribe(embedded, "stripe", price.ID, "content:metrics", c.saveCard("stripe", visa))
 
 		var norm int64
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT openrails.monthly_normalized_amount($1, $2)`), row.amount, row.hours).Scan(&norm))
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT billing.monthly_normalized_amount($1, $2)`), row.amount, row.hours).Scan(&norm))
 		expected += norm
 
 		status, res := w.staffJSON(http.MethodPost, "/v1/merchant/metrics/query", map[string]any{
@@ -246,7 +244,7 @@ func TestCadenceMetrics(t *testing.T) {
 		require.Equal(t, norm, byCycle[row.label], "%dh is %s with its normalised MRR: %v", row.hours, row.label, byCycle)
 
 		var fleet int64
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT monthly_amount FROM openrails.fleet_mrr_by_currency(NULL) WHERE currency = 'USD'`)).Scan(&fleet))
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT monthly_amount FROM billing.fleet_mrr_by_currency(NULL) WHERE currency = 'USD'`)).Scan(&fleet))
 		require.Equal(t, expected, dashboard, "dashboard MRR after %dh", row.hours)
 		require.Equal(t, dashboard, fleet, "fleet MRR equals dashboard MRR after %dh", row.hours)
 	}

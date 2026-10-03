@@ -166,7 +166,7 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 				return false
 			}
 			var missed bool
-			err := w.pool.QueryRow(r.Context(), w.q(`SELECT EXISTS (SELECT 1 FROM openrails.rebill_cycles WHERE subscription_id = $1 AND missed_at IS NOT NULL)`), l.sub.UUID()).Scan(&missed)
+			err := w.pool.QueryRow(r.Context(), w.q(`SELECT EXISTS (SELECT 1 FROM billing.rebill_cycles WHERE subscription_id = $1 AND missed_at IS NOT NULL)`), l.sub.UUID()).Scan(&missed)
 			return err == nil && missed
 		}
 		w.nmi.Intercept(handedOver, func(_ *http.Request, serve func() *http.Response) (*http.Response, error) {
@@ -233,7 +233,7 @@ func TestNMIAttemptedRebillIsNeverCollected(t *testing.T) {
 				} `json:"nmi_transactions"`
 			}
 			var raw []byte
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT evidence FROM openrails.reconciliation_findings WHERE finding_type = 'life.rebill.missed' AND subject_key = $1`), findings[0]).Scan(&raw))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT evidence FROM billing.reconciliation_findings WHERE finding_type = 'life.rebill.missed' AND subject_key = $1`), findings[0]).Scan(&raw))
 			require.NoError(t, json.Unmarshal(raw, &evidence))
 			require.False(t, evidence.Collected)
 			require.Len(t, evidence.Held, 1)

@@ -13,7 +13,7 @@ import (
 )
 
 const acceptPaymentMethodSetupSession = `-- name: AcceptPaymentMethodSetupSession :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
     expires_at=$2,status='requires_action',updated_at=$3
 WHERE id=$4 AND merchant_id=$5
@@ -48,13 +48,13 @@ func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg Accep
 }
 
 const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
-INSERT INTO openrails.payment_methods
+INSERT INTO billing.payment_methods
 (id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
 VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,$8,$9,$10,'pan_proxy','',$11,$11)
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
-DO UPDATE SET id=openrails.payment_methods.id
-WHERE openrails.payment_methods.customer_id=EXCLUDED.customer_id
-  AND openrails.payment_methods.custodian='hyperswitch'
+DO UPDATE SET id=billing.payment_methods.id
+WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
+  AND billing.payment_methods.custodian='hyperswitch'
 RETURNING id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, is_default
 `
 
@@ -73,7 +73,7 @@ type AttachCapturedPaymentMethodParams struct {
 }
 
 // Capture attachment never reparents an existing instrument to another payer.
-func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCapturedPaymentMethodParams) (OpenrailsPaymentMethod, error) {
+func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCapturedPaymentMethodParams) (BillingPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, attachCapturedPaymentMethod,
 		arg.ID,
 		arg.MerchantID,
@@ -87,7 +87,7 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 		arg.ExpiryDate,
 		arg.Now,
 	)
-	var i OpenrailsPaymentMethod
+	var i BillingPaymentMethod
 	err := row.Scan(
 		&i.ID,
 		&i.Rail,
@@ -121,7 +121,7 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 }
 
 const bindSolanaCheckoutSession = `-- name: BindSolanaCheckoutSession :execrows
-UPDATE openrails.checkout_sessions SET
+UPDATE billing.checkout_sessions SET
     reference = $2,
     rail_state = $3,
     updated_at = $4
@@ -158,7 +158,7 @@ func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaC
 }
 
 const claimHostedPurchaseDispatch = `-- name: ClaimHostedPurchaseDispatch :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
 WHERE merchant_id=$1::uuid AND id=$2::uuid
   AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
@@ -184,7 +184,7 @@ func (q *Queries) ClaimHostedPurchaseDispatch(ctx context.Context, arg ClaimHost
 }
 
 const claimSolanaCheckoutSignature = `-- name: ClaimSolanaCheckoutSignature :execrows
-UPDATE openrails.checkout_sessions SET transaction_id = $1::text
+UPDATE billing.checkout_sessions SET transaction_id = $1::text
 WHERE checkout_sessions.merchant_id = $2::uuid AND id = $3::uuid
   AND rail = 'solana'
   AND deleted_at IS NULL
@@ -210,7 +210,7 @@ func (q *Queries) ClaimSolanaCheckoutSignature(ctx context.Context, arg ClaimSol
 }
 
 const closeHostedCheckoutFromProvider = `-- name: CloseHostedCheckoutFromProvider :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET status=CASE WHEN status='succeeded' THEN status ELSE $1::text END,
     rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
     updated_at=$2::timestamptz
@@ -241,7 +241,7 @@ func (q *Queries) CloseHostedCheckoutFromProvider(ctx context.Context, arg Close
 }
 
 const completePaymentMethodSetupSession = `-- name: CompletePaymentMethodSetupSession :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
     status='succeeded',updated_at=$2
 WHERE id=$3 AND merchant_id=$4
@@ -271,11 +271,11 @@ func (q *Queries) CompletePaymentMethodSetupSession(ctx context.Context, arg Com
 }
 
 const countInvalidCheckoutCaptureReferences = `-- name: CountInvalidCheckoutCaptureReferences :one
-SELECT count(*) FROM openrails.checkout_sessions cs
+SELECT count(*) FROM billing.checkout_sessions cs
 WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='nmi'
 AND (
- NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
- OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+ NOT EXISTS(SELECT 1 FROM billing.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
+ OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
 )
 `
 
@@ -290,8 +290,8 @@ func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, mer
 }
 
 const countInvalidEngineCheckoutReferences = `-- name: CountInvalidEngineCheckoutReferences :one
-SELECT count(*) FROM openrails.checkout_sessions cs
-LEFT JOIN openrails.rail_intents i ON i.merchant_id=cs.merchant_id
+SELECT count(*) FROM billing.checkout_sessions cs
+LEFT JOIN billing.rail_intents i ON i.merchant_id=cs.merchant_id
  AND i.payload->>'checkout_session_id'=cs.id::text AND i.intent_type='initial_membership'
 WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'initial_membership_quote'
 AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
@@ -309,8 +309,8 @@ func (q *Queries) CountInvalidEngineCheckoutReferences(ctx context.Context, merc
 }
 
 const countInvalidPurchaseCheckoutReferences = `-- name: CountInvalidPurchaseCheckoutReferences :one
-SELECT count(*) FROM openrails.checkout_sessions s
-LEFT JOIN openrails.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+SELECT count(*) FROM billing.checkout_sessions s
+LEFT JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
 WHERE s.merchant_id=$1::uuid AND s.rail_state ? 'accepted_purchase'
  AND (p.id IS NULL
    OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
@@ -331,9 +331,9 @@ func (q *Queries) CountInvalidPurchaseCheckoutReferences(ctx context.Context, me
 }
 
 const countInvalidStripeSetupReferences = `-- name: CountInvalidStripeSetupReferences :one
-SELECT count(*) FROM openrails.checkout_sessions cs
+SELECT count(*) FROM billing.checkout_sessions cs
 WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'
-AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id)
+AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id)
 `
 
 func (q *Queries) CountInvalidStripeSetupReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -345,7 +345,7 @@ func (q *Queries) CountInvalidStripeSetupReferences(ctx context.Context, merchan
 
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
-INSERT INTO openrails.checkout_sessions (
+INSERT INTO billing.checkout_sessions (
     id, merchant_id, customer_id, price_id, mode, rail, status, amount,
     currency, expires_at, reference, transaction_id, payment_id,
     subscription_id, metadata, rail_fields, rail_state, routing_reason,
@@ -386,7 +386,7 @@ type CreateCheckoutSessionParams struct {
 	UpdatedAt      time.Time
 }
 
-// openrails.checkout_sessions.
+// billing.checkout_sessions.
 func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createCheckoutSession,
 		arg.ID,
@@ -418,7 +418,7 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 }
 
 const createPaymentMethodSetupSession = `-- name: CreatePaymentMethodSetupSession :execrows
-INSERT INTO openrails.checkout_sessions
+INSERT INTO billing.checkout_sessions
 (id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
 VALUES($1,$2,$3,$4,'payment_method','nmi','created',$5,$6,$7,$8,$8)
 ON CONFLICT (id) DO NOTHING
@@ -455,7 +455,7 @@ func (q *Queries) CreatePaymentMethodSetupSession(ctx context.Context, arg Creat
 }
 
 const expireCheckoutSessionByID = `-- name: ExpireCheckoutSessionByID :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
     status = 'expired', updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid
@@ -479,12 +479,12 @@ func (q *Queries) ExpireCheckoutSessionByID(ctx context.Context, arg ExpireCheck
 }
 
 const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
     status = 'expired', updated_at = $1
 WHERE deleted_at IS NULL
   AND ctid IN (
-    SELECT cs.ctid FROM openrails.checkout_sessions cs
+    SELECT cs.ctid FROM billing.checkout_sessions cs
     WHERE cs.merchant_id = $2::uuid
       AND cs.expires_at IS NOT NULL AND cs.expires_at < $1::timestamptz
       AND cs.status IN ('created', 'requires_action')
@@ -511,13 +511,13 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckout
 }
 
 const failCheckoutSessionInitialization = `-- name: FailCheckoutSessionInitialization :execrows
-UPDATE openrails.checkout_sessions cs
+UPDATE billing.checkout_sessions cs
 SET status = 'failed', updated_at = $1::timestamptz,
     rail_state = COALESCE(cs.rail_state, '{}'::jsonb) || jsonb_build_object('message', $2::text, 'failure_reason', $2::text,
       'failure_kind', $3::text, 'failure_code', $4::text)
 WHERE cs.merchant_id = $5::uuid AND cs.id = $6::uuid
   AND cs.deleted_at IS NULL AND cs.status = 'created'
-  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
                   WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY($7::text[]))
 `
 
@@ -551,7 +551,7 @@ func (q *Queries) FailCheckoutSessionInitialization(ctx context.Context, arg Fai
 }
 
 const failHostedPurchaseInitialization = `-- name: FailHostedPurchaseInitialization :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET status='failed', updated_at=$1::timestamptz,
     rail_state=rail_state || jsonb_build_object('failure_reason', $2::text)
       || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
@@ -584,8 +584,8 @@ func (q *Queries) FailHostedPurchaseInitialization(ctx context.Context, arg Fail
 }
 
 const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
-SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, p.pending_signer_public_key,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM openrails.psps p
-JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, p.pending_signer_public_key,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
+JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
 WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
 FOR SHARE OF p,c
 `
@@ -596,8 +596,8 @@ type GetCheckoutCaptureAccountsForShareParams struct {
 }
 
 type GetCheckoutCaptureAccountsForShareRow struct {
-	OpenrailsPsp       OpenrailsPsp
-	OpenrailsCustodian OpenrailsCustodian
+	BillingPsp       BillingPsp
+	BillingCustodian BillingCustodian
 }
 
 // Recheck current authority after vendor metadata readback, inside only the
@@ -606,38 +606,38 @@ func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg Ge
 	row := q.db.QueryRow(ctx, getCheckoutCaptureAccountsForShare, arg.MerchantID, arg.PspID)
 	var i GetCheckoutCaptureAccountsForShareRow
 	err := row.Scan(
-		&i.OpenrailsPsp.ID,
-		&i.OpenrailsPsp.MerchantID,
-		&i.OpenrailsPsp.Rail,
-		&i.OpenrailsPsp.Environment,
-		&i.OpenrailsPsp.AccountID,
-		&i.OpenrailsPsp.Key,
-		&i.OpenrailsPsp.Evidence,
-		&i.OpenrailsPsp.FirstSeenAt,
-		&i.OpenrailsPsp.LastVerifiedAt,
-		&i.OpenrailsPsp.ReplacedAt,
-		&i.OpenrailsPsp.CreatedAt,
-		&i.OpenrailsPsp.UpdatedAt,
-		&i.OpenrailsPsp.Archived,
-		&i.OpenrailsPsp.CustodianID,
-		&i.OpenrailsPsp.PendingSignerPublicKey,
-		&i.OpenrailsCustodian.ID,
-		&i.OpenrailsCustodian.MerchantID,
-		&i.OpenrailsCustodian.Key,
-		&i.OpenrailsCustodian.Kind,
-		&i.OpenrailsCustodian.Environment,
-		&i.OpenrailsCustodian.AccountID,
-		&i.OpenrailsCustodian.Settings,
-		&i.OpenrailsCustodian.CredentialVersions,
-		&i.OpenrailsCustodian.Archived,
-		&i.OpenrailsCustodian.CreatedAt,
-		&i.OpenrailsCustodian.UpdatedAt,
+		&i.BillingPsp.ID,
+		&i.BillingPsp.MerchantID,
+		&i.BillingPsp.Rail,
+		&i.BillingPsp.Environment,
+		&i.BillingPsp.AccountID,
+		&i.BillingPsp.Key,
+		&i.BillingPsp.Evidence,
+		&i.BillingPsp.FirstSeenAt,
+		&i.BillingPsp.LastVerifiedAt,
+		&i.BillingPsp.ReplacedAt,
+		&i.BillingPsp.CreatedAt,
+		&i.BillingPsp.UpdatedAt,
+		&i.BillingPsp.Archived,
+		&i.BillingPsp.CustodianID,
+		&i.BillingPsp.PendingSignerPublicKey,
+		&i.BillingCustodian.ID,
+		&i.BillingCustodian.MerchantID,
+		&i.BillingCustodian.Key,
+		&i.BillingCustodian.Kind,
+		&i.BillingCustodian.Environment,
+		&i.BillingCustodian.AccountID,
+		&i.BillingCustodian.Settings,
+		&i.BillingCustodian.CredentialVersions,
+		&i.BillingCustodian.Archived,
+		&i.BillingCustodian.CreatedAt,
+		&i.BillingCustodian.UpdatedAt,
 	)
 	return i, err
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM openrails.checkout_sessions WHERE checkout_sessions.merchant_id = $2::uuid AND id = $1
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions WHERE checkout_sessions.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL
 `
 
@@ -646,9 +646,9 @@ type GetCheckoutSessionByIDParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) GetCheckoutSessionByID(ctx context.Context, arg GetCheckoutSessionByIDParams) (OpenrailsCheckoutSession, error) {
+func (q *Queries) GetCheckoutSessionByID(ctx context.Context, arg GetCheckoutSessionByIDParams) (BillingCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getCheckoutSessionByID, arg.ID, arg.MerchantID)
-	var i OpenrailsCheckoutSession
+	var i BillingCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -679,7 +679,7 @@ func (q *Queries) GetCheckoutSessionByID(ctx context.Context, arg GetCheckoutSes
 }
 
 const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions cs
 WHERE cs.merchant_id = $2::uuid AND cs.reference = $1
   AND cs.deleted_at IS NULL
 LIMIT 1
@@ -690,9 +690,9 @@ type GetCheckoutSessionByReferenceParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, arg GetCheckoutSessionByReferenceParams) (OpenrailsCheckoutSession, error) {
+func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, arg GetCheckoutSessionByReferenceParams) (BillingCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getCheckoutSessionByReference, arg.Reference, arg.MerchantID)
-	var i OpenrailsCheckoutSession
+	var i BillingCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -723,7 +723,7 @@ func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, arg GetChec
 }
 
 const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM openrails.checkout_sessions cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions cs
 WHERE cs.merchant_id = $4::uuid AND cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
@@ -742,7 +742,7 @@ type GetLatestOpenCheckoutSessionParams struct {
 	Now        time.Time
 }
 
-func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLatestOpenCheckoutSessionParams) (OpenrailsCheckoutSession, error) {
+func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLatestOpenCheckoutSessionParams) (BillingCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getLatestOpenCheckoutSession,
 		arg.CustomerID,
 		arg.PriceID,
@@ -750,7 +750,7 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		arg.MerchantID,
 		arg.Now,
 	)
-	var i OpenrailsCheckoutSession
+	var i BillingCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -781,7 +781,7 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 }
 
 const getPaymentMethodSetupSessionForUpdate = `-- name: GetPaymentMethodSetupSessionForUpdate :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM openrails.checkout_sessions
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions
 WHERE id=$1 AND merchant_id=$2
   AND mode='payment_method' AND deleted_at IS NULL
 FOR UPDATE
@@ -792,9 +792,9 @@ type GetPaymentMethodSetupSessionForUpdateParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg GetPaymentMethodSetupSessionForUpdateParams) (OpenrailsCheckoutSession, error) {
+func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg GetPaymentMethodSetupSessionForUpdateParams) (BillingCheckoutSession, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodSetupSessionForUpdate, arg.ID, arg.MerchantID)
-	var i OpenrailsCheckoutSession
+	var i BillingCheckoutSession
 	err := row.Scan(
 		&i.ID,
 		&i.PriceID,
@@ -826,8 +826,8 @@ func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg
 
 const hasUnresolvedProductCheckout = `-- name: HasUnresolvedProductCheckout :one
 SELECT EXISTS (
- SELECT 1 FROM openrails.checkout_sessions s
- JOIN openrails.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
+ SELECT 1 FROM billing.checkout_sessions s
+ JOIN billing.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
  WHERE s.merchant_id=$1::uuid
    AND s.customer_id=$2::uuid
    AND p.product_id=$3::uuid
@@ -836,7 +836,7 @@ SELECT EXISTS (
    AND (s.status IN ('created','requires_action')
      OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
    -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents f
+   AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
      WHERE f.merchant_id=s.merchant_id
        AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
        AND f.status IN ('failed_terminal','expired','superseded'))
@@ -866,7 +866,7 @@ func (q *Queries) HasUnresolvedProductCheckout(ctx context.Context, arg HasUnres
 }
 
 const listStaleCheckoutSessions = `-- name: ListStaleCheckoutSessions :many
-SELECT id FROM openrails.checkout_sessions
+SELECT id FROM billing.checkout_sessions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND expires_at IS NOT NULL AND expires_at < $3::timestamptz
@@ -904,7 +904,7 @@ func (q *Queries) ListStaleCheckoutSessions(ctx context.Context, arg ListStaleCh
 }
 
 const lockCheckoutSessionForAdmission = `-- name: LockCheckoutSessionForAdmission :one
-SELECT status FROM openrails.checkout_sessions
+SELECT status FROM billing.checkout_sessions
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND deleted_at IS NULL
 FOR UPDATE
@@ -925,7 +925,7 @@ func (q *Queries) LockCheckoutSessionForAdmission(ctx context.Context, arg LockC
 }
 
 const lockCheckoutSessionForShare = `-- name: LockCheckoutSessionForShare :one
-SELECT id FROM openrails.checkout_sessions
+SELECT id FROM billing.checkout_sessions
 WHERE merchant_id = $1::uuid AND id = $2::uuid
   AND deleted_at IS NULL
 FOR SHARE
@@ -944,8 +944,8 @@ func (q *Queries) LockCheckoutSessionForShare(ctx context.Context, arg LockCheck
 }
 
 const lockPurchasableCheckoutPrice = `-- name: LockPurchasableCheckoutPrice :one
-SELECT p.id FROM openrails.prices p
-JOIN openrails.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
+SELECT p.id FROM billing.prices p
+JOIN billing.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
 WHERE p.id=$1::uuid AND p.merchant_id=$2::uuid
   AND NOT p.archived AND NOT product.archived
 FOR SHARE OF p, product
@@ -964,7 +964,7 @@ func (q *Queries) LockPurchasableCheckoutPrice(ctx context.Context, arg LockPurc
 }
 
 const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows
-UPDATE openrails.checkout_sessions SET
+UPDATE billing.checkout_sessions SET
     customer_id = $2,
     price_id = $3,
     mode = $4,

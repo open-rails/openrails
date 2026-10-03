@@ -289,7 +289,7 @@ func TestServiceAdmitBatchIsolatesItems(t *testing.T) {
 		{CustomerID: holdless.String(), Invoker: "user:h", EstimatedAmount: 100, RequestID: "r8"},
 		{CustomerID: reused.String(), Invoker: "user:i", RequestID: "r9"},
 	}
-	cause := errors.New(`ERROR: relation "openrails.billing_policy_bindings" does not exist (SQLSTATE 42P01)`)
+	cause := errors.New(`ERROR: relation "billing.billing_policy_bindings" does not exist (SQLSTATE 42P01)`)
 	var seenTrust string
 	admit := func(_ context.Context, in billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
 		switch billing.CustomerID(in.CustomerID) {

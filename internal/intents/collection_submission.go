@@ -20,13 +20,13 @@ type CollectionNonexecutionProof struct {
 	code, reason string
 }
 
-func (p CollectionNonexecutionProof) permits(in gen.OpenrailsRailIntent) bool {
+func (p CollectionNonexecutionProof) permits(in gen.BillingRailIntent) bool {
 	binding, err := collectionBinding(in)
 	return err == nil && p.binding == binding && p.submittedAt == EvidenceString(in, "submitted_at")
 }
 
 // BeginCollectedPayment mints authority only for the writer of a fresh fence.
-func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.OpenrailsRailIntent, now time.Time) (CollectionNonexecutionProof, bool, error) {
+func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.BillingRailIntent, now time.Time) (CollectionNonexecutionProof, bool, error) {
 	if in.IntentType != "invoice_collection" && in.IntentType != subscriptions.TypeSubscriptionCollection {
 		return CollectionNonexecutionProof{}, false, errors.New("submission received an unsupported collected-payment kind")
 	}
@@ -44,8 +44,8 @@ func (s *Store) BeginCollectedPayment(ctx context.Context, in gen.OpenrailsRailI
 
 // ConfirmCollectedPaymentNotExecuted preserves the existing positive provider-read
 // authority. A missing search result is not a confirmation under this contract.
-func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.OpenrailsRailIntent, verifier interface {
-	ConfirmCollectionNotExecuted(context.Context, gen.OpenrailsRailIntent) error
+func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.BillingRailIntent, verifier interface {
+	ConfirmCollectionNotExecuted(context.Context, gen.BillingRailIntent) error
 }) (CollectionNonexecutionProof, error) {
 	if verifier == nil || (in.IntentType != "invoice_collection" && in.IntentType != subscriptions.TypeSubscriptionCollection) {
 		return CollectionNonexecutionProof{}, errors.New("invoice nonexecution verifier is unavailable")
@@ -85,7 +85,7 @@ type collectionNonexecution struct {
 }
 
 // LoadCollectionNonexecution validates sealed custody against this operation and fence.
-func LoadCollectionNonexecution(in gen.OpenrailsRailIntent) (CollectionNonexecutionProof, bool, error) {
+func LoadCollectionNonexecution(in gen.BillingRailIntent) (CollectionNonexecutionProof, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return CollectionNonexecutionProof{}, false, nil
@@ -118,7 +118,7 @@ func validCollectionNonexecutionCode(code string) bool {
 
 // RetainCollectionNonexecution uses the existing sealed-evidence writer, before
 // local effects. Generic progress/outcome maps cannot manufacture this custody.
-func (s *Store) RetainCollectionNonexecution(ctx context.Context, in gen.OpenrailsRailIntent, proof CollectionNonexecutionProof, code, reason string) error {
+func (s *Store) RetainCollectionNonexecution(ctx context.Context, in gen.BillingRailIntent, proof CollectionNonexecutionProof, code, reason string) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err

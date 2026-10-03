@@ -42,7 +42,7 @@ type cutoverAccountBinding struct {
 	Revision            int
 }
 
-func cutoverAccountBindings(in gen.OpenrailsRailIntent, p nmiCutoverPayload) (map[string]cutoverAccountBinding, []cutoverAccountRequalification, error) {
+func cutoverAccountBindings(in gen.BillingRailIntent, p nmiCutoverPayload) (map[string]cutoverAccountBinding, []cutoverAccountRequalification, error) {
 	bindings := map[string]cutoverAccountBinding{
 		"source": {Qualification: p.SourceQualification.Record, OriginalFingerprint: p.SourceCredentialFingerprint, Fingerprint: p.SourceCredentialFingerprint},
 		"target": {Qualification: p.TargetQualification.Record, OriginalFingerprint: p.TargetCredentialFingerprint, Fingerprint: p.TargetCredentialFingerprint},
@@ -103,7 +103,7 @@ func (h *NMIProviderCutover) boundCutoverClient(ctx context.Context, client *nmi
 // writeCutover reloads the canonical operation binding while WithWrite holds
 // the account share lock. Requalification takes that account's update lock, so
 // a stale executor cannot dispatch after the new binding has committed.
-func (h *NMIProviderCutover) writeCutover(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload, role string, client *nmi.NMIClient, send func() error) (entered bool, err error) {
+func (h *NMIProviderCutover) writeCutover(ctx context.Context, in gen.BillingRailIntent, p nmiCutoverPayload, role string, client *nmi.NMIClient, send func() error) (entered bool, err error) {
 	authorized, _, err := cutoverAccountBindings(in, p)
 	if err != nil {
 		return false, err
@@ -137,7 +137,7 @@ func (h *NMIProviderCutover) writeCutover(ctx context.Context, in gen.OpenrailsR
 	return entered, err
 }
 
-func (h *NMIProviderCutover) requalifyAccount(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload, r Resolution) (Outcome, error) {
+func (h *NMIProviderCutover) requalifyAccount(ctx context.Context, in gen.BillingRailIntent, p nmiCutoverPayload, r Resolution) (Outcome, error) {
 	bindings, history, err := cutoverAccountBindings(in, p)
 	if err != nil {
 		return Outcome{}, RejectResolution("accepted account binding is invalid")
@@ -223,7 +223,7 @@ func (h *NMIProviderCutover) requalifyAccount(ctx context.Context, in gen.Openra
 	return Retryable("operator qualified the rotated credential for this account; continue under current write gates"), nil
 }
 
-func cutoverAccountRequalificationMatches(in gen.OpenrailsRailIntent, r Resolution) bool {
+func cutoverAccountRequalificationMatches(in gen.BillingRailIntent, r Resolution) bool {
 	p, _, err := decodeCutover(in)
 	if err != nil {
 		return false

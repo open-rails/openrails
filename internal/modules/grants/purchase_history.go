@@ -41,16 +41,16 @@ func PurchaseWindows(spec map[string]*int, duration *int, accepted, entitlementS
 }
 
 type PurchaseHistory struct {
-	Entitlements map[string]gen.OpenrailsGrant
-	Ownership    *gen.OpenrailsGrant
+	Entitlements map[string]gen.BillingGrant
+	Ownership    *gen.BillingGrant
 }
 
 // ValidatePurchaseHistory compares original immutable grant events. A later
 // revoke never changes those facts and must not be mistaken for missing access.
 // Missing effects are returned to the caller; completion can repair them, while
 // an archive requiring a complete terminal purchase refuses them.
-func ValidatePurchaseHistory(merchant, customer, product, payment uuid.UUID, wanted map[string]PurchaseWindow, ownership PurchaseWindow, original []gen.OpenrailsGrant) (PurchaseHistory, error) {
-	out := PurchaseHistory{Entitlements: map[string]gen.OpenrailsGrant{}}
+func ValidatePurchaseHistory(merchant, customer, product, payment uuid.UUID, wanted map[string]PurchaseWindow, ownership PurchaseWindow, original []gen.BillingGrant) (PurchaseHistory, error) {
+	out := PurchaseHistory{Entitlements: map[string]gen.BillingGrant{}}
 	for _, g := range original {
 		if g.MerchantID != merchant || g.CustomerID != customer || g.Event != "grant" || g.SourceType != string(Purchase) || g.SourceID != payment.String() || g.PaymentID != nil && *g.PaymentID != payment || g.ProductID != nil && *g.ProductID != product {
 			return out, errors.New("original grant belongs to another accepted purchase")

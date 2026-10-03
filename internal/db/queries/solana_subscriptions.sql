@@ -1,7 +1,7 @@
--- openrails.solana_subscriptions — on-chain recurring subscription state (#255).
+-- billing.solana_subscriptions — on-chain recurring subscription state (#255).
 
 -- name: UpsertSolanaSubscription :exec
-INSERT INTO openrails.solana_subscriptions (
+INSERT INTO billing.solana_subscriptions (
     id, merchant_id, subscription_id, subscriber_wallet, authority_pda,
     subscription_pda, plan_pda, merchant_address, mint,
     plan_created_at_fingerprint, last_pulled_period_start, last_signature,
@@ -19,20 +19,20 @@ ON CONFLICT (subscription_pda) DO UPDATE SET
     status = EXCLUDED.status,
     plan_created_at_fingerprint = EXCLUDED.plan_created_at_fingerprint,
     updated_at = EXCLUDED.updated_at
-WHERE openrails.solana_subscriptions.merchant_id = EXCLUDED.merchant_id;
+WHERE billing.solana_subscriptions.merchant_id = EXCLUDED.merchant_id;
 
 -- name: GetSolanaSubscriptionByPDA :one
-SELECT * FROM openrails.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_pda = $1;
+SELECT * FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_pda = $1;
 
 -- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT * FROM openrails.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = $1;
+SELECT * FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = $1;
 
 -- name: ListDueSolanaSubscriptions :many
 -- or#893: the crank's recurring-pull intent must name the PSP it executes
 -- against, and the local subscription is where that provenance lives.
 SELECT sqlc.embed(s), sub.psp_id
-FROM openrails.solana_subscriptions s
-JOIN openrails.subscriptions sub ON sub.id = s.subscription_id
+FROM billing.solana_subscriptions s
+JOIN billing.subscriptions sub ON sub.id = s.subscription_id
 -- A subscription a prune tombstoned is not due for anything: the join is a
 -- LIVE read, so it carries the or#858 predicate. The parent terminal guard is
 -- defence in depth if a failed/legacy cascade ever leaves its mirror active.
@@ -43,7 +43,7 @@ ORDER BY s.merchant_id ASC, s.next_pull_at ASC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
 -- name: AdvanceSolanaSubscriptionAfterPull :exec
-UPDATE openrails.solana_subscriptions SET
+UPDATE billing.solana_subscriptions SET
     last_pulled_period_start = $2,
     last_signature = $3,
     next_pull_at = $4,
@@ -51,18 +51,18 @@ UPDATE openrails.solana_subscriptions SET
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: SetSolanaSubscriptionNextPullAt :exec
-UPDATE openrails.solana_subscriptions SET
+UPDATE billing.solana_subscriptions SET
     next_pull_at = $2,
     updated_at = $3
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListActiveSolanaMerchantWallets :many
 SELECT DISTINCT merchant_id, merchant_address
-FROM openrails.solana_subscriptions
+FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active';
 
 -- name: ListActiveSolanaSubscriptionsWithSignature :many
-SELECT * FROM openrails.solana_subscriptions
+SELECT * FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
@@ -70,7 +70,7 @@ ORDER BY updated_at ASC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 
 -- name: SetSolanaSubscriptionStatus :exec
-UPDATE openrails.solana_subscriptions SET
+UPDATE billing.solana_subscriptions SET
     status = $2,
     updated_at = $3
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;

@@ -251,10 +251,10 @@ func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 	dl.list(m.railSub, ccbillDate(w.clock.Now().Add(2*day)), "")
 
 	// Surveyed but never armed: the pass is advisory and changes nothing.
-	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
+	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, updated_by, reason)
-		SELECT id, true, 'e2e', 'survey' FROM openrails.merchants WHERE slug = $1`), w.slug)
+	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, updated_by, reason)
+		SELECT id, true, 'e2e', 'survey' FROM billing.merchants WHERE slug = $1`), w.slug)
 	require.NoError(t, err)
 	w.pull()
 	require.Equal(t, "past_due", w.subscription(embedded, m.sub).Status, "an advisory pass reactivates nothing")

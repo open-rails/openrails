@@ -46,7 +46,7 @@ func (w *world) raceCCBill(m *ccbillMember, events ...ccbillEvent) {
 	tx, err := w.pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	_, err = tx.Exec(ctx, w.q(`SELECT 1 FROM openrails.subscriptions WHERE id = $1 FOR UPDATE`), m.sub.UUID())
+	_, err = tx.Exec(ctx, w.q(`SELECT 1 FROM billing.subscriptions WHERE id = $1 FOR UPDATE`), m.sub.UUID())
 	require.NoError(t, err)
 
 	done := make(chan int, len(events))
@@ -123,7 +123,7 @@ func TestCCBillRenewalAfterRefundIsRefundReview(t *testing.T) {
 	require.NotNil(t, charge, "the charge is on the ledger, not dropped")
 	require.Equal(t, "succeeded", charge.Status)
 	var review string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(metadata->>'refund_review', '') FROM openrails.payments WHERE transaction_id = $1`), txn).Scan(&review))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(metadata->>'refund_review', '') FROM billing.payments WHERE transaction_id = $1`), txn).Scan(&review))
 	require.NotEmpty(t, review, "the charge waits for refund review")
 
 	before := len(w.payments(embedded, m.c.id))

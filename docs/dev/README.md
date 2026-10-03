@@ -56,10 +56,9 @@ rule PREPAREs every query) need a live Postgres whose schema matches
   (`openrails_sqlc_vet`) on the local compose Postgres (default
   `127.0.0.1:5434`; override via `SQLC_ADMIN_DATABASE_URL`,
   `SQLC_POSTGRES_HOST`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB`) and applies
-  the authored baseline through migratekit with
-  explicit canonical schema `openrails`. Runtime fixtures use the default
-  `billing` schema and production query rewriting; SQLC vet prepares the source
-  SQL directly. AuthKit tables and migrations are outside this query catalog.
+  the authored baseline through migratekit in `billing`, the schema all SQL is
+  authored in, so vet prepares exactly what a default deployment runs. AuthKit
+  tables and migrations are outside this query catalog.
 
 So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
 commit the regenerated `internal/db/gen`. Run `task sqlc-check` locally to

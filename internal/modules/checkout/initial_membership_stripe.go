@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-func (h *InitialMembershipIntentHandler) stripeEngineService(ctx context.Context, in gen.OpenrailsRailIntent) (*subscriptions.StripeService, error) {
+func (h *InitialMembershipIntentHandler) stripeEngineService(ctx context.Context, in gen.BillingRailIntent) (*subscriptions.StripeService, error) {
 	resolver, ok := h.Resolver.(intents.StripeEngineServiceResolver)
 	if !ok {
 		return nil, errors.New("Stripe engine account resolver unavailable")
@@ -24,7 +24,7 @@ func (h *InitialMembershipIntentHandler) stripeEngineService(ctx context.Context
 	}
 	return service, nil
 }
-func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) intents.Outcome {
+func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload) intents.Outcome {
 	if h.Checkout.Config == nil || h.Checkout.Config.IsProviderReadOnly() {
 		return intents.Parked("Stripe engine writes unavailable")
 	}
@@ -58,7 +58,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Contex
 	}
 	return h.executeStripeInitialDecline(ctx, in)
 }
-func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) intents.Outcome {
+func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context, in gen.BillingRailIntent, p InitialMembershipPayload) intents.Outcome {
 	service, err := h.stripeEngineService(ctx, in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -110,7 +110,7 @@ func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context
 
 // Cancellation uses the original submission fence and the normal Execute lease.
 // Recovery always reads the same payment before considering another cancel.
-func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context.Context, in gen.BillingRailIntent) intents.Outcome {
 	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())

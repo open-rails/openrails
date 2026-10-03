@@ -13,7 +13,7 @@ import (
 )
 
 const beginStripeMethodSetup = `-- name: BeginStripeMethodSetup :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET status='requires_action',updated_at=$1
 WHERE merchant_id=$2 AND id=$3
   AND rail='stripe' AND mode='payment_method' AND status='created'
@@ -36,7 +36,7 @@ func (q *Queries) BeginStripeMethodSetup(ctx context.Context, arg BeginStripeMet
 }
 
 const completeStripeMethodSetup = `-- name: CompleteStripeMethodSetup :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET status='succeeded',rail_state=rail_state || jsonb_build_object('payment_method_id',$1::uuid::text),updated_at=$2
 WHERE merchant_id=$3 AND id=$4
   AND rail='stripe' AND mode='payment_method' AND status='requires_action'
@@ -66,7 +66,7 @@ func (q *Queries) CompleteStripeMethodSetup(ctx context.Context, arg CompleteStr
 }
 
 const retainStripeMethodSetup = `-- name: RetainStripeMethodSetup :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET reference=$1,updated_at=$2
 WHERE merchant_id=$3 AND id=$4
   AND rail='stripe' AND mode='payment_method' AND status='requires_action'

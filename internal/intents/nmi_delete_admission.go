@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func (s *Store) enqueueNMIMethodDelete(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
-	var row gen.OpenrailsRailIntent
+func (s *Store) enqueueNMIMethodDelete(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
+	var row gen.BillingRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil || mid.UUID() != p.MerchantID {
 		return row, paymentmethods.ErrPaymentMethodDeleteUnsafe

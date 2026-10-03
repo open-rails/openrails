@@ -10,7 +10,7 @@ import (
 
 // DeletedMethod validates a terminal instrument decision without requiring the
 // removed row. Archives use its immutable payer/ID to explain nullable history.
-func DeletedMethod(in gen.OpenrailsRailIntent) (uuid.UUID, uuid.UUID, error) {
+func DeletedMethod(in gen.BillingRailIntent) (uuid.UUID, uuid.UUID, error) {
 	invalid := errors.New("invalid terminal payment-method deletion")
 	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.Status != StatusSucceeded {
 		return uuid.Nil, uuid.Nil, invalid
@@ -70,7 +70,7 @@ func DeletedMethod(in gen.OpenrailsRailIntent) (uuid.UUID, uuid.UUID, error) {
 	return uuid.Nil, uuid.Nil, invalid
 }
 
-func deletedMethodActorMatches(in gen.OpenrailsRailIntent, customer uuid.UUID) bool {
+func deletedMethodActorMatches(in gen.BillingRailIntent, customer uuid.UUID) bool {
 	switch Origin(in.Origin) {
 	case OriginUser:
 		if in.Actor == nil {

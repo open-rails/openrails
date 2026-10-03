@@ -133,8 +133,8 @@ func TestWholeJSONNumber(t *testing.T) {
 	}
 }
 
-func testResolver(fallback PSPRef, rows ...gen.OpenrailsPsp) *pspResolver {
-	r := &pspResolver{byID: map[uuid.UUID]gen.OpenrailsPsp{}, byKey: map[string]gen.OpenrailsPsp{}, fallback: fallback}
+func testResolver(fallback PSPRef, rows ...gen.BillingPsp) *pspResolver {
+	r := &pspResolver{byID: map[uuid.UUID]gen.BillingPsp{}, byKey: map[string]gen.BillingPsp{}, fallback: fallback}
 	for _, p := range rows {
 		r.byID[p.ID] = p
 		r.byKey[pspKeyIndex(p.Rail, *p.Key)] = p
@@ -143,8 +143,8 @@ func testResolver(fallback PSPRef, rows ...gen.OpenrailsPsp) *pspResolver {
 	return r
 }
 
-func psp(rail, key string) gen.OpenrailsPsp {
-	return gen.OpenrailsPsp{ID: uuid.New(), Rail: rail, Key: &key}
+func psp(rail, key string) gen.BillingPsp {
+	return gen.BillingPsp{ID: uuid.New(), Rail: rail, Key: &key}
 }
 
 // or#893: every provider row is attributed to a PSP the merchant owns on the same

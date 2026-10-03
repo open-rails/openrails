@@ -15,7 +15,7 @@
 -- proved nothing, and `x <> ALL('{}')` is TRUE for every row. The cardinality
 -- guard makes an empty remote set match NOTHING here, so even a caller that
 -- skipped its own refusal cannot wipe a PSP's book (or#858).
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail_subscription_id <> ''
@@ -26,7 +26,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: ListPSPSubscriptionCandidates :many
 -- Every account-bound subscription a prune WOULD have considered. Reports what
 -- a coverage-blocked pass skipped; never a deletion input.
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail_subscription_id <> ''
@@ -36,7 +36,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- Windowed: only payments inside the pulled [since, until] window are eligible
 -- (a snapshot only proves absence within the window it covered). Same empty-set
 -- refusal as the subscription query.
-SELECT id FROM openrails.payments
+SELECT id FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND deleted_at IS NULL
@@ -46,7 +46,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(until)::timestamptz IS NULL OR purchased_at <= sqlc.narg(until)::timestamptz);
 
 -- name: ListPSPPaymentCandidates :many
-SELECT id FROM openrails.payments
+SELECT id FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND deleted_at IS NULL
@@ -58,7 +58,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- retracted through convergence (grant revoke), never row-deleted (that would
 -- orphan the grant). Such excess subs are surfaced by prune, not deleted.
 SELECT EXISTS(
-  SELECT 1 FROM openrails.grants
+  SELECT 1 FROM billing.grants
   WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     AND source_type = 'subscription'
     AND source_id = sqlc.arg(subscription_id)::uuid::text
@@ -69,15 +69,15 @@ SELECT EXISTS(
 -- refund, an admin grant, or a checkout session. Such rows are retracted through
 -- convergence (grant revoke), never pruned.
 SELECT
-  EXISTS(SELECT 1 FROM openrails.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
-  OR EXISTS(SELECT 1 FROM openrails.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = sqlc.arg(payment_id)::uuid AND r.deleted_at IS NULL)
-  OR EXISTS(SELECT 1 FROM openrails.checkout_sessions cs WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.payment_id = sqlc.arg(payment_id)::uuid AND cs.deleted_at IS NULL)
+  EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
+  OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = sqlc.arg(payment_id)::uuid AND r.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing.checkout_sessions cs WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.payment_id = sqlc.arg(payment_id)::uuid AND cs.deleted_at IS NULL)
   AS protected;
 
 -- --- or#858 soft delete ------------------------------------------------------
 
 -- name: PruneSoftDeleteCheckoutSessionsBySubscription :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
@@ -86,7 +86,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL;
 
 -- name: PruneSoftDeleteEntitlementsBySubscription :execrows
-UPDATE openrails.entitlements
+UPDATE billing.entitlements
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
@@ -96,7 +96,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL;
 
 -- name: PruneSoftDeleteSubscriptionByID :execrows
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
@@ -106,7 +106,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL;
 
 -- name: PruneSoftDeletePaymentByID :execrows
-UPDATE openrails.payments
+UPDATE billing.payments
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -120,22 +120,22 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- entitlement revocation — is never resurrected by a rollback.
 
 -- name: RestoreSubscriptionsByDestructiveRun :execrows
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
 -- name: RestorePaymentsByDestructiveRun :execrows
-UPDATE openrails.payments
+UPDATE billing.payments
 SET deleted_at = NULL, destructive_run_id = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
 -- name: RestoreCheckoutSessionsByDestructiveRun :execrows
-UPDATE openrails.checkout_sessions
+UPDATE billing.checkout_sessions
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
 -- name: RestoreEntitlementsByDestructiveRun :execrows
-UPDATE openrails.entitlements
+UPDATE billing.entitlements
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
@@ -145,7 +145,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.ar
 -- reversible record.
 
 -- name: CreateDestructiveRun :one
-INSERT INTO openrails.maintenance_runs (
+INSERT INTO billing.maintenance_runs (
     id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.narg(psp_id)::uuid,
@@ -155,7 +155,7 @@ INSERT INTO openrails.maintenance_runs (
 RETURNING *;
 
 -- name: FinishDestructiveRun :one
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status = sqlc.arg(status)::text,
     finished_at = sqlc.arg(now)::timestamptz,
     affected = sqlc.narg(affected)::jsonb
@@ -163,7 +163,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','converge_e
 RETURNING *;
 
 -- name: MarkDestructiveRunReversed :one
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status = 'reversed',
     reversed_at = sqlc.arg(now)::timestamptz,
     reversed_by = sqlc.arg(reversed_by)::text
@@ -174,11 +174,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING *;
 
 -- name: GetDestructiveRun :one
-SELECT * FROM openrails.maintenance_runs
+SELECT * FROM billing.maintenance_runs
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = sqlc.arg(id)::uuid;
 
 -- name: ListDestructiveRuns :many
-SELECT * FROM openrails.maintenance_runs
+SELECT * FROM billing.maintenance_runs
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND kind IN ('prune','converge_enforce','merchant_purge')
   AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)

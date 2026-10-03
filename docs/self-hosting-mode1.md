@@ -76,7 +76,7 @@ manifest and secret files before it can use those providers.
 3. Secrets are seeded **into memory** (the runtime manifest secret plane) and
    served through the same store interface every consumer reads — checkout,
    webhook verification, provider pulls, rebill charging. Nothing is written
-   to `openrails.merchant_secrets` or Vault KV.
+   to `billing.merchant_secrets` or Vault KV.
 4. A declared secret that resolves to an empty value (no YAML value, no
    mounted file, no env var) is a boot **error**. A PSP declared without a
    given secret seeds nothing for it — requests needing it fail closed at use

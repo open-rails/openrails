@@ -1119,7 +1119,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 	default:
 		f.LocalEvidence = localSubEvidence(sub)
 		f.LocalEvidence["correlated_via"] = how
-		f.RecommendedAction = "enforce backfills the missing openrails.payments row (deduped on rail+transaction_id)"
+		f.RecommendedAction = "enforce backfills the missing billing.payments row (deduped on rail+transaction_id)"
 		subID := sub.ID
 		action := &BackfillPaymentAction{
 			Rail:           sub.Rail,
@@ -1246,7 +1246,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 		"price_id":            billing.PriceID(priceID).String(),
 		"correlated_via":      "purchase_memo",
 	}
-	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout session (recipient, mint and amount agree); enforce backfills the missing openrails.payments row with money from the on-chain transfer"
+	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout session (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
 	f.Apply = &ApplyAction{BackfillPayment: &BackfillPaymentAction{
 		Rail:          string(ProviderSolana),
 		TransactionID: t.TransactionID,

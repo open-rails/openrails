@@ -2,14 +2,14 @@
 -- Balances are O(1) maintained counters on accounts; transfers are append-only.
 
 -- name: GetLedgerAccount :one
-SELECT * FROM openrails.ledger_accounts
+SELECT * FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND account_type = sqlc.arg(account_type)::text
   AND currency = sqlc.arg(currency)::text
   AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid;
 
 -- name: InsertLedgerAccount :one
-INSERT INTO openrails.ledger_accounts (
+INSERT INTO billing.ledger_accounts (
     merchant_id, customer_id, account_type, currency,
     debits_must_not_exceed_credits, credits_must_not_exceed_debits
 ) VALUES (
@@ -27,7 +27,7 @@ RETURNING *;
 -- therefore "already applied", not an error — ledger.Apply reads the committed
 -- row and reports Replayed.
 -- name: InsertLedgerTransfer :one
-INSERT INTO openrails.ledger_transfers (
+INSERT INTO billing.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
     allow_debit_negative_up_to, operation,
     source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id
@@ -46,7 +46,7 @@ RETURNING *;
 -- the full physical identity, lot included, so a multi-lot spend resolves the
 -- right leg.
 -- name: GetLedgerTransferAtCoordinate :one
-SELECT * FROM openrails.ledger_transfers
+SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id IS NOT DISTINCT FROM sqlc.narg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
@@ -60,7 +60,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- counters. This is the Phase H O(1) replacement for summing ledger_transfers.
 -- name: LedgerAccountBalance :one
 SELECT (credits_posted - debits_posted)::bigint AS balance
-FROM openrails.ledger_accounts
+FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(account_id)::uuid;
 
@@ -68,7 +68,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- first, paginated) — the source for GetTransactions after the single-entry
 -- money_transactions table was retired (#512 hard cut).
 -- name: ListLedgerTransfersByCustomer :many
-SELECT * FROM openrails.ledger_transfers
+SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
@@ -76,7 +76,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(lim)::int OFFSET sqlc.arg(off)::int;
 
 -- name: CountLedgerTransfersByCustomer :one
-SELECT count(*) FROM openrails.ledger_transfers
+SELECT count(*) FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text;
@@ -87,7 +87,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- a wasted-spend usage charge sharing one (source, source_id) alias here.
 -- Newest-first so a replay returns the latest row.
 -- name: GetLedgerTransferByCoords :one
-SELECT * FROM openrails.ledger_transfers
+SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
@@ -101,7 +101,7 @@ LIMIT 1;
 -- GetLedgerSpendByCoords: the first posted spend movement for one money
 -- operation at its idempotency coordinate.
 -- name: GetLedgerSpendByCoords :one
-SELECT * FROM openrails.ledger_transfers
+SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
@@ -117,7 +117,7 @@ LIMIT 1;
 -- emitted as positive transfer amounts; the sign is applied by the caller.
 -- name: SumLedgerMovementsByCustomerInPeriod :many
 SELECT transfer_type, COALESCE(SUM(amount), 0)::bigint AS total
-FROM openrails.ledger_transfers
+FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
@@ -133,7 +133,7 @@ SELECT merchant_id,
        currency,
        SUM(credits_posted - debits_posted)::bigint AS net,
        COUNT(*)::bigint AS accounts
-FROM openrails.ledger_accounts
+FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 GROUP BY merchant_id, currency
 HAVING SUM(credits_posted - debits_posted) <> 0
@@ -146,11 +146,11 @@ WITH logged AS (
     SELECT account_id, SUM(credit)::bigint AS credits, SUM(debit)::bigint AS debits
     FROM (
         SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
-        FROM openrails.ledger_transfers
+        FROM billing.ledger_transfers
         WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         UNION ALL
         SELECT debit_account_id, 0::bigint, amount
-        FROM openrails.ledger_transfers
+        FROM billing.ledger_transfers
         WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     ) legs
     GROUP BY account_id
@@ -164,7 +164,7 @@ SELECT a.id AS account_id,
        COALESCE(l.credits, 0)::bigint AS logged_credits,
        a.debits_posted AS stored_debits,
        COALESCE(l.debits, 0)::bigint AS logged_debits
-FROM openrails.ledger_accounts a
+FROM billing.ledger_accounts a
 LEFT JOIN logged l ON l.account_id = a.id
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (a.credits_posted <> COALESCE(l.credits, 0)
@@ -178,7 +178,7 @@ ORDER BY a.merchant_id, a.currency, a.id;
 -- a retry's amount to refuse a reused key carrying a changed body.
 -- name: SumLedgerSpendByCoords :one
 SELECT COALESCE(SUM(amount), 0)::bigint AS total, count(*)::bigint AS transfers
-FROM openrails.ledger_transfers
+FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text

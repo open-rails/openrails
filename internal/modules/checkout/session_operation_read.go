@@ -80,14 +80,14 @@ func (s *CheckoutSessionService) acceptedOperationSessionResponse(ctx context.Co
 
 // authenticationRequired reports a card payment waiting on the customer's
 // provider challenge (3-D Secure); the browser completes it in the page.
-func authenticationRequired(operation gen.OpenrailsRailIntent) bool {
+func authenticationRequired(operation gen.BillingRailIntent) bool {
 	var evidence struct {
 		AuthenticationRequired bool `json:"authentication_required"`
 	}
 	return json.Unmarshal(operation.ResultEvidence, &evidence) == nil && evidence.AuthenticationRequired
 }
 
-func saleOwnedBySession(operation gen.OpenrailsRailIntent, session *models.CheckoutSession, custodian bool) error {
+func saleOwnedBySession(operation gen.BillingRailIntent, session *models.CheckoutSession, custodian bool) error {
 	if custodian {
 		var p CustodianSalePayload
 		if err := json.Unmarshal(operation.Payload, &p); err != nil {
@@ -108,7 +108,7 @@ func saleOwnedBySession(operation gen.OpenrailsRailIntent, session *models.Check
 	return nil
 }
 
-func validateSaleTerminal(operation gen.OpenrailsRailIntent, custodian bool) error {
+func validateSaleTerminal(operation gen.BillingRailIntent, custodian bool) error {
 	if custodian {
 		return nil
 	}

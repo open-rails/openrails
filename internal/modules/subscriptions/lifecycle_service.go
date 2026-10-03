@@ -1863,7 +1863,7 @@ func samePeriodEnd(belief, current *time.Time) bool {
 	return current != nil && current.Equal(*belief)
 }
 
-// cancelSolanaSubscriptionCascade flips the linked openrails.solana_subscriptions
+// cancelSolanaSubscriptionCascade flips the linked billing.solana_subscriptions
 // row to cancelled so the hourly Solana cranker's ListDue (which filters
 // status = active) no longer returns it — billing stops because OpenRails is the
 // only puller (#264). `d` must be the tx-bound db handle so the cascade commits

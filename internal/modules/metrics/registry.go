@@ -27,7 +27,7 @@ const (
 type Family string
 
 const (
-	FamPayments       Family = "payments"        // flow over openrails.payments (purchased_at)
+	FamPayments       Family = "payments"        // flow over billing.payments (purchased_at)
 	FamSubsNew        Family = "subs_new"        // flow over subscriptions (started_at)
 	FamSubsCancelled  Family = "subs_cancelled"  // flow over subscriptions (cancelled_at)
 	FamSubsEnded      Family = "subs_ended"      // flow over subscriptions (ended_at)
@@ -112,8 +112,8 @@ func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (strin
 const (
 	// monthlyNormExpr and billingCycleExpr are the schema's shared definitions
 	// (migration 0004), also used by fleet MRR.
-	monthlyNormExpr  = `openrails.monthly_normalized_amount(pr.amount, pr.access_duration_hours)`
-	billingCycleExpr = `openrails.billing_cycle_label(pr.access_duration_hours)`
+	monthlyNormExpr  = `billing.monthly_normalized_amount(pr.amount, pr.access_duration_hours)`
+	billingCycleExpr = `billing.billing_cycle_label(pr.access_duration_hours)`
 
 	// streamExpr classifies a payment's revenue stream.
 	streamExpr = `CASE
@@ -175,12 +175,12 @@ var Dimensions = []Dimension{
 var families = map[Family]familySpec{
 	FamPayments: {
 		Kind:     "flow",
-		From:     `openrails.payments p`,
+		From:     `billing.payments p`,
 		TimeExpr: `p.purchased_at`,
 		DimJoins: map[string]string{
-			"product_id":    `LEFT JOIN openrails.prices pr ON pr.id = p.price_id`,
-			"billing_cycle": `LEFT JOIN openrails.prices pr ON pr.id = p.price_id`,
-			"rail_account":  `LEFT JOIN openrails.psps rma ON rma.id = p.psp_id`,
+			"product_id":    `LEFT JOIN billing.prices pr ON pr.id = p.price_id`,
+			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.id = p.price_id`,
+			"rail_account":  `LEFT JOIN billing.psps rma ON rma.id = p.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `p.currency`,
@@ -198,12 +198,12 @@ var families = map[Family]familySpec{
 	},
 	FamSubsNew: {
 		Kind:     "flow",
-		From:     `openrails.subscriptions s`,
+		From:     `billing.subscriptions s`,
 		TimeExpr: `s.started_at`,
 		DimJoins: map[string]string{
-			"currency":      `LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
-			"billing_cycle": `LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
-			"rail_account":  `LEFT JOIN openrails.psps rma ON rma.id = s.psp_id`,
+			"currency":      `LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
+			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
+			"rail_account":  `LEFT JOIN billing.psps rma ON rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,
@@ -213,7 +213,7 @@ var families = map[Family]familySpec{
 			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
 			"billing_cycle": billingCycleExpr,
 			"subscriber_type": `CASE WHEN EXISTS (
-				SELECT 1 FROM openrails.subscriptions s2
+				SELECT 1 FROM billing.subscriptions s2
 				WHERE s2.merchant_id = s.merchant_id AND s2.customer_id = s.customer_id
 				  AND s2.id <> s.id AND s2.ended_at IS NOT NULL AND s2.ended_at <= s.started_at
 			) THEN 'returning' ELSE 'first_time' END`,
@@ -221,11 +221,11 @@ var families = map[Family]familySpec{
 	},
 	FamSubsCancelled: {
 		Kind:     "flow",
-		From:     `openrails.subscriptions s`,
+		From:     `billing.subscriptions s`,
 		TimeExpr: `s.cancelled_at`,
 		DimJoins: map[string]string{
-			"currency":     `LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
-			"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = s.psp_id`,
+			"currency":     `LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
+			"rail_account": `LEFT JOIN billing.psps rma ON rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":     `COALESCE(pr.currency, '')`,
@@ -239,7 +239,7 @@ var families = map[Family]familySpec{
 	},
 	FamSubsEnded: {
 		Kind:     "flow",
-		From:     `openrails.subscriptions s`,
+		From:     `billing.subscriptions s`,
 		TimeExpr: `s.ended_at`,
 		DimExprs: map[string]string{
 			"rail":        `s.rail`,
@@ -251,7 +251,7 @@ var families = map[Family]familySpec{
 	},
 	FamGrants: {
 		Kind:     "flow",
-		From:     `openrails.grants g`,
+		From:     `billing.grants g`,
 		TimeExpr: `g.created_at`,
 		DimExprs: map[string]string{
 			"currency":   `g.currency`,
@@ -262,7 +262,7 @@ var families = map[Family]familySpec{
 	},
 	FamUsage: {
 		Kind:     "flow",
-		From:     `openrails.usage_events ue`,
+		From:     `billing.usage_events ue`,
 		TimeExpr: `ue.occurred_at`,
 		DimExprs: map[string]string{
 			"currency":  `ue.currency`,
@@ -273,7 +273,7 @@ var families = map[Family]familySpec{
 	},
 	FamTransitions: {
 		Kind:     "flow",
-		From:     `openrails.subscription_status_transitions st`,
+		From:     `billing.subscription_status_transitions st`,
 		TimeExpr: `st.occurred_at`,
 		DimExprs: map[string]string{
 			"cancel_type": `COALESCE(st.cancel_type, 'unknown')`,
@@ -281,7 +281,7 @@ var families = map[Family]familySpec{
 	},
 	FamDenials: {
 		Kind:     "flow",
-		From:     `openrails.admission_denials_hourly ad`,
+		From:     `billing.admission_denials_hourly ad`,
 		TimeExpr: `ad.hour_at`,
 		DimExprs: map[string]string{
 			"denial_reason": `ad.denial_reason`,
@@ -290,11 +290,11 @@ var families = map[Family]familySpec{
 	},
 	FamSubsSnapshot: {
 		Kind: "snapshot",
-		From: `openrails.subscriptions s LEFT JOIN openrails.prices pr ON pr.id = s.price_id`,
+		From: `billing.subscriptions s LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
 		// Interval predicate: sub existed at t.
 		BaseWhere: `s.started_at <= edge.bucket AND (s.ended_at IS NULL OR s.ended_at > edge.bucket)`,
 		DimJoins: map[string]string{
-			"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = s.psp_id`,
+			"rail_account": `LEFT JOIN billing.psps rma ON rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,
@@ -308,7 +308,7 @@ var families = map[Family]familySpec{
 	},
 	FamEntitlSnapshot: {
 		Kind: "snapshot",
-		From: `openrails.entitlements e`,
+		From: `billing.entitlements e`,
 		BaseWhere: `e.start_at <= edge.bucket AND (e.end_at IS NULL OR e.end_at > edge.bucket)
 		  AND (e.revoked_at IS NULL OR e.revoked_at > edge.bucket) AND e.deleted_at IS NULL`,
 		DimExprs: map[string]string{
@@ -317,9 +317,9 @@ var families = map[Family]familySpec{
 	},
 	FamBalance: {
 		Kind: "balance",
-		From: `openrails.ledger_transfers lt
-		JOIN openrails.ledger_accounts da ON da.id = lt.debit_account_id
-		JOIN openrails.ledger_accounts ca ON ca.id = lt.credit_account_id`,
+		From: `billing.ledger_transfers lt
+		JOIN billing.ledger_accounts da ON da.id = lt.debit_account_id
+		JOIN billing.ledger_accounts ca ON ca.id = lt.credit_account_id`,
 		TimeExpr: `lt.created_at`,
 		DimExprs: map[string]string{
 			"currency": `lt.currency`,
@@ -330,14 +330,14 @@ var families = map[Family]familySpec{
 	},
 	FamWebhookHealth: {
 		Kind: "snapshot",
-		From: `openrails.webhook_health wh`,
+		From: `billing.webhook_health wh`,
 		DimExprs: map[string]string{
 			"rail": `wh.rail`,
 		},
 	},
 	FamWebhookDaily: {
 		Kind:     "flow",
-		From:     `openrails.webhook_health_daily whd`,
+		From:     `billing.webhook_health_daily whd`,
 		TimeExpr: `whd.day_at`,
 		DimExprs: map[string]string{
 			"rail": `whd.rail`,
@@ -345,9 +345,9 @@ var families = map[Family]familySpec{
 	},
 	FamAttempts: {
 		Kind:     "flow",
-		From:     `openrails.payment_attempts a`,
+		From:     `billing.payment_attempts a`,
 		TimeExpr: `a.attempted_at`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = a.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = a.psp_id`},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(a.currency, '')`,
 			"rail":          `a.rail`,
@@ -372,7 +372,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     checkoutsFrom,
 		TimeExpr: `ck.started_at`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = ck.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = ck.psp_id`},
 		DimExprs: map[string]string{
 			"currency":     `ck.currency`,
 			"rail":         `ck.rail`,
@@ -383,9 +383,9 @@ var families = map[Family]familySpec{
 	},
 	FamRebillCycles: {
 		Kind:     "flow",
-		From:     `openrails.rebill_cycle_facts cy`,
+		From:     `billing.rebill_cycle_facts cy`,
 		TimeExpr: `cy.due_at`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = cy.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = cy.psp_id`},
 		DimExprs: map[string]string{
 			"currency":               `cy.currency`,
 			"rail":                   `cy.rail`,
@@ -404,9 +404,9 @@ var families = map[Family]familySpec{
 	},
 	FamNMIHistory: {
 		Kind:     "flow",
-		From:     `openrails.nmi_history_months h`,
+		From:     `billing.nmi_history_months h`,
 		TimeExpr: `h.month`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN openrails.psps rma ON rma.id = h.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = h.psp_id`},
 		DimExprs: map[string]string{
 			"rail_account": `COALESCE(rma.account_id, 'unknown')`,
 			"nmi_kind":     `h.kind`,
@@ -428,7 +428,7 @@ const checkoutsFrom = `(SELECT a.merchant_id, a.checkout_id,
 		(array_agg(a.psp_id ORDER BY a.attempted_at, a.id))[1] AS psp_id,
 		(array_agg(a.owner ORDER BY a.attempted_at, a.id))[1] AS owner,
 		COALESCE((array_agg(a.currency ORDER BY a.attempted_at, a.id) FILTER (WHERE a.currency IS NOT NULL))[1], '') AS currency
-	FROM openrails.payment_attempts a
+	FROM billing.payment_attempts a
 	WHERE a.checkout_id IS NOT NULL
 	GROUP BY a.merchant_id, a.checkout_id) ck`
 
@@ -697,7 +697,7 @@ var Measures = []Measure{
 		Dims: []string{"currency", "product_id", "payer"}},
 	{Name: "repeat_topups", Class: ClassAdditive, Family: FamGrants, Unit: "count", Internal: true,
 		Expr: `COALESCE(SUM(CASE WHEN EXISTS (
-			SELECT 1 FROM openrails.grants g2
+			SELECT 1 FROM billing.grants g2
 			WHERE g2.merchant_id = g.merchant_id AND g2.customer_id = g.customer_id
 			  AND g2.kind = 'credit' AND g2.event = 'grant' AND g2.source_type = 'purchase'
 			  AND g2.created_at < g.created_at

@@ -17,8 +17,8 @@ import (
 // Replacement admission joins deletion's customer/method order. Once an
 // update is accepted its existing payload pins the method; once deletion is
 // accepted a fresh token must never reach that vendor target.
-func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
-	var row gen.OpenrailsRailIntent
+func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
+	var row gen.BillingRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil || mid.UUID() != p.MerchantID {
 		return row, paymentmethods.ErrPaymentMethodDeleteUnsafe
@@ -27,7 +27,7 @@ func (s *Store) enqueueNMIMethodUpdate(ctx context.Context, p EnqueueParams) (ge
 	if err != nil {
 		return row, err
 	}
-	terms, err := decodeNMIPaymentMethodUpdatePayload(gen.OpenrailsRailIntent{Payload: raw})
+	terms, err := decodeNMIPaymentMethodUpdatePayload(gen.BillingRailIntent{Payload: raw})
 	if err != nil {
 		return row, err
 	}

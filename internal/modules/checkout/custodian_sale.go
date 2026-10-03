@@ -296,11 +296,11 @@ func (h *CustodianSaleIntentHandler) PrunePolicy() (keepPayload, keepEvidence bo
 	return false, true
 }
 
-func (h *CustodianSaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+func (h *CustodianSaleIntentHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
-func decodeCustodianSalePayload(intent gen.OpenrailsRailIntent) (CustodianSalePayload, error) {
+func decodeCustodianSalePayload(intent gen.BillingRailIntent) (CustodianSalePayload, error) {
 	var p CustodianSalePayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("custodian sale intent has no payload")
@@ -319,7 +319,7 @@ func (h *CustodianSaleIntentHandler) gatewayQueryClient(cfg *custodialPSP) (*nmi
 	return (&railresolve.NMIFactory{Config: h.Sale.Config}).ClientFor(cfg.MerchantID, cfg.Scope, cfg.Settings)
 }
 
-func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) intents.Outcome {
 	if intent.Attempts > 1 {
 		return h.Verify(ctx, intent)
 	}
@@ -414,7 +414,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 }
 
 // Verify resolves an ambiguous sale via the gateway query leg.
-func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) intents.Outcome {
 	p, err := decodeCustodianSalePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
@@ -446,7 +446,7 @@ func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.Open
 
 // Resolve accepts only provider-confirmed non-execution for a custodian sale.
 // Receipts converge through the exact order-reference search.
-func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.BillingRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	p, err := decodeCustodianSalePayload(intent)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -479,7 +479,7 @@ func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.Ope
 
 // priorAnchor finds an existing instrument by the custodian's PAN fingerprint
 // and returns its unscheduled stored-credential anchor (+ the instrument row).
-func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, fingerprint string) (string, *gen.OpenrailsPaymentMethod) {
+func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, fingerprint string) (string, *gen.BillingPaymentMethod) {
 	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" {
 		return "", nil
 	}
@@ -499,7 +499,7 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 
 // finalize is the verified-existing leg (no fresh charge result): the charge
 // landed at the gateway; conversion may still be pending.
-func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, cfg *custodialPSP, p CustodianSalePayload, orderID, transactionID string, _ bool) (outcome intents.Outcome) {
+func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, intent gen.BillingRailIntent, cfg *custodialPSP, p CustodianSalePayload, orderID, transactionID string, _ bool) (outcome intents.Outcome) {
 	defer func() {
 		if outcome.Class == intents.OutcomeAmbiguous && transactionID != "" {
 			outcome.Evidence = map[string]any{"transaction_id": transactionID}
@@ -524,7 +524,7 @@ func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, intent gen.Op
 // finalizeApproved converts the intent to a durable token, writes/reuses the
 // instrument row, persists the stored-credential anchor write-once, provisions
 // an NT when armed (never load-bearing), and registers the purchase.
-func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, intent gen.OpenrailsRailIntent, cfg *custodialPSP, p CustodianSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) (outcome intents.Outcome) {
+func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, intent gen.BillingRailIntent, cfg *custodialPSP, p CustodianSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) (outcome intents.Outcome) {
 	merchantID := intent.MerchantID
 	defer func() {
 		if outcome.Class == intents.OutcomeAmbiguous && res.TransactionID != "" {
@@ -701,7 +701,7 @@ func stringPtrIfSet(v string) *string {
 
 // recordAttempt records the custodian sale's answer (#1110). The sale's own
 // writes are not one transaction, so a failed write is logged.
-func (h *CustodianSaleIntentHandler) recordAttempt(ctx context.Context, intent gen.OpenrailsRailIntent, cfg *custodialPSP, p CustodianSalePayload, a attempts.Attempt) {
+func (h *CustodianSaleIntentHandler) recordAttempt(ctx context.Context, intent gen.BillingRailIntent, cfg *custodialPSP, p CustodianSalePayload, a attempts.Attempt) {
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil || h.Sale.DB == nil || cfg.Scope.ID == uuid.Nil {
 		return

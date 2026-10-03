@@ -8,6 +8,6 @@
 -- The per-customer spend mutex (#491): every spend/capture/deposit path locks
 -- this row FOR UPDATE before reading/mutating the customer's ledger, serializing
 -- all money mutations per customer. Returns the customer id.
-SELECT id FROM openrails.customers
+SELECT id FROM billing.customers
 WHERE id = $1 AND merchant_id = $2
 FOR UPDATE;

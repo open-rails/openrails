@@ -12,7 +12,7 @@ import (
 // ValidateProviderCutoverLineage explains a historical account/reference through
 // retained, completed forward cutovers. Original payment custody stays bound to
 // the original account; current catalog and current account defaults are unused.
-func ValidateProviderCutoverLineage(merchantID, subscriptionID, customerID, sourcePSP uuid.UUID, sourceRef string, currentPSP uuid.UUID, currentRef string, operations []gen.OpenrailsRailIntent) error {
+func ValidateProviderCutoverLineage(merchantID, subscriptionID, customerID, sourcePSP uuid.UUID, sourceRef string, currentPSP uuid.UUID, currentRef string, operations []gen.BillingRailIntent) error {
 	type address struct {
 		psp uuid.UUID
 		ref string

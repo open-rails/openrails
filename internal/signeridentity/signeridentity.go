@@ -97,7 +97,7 @@ func (t *Transit) PublicKey(ctx context.Context, key string) ([]byte, error) {
 
 // StoredSigner is an active Solana PSP signed by a Transit key.
 type StoredSigner struct {
-	Row      gen.OpenrailsPsp
+	Row      gen.BillingPsp
 	Identity solanago.PublicKey
 }
 

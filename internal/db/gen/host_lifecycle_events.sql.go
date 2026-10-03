@@ -13,9 +13,9 @@ import (
 )
 
 const deleteDeliveredHostLifecycleEventsBefore = `-- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
-DELETE FROM openrails.host_outbox
+DELETE FROM billing.host_outbox
 WHERE ctid IN (
-    SELECT hle.ctid FROM openrails.host_outbox hle
+    SELECT hle.ctid FROM billing.host_outbox hle
     WHERE hle.merchant_id = $1::uuid
       AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
       AND hle.delivered_at < $2::timestamptz
@@ -40,7 +40,7 @@ func (q *Queries) DeleteDeliveredHostLifecycleEventsBefore(ctx context.Context, 
 
 const enqueueHostLifecycleEvent = `-- name: EnqueueHostLifecycleEvent :execrows
 
-INSERT INTO openrails.host_outbox
+INSERT INTO billing.host_outbox
     (merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data, dedupe_key)
 VALUES (
     $1, $2::text, $3::text,

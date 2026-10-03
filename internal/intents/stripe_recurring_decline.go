@@ -22,7 +22,7 @@ type stripeRecurringDecline struct {
 
 // LoadStripeRecurringDecline exposes a sealed canceled-PI refusal, never a
 // mutable requires_payment_method status or synthetic NMI response code.
-func LoadStripeRecurringDecline(in gen.OpenrailsRailIntent) (string, string, bool, error) {
+func LoadStripeRecurringDecline(in gen.BillingRailIntent) (string, string, bool, error) {
 	var all map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return "", "", false, nil
@@ -58,7 +58,7 @@ func LoadStripeRecurringDecline(in gen.OpenrailsRailIntent) (string, string, boo
 	}
 	return code, fact.PaymentIntentID, true, nil
 }
-func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) error {
+func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.BillingRailIntent, service *subscriptions.StripeService, reference string) error {
 	if in.IntentType != subscriptions.TypeSubscriptionCollection {
 		return errors.New("not recurring Stripe collection")
 	}
@@ -100,7 +100,7 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Openrai
 
 // retainedDeclineCode is the issuer's decline code the execute leg retained
 // before cancelling: Stripe clears it from the cancelled PaymentIntent.
-func (s *Store) retainedDeclineCode(ctx context.Context, in gen.OpenrailsRailIntent) string {
+func (s *Store) retainedDeclineCode(ctx context.Context, in gen.BillingRailIntent) string {
 	current, err := s.Get(ctx, in.ID)
 	if err != nil {
 		return ""

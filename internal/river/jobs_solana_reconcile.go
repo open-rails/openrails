@@ -38,7 +38,7 @@ type SolanaReconcileArgs struct{}
 func (SolanaReconcileArgs) Kind() string { return KindSolanaReconcile }
 
 // SolanaReconcileWorker verifies that every recorded on-chain pull
-// (solana_subscriptions.last_signature) has a matching openrails.payments row.
+// (solana_subscriptions.last_signature) has a matching billing.payments row.
 // Missing rows emit a billing_ledger_repair_required alert; it never mutates the
 // ledger itself (operator-led repair, like the other reconcilers).
 type SolanaReconcileWorker struct {
@@ -119,7 +119,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 				Operation:      "solana_crank_unrecorded_pull",
 				TransactionID:  sig,
 				SubscriptionID: &subID,
-				Err:            fmt.Errorf("confirmed on-chain pull %s has no openrails.payments record", sig),
+				Err:            fmt.Errorf("confirmed on-chain pull %s has no billing.payments record", sig),
 				Metadata: map[string]any{
 					"subscription_pda": row.SubscriptionPDA,
 					"merchant_address": row.MerchantAddress,

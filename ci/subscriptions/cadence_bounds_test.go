@@ -79,7 +79,7 @@ func TestHeldRenewalKeepsAccess(t *testing.T) {
 	var count int
 	var heldSeconds int64
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT (evidence->'local'->>'count')::int, (evidence->'local'->>'oldest_held_seconds')::bigint
-		FROM openrails.reconciliation_findings WHERE finding_type = 'life.renewal.held' AND status = 'requires_review'`)).Scan(&count, &heldSeconds))
+		FROM billing.reconciliation_findings WHERE finding_type = 'life.renewal.held' AND status = 'requires_review'`)).Scan(&count, &heldSeconds))
 	require.Equal(t, 1, count)
 	require.Equal(t, int64((3 * day).Seconds()), heldSeconds, "the oldest held renewal has waited since its period end")
 

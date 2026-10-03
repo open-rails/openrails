@@ -14,7 +14,7 @@ import (
 
 const fleetMRRByCurrency = `-- name: FleetMRRByCurrency :many
 SELECT currency::text AS currency, subscriptions::bigint AS subscriptions, monthly_amount::bigint AS monthly_amount
-FROM openrails.fleet_mrr_by_currency($1::uuid)
+FROM billing.fleet_mrr_by_currency($1::uuid)
 `
 
 type FleetMRRByCurrencyRow struct {
@@ -46,7 +46,7 @@ func (q *Queries) FleetMRRByCurrency(ctx context.Context, excludeMerchantID *uui
 const fleetMerchantFunnel = `-- name: FleetMerchantFunnel :one
 
 SELECT total::bigint AS total, armed::bigint AS armed, first_revenue::bigint AS first_revenue, active_revenue::bigint AS active_revenue
-FROM openrails.fleet_merchant_funnel($1::uuid, $2::timestamptz)
+FROM billing.fleet_merchant_funnel($1::uuid, $2::timestamptz)
 `
 
 type FleetMerchantFunnelParams struct {
@@ -77,7 +77,7 @@ func (q *Queries) FleetMerchantFunnel(ctx context.Context, arg FleetMerchantFunn
 
 const fleetRailHealth = `-- name: FleetRailHealth :many
 SELECT rail::text AS rail, succeeded::bigint AS succeeded, failed::bigint AS failed, chargebacks::bigint AS chargebacks
-FROM openrails.fleet_rail_health($1::uuid, $2::timestamptz)
+FROM billing.fleet_rail_health($1::uuid, $2::timestamptz)
 `
 
 type FleetRailHealthParams struct {
@@ -119,7 +119,7 @@ func (q *Queries) FleetRailHealth(ctx context.Context, arg FleetRailHealthParams
 
 const fleetRevenueByCurrency = `-- name: FleetRevenueByCurrency :many
 SELECT currency::text AS currency, payments::bigint AS payments, settled_amount::bigint AS settled_amount
-FROM openrails.fleet_revenue_by_currency($1::uuid, $2::timestamptz)
+FROM billing.fleet_revenue_by_currency($1::uuid, $2::timestamptz)
 `
 
 type FleetRevenueByCurrencyParams struct {
@@ -155,7 +155,7 @@ func (q *Queries) FleetRevenueByCurrency(ctx context.Context, arg FleetRevenueBy
 
 const fleetWeeklyActiveMerchants = `-- name: FleetWeeklyActiveMerchants :many
 SELECT week_start::timestamptz AS week_start, merchants::bigint AS merchants
-FROM openrails.fleet_weekly_active_merchants($1::uuid, $2::timestamptz)
+FROM billing.fleet_weekly_active_merchants($1::uuid, $2::timestamptz)
 `
 
 type FleetWeeklyActiveMerchantsParams struct {
@@ -190,7 +190,7 @@ func (q *Queries) FleetWeeklyActiveMerchants(ctx context.Context, arg FleetWeekl
 
 const fleetWeeklyCancelledSubscriptions = `-- name: FleetWeeklyCancelledSubscriptions :many
 SELECT week_start::timestamptz AS week_start, cancellations::bigint AS cancellations
-FROM openrails.fleet_weekly_cancelled_subscriptions($1::uuid, $2::timestamptz)
+FROM billing.fleet_weekly_cancelled_subscriptions($1::uuid, $2::timestamptz)
 `
 
 type FleetWeeklyCancelledSubscriptionsParams struct {
@@ -225,7 +225,7 @@ func (q *Queries) FleetWeeklyCancelledSubscriptions(ctx context.Context, arg Fle
 
 const fleetWeeklyNewMerchants = `-- name: FleetWeeklyNewMerchants :many
 SELECT date_trunc('week', created_at)::timestamptz AS week_start, count(*)::bigint AS merchants
-FROM openrails.merchants
+FROM billing.merchants
 WHERE deleted_at IS NULL AND status = 'active'
   AND created_at >= date_trunc('week', $1::timestamptz)
   AND ($2::uuid IS NULL OR id <> $2::uuid)
@@ -264,7 +264,7 @@ func (q *Queries) FleetWeeklyNewMerchants(ctx context.Context, arg FleetWeeklyNe
 
 const fleetWeeklyVolume = `-- name: FleetWeeklyVolume :many
 SELECT week_start::timestamptz AS week_start, currency::text AS currency, payments::bigint AS payments, settled_amount::bigint AS settled_amount
-FROM openrails.fleet_weekly_volume($1::uuid, $2::timestamptz)
+FROM billing.fleet_weekly_volume($1::uuid, $2::timestamptz)
 `
 
 type FleetWeeklyVolumeParams struct {

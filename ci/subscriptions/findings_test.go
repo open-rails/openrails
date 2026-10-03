@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,7 +88,7 @@ type findingRow struct{ subject, severity, action string }
 
 func (w *world) findings(findingType string) []findingRow {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT subject_key, severity, coalesce(recommended_action, '') FROM openrails.reconciliation_findings
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT subject_key, severity, coalesce(recommended_action, '') FROM billing.reconciliation_findings
 		WHERE finding_type = $1 AND status IN ('reconcile_required', 'requires_review')`), findingType)
 	require.NoError(w.t, err)
 	defer rows.Close()
@@ -103,14 +102,14 @@ func (w *world) findings(findingType string) []findingRow {
 }
 
 func (w *world) q(sql string) string {
-	return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
+	return inSchema(w.schema, sql)
 }
 
 // seedFinding stands in for an open finding a previous detector raised.
 func (w *world) seedFinding(findingType, subject string) string {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO openrails.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status)
-		SELECT id, $2, $3, 'critical', 'requires_review' FROM openrails.merchants WHERE slug = $1`), w.slug, findingType, subject)
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.reconciliation_findings (merchant_id, finding_type, subject_key, severity, status)
+		SELECT id, $2, $3, 'critical', 'requires_review' FROM billing.merchants WHERE slug = $1`), w.slug, findingType, subject)
 	require.NoError(w.t, err)
 	require.Contains(w.t, w.openFindings(findingType), subject)
 	return subject
@@ -120,7 +119,7 @@ func (w *world) seedFinding(findingType, subject string) string {
 // charges named the period they paid for.
 func (w *world) forgetPaidPeriods(customerID string) {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE openrails.payments SET metadata = metadata - 'period_start' WHERE customer_id = $1::uuid`), customerID)
+	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE billing.payments SET metadata = metadata - 'period_start' WHERE customer_id = $1::uuid`), customerID)
 	require.NoError(w.t, err)
 }
 
@@ -134,14 +133,14 @@ func (w *world) chargeAgain(customerID string, after time.Duration, newPrice boo
 	if newPrice {
 		// A plan change opens its own period at the moment it is paid.
 		metadataExpr = `metadata || jsonb_build_object('period_start', to_char((purchased_at + $2::interval) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))`
-		priceExpr = `(SELECT p2.id FROM openrails.prices p2 JOIN openrails.prices p1 ON p1.id = pay.price_id WHERE p2.product_id = p1.product_id AND p2.id <> p1.id LIMIT 1)`
+		priceExpr = `(SELECT p2.id FROM billing.prices p2 JOIN billing.prices p1 ON p1.id = pay.price_id WHERE p2.product_id = p1.product_id AND p2.id <> p1.id LIMIT 1)`
 		w.anotherPrice(customerID)
 	}
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id,
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id,
 			entitlements_spec_snapshot, metadata, purchased_at, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement)
 		SELECT $3::uuid, `+priceExpr+`, rail, transaction_id || '-again', amount, list_amount, currency, status, subscription_id,
 			entitlements_spec_snapshot, `+metadataExpr+`, purchased_at + $2::interval, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement
-		FROM openrails.payments pay WHERE customer_id = $1::uuid AND status = 'completed' ORDER BY purchased_at DESC LIMIT 1`), customerID, fmt.Sprintf("%d seconds", int(after.Seconds())), id)
+		FROM billing.payments pay WHERE customer_id = $1::uuid AND status = 'completed' ORDER BY purchased_at DESC LIMIT 1`), customerID, fmt.Sprintf("%d seconds", int(after.Seconds())), id)
 	require.NoError(w.t, err)
 	return id.String()
 }
@@ -150,9 +149,9 @@ func (w *world) chargeAgain(customerID string, after time.Duration, newPrice boo
 // charge (a plan change target).
 func (w *world) anotherPrice(customerID string) {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew, key)
+	_, err := w.pool.Exec(w.t.Context(), w.q(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew, key)
 		SELECT gen_random_uuid(), p.product_id, p.amount * 2, p.currency, p.merchant_id, p.access_duration_hours, p.auto_renew, p.key || '-plus'
-		FROM openrails.payments pay JOIN openrails.prices p ON p.id = pay.price_id
+		FROM billing.payments pay JOIN billing.prices p ON p.id = pay.price_id
 		WHERE pay.customer_id = $1::uuid ORDER BY pay.purchased_at DESC LIMIT 1
 		ON CONFLICT DO NOTHING`), customerID)
 	require.NoError(w.t, err)
@@ -161,6 +160,6 @@ func (w *world) anotherPrice(customerID string) {
 // dropLatestCharge removes the customer's latest charge row.
 func (w *world) dropLatestCharge(customerID string) {
 	w.t.Helper()
-	_, err := w.pool.Exec(w.t.Context(), w.q(`DELETE FROM openrails.payments WHERE id = (SELECT id FROM openrails.payments WHERE customer_id = $1::uuid ORDER BY purchased_at DESC LIMIT 1)`), customerID)
+	_, err := w.pool.Exec(w.t.Context(), w.q(`DELETE FROM billing.payments WHERE id = (SELECT id FROM billing.payments WHERE customer_id = $1::uuid ORDER BY purchased_at DESC LIMIT 1)`), customerID)
 	require.NoError(w.t, err)
 }

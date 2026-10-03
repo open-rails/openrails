@@ -8,7 +8,7 @@ SELECT key,
        COALESCE(aggregation, '')::text AS aggregation,
        COALESCE(unit, '')::text AS unit,
        group_by
-FROM openrails.catalog_meters
+FROM billing.catalog_meters
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY key;
 
@@ -16,20 +16,20 @@ ORDER BY key;
 SELECT rc.id, rc.created_at, COALESCE(p.key, '')::text AS product_key, rc.ordinal,
        COALESCE(rc.meter_key, '')::text AS meter_key, rc.payment_term, rc.filter,
        rc.allowance, rc.price
-FROM openrails.catalog_rate_cards rc
-LEFT JOIN openrails.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
+FROM billing.catalog_rate_cards rc
+LEFT JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
 WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id IS NULL;
 
 -- name: ListCatalogProductRateCards :many
 SELECT rc.product_id::uuid AS product_id, rc.ordinal, rc.meter_key, rc.payment_term, rc.filter, rc.allowance, rc.price
-FROM openrails.catalog_rate_cards rc
-JOIN openrails.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
+FROM billing.catalog_rate_cards rc
+JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
 WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND p.catalog_id = sqlc.arg(catalog_id)::uuid
   AND rc.customer_id IS NULL
 ORDER BY rc.product_id, rc.ordinal;
 
 -- name: SyncCatalogMeter :exec
-INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+INSERT INTO billing.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
 VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(meter_key)::text,
     NULLIF(sqlc.arg(event_type)::text, ''), NULLIF(sqlc.arg(value_property)::text, ''),
@@ -42,7 +42,7 @@ ON CONFLICT (merchant_id, key) DO UPDATE SET event_type = EXCLUDED.event_type,
 WHERE sqlc.arg(overwrite)::boolean;
 
 -- name: SyncCatalogRateCard :exec
-INSERT INTO openrails.catalog_rate_cards
+INSERT INTO billing.catalog_rate_cards
     (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price, id, created_at)
 VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.narg(product_id)::uuid, sqlc.arg(ordinal)::bigint,
@@ -56,20 +56,20 @@ ON CONFLICT (merchant_id, product_id, ordinal) DO UPDATE SET meter_key = EXCLUDE
 WHERE sqlc.arg(overwrite)::boolean;
 
 -- name: DeleteDefaultCatalogRateCard :exec
-DELETE FROM openrails.catalog_rate_cards
+DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND customer_id IS NULL;
 
 -- name: DeleteCatalogMeter :exec
-DELETE FROM openrails.catalog_meters
+DELETE FROM billing.catalog_meters
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(meter_key)::text;
 
 -- name: GetCatalogRevisionForShare :one
-SELECT catalog_revision FROM openrails.merchants WHERE id = sqlc.arg(merchant_id)::uuid FOR SHARE;
+SELECT catalog_revision FROM billing.merchants WHERE id = sqlc.arg(merchant_id)::uuid FOR SHARE;
 
 -- name: ListLiveCatalogProducts :many
 SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec,
        tier_group, tier_rank, archived
-FROM openrails.products
+FROM billing.products
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND catalog_id = sqlc.arg(catalog_id)::uuid AND NOT archived
 ORDER BY COALESCE(tier_group, ''), tier_rank, key;
 
@@ -81,12 +81,12 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.aut
                'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
                'recurring_billing_option_id', binding.recurring_billing_option_id, 'plan_pda', binding.plan_pda,
                'flex_id', binding.flex_id)))
-           FROM openrails.price_psp_bindings binding
-           JOIN openrails.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
+           FROM billing.price_psp_bindings binding
+           JOIN billing.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
            WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id
        ), '{}'::jsonb)::jsonb AS psp_links,
        p.archived
-FROM openrails.prices p
-JOIN openrails.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
+FROM billing.prices p
+JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND product.catalog_id = sqlc.arg(catalog_id)::uuid AND NOT p.archived
 ORDER BY p.product_id, p.amount, p.currency;

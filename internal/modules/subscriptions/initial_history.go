@@ -38,7 +38,7 @@ func ValidateInitialMembershipPayment(t InitialMembershipTerms, p *models.Paymen
 // ValidateInitialMembershipHistory reads immutable source grants. It deliberately
 // ignores mutable current periods and later revoke records, and never restores
 // a projection merely because an old accepted operation is replayed.
-func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTerms, rows []gen.OpenrailsGrant) error {
+func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTerms, rows []gen.BillingGrant) error {
 	if t.Pending {
 		if len(rows) != 0 {
 			return errors.New("pending enrollment granted access before its accepted start")

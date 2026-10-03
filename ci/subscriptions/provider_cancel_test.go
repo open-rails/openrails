@@ -17,7 +17,7 @@ import (
 func (w *world) providerCancels(intentType string, sub uuid.UUID) int {
 	w.t.Helper()
 	var n int
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM openrails.rail_intents
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM billing.rail_intents
 		WHERE intent_type = $1 AND subscription_id = $2`), intentType, sub).Scan(&n))
 	return n
 }

@@ -13,7 +13,7 @@ import (
 )
 
 const getCustomerDelinquency = `-- name: GetCustomerDelinquency :one
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM openrails.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = $3
@@ -25,9 +25,9 @@ type GetCustomerDelinquencyParams struct {
 	Currency   string
 }
 
-func (q *Queries) GetCustomerDelinquency(ctx context.Context, arg GetCustomerDelinquencyParams) (OpenrailsCustomerDelinquency, error) {
+func (q *Queries) GetCustomerDelinquency(ctx context.Context, arg GetCustomerDelinquencyParams) (BillingCustomerDelinquency, error) {
 	row := q.db.QueryRow(ctx, getCustomerDelinquency, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsCustomerDelinquency
+	var i BillingCustomerDelinquency
 	err := row.Scan(
 		&i.MerchantID,
 		&i.CustomerID,
@@ -49,7 +49,7 @@ const getOverdueInvoiceAggregate = `-- name: GetOverdueInvoiceAggregate :one
 SELECT COALESCE(MIN(due_at), $1::timestamptz) AS overdue_since,
        COALESCE(SUM(amount_due), 0)::bigint AS overdue_amount,
        COUNT(*)::bigint AS overdue_invoices
-FROM openrails.invoices
+FROM billing.invoices
 WHERE merchant_id = $2
   AND customer_id = $3
   AND currency = $4
@@ -91,7 +91,7 @@ func (q *Queries) GetOverdueInvoiceAggregate(ctx context.Context, arg GetOverdue
 }
 
 const listCustomerDelinquency = `-- name: ListCustomerDelinquency :many
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM openrails.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND customer_id = $2
 ORDER BY currency
@@ -103,15 +103,15 @@ type ListCustomerDelinquencyParams struct {
 }
 
 // Every currency for one payer (the per-payer API read).
-func (q *Queries) ListCustomerDelinquency(ctx context.Context, arg ListCustomerDelinquencyParams) ([]OpenrailsCustomerDelinquency, error) {
+func (q *Queries) ListCustomerDelinquency(ctx context.Context, arg ListCustomerDelinquencyParams) ([]BillingCustomerDelinquency, error) {
 	rows, err := q.db.Query(ctx, listCustomerDelinquency, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCustomerDelinquency
+	var items []BillingCustomerDelinquency
 	for rows.Next() {
-		var i OpenrailsCustomerDelinquency
+		var i BillingCustomerDelinquency
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.CustomerID,
@@ -138,7 +138,7 @@ func (q *Queries) ListCustomerDelinquency(ctx context.Context, arg ListCustomerD
 
 const listDelinquencyWorkMerchants = `-- name: ListDelinquencyWorkMerchants :many
 
-SELECT merchant_id FROM openrails.delinquency_work_merchant_ids(
+SELECT merchant_id FROM billing.delinquency_work_merchant_ids(
     $1::timestamptz,
     $2::int)
 `
@@ -176,7 +176,7 @@ func (q *Queries) ListDelinquencyWorkMerchants(ctx context.Context, arg ListDeli
 }
 
 const listDelinquentCustomers = `-- name: ListDelinquentCustomers :many
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM openrails.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND state <> 'current'
   AND ($2::text IS NULL OR state = $2::text)
@@ -192,15 +192,15 @@ type ListDelinquentCustomersParams struct {
 
 // The operator's roster: who is overdue, worst first. `current` rows are never
 // returned — a settled payer is not a row anyone needs to look at.
-func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquentCustomersParams) ([]OpenrailsCustomerDelinquency, error) {
+func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquentCustomersParams) ([]BillingCustomerDelinquency, error) {
 	rows, err := q.db.Query(ctx, listDelinquentCustomers, arg.MerchantID, arg.State, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCustomerDelinquency
+	var items []BillingCustomerDelinquency
 	for rows.Next() {
-		var i OpenrailsCustomerDelinquency
+		var i BillingCustomerDelinquency
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.CustomerID,
@@ -226,7 +226,7 @@ func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquen
 }
 
 const listNonCurrentDelinquency = `-- name: ListNonCurrentDelinquency :many
-SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM openrails.customer_delinquency
+SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
   AND state <> 'current'
 ORDER BY overdue_since, customer_id, currency
@@ -241,15 +241,15 @@ type ListNonCurrentDelinquencyParams struct {
 // The EXIT leg: payers already parked in grace/delinquent. Small by
 // construction, and the only way a cleared debt gets noticed — an invoice that
 // was paid no longer appears in the enter scan at all.
-func (q *Queries) ListNonCurrentDelinquency(ctx context.Context, arg ListNonCurrentDelinquencyParams) ([]OpenrailsCustomerDelinquency, error) {
+func (q *Queries) ListNonCurrentDelinquency(ctx context.Context, arg ListNonCurrentDelinquencyParams) ([]BillingCustomerDelinquency, error) {
 	rows, err := q.db.Query(ctx, listNonCurrentDelinquency, arg.MerchantID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsCustomerDelinquency
+	var items []BillingCustomerDelinquency
 	for rows.Next() {
-		var i OpenrailsCustomerDelinquency
+		var i BillingCustomerDelinquency
 		if err := rows.Scan(
 			&i.MerchantID,
 			&i.CustomerID,
@@ -286,14 +286,14 @@ SELECT i.customer_id,
        -- would be inferred non-null by sqlc and mis-scan.
        COALESCE(pol.grace_days, -1)::int AS grace_days,
        COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
-FROM openrails.invoices i
+FROM billing.invoices i
 LEFT JOIN LATERAL (
     SELECT (p.policy ->> 'delinquency_grace_days')::int AS grace_days,
            (p.policy ->> 'delinquency_amount_floor')::bigint AS amount_floor
-    FROM openrails.billing_policy_bindings b
-    JOIN openrails.billing_policies p
+    FROM billing.billing_policy_bindings b
+    JOIN billing.billing_policies p
       ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-    LEFT JOIN openrails.money_settings ms
+    LEFT JOIN billing.money_settings ms
       ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
     WHERE b.merchant_id = i.merchant_id
       AND (b.customer_id = i.customer_id OR b.customer_id IS NULL)
@@ -371,12 +371,12 @@ func (q *Queries) ListOverdueInvoiceAggregates(ctx context.Context, arg ListOver
 const upsertCustomerDelinquency = `-- name: UpsertCustomerDelinquency :one
 WITH previous AS (
     SELECT state, entered_at, transition_seq
-    FROM openrails.customer_delinquency
+    FROM billing.customer_delinquency
     WHERE merchant_id = $1::uuid
       AND customer_id = $2::uuid
       AND currency = $3::text
 ), upserted AS (
-    INSERT INTO openrails.customer_delinquency AS d (
+    INSERT INTO billing.customer_delinquency AS d (
         merchant_id, customer_id, currency, state, overdue_since, overdue_amount,
         overdue_invoices, entered_at, transition_seq, evaluated_at, created_at, updated_at)
     VALUES (

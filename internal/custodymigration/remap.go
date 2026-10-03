@@ -24,7 +24,7 @@ import (
 //
 // The flip itself is a compare-and-swap on the CURRENT custodian: two runs of
 // the same manifest cannot both apply.
-func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.OpenrailsPaymentMethod, out RowResult) (RowResult, error) {
+func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.BillingPaymentMethod, out RowResult) (RowResult, error) {
 	token := strings.TrimSpace(tk.Token)
 
 	// The plan leg stops here: it has performed every read the apply leg makes

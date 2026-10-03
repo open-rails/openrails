@@ -38,7 +38,7 @@ const (
 // SolanaSubscriptionRef identifies one locally-known on-chain subscription:
 // the subscription PDA (which is also the local
 // subscriptions.rail_subscription_id for solana memberships) and its
-// plan PDA. The caller supplies these from openrails.solana_subscriptions.
+// plan PDA. The caller supplies these from billing.solana_subscriptions.
 type SolanaSubscriptionRef struct {
 	SubscriptionPDA  string
 	PlanPDA          string
@@ -57,7 +57,7 @@ type SolanaPlanSource func(ctx context.Context) ([]string, error)
 
 // SolanaDueSubscriptionSource returns the set of locally-known subscription
 // PDAs whose local next_pull_at is at/before `before` (#720 due-window). The
-// caller is expected to answer this from openrails.solana_subscriptions
+// caller is expected to answer this from billing.solana_subscriptions
 // server-side (see ListDueSolanaSubscriptions) so the read itself stays
 // due-proportional rather than O(all subs). Deliberately separate from
 // Source: Source stays exhaustive (narrowed per-subscription/customer

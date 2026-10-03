@@ -47,7 +47,7 @@ func saleRequestFingerprint(req *CheckoutRequest, user *UserIdentity, price uuid
 	return fmt.Sprintf("%x", digest)
 }
 
-func ownsSaleRequest(in gen.OpenrailsRailIntent, customer string, price uuid.UUID, fingerprint string) error {
+func ownsSaleRequest(in gen.BillingRailIntent, customer string, price uuid.UUID, fingerprint string) error {
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func ownsSaleRequest(in gen.OpenrailsRailIntent, customer string, price uuid.UUI
 	return nil
 }
 
-func saleReplayParams(in gen.OpenrailsRailIntent) intents.EnqueueParams {
+func saleReplayParams(in gen.BillingRailIntent) intents.EnqueueParams {
 	return intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, IntentType: payments.TypeNMISale, PriceID: in.PriceID, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: in.NextAttemptAt, Origin: intents.Origin(in.Origin)}
 }
 

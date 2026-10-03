@@ -38,7 +38,7 @@ func (r *ProductAccessGrantRepo) ledger(ctx context.Context, merchantID uuid.UUI
 // ownershipModel maps an ownership grant-event (+ its optional termination event)
 // to the legacy ProductAccessGrant shape. status='revoked' iff a terminating
 // event supersedes the grant; revoked_at / reason come from that event.
-func ownershipModel(g gen.OpenrailsGrant, term *gen.OpenrailsGrant) models.ProductAccessGrant {
+func ownershipModel(g gen.BillingGrant, term *gen.BillingGrant) models.ProductAccessGrant {
 	var productID uuid.UUID
 	if g.ProductID != nil {
 		productID = *g.ProductID
@@ -245,7 +245,7 @@ func (r *ProductAccessGrantRepo) ListActivePage(ctx context.Context, userID stri
 }
 
 // ownershipInWindow reports whether a live grant grants product access at `at`.
-func ownershipInWindow(g gen.OpenrailsGrant, productID uuid.UUID, at time.Time) bool {
+func ownershipInWindow(g gen.BillingGrant, productID uuid.UUID, at time.Time) bool {
 	if g.Kind != string(grants.Ownership) || g.ProductID == nil || *g.ProductID != productID {
 		return false
 	}

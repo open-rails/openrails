@@ -94,7 +94,7 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 ## Card-testing ledger
 
 Cards the provider refused are counted in PostgreSQL
-(`openrails.card_attempt_failures`), so blocks hold on every replica without
+(`billing.card_attempt_failures`), so blocks hold on every replica without
 Redis or captcha (SEC-30). A request refused before any provider call (a
 missing field, an unconfigured PSP) is not a decline. Card saves, checkout
 creation and confirmation (browser routes and the embedded or remote Client)

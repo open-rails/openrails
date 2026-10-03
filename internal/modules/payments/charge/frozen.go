@@ -33,7 +33,7 @@ var ErrInstrumentChanged = errors.New("payment method no longer matches the oper
 var ErrNotDispatched = errors.New("charge refused before provider dispatch")
 
 // FreezeInstrument freezes a saved method's instrument.
-func FreezeInstrument(method gen.OpenrailsPaymentMethod) FrozenInstrument {
+func FreezeInstrument(method gen.BillingPaymentMethod) FrozenInstrument {
 	return FrozenInstrument{
 		PSPID: method.PspID, Custodian: method.Custodian, CustodianID: method.CustodianID,
 		StoredCredentialRecurringRef: strings.TrimSpace(method.StoredCredentialRecurringRef), StoredCredentialUnscheduledRef: strings.TrimSpace(method.StoredCredentialUnscheduledRef),
@@ -55,7 +55,7 @@ func (i FrozenInstrument) Validate() error {
 // proxy (or#879), so the gateway holds no vault for it.
 func (i FrozenInstrument) CustodianHeld() bool { return i.Custodian != models.CustodianPSP }
 
-func (i FrozenInstrument) Matches(method gen.OpenrailsPaymentMethod, agreement Agreement) error {
+func (i FrozenInstrument) Matches(method gen.BillingPaymentMethod, agreement Agreement) error {
 	cur := FreezeInstrument(method)
 	switch agreement {
 	case AgreementRecurring:

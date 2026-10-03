@@ -3,20 +3,20 @@
 
 -- name: WebhookEventCompleted :one
 SELECT EXISTS(
-  SELECT 1 FROM openrails.webhook_events
+  SELECT 1 FROM billing.webhook_events
   WHERE merchant_id = $1 AND op = $2 AND event_id = $3
 ) AS completed;
 
 -- name: MarkWebhookEventCompleted :execrows
-INSERT INTO openrails.webhook_events (merchant_id, op, event_id)
+INSERT INTO billing.webhook_events (merchant_id, op, event_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, op, event_id) DO NOTHING;
 
 -- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: DeleteCompletedWebhookEventsBefore :execrows
-DELETE FROM openrails.webhook_events
+DELETE FROM billing.webhook_events
 WHERE ctid IN (
-    SELECT we.ctid FROM openrails.webhook_events we
+    SELECT we.ctid FROM billing.webhook_events we
     WHERE we.merchant_id = sqlc.arg(merchant_id)::uuid
       AND we.completed_at < sqlc.arg(cutoff)::timestamptz
     LIMIT sqlc.arg(row_limit)::int

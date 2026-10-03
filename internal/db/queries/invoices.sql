@@ -1,4 +1,4 @@
--- openrails.invoices: period invoices/statements. Arrears invoices become open
+-- billing.invoices: period invoices/statements. Arrears invoices become open
 -- receivables at finalization; payments are allocated back to invoice_id.
 
 -- name: ListInvoicePayers :many
@@ -11,12 +11,12 @@
 SELECT customer_id::uuid AS customer_id, currency, MIN(period_anchor)::timestamptz AS period_anchor
 FROM (
     SELECT customer_id, currency, MIN(created_at) AS period_anchor
-    FROM openrails.ledger_transfers
+    FROM billing.ledger_transfers
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id IS NOT NULL
     GROUP BY customer_id, currency
     UNION ALL
     SELECT customer_id, currency, MIN(created_at) AS period_anchor
-    FROM openrails.usage_events
+    FROM billing.usage_events
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pricing_authority = 'catalog'
     GROUP BY customer_id, currency
 ) activity
@@ -25,13 +25,13 @@ ORDER BY customer_id, currency;
 
 -- name: GetInvoiceByPeriod :one
 -- Idempotency key is per (payer, period, currency): one invoice per currency (#474).
-SELECT * FROM openrails.invoices
+SELECT * FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2
   AND period_from = $3 AND period_to = $4 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
 -- name: InsertInvoice :exec
-INSERT INTO openrails.invoices (
+INSERT INTO billing.invoices (
     id, merchant_id, customer_id, currency,
     invoice_number,
     period_from, period_to, usage_total, deposits_total, owed_accrued, owed_paid,
@@ -59,7 +59,7 @@ INSERT INTO openrails.invoices (
 -- #726: invoice_items is the pending-accrual workspace only; rows are born
 -- pending and only ever leave via AttachPendingInvoiceItemsToInvoice. The
 -- statement itemization lives in invoices.line_items.
-INSERT INTO openrails.invoice_items (
+INSERT INTO billing.invoice_items (
     id, merchant_id, customer_id, currency,
     source_type, source_id, invoice_at, amount, metadata,
     created_at, updated_at
@@ -72,7 +72,7 @@ INSERT INTO openrails.invoice_items (
 ON CONFLICT (merchant_id, customer_id, currency, source_type, source_id) DO NOTHING;
 
 -- name: AttachPendingInvoiceItemsToInvoice :execrows
-UPDATE openrails.invoice_items
+UPDATE billing.invoice_items
 SET invoice_id = sqlc.arg(invoice_id),
     status = 'invoiced',
     updated_at = sqlc.arg(now)::timestamptz
@@ -86,7 +86,7 @@ WHERE merchant_id = $1
 
 -- name: SumPendingInvoiceItemAmountInPeriod :one
 SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.invoice_items
+FROM billing.invoice_items
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending'
   AND invoice_at >= sqlc.arg(period_from)::timestamptz
@@ -100,8 +100,8 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 -- most-specific-wins rungs the admission path uses (money_settings.tier supplies
 -- the tier rung), so a per-payer trigger costs no extra round trip.
 SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_from, MIN(s.created_at)::timestamptz AS period_anchor
-FROM openrails.money_settings s
-JOIN openrails.invoice_items ii
+FROM billing.money_settings s
+JOIN billing.invoice_items ii
   ON ii.merchant_id = s.merchant_id
  AND ii.customer_id = s.customer_id
  AND ii.currency = s.currency
@@ -110,8 +110,8 @@ JOIN openrails.invoice_items ii
  AND ii.invoice_at < sqlc.arg(cutoff)::timestamptz
 LEFT JOIN LATERAL (
     SELECT (p.policy ->> 'collection_threshold_amount')::bigint AS threshold
-    FROM openrails.billing_policy_bindings b
-    JOIN openrails.billing_policies p
+    FROM billing.billing_policy_bindings b
+    JOIN billing.billing_policies p
       ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
     WHERE b.merchant_id = s.merchant_id
       AND (b.customer_id = s.customer_id OR b.customer_id IS NULL)
@@ -125,7 +125,7 @@ WHERE s.merchant_id = $1
 GROUP BY s.merchant_id, s.customer_id, s.currency, s.credit_limit_amount, pol.threshold
 HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
     SELECT COALESCE(SUM(i.amount_due), 0)::bigint
-    FROM openrails.invoices i
+    FROM billing.invoices i
     WHERE i.merchant_id = s.merchant_id
       AND i.customer_id = s.customer_id
       AND i.currency = s.currency
@@ -140,8 +140,8 @@ ORDER BY period_from ASC;
 SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
        i.collection_failure_count, i.collection_failed_at,
        s.collection_payment_method_id::uuid AS collection_payment_method_id
-FROM openrails.invoices i
-JOIN openrails.money_settings s
+FROM billing.invoices i
+JOIN billing.money_settings s
   ON s.merchant_id = i.merchant_id
  AND s.customer_id = i.customer_id
  AND s.currency = i.currency
@@ -174,7 +174,7 @@ ORDER BY i.due_at NULLS FIRST, i.created_at ASC;
 -- (MarkInvoicesPastDue, due_at < now) and belongs to the delinquency axis
 -- (or#878). Our decision to stop attempting must not age the customer's
 -- invoice: it stays open, it stays collectible, and it stays theirs to settle.
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET collection_failure_count = collection_failure_count + 1,
     collection_failed_at = COALESCE(collection_failed_at, sqlc.arg(now)::timestamptz),
     status = CASE
@@ -204,7 +204,7 @@ WHERE merchant_id = $1
 -- Untouched on purpose: `uncollectible` invoices (terminal needs an operator,
 -- not a new card) and rows mid-claim or in-doubt, which the claim and verifier
 -- machinery owns.
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET next_collection_attempt_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1
@@ -221,7 +221,7 @@ WHERE merchant_id = $1
 -- Invoice transitions and payer notifications commit in one statement. Collection
 -- failures may already have set past_due; those invoices still need their notice.
 WITH overdue AS (
-    UPDATE openrails.invoices
+    UPDATE billing.invoices
     SET status = 'past_due', updated_at = sqlc.arg(now)::timestamptz
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND status = 'open' AND amount_due > 0
@@ -231,12 +231,12 @@ WITH overdue AS (
     SELECT * FROM overdue
     UNION ALL
     SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
-    FROM openrails.invoices
+    FROM billing.invoices
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND status = 'past_due' AND amount_due > 0
       AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
 ), notices AS (
-    INSERT INTO openrails.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
+    INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
            jsonb_build_object('invoice_id', id,
                               'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
@@ -255,7 +255,7 @@ SELECT count(*) FROM overdue;
 SELECT COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
        COALESCE(SUM(amount), 0)::bigint AS amount,
        COUNT(*)::bigint AS item_count
-FROM openrails.invoice_items
+FROM billing.invoice_items
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending'
   AND invoice_at >= sqlc.arg(period_from)::timestamptz
@@ -268,13 +268,13 @@ ORDER BY 1 ASC;
 SELECT source_type,
        COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
        amount, invoice_at
-FROM openrails.invoice_items
+FROM billing.invoice_items
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_id IS NULL AND status = 'pending'
 ORDER BY invoice_at ASC, source_id ASC;
 
 -- name: ApplyInvoicePaymentSnapshot :execrows
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET amount_paid = amount_paid + sqlc.arg(snapshot)::bigint,
     amount_due = GREATEST(0, amount_due - sqlc.arg(snapshot)::bigint),
     status = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN 'paid' ELSE status END,
@@ -288,14 +288,14 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
   AND amount_due >= sqlc.arg(snapshot)::bigint;
 
 -- name: SetInvoiceExternalID :execrows
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET external_invoice_id = sqlc.arg(external_invoice_id),
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
   AND (external_invoice_id IS NULL OR external_invoice_id = sqlc.arg(external_invoice_id));
 
 -- name: InsertInvoicePayment :exec
-INSERT INTO openrails.invoice_payments (
+INSERT INTO billing.invoice_payments (
     id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
     currency, amount, status, rail, rail_payment_id,
     failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
@@ -309,7 +309,7 @@ INSERT INTO openrails.invoice_payments (
 );
 
 -- name: GetInvoicePaymentAttemptByKey :one
-SELECT * FROM openrails.invoice_payments
+SELECT * FROM billing.invoice_payments
 WHERE merchant_id = $1
   AND customer_id = $2
   AND invoice_id = $3
@@ -317,7 +317,7 @@ WHERE merchant_id = $1
 LIMIT 1;
 
 -- name: GetInvoicePaymentAttempt :one
-SELECT * FROM openrails.invoice_payments
+SELECT * FROM billing.invoice_payments
 WHERE merchant_id = $1
   AND customer_id = $2
   AND invoice_id = $3
@@ -325,7 +325,7 @@ WHERE merchant_id = $1
 LIMIT 1;
 
 -- name: FailClaimedInvoicePaymentAttempt :execrows
-UPDATE openrails.invoice_payments
+UPDATE billing.invoice_payments
 SET status = 'failed',
     rail = sqlc.narg(rail),
     rail_payment_id = sqlc.narg(rail_payment_id),
@@ -340,7 +340,7 @@ WHERE merchant_id = $1
   AND status = 'attempted';
 
 -- name: SettleClaimedInvoicePaymentAttempt :execrows
-UPDATE openrails.invoice_payments
+UPDATE billing.invoice_payments
 SET status = 'settled',
     ledger_transfer_id = sqlc.arg(ledger_transfer_id),
     rail = sqlc.narg(rail),
@@ -355,8 +355,8 @@ WHERE merchant_id = $1
 
 -- name: ListInvoicePaymentAttemptsByPayer :many
 SELECT p.*
-FROM openrails.invoice_payments p
-JOIN openrails.invoices i
+FROM billing.invoice_payments p
+JOIN billing.invoices i
   ON i.merchant_id = p.merchant_id
  AND i.customer_id = p.customer_id
  AND i.id = p.invoice_id
@@ -368,8 +368,8 @@ LIMIT $4 OFFSET $5;
 
 -- name: CountInvoicePaymentAttemptsByPayer :one
 SELECT count(*)
-FROM openrails.invoice_payments p
-JOIN openrails.invoices i
+FROM billing.invoice_payments p
+JOIN billing.invoices i
   ON i.merchant_id = p.merchant_id
  AND i.customer_id = p.customer_id
  AND i.id = p.invoice_id
@@ -382,7 +382,7 @@ WHERE p.merchant_id = $1
 -- nothing about lateness (status is the clock's reading, or#828/or#878);
 -- reclaiming an `uncollectible` invoice reopens it (a manual retry undoing a
 -- terminal outcome). The previous failure code stays as forensics.
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
     next_collection_attempt_at = NULL,
     uncollectible_at = NULL,
@@ -399,7 +399,7 @@ WHERE merchant_id = $1
 -- The owning operation reached a terminal outcome that is not a decline
 -- (settled, or provider-confirmed non-execution, which makes the invoice due
 -- again at next_attempt_at).
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET collection_intent_id = NULL,
     next_collection_attempt_at = sqlc.narg(next_attempt_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
@@ -409,7 +409,7 @@ WHERE merchant_id = $1
   AND collection_intent_id = sqlc.arg(intent_id)::uuid;
 
 -- name: VoidInvoiceForPayer :one
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET status = 'voided',
     amount_due = 0,
     voided_at = sqlc.arg(now)::timestamptz,
@@ -420,7 +420,7 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
 RETURNING *;
 
 -- name: MarkInvoiceUncollectibleForPayer :one
-UPDATE openrails.invoices
+UPDATE billing.invoices
 SET status = 'uncollectible',
     uncollectible_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
@@ -430,22 +430,22 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
 RETURNING *;
 
 -- name: ListInvoicesByPayer :many
-SELECT * FROM openrails.invoices
+SELECT * FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY period_from DESC
 LIMIT $3::int OFFSET $4::int;
 
 -- name: CountInvoicesByPayer :one
-SELECT count(*) FROM openrails.invoices
+SELECT count(*) FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2;
 
 -- name: GetInvoiceForPayer :one
-SELECT * FROM openrails.invoices
+SELECT * FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1;
 
 -- name: GetInvoiceForPayerForUpdate :one
-SELECT * FROM openrails.invoices
+SELECT * FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE;
@@ -458,10 +458,10 @@ SELECT sqlc.embed(a), sqlc.embed(i), l.amount AS ledger_amount,
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
         AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
-FROM openrails.invoice_payments a
-JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
+FROM billing.invoice_payments a
+JOIN billing.rail_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
-LEFT JOIN openrails.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
+LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
   AND (sqlc.narg(after_id)::uuid IS NULL OR a.id > sqlc.narg(after_id)::uuid)
 ORDER BY a.id

@@ -16,7 +16,7 @@ const cardAttackBreadth = `-- name: CardAttackBreadth :one
 SELECT COALESCE(sum(failures) FILTER (WHERE subject = $1::text), 0)::bigint AS failures,
        count(DISTINCT subject) FILTER (WHERE starts_with(subject, $2::text))::bigint AS customers,
        count(DISTINCT subject) FILTER (WHERE starts_with(subject, $3::text))::bigint AS addresses
-FROM openrails.card_attempt_failures
+FROM billing.card_attempt_failures
 WHERE merchant_id = $4::uuid
   AND bucket_at >= $5::timestamptz
 `
@@ -54,7 +54,7 @@ const cardAttemptFailureCounts = `-- name: CardAttemptFailureCounts :many
 SELECT subject,
        COALESCE(sum(failures) FILTER (WHERE bucket_at >= $1::timestamptz), 0)::bigint AS burst,
        COALESCE(sum(failures), 0)::bigint AS daily
-FROM openrails.card_attempt_failures
+FROM billing.card_attempt_failures
 WHERE merchant_id = $2::uuid
   AND subject = ANY($3::text[])
   AND bucket_at >= $4::timestamptz
@@ -100,7 +100,7 @@ func (q *Queries) CardAttemptFailureCounts(ctx context.Context, arg CardAttemptF
 }
 
 const pruneCardAttemptFailures = `-- name: PruneCardAttemptFailures :execrows
-DELETE FROM openrails.card_attempt_failures
+DELETE FROM billing.card_attempt_failures
 WHERE merchant_id = $1::uuid
   AND bucket_at < $2::timestamptz
 `
@@ -119,11 +119,11 @@ func (q *Queries) PruneCardAttemptFailures(ctx context.Context, arg PruneCardAtt
 }
 
 const recordCardAttemptFailure = `-- name: RecordCardAttemptFailure :exec
-INSERT INTO openrails.card_attempt_failures (merchant_id, subject, bucket_at, failures)
+INSERT INTO billing.card_attempt_failures (merchant_id, subject, bucket_at, failures)
 SELECT $1::uuid, s.subject, $2::timestamptz, 1
 FROM unnest($3::text[]) AS s(subject)
 ON CONFLICT (merchant_id, subject, bucket_at)
-DO UPDATE SET failures = openrails.card_attempt_failures.failures + 1
+DO UPDATE SET failures = billing.card_attempt_failures.failures + 1
 `
 
 type RecordCardAttemptFailureParams struct {

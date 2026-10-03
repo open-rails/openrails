@@ -45,7 +45,7 @@ func TestPaymentProviderConfigProjection(t *testing.T) {
 		return out
 	}
 
-	got := paymentProviderConfigFromRow(gen.OpenrailsPsp{
+	got := paymentProviderConfigFromRow(gen.BillingPsp{
 		Rail: "stripe", Environment: "live", AccountID: "acct_123", LastVerifiedAt: &now,
 		Evidence: []byte(`{"public_config":{"publishable_key":"pk_live_123"},"credentials_validated":true,"credential_versions":{"secret_key":3}}`),
 	}, configured(name("stripe", "acct_123", "secret_key"), name("stripe", "acct_123", "webhook_signing_secret")))
@@ -66,11 +66,11 @@ func TestPaymentProviderConfigProjection(t *testing.T) {
 		{`{"credentials_validated":true}`, nil},
 		{`{"credentials_validated":true}`, configured(name("nmi", "gw", "webhook_signing_secret"))},
 	} {
-		got := paymentProviderConfigFromRow(gen.OpenrailsPsp{Rail: "nmi", Environment: "live", AccountID: "gw", LastVerifiedAt: &now, Evidence: []byte(tc.evidence)}, tc.statuses)
+		got := paymentProviderConfigFromRow(gen.BillingPsp{Rail: "nmi", Environment: "live", AccountID: "gw", LastVerifiedAt: &now, Evidence: []byte(tc.evidence)}, tc.statuses)
 		require.Nil(t, got.LastVerifiedAt, tc.evidence)
 		require.Nil(t, got.Credentials["security_key"].LastValidatedAt, tc.evidence)
 	}
-	retired := paymentProviderConfigFromRow(gen.OpenrailsPsp{Rail: "nmi", Environment: "live", AccountID: "gw", Evidence: []byte(`{"retired_credentials":{"security_key":true}}`)}, configured(name("nmi", "gw", "security_key")))
+	retired := paymentProviderConfigFromRow(gen.BillingPsp{Rail: "nmi", Environment: "live", AccountID: "gw", Evidence: []byte(`{"retired_credentials":{"security_key":true}}`)}, configured(name("nmi", "gw", "security_key")))
 	require.False(t, retired.Credentials["security_key"].Configured, "a retired credential is never shown as configured")
 
 	// CCBill validation proves the DataLink pair, never the webhook salt.

@@ -8,7 +8,7 @@
 -- ============================================================================
 
 -- name: CreateReconciliationRun :one
-INSERT INTO openrails.maintenance_runs (
+INSERT INTO billing.maintenance_runs (
     merchant_id, kind, mode, rails, window_since, window_until, started_at, status
 ) VALUES (
     sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode), sqlc.arg(rails),
@@ -17,25 +17,25 @@ INSERT INTO openrails.maintenance_runs (
 RETURNING *;
 
 -- name: FinishReconciliationRun :execrows
-UPDATE openrails.maintenance_runs
+UPDATE billing.maintenance_runs
 SET status = sqlc.arg(status),
     summary = sqlc.narg(summary),
     error = sqlc.narg(error),
     finished_at = now()
-WHERE id = sqlc.arg(id) AND kind='reconciliation' AND merchant_id=openrails.current_merchant_id() AND status = 'running';
+WHERE id = sqlc.arg(id) AND kind='reconciliation' AND merchant_id=billing.current_merchant_id() AND status = 'running';
 
 -- name: GetReconciliationRun :one
-SELECT * FROM openrails.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=openrails.current_merchant_id();
+SELECT * FROM billing.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=billing.current_merchant_id();
 
 -- name: GetLatestReconciliationRun :one
-SELECT * FROM openrails.maintenance_runs
-WHERE kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
+SELECT * FROM billing.maintenance_runs
+WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT 1;
 
 -- name: ListReconciliationRuns :many
-SELECT * FROM openrails.maintenance_runs
-WHERE kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
+SELECT * FROM billing.maintenance_runs
+WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
@@ -48,7 +48,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- REOPENED with the freshly computed status; an ignored finding stays ignored
 -- (an operator explicitly silenced this identity).
 -- name: UpsertReconciliationFinding :one
-INSERT INTO openrails.reconciliation_findings (
+INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
     first_seen_run, last_seen_run
@@ -63,21 +63,21 @@ INSERT INTO openrails.reconciliation_findings (
 ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     severity = EXCLUDED.severity,
     status = CASE
-        WHEN openrails.reconciliation_findings.status = 'ignored' THEN 'ignored'
+        WHEN billing.reconciliation_findings.status = 'ignored' THEN 'ignored'
         ELSE EXCLUDED.status
     END,
     recommended_action = EXCLUDED.recommended_action,
     evidence = CASE
-        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.evidence
+        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.evidence
         ELSE EXCLUDED.evidence
     END,
     resolved_at = CASE
-        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolved_at
+        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolved_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolved_at
         ELSE NULL
     END,
     resolution = CASE
-        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolution
+        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.resolution
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
@@ -86,23 +86,23 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     -- resolve statements below) is a resolution — clear the notify linkage so
     -- a future reopen of this identity notifies again.
     notified_at = CASE
-        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.notified_at
+        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
-        ELSE openrails.reconciliation_findings.notified_at
+        ELSE billing.reconciliation_findings.notified_at
     END,
     notified_severity = CASE
-        WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.notified_severity
+        WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_severity
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
-        ELSE openrails.reconciliation_findings.notified_severity
+        ELSE billing.reconciliation_findings.notified_severity
     END,
-    last_seen_run = COALESCE(EXCLUDED.last_seen_run, openrails.reconciliation_findings.last_seen_run),
+    last_seen_run = COALESCE(EXCLUDED.last_seen_run, billing.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
 RETURNING *;
 
 -- name: ClaimReconciliationFindingNotification :execrows
 -- Claim one open episode/escalation in the same transaction as its notification.
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
@@ -116,7 +116,7 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id =
 -- #787: dedupe linkage for the immediate notify path — set once a finding
 -- pushes an operator notification, cleared by every resolution statement below
 -- so a reopened finding notifies again.
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
@@ -128,11 +128,11 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id =
 -- address merchant B's finding on any connection the since-removed RLS did
 -- not filter.
 -- name: GetReconciliationFinding :one
-SELECT * FROM openrails.reconciliation_findings
-WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
+SELECT * FROM billing.reconciliation_findings
+WHERE id = $1 AND merchant_id = billing.current_merchant_id();
 
 -- name: ListReconciliationFindings :many
-SELECT * FROM openrails.reconciliation_findings
+SELECT * FROM billing.reconciliation_findings
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(provider)::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = sqlc.narg(provider)::text)
   AND (sqlc.narg(finding_type)::text IS NULL OR finding_type = sqlc.narg(finding_type)::text)
@@ -141,7 +141,7 @@ ORDER BY last_seen_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: ListActionableReconciliationFindingsByProvider :many
-SELECT * FROM openrails.reconciliation_findings
+SELECT * FROM billing.reconciliation_findings
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key;
 
@@ -151,14 +151,14 @@ ORDER BY finding_type, subject_key;
 -- no merchant predicate at all — a long transaction on a big backlog, and a
 -- cross-merchant write.
 -- name: AutoResolveVanishedReconciliationFindings :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE ctid IN (
-    SELECT f.ctid FROM openrails.reconciliation_findings f
+    SELECT f.ctid FROM billing.reconciliation_findings f
     WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
       AND f.evidence->>'provider' = sqlc.arg(provider)
       AND f.status IN ('reconcile_required', 'requires_review')
@@ -172,7 +172,7 @@ WHERE ctid IN (
 -- re-scheduled) auto-resolves on the next LIFE pass. Cutoffs mirror the
 -- detection (ListStuckRailIntents) exactly — edit together.
 -- name: AutoResolveRecoveredStuckIntentFindings :execrows
-UPDATE openrails.reconciliation_findings f
+UPDATE billing.reconciliation_findings f
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
@@ -182,7 +182,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
   AND f.status IN ('reconcile_required', 'requires_review')
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.rail_intents pi
+      SELECT 1 FROM billing.rail_intents pi
       WHERE pi.merchant_id = f.merchant_id
         AND pi.id::text = f.subject_key
         AND ((pi.status IN ('pending', 'failed_retryable') AND pi.created_at <= sqlc.arg(action_cutoff)::timestamptz)
@@ -190,7 +190,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   );
 
 -- name: MarkReconciliationFindingVanished :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
@@ -199,7 +199,7 @@ SET status = 'fixed',
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
 -- name: MarkReconciliationFindingAutoFixed :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'auto_fixed',
     resolution = 'enforced',
     evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true),
@@ -209,7 +209,7 @@ SET status = 'auto_fixed',
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
 -- name: AckReconciliationFinding :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'admin_fixed',
     operator_notes = sqlc.narg(operator_notes),
@@ -219,7 +219,7 @@ SET status = 'fixed',
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
 
 -- name: DismissReconciliationFinding :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'ignored',
     resolution = 'ignored',
     operator_notes = sqlc.narg(operator_notes),
@@ -238,7 +238,7 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id =
 -- for pagination. merchant_id stamped explicitly (multi-merchant pattern).
 -- name: AdminListReconciliationFindings :many
 SELECT sqlc.embed(f), count(*) OVER () AS total_count
-FROM openrails.reconciliation_findings f
+FROM billing.reconciliation_findings f
 WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (CASE
          WHEN sqlc.narg(status)::text IS NULL THEN f.status IN ('reconcile_required', 'requires_review')
@@ -255,7 +255,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- open-by-severity) — the findings ledger IS the metric store.
 -- name: CountOpenReconciliationFindingsByTypeSeverity :many
 SELECT finding_type, severity, count(*) AS open_count
-FROM openrails.reconciliation_findings
+FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status IN ('reconcile_required', 'requires_review')
 GROUP BY finding_type, severity;
@@ -265,7 +265,7 @@ GROUP BY finding_type, severity;
 -- evidence.resolution. Only OPEN findings resolve — approve on an already-
 -- resolved finding is a handler-level 409.
 -- name: AdminResolveReconciliationFinding :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'admin_fixed',
     operator_notes = sqlc.narg(operator_notes),
@@ -278,14 +278,14 @@ SET status = 'fixed',
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
 
 -- Ignore: permanent silence for the subject (the upsert keeps ignored
 -- identities ignored across re-runs — same semantics the breaker's dismiss
 -- honors). Notes are REQUIRED (enforced at the handler).
 -- name: AdminIgnoreReconciliationFinding :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'ignored',
     resolution = 'ignored',
     operator_notes = sqlc.narg(operator_notes),
@@ -294,20 +294,20 @@ SET status = 'ignored',
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
 
 -- Partial failure: append the execution error to operator_notes; the finding
 -- STAYS OPEN (never half-marked fixed).
 -- name: AppendReconciliationFindingNotes :execrows
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET operator_notes = CASE
         WHEN COALESCE(operator_notes, '') = '' THEN sqlc.arg(note)::text
         ELSE operator_notes || E'\n' || sqlc.arg(note)::text
     END,
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND merchant_id = openrails.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
 
 -- ============================================================================
@@ -321,11 +321,11 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        cancelled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot, scheduled_price_id,
-       EXISTS (SELECT 1 FROM openrails.rail_intents ri
+       EXISTS (SELECT 1 FROM billing.rail_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
-FROM openrails.subscriptions
+FROM billing.subscriptions
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
   AND psp_id = sqlc.arg(psp_id)::uuid;
@@ -333,7 +333,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sq
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
-FROM openrails.payments
+FROM billing.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
@@ -345,13 +345,13 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
 -- for HashiCorp Vault, and the column already carries the right name.
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, last_four, card_type,
        expiry_date
-FROM openrails.payment_methods
+FROM billing.payment_methods
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
-FROM openrails.solana_subscriptions
+FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
 ;
 
@@ -361,8 +361,8 @@ WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
 -- (grandfathered subscriptions bill them).
 -- name: ReconcileListPricesWithPSPLinks :many
 SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
-FROM openrails.prices
-WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
+FROM billing.prices
+WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
@@ -380,7 +380,7 @@ WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM
 -- equivalent live window already exists (idempotent via NOT EXISTS; the
 -- re-run inserts nothing).
 -- name: ReconcileGrantSubscriptionEntitlement :execrows
-INSERT INTO openrails.entitlements (
+INSERT INTO billing.entitlements (
     merchant_id, customer_id, entitlement, start_at, end_at,
     source_id, source_type
 )
@@ -388,7 +388,7 @@ SELECT sqlc.arg(merchant_id), sqlc.arg(customer_id), sqlc.arg(entitlement),
        sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
        sqlc.arg(subscription_id), 'subscription'
 WHERE NOT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = sqlc.arg(customer_id)
       AND ent.entitlement = sqlc.arg(entitlement)
       AND ent.source_type = 'subscription'
@@ -401,7 +401,7 @@ WHERE NOT EXISTS (
 -- PS-4: backfill a rail charge that has no local payment record.
 -- Dedupe rides the uq_payments_merchant_rail_transaction identity.
 -- name: ReconcileBackfillPayment :execrows
-INSERT INTO openrails.payments (
+INSERT INTO billing.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, psp_id,
     money_movement
@@ -421,7 +421,7 @@ ON CONFLICT DO NOTHING;
 -- PS-5: record a rail refund that is missing locally as a negative-
 -- amount payment row linked to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
-INSERT INTO openrails.payments (
+INSERT INTO billing.payments (
     merchant_id, price_id, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
     customer_id, psp_id, reversal_kind, money_movement
@@ -440,7 +440,7 @@ INSERT INTO openrails.payments (
 ON CONFLICT DO NOTHING;
 
 -- name: ReconcileMarkPaymentRefunded :execrows
-UPDATE openrails.payments
+UPDATE billing.payments
 SET status = 'refunded'
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
 
@@ -452,23 +452,23 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 -- when any subscription already carries the rail subscription id (zero
 -- rows returned = already materialized).
 -- name: ReconcileMaterializeSubscription :many
-INSERT INTO openrails.subscriptions (
+INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
-SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::openrails.subscription_status,
+SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::billing.subscription_status,
        sqlc.arg(rail), sqlc.arg(rail_subscription_id),
        sqlc.narg(user_email),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
        p.entitlements_spec, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
-FROM openrails.prices pr
-JOIN openrails.products p ON p.id = pr.product_id
+FROM billing.prices pr
+JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.subscriptions s
+      SELECT 1 FROM billing.subscriptions s
       WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_subscription_id)
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
@@ -481,7 +481,7 @@ RETURNING id, entitlements_spec_snapshot;
 
 -- PS-7: adopt the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows
-UPDATE openrails.payment_methods
+UPDATE billing.payment_methods
 SET last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
     updated_at = now()
@@ -501,7 +501,7 @@ WHERE id = sqlc.arg(id)
 -- name: UpsertReconciliationState :one
 -- Mark a source domain's reconciliation watermark: pass fully_reconciled=true
 -- after a completed authoritative pull/import for that domain.
-INSERT INTO openrails.reconciliation_state (
+INSERT INTO billing.reconciliation_state (
     merchant_id, source_domain, fully_reconciled, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(source_domain)::text,
@@ -516,7 +516,7 @@ RETURNING *;
 -- The confirmed-absence gate (§3.2): is this source domain proven fully
 -- reconciled for the merchant? Absent row = not yet reconciled = false.
 SELECT COALESCE((
-    SELECT fully_reconciled FROM openrails.reconciliation_state
+    SELECT fully_reconciled FROM billing.reconciliation_state
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND source_domain = sqlc.arg(source_domain)::text
 ), false) AS fully_reconciled;
@@ -527,7 +527,7 @@ SELECT COALESCE((
 -- provider (RenewalOverdue -> unverified). Oldest lapse first, capped (or#837).
 -- name: ListOverdueRenewals :many
 SELECT s.id, s.rail, s.current_period_ends_at
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
@@ -535,7 +535,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.collection_policy <> 'engine'
   AND s.current_period_ends_at < sqlc.arg(overdue_before)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.payments p
+      SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
         AND p.deleted_at IS NULL AND p.status = 'completed'
         AND p.purchased_at >= s.current_period_ends_at
@@ -548,7 +548,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- repair asks the provider (DunningStale -> unverified). Capped (or#837).
 -- name: ListDunningPastGrace :many
 SELECT s.id, s.current_period_ends_at, s.grace_ends_at
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
@@ -562,14 +562,14 @@ LIMIT sqlc.arg(row_limit)::int;
 -- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 -- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
 -- name: ListStalePendingSubscriptions :many
-SELECT s.id FROM openrails.subscriptions s
+SELECT s.id FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'pending'
   AND s.created_at < sqlc.arg(cutoff)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.payments p
+      SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
         AND p.status = 'completed' AND p.deleted_at IS NULL
   )
@@ -579,9 +579,9 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListPaidPendingSubscriptions :many
 SELECT s.id, s.rail, s.created_at, p.id AS payment_id, p.transaction_id, p.purchased_at
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 JOIN LATERAL (
-    SELECT p.id, p.transaction_id, p.purchased_at FROM openrails.payments p
+    SELECT p.id, p.transaction_id, p.purchased_at FROM billing.payments p
     WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
       AND p.status = 'completed' AND p.deleted_at IS NULL
     ORDER BY p.purchased_at DESC, p.id DESC
@@ -599,7 +599,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- will not auto-retry (terminal/expired, or past their deadline) and need an
 -- operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
 -- name: ListAbandonedProviderIntents :many
-SELECT id, intent_type, status, rail FROM openrails.rail_intents
+SELECT id, intent_type, status, rail FROM billing.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (
@@ -615,7 +615,7 @@ ORDER BY created_at;
 -- evidence) are resolvable only here — via the roster/per-sub probe — so they
 -- must never starve behind a large dated cohort under the LIMIT.
 -- name: ListUnknownSubscriptions :many
-SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM openrails.subscriptions
+SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
@@ -631,7 +631,7 @@ LIMIT sqlc.arg(max_rows)::int;
 -- provider-owned rows are retried by the provider or not at all.
 -- name: ListDunningStalledSubscriptions :many
 SELECT id, (COALESCE(retry_attempts, 0) >= 1 AND last_retry_at IS NOT NULL)::bool AS attempt_recorded
-FROM openrails.subscriptions
+FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
@@ -647,8 +647,8 @@ ORDER BY current_period_ends_at;
 -- is safe: revoked/deleted windows remain recorded decisions and are excluded.
 -- name: ListActiveAutoRenewSubsWithExpiredBoundedAccess :many
 SELECT DISTINCT s.id, s.customer_id
-FROM openrails.subscriptions s
-JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+FROM billing.subscriptions s
+JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
@@ -656,7 +656,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.auto_renew
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND EXISTS (
-      SELECT 1 FROM openrails.entitlements expired
+      SELECT 1 FROM billing.entitlements expired
       WHERE expired.merchant_id = s.merchant_id
         AND expired.source_type = 'subscription'
         AND expired.source_id = s.id
@@ -666,7 +666,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
         AND expired.end_at <= sqlc.arg(now)::timestamptz
   )
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.entitlements live
+      SELECT 1 FROM billing.entitlements live
       WHERE live.merchant_id = s.merchant_id
         AND live.source_type = 'subscription'
         AND live.source_id = s.id
@@ -692,13 +692,13 @@ LIMIT sqlc.arg(row_limit);
 SELECT s.id, s.customer_id, s.product_id, s.status,
        s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at,
        missing.spec AS entitlements_spec
-FROM openrails.subscriptions s
-JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
+FROM billing.subscriptions s
+JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
     SELECT jsonb_object_agg(feat, NULL::text) AS spec
     FROM jsonb_object_keys(pd.entitlements_spec) AS feat
     WHERE NOT EXISTS (
-        SELECT 1 FROM openrails.entitlements e
+        SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
           AND e.source_type = 'subscription' AND e.source_id = s.id
           AND e.entitlement = feat
@@ -716,7 +716,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.current_period_ends_at IS NOT NULL AND s.current_period_ends_at > sqlc.arg(now)::timestamptz
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
   AND EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
         AND g.source_type = 'subscription' AND g.source_id = s.id::text
   )
@@ -746,13 +746,13 @@ ORDER BY s.current_period_ends_at;
 -- customer_id nullable: NULL = merchant-wide sweep.
 -- name: ListDeadSubsWithLiveEntitlements :many
 SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'cancelled'
   AND EXISTS (
-      SELECT 1 FROM openrails.entitlements e
+      SELECT 1 FROM billing.entitlements e
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
@@ -805,12 +805,12 @@ SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
            WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
            ELSE 'refunded_payment'
        END::text AS cause
-FROM openrails.entitlements e
-LEFT JOIN openrails.subscriptions s
+FROM billing.entitlements e
+LEFT JOIN billing.subscriptions s
        ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
-LEFT JOIN openrails.payments pay
+LEFT JOIN billing.payments pay
        ON e.source_type = 'one_off' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
-LEFT JOIN openrails.prices pr
+LEFT JOIN billing.prices pr
        ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
@@ -820,7 +820,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.source_type IN ('subscription', 'one_off')
   -- no live un-terminated entitlement grant covering now justifies the window
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = e.merchant_id
         AND g.customer_id = e.customer_id
         AND g.event = 'grant' AND g.kind = 'entitlement'
@@ -831,14 +831,14 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
         AND g.starts_at <= sqlc.arg(now)::timestamptz
         AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)
         AND NOT EXISTS (
-            SELECT 1 FROM openrails.grants t
+            SELECT 1 FROM billing.grants t
             WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
               AND t.event IN ('revoke', 'expire', 'supersede'))
   )
   -- a TERMINATED backing grant means derive.grant_effect.excess owns the retraction
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tg
-      JOIN openrails.grants t ON t.merchant_id = tg.merchant_id AND t.supersedes_id = tg.id
+      SELECT 1 FROM billing.grants tg
+      JOIN billing.grants t ON t.merchant_id = tg.merchant_id AND t.supersedes_id = tg.id
                              AND t.event IN ('revoke', 'expire', 'supersede')
       WHERE tg.merchant_id = e.merchant_id AND tg.id = e.grant_id
   )
@@ -859,7 +859,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- name: CountUnknownSubsPastPaidThrough :one
 SELECT COUNT(*)::bigint AS pressure_count,
        COALESCE(MAX(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'unverified'
@@ -884,18 +884,18 @@ FROM (SELECT count(*) AS total,
              count(*) FILTER (WHERE open) AS open_count,
              count(*) FILTER (WHERE cause = 'unsanctioned') AS unsanctioned,
              COALESCE(sum(days), 0) AS days
-        FROM openrails.freeloader_episodes
+        FROM billing.freeloader_episodes
        WHERE merchant_id = sqlc.arg(merchant_id)::uuid) fl
 CROSS JOIN (SELECT count(*) AS total,
                    count(*) FILTER (WHERE open) AS open_count,
                    COALESCE(sum(days), 0) AS days
-              FROM openrails.orphaned_episodes
+              FROM billing.orphaned_episodes
              WHERE merchant_id = sqlc.arg(merchant_id)::uuid) o;
 
 -- #511 Phase E (Converge sweep worker): the no-GUC list of merchants
 -- to sweep. merchants is a GLOBAL control-plane table.
 -- name: ListActiveMerchantIDs :many
-SELECT id FROM openrails.merchants
+SELECT id FROM billing.merchants
 WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id;
 
@@ -911,7 +911,7 @@ SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.entitlement,
        LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
        e.source_type, e.source_id
-FROM openrails.entitlements e
+FROM billing.entitlements e
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
   AND e.deleted_at IS NULL
@@ -919,7 +919,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(closed_after)::timestamptz
   AND LEAST(COALESCE(e.end_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.entitlements live
+      SELECT 1 FROM billing.entitlements live
       WHERE live.merchant_id = e.merchant_id
         AND live.customer_id = e.customer_id
         AND live.entitlement = e.entitlement
@@ -930,7 +930,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   -- A tier change supersedes the replaced tier's window while the customer
   -- holds the new tier's access: that is not access ending.
   AND NOT (e.revoke_reason = 'superseded' AND EXISTS (
-      SELECT 1 FROM openrails.entitlements nw
+      SELECT 1 FROM billing.entitlements nw
       WHERE nw.merchant_id = e.merchant_id
         AND nw.customer_id = e.customer_id
         AND nw.deleted_at IS NULL AND nw.revoked_at IS NULL
@@ -941,7 +941,7 @@ ORDER BY e.customer_id,
 
 -- name: ResolveStandingFinding :execrows
 -- A standing finding whose subject is healthy again closes itself.
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now()
  WHERE merchant_id = sqlc.arg(merchant_id)::uuid
    AND finding_type = sqlc.arg(finding_type)::text
@@ -951,7 +951,7 @@ UPDATE openrails.reconciliation_findings
 -- name: ResolveClearedFindings :execrows
 -- Open findings of the given standing types that the latest merchant-wide
 -- converge no longer reports (keep = type || chr(31) || subject) have cleared.
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
        notified_at = NULL, notified_severity = NULL, updated_at = now()
  WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -964,7 +964,7 @@ UPDATE openrails.reconciliation_findings
 -- min(24h, max(5m, period/10)) after the paid period. Collection is stopped.
 SELECT count(*)::int AS held,
        COALESCE(min(s.current_period_ends_at), sqlc.arg(now)::timestamptz)::timestamptz AS oldest_due_at
-FROM openrails.subscriptions s
+FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL AND s.cancelled_at IS NULL
   AND s.status = 'active' AND s.collection_policy = 'engine'
@@ -978,8 +978,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT s.id, s.psp_id, s.rail,
        COALESCE(v.since, s.updated_at)::timestamptz AS since,
        COALESCE(v.reads, 0)::int AS reads, v.last_read_at
-FROM openrails.subscriptions s
-LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+FROM billing.subscriptions s
+LEFT JOIN billing.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
@@ -995,8 +995,8 @@ SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
        count(*) FILTER (WHERE s.status = 'awaiting_method')::bigint AS awaiting_method,
        count(*) FILTER (WHERE s.status = 'unverified')::bigint AS unverified,
        COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(COALESCE(v.since, s.updated_at)) FILTER (WHERE s.status = 'unverified'))), 0)::bigint AS oldest_unverified_age_seconds
-FROM openrails.subscriptions s
-LEFT JOIN openrails.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
+FROM billing.subscriptions s
+LEFT JOIN billing.subscription_verifications v ON v.merchant_id = s.merchant_id AND v.subscription_id = s.id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified');
@@ -1006,7 +1006,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: CountUnknownOperations :one
 SELECT count(*)::bigint AS open_count,
        COALESCE(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - min(created_at))), 0)::bigint AS oldest_age_seconds
-FROM openrails.rail_intents
+FROM billing.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND status = 'unknown_needs_verify';
 
@@ -1014,7 +1014,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- for the subscription (at or after since, when given).
 -- name: SubscriptionHasCompletedPayment :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.payments p
+    SELECT 1 FROM billing.payments p
     WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       AND p.subscription_id = sqlc.arg(subscription_id)::uuid
       AND p.deleted_at IS NULL AND p.status = 'completed'
@@ -1022,35 +1022,35 @@ SELECT EXISTS (
 )::bool AS paid;
 
 -- name: ListUnverifiedSubscriptionIDsIn :many
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
   AND status = 'unverified' AND deleted_at IS NULL
   AND collection_policy <> 'engine' AND rail_subscription_id <> '';
 
 -- Callers pass a limit one above their bulk threshold.
 -- name: ListUnverifiedNMISubscriptionIDs :many
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'nmi' AND status = 'unverified' AND deleted_at IS NULL
   AND collection_policy <> 'engine' AND rail_subscription_id <> ''
 ORDER BY current_period_ends_at NULLS FIRST
 LIMIT sqlc.arg(row_limit)::bigint;
 
 -- name: ListUnverifiedSubscriptionIDsForPSP :many
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND status = 'unverified' AND deleted_at IS NULL
   AND collection_policy <> 'engine' AND rail_subscription_id <> ''
 ORDER BY current_period_ends_at NULLS FIRST;
 
 -- name: RecordSubscriptionVerificationReads :exec
-UPDATE openrails.subscription_verifications
+UPDATE billing.subscription_verifications
 SET reads = reads + 1, last_read_at = sqlc.arg(read_at)::timestamptz, last_error = sqlc.narg(last_error)::text
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[]);
 
 -- name: ListSubscriptionVaultRefs :many
 SELECT s.id, pm.rail_customer_ref
-FROM openrails.subscriptions s
-JOIN openrails.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = s.payment_method_id
+FROM billing.subscriptions s
+JOIN billing.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = s.payment_method_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(ids)::uuid[]) AND s.deleted_at IS NULL;
 
 -- Recorded charges (payments) and declines (attempts) a bulk pass decides from.
@@ -1058,34 +1058,34 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(ids)::
 SELECT subscription_id, transaction_id::text AS transaction_id, 'completed'::text AS status,
        purchased_at::timestamptz AS occurred_at, amount::bigint AS amount, currency::text AS currency,
        ''::text AS response_code
-FROM openrails.payments
+FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[])
   AND purchased_at >= sqlc.arg(since)::timestamptz AND status = 'completed' AND deleted_at IS NULL
 UNION ALL
 SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::timestamptz, amount::bigint,
        COALESCE(currency, '')::text, COALESCE(response_code, '')::text
-FROM openrails.payment_attempts
+FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[])
   AND attempted_at >= sqlc.arg(since)::timestamptz AND category <> 'approved' AND transaction_id IS NOT NULL;
 
 -- Resumes an interrupted bulk read, or starts one.
 -- name: StartNMIBulkCheckpoint :one
-INSERT INTO openrails.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
+INSERT INTO billing.nmi_bulk_checkpoints (merchant_id, psp_id, since, until, next_page, started_at)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(psp_id)::uuid, sqlc.arg(since)::timestamptz,
         sqlc.arg(until)::timestamptz, 1, sqlc.arg(until)::timestamptz)
 ON CONFLICT (merchant_id, psp_id) DO UPDATE SET merchant_id = EXCLUDED.merchant_id
 RETURNING since, until, next_page;
 
 -- name: SetNMIBulkCheckpointPage :exec
-UPDATE openrails.nmi_bulk_checkpoints SET next_page = sqlc.arg(next_page)::bigint
+UPDATE billing.nmi_bulk_checkpoints SET next_page = sqlc.arg(next_page)::bigint
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: DeleteNMIBulkCheckpoint :exec
-DELETE FROM openrails.nmi_bulk_checkpoints
+DELETE FROM billing.nmi_bulk_checkpoints
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: AutoResolveFindingBySubject :exec
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(finding_type)::text
@@ -1093,7 +1093,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = sqlc.arg(find
   AND status IN ('reconcile_required', 'requires_review');
 
 -- name: AutoResolveReviewFindingsByType :exec
-UPDATE openrails.reconciliation_findings
+UPDATE billing.reconciliation_findings
 SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])

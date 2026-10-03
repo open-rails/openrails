@@ -90,7 +90,7 @@ const (
 func Custodians() []string { return []string{CustodianPSP, CustodianBasisTheory, CustodianHyperSwitch} }
 
 // PaymentMethodCharge is the DERIVED last-charge health for a payment method
-// (#589) — computed at query time from openrails.payments, never a stored column.
+// (#589) — computed at query time from billing.payments, never a stored column.
 type PaymentMethodCharge struct {
 	LastChargedAt time.Time
 	Status        string // completed | failed: the latest charge attempt's outcome

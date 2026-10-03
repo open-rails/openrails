@@ -25,7 +25,7 @@ func (q *Queries) AcquireEntitlementTimelineLock(ctx context.Context, key int64)
 
 const createEntitlement = `-- name: CreateEntitlement :one
 
-INSERT INTO openrails.entitlements (
+INSERT INTO billing.entitlements (
     id, merchant_id, customer_id, entitlement, start_at, end_at,
     source_id, source_type, grant_id, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
@@ -56,7 +56,7 @@ type CreateEntitlementParams struct {
 	UpdatedAt    time.Time
 }
 
-// openrails.entitlements. The model is bun-soft-delete (deleted_at): every
+// billing.entitlements. The model is bun-soft-delete (deleted_at): every
 // read filters deleted_at IS NULL explicitly here (bun added it implicitly).
 func (q *Queries) CreateEntitlement(ctx context.Context, arg CreateEntitlementParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, createEntitlement,
@@ -80,7 +80,7 @@ func (q *Queries) CreateEntitlement(ctx context.Context, arg CreateEntitlementPa
 }
 
 const endActiveEntitlementsBySubscription = `-- name: EndActiveEntitlementsBySubscription :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = $2::timestamptz,
     updated_at = $3::timestamptz,
     revoked_at = CASE WHEN $4::boolean THEN $3::timestamptz ELSE ent.revoked_at END,
@@ -122,7 +122,7 @@ func (q *Queries) EndActiveEntitlementsBySubscription(ctx context.Context, arg E
 const entitlementCoverage = `-- name: EntitlementCoverage :one
 SELECT COALESCE(bool_or(ent.end_at IS NULL), false)::boolean AS indefinite,
        COALESCE(max(ent.end_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
-FROM openrails.entitlements ent
+FROM billing.entitlements ent
 WHERE ent.merchant_id = $1::uuid
   AND ent.customer_id = $2::uuid
   AND ent.entitlement = ANY($3::text[])
@@ -160,7 +160,7 @@ func (q *Queries) EntitlementCoverage(ctx context.Context, arg EntitlementCovera
 
 const entitlementExistsActive = `-- name: EntitlementExistsActive :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
@@ -192,7 +192,7 @@ func (q *Queries) EntitlementExistsActive(ctx context.Context, arg EntitlementEx
 
 const entitlementExistsBySource = `-- name: EntitlementExistsBySource :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $4::uuid AND ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
@@ -222,7 +222,7 @@ func (q *Queries) EntitlementExistsBySource(ctx context.Context, arg Entitlement
 
 const entitlementHasActiveIndefinite = `-- name: EntitlementHasActiveIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
@@ -252,7 +252,7 @@ func (q *Queries) EntitlementHasActiveIndefinite(ctx context.Context, arg Entitl
 }
 
 const getEntitlementByGrant = `-- name: GetEntitlementByGrant :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
 WHERE merchant_id = $1::uuid
   AND grant_id = $2::uuid
   AND entitlement = $3::text
@@ -269,9 +269,9 @@ type GetEntitlementByGrantParams struct {
 
 // #511 fetch-back: the entitlement window MaterializeGrant projected for a given
 // grant + feature (so PushNewEntitlement can return the created row).
-func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementByGrantParams) (OpenrailsEntitlement, error) {
+func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementByGrantParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getEntitlementByGrant, arg.MerchantID, arg.GrantID, arg.Entitlement)
-	var i OpenrailsEntitlement
+	var i BillingEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -295,7 +295,7 @@ func (q *Queries) GetEntitlementByGrant(ctx context.Context, arg GetEntitlementB
 }
 
 const getEntitlementByID = `-- name: GetEntitlementByID :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1
@@ -306,9 +306,9 @@ type GetEntitlementByIDParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByIDParams) (OpenrailsEntitlement, error) {
+func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByIDParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getEntitlementByID, arg.ID, arg.MerchantID)
-	var i OpenrailsEntitlement
+	var i BillingEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -332,7 +332,7 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, arg GetEntitlementByID
 }
 
 const getEntitlementByIDForUpdate = `-- name: GetEntitlementByIDForUpdate :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id=$1::uuid AND ent.id=$2::uuid
   AND ent.deleted_at IS NULL
 FOR UPDATE
@@ -344,9 +344,9 @@ type GetEntitlementByIDForUpdateParams struct {
 }
 
 // Customer and timeline locks must precede this row lock.
-func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitlementByIDForUpdateParams) (OpenrailsEntitlement, error) {
+func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitlementByIDForUpdateParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getEntitlementByIDForUpdate, arg.MerchantID, arg.ID)
-	var i OpenrailsEntitlement
+	var i BillingEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -370,7 +370,7 @@ func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitl
 }
 
 const getLatestEntitlementBySource = `-- name: GetLatestEntitlementBySource :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND entitlement = $3::text
@@ -388,7 +388,7 @@ type GetLatestEntitlementBySourceParams struct {
 	SourceID    uuid.UUID
 }
 
-func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLatestEntitlementBySourceParams) (OpenrailsEntitlement, error) {
+func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLatestEntitlementBySourceParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getLatestEntitlementBySource,
 		arg.MerchantID,
 		arg.CustomerID,
@@ -396,7 +396,7 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 		arg.SourceType,
 		arg.SourceID,
 	)
-	var i OpenrailsEntitlement
+	var i BillingEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -420,7 +420,7 @@ func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLates
 }
 
 const getTimelineCoveringWindow = `-- name: GetTimelineCoveringWindow :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -439,14 +439,14 @@ type GetTimelineCoveringWindowParams struct {
 }
 
 // The window covering instant `at` (for already-covered EndAt requests).
-func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (OpenrailsEntitlement, error) {
+func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimelineCoveringWindowParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getTimelineCoveringWindow,
 		arg.CustomerID,
 		arg.Entitlement,
 		arg.MerchantID,
 		arg.At,
 	)
-	var i OpenrailsEntitlement
+	var i BillingEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -470,7 +470,7 @@ func (q *Queries) GetTimelineCoveringWindow(ctx context.Context, arg GetTimeline
 }
 
 const getTimelineIndefinite = `-- name: GetTimelineIndefinite :one
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -486,9 +486,9 @@ type GetTimelineIndefiniteParams struct {
 	MerchantID  uuid.UUID
 }
 
-func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineIndefiniteParams) (OpenrailsEntitlement, error) {
+func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineIndefiniteParams) (BillingEntitlement, error) {
 	row := q.db.QueryRow(ctx, getTimelineIndefinite, arg.CustomerID, arg.Entitlement, arg.MerchantID)
-	var i OpenrailsEntitlement
+	var i BillingEntitlement
 	err := row.Scan(
 		&i.ID,
 		&i.Entitlement,
@@ -512,7 +512,7 @@ func (q *Queries) GetTimelineIndefinite(ctx context.Context, arg GetTimelineInde
 }
 
 const getTimelineTailEnd = `-- name: GetTimelineTailEnd :one
-SELECT ent.end_at FROM openrails.entitlements ent
+SELECT ent.end_at FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -537,7 +537,7 @@ func (q *Queries) GetTimelineTailEnd(ctx context.Context, arg GetTimelineTailEnd
 }
 
 const listActiveEntitlementNames = `-- name: ListActiveEntitlementNames :many
-SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
+SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.customer_id = $1
   AND ent.start_at <= $3::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
@@ -573,7 +573,7 @@ func (q *Queries) ListActiveEntitlementNames(ctx context.Context, arg ListActive
 }
 
 const listActiveEntitlementNamesMerchant = `-- name: ListActiveEntitlementNamesMerchant :many
-SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
+SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.start_at <= $3::timestamptz
@@ -609,7 +609,7 @@ func (q *Queries) ListActiveEntitlementNamesMerchant(ctx context.Context, arg Li
 }
 
 const listActiveEntitlementRecordsByCustomerIDs = `-- name: ListActiveEntitlementRecordsByCustomerIDs :many
-SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id, ent.destructive_run_class FROM openrails.entitlements ent
+SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id, ent.destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = ANY($2::uuid[])
   AND ent.revoked_at IS NULL
@@ -630,15 +630,15 @@ type ListActiveEntitlementRecordsByCustomerIDsParams struct {
 // per-customer round trips. customers is UUID-only (#491): the caller derives the
 // customer ids (FederatedCustomerID / the subject UUID) and maps results back.
 // Customers with no active rows simply do not appear.
-func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context, arg ListActiveEntitlementRecordsByCustomerIDsParams) ([]OpenrailsEntitlement, error) {
+func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context, arg ListActiveEntitlementRecordsByCustomerIDsParams) ([]BillingEntitlement, error) {
 	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsByCustomerIDs, arg.MerchantID, arg.CustomerIds, arg.At)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsEntitlement
+	var items []BillingEntitlement
 	for rows.Next() {
-		var i OpenrailsEntitlement
+		var i BillingEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -669,7 +669,7 @@ func (q *Queries) ListActiveEntitlementRecordsByCustomerIDs(ctx context.Context,
 }
 
 const listActiveEntitlementRecordsMerchant = `-- name: ListActiveEntitlementRecordsMerchant :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.revoked_at IS NULL
@@ -685,15 +685,15 @@ type ListActiveEntitlementRecordsMerchantParams struct {
 	At         time.Time
 }
 
-func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg ListActiveEntitlementRecordsMerchantParams) ([]OpenrailsEntitlement, error) {
+func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg ListActiveEntitlementRecordsMerchantParams) ([]BillingEntitlement, error) {
 	rows, err := q.db.Query(ctx, listActiveEntitlementRecordsMerchant, arg.MerchantID, arg.CustomerID, arg.At)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsEntitlement
+	var items []BillingEntitlement
 	for rows.Next() {
-		var i OpenrailsEntitlement
+		var i BillingEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -724,7 +724,7 @@ func (q *Queries) ListActiveEntitlementRecordsMerchant(ctx context.Context, arg 
 }
 
 const listCustomersWithEntitlement = `-- name: ListCustomersWithEntitlement :many
-SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
+SELECT DISTINCT ent.customer_id FROM billing.entitlements ent
 WHERE ent.merchant_id = $1::uuid AND ent.entitlement = $2::text
   AND ent.start_at <= $3::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > $3::timestamptz)
@@ -774,7 +774,7 @@ func (q *Queries) ListCustomersWithEntitlement(ctx context.Context, arg ListCust
 }
 
 const listDistinctEntitlementNamesBySource = `-- name: ListDistinctEntitlementNamesBySource :many
-SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
+SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $3::uuid AND ent.source_type = $1
   AND ent.source_id = $2
   AND ent.revoked_at IS NULL
@@ -808,7 +808,7 @@ func (q *Queries) ListDistinctEntitlementNamesBySource(ctx context.Context, arg 
 }
 
 const listEntitlementsByCustomer = `-- name: ListEntitlementsByCustomer :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC
@@ -819,15 +819,15 @@ type ListEntitlementsByCustomerParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitlementsByCustomerParams) ([]OpenrailsEntitlement, error) {
+func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitlementsByCustomerParams) ([]BillingEntitlement, error) {
 	rows, err := q.db.Query(ctx, listEntitlementsByCustomer, arg.CustomerID, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsEntitlement
+	var items []BillingEntitlement
 	for rows.Next() {
-		var i OpenrailsEntitlement
+		var i BillingEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -858,7 +858,7 @@ func (q *Queries) ListEntitlementsByCustomer(ctx context.Context, arg ListEntitl
 }
 
 const listExtendableSubscriptionEntitlements = `-- name: ListExtendableSubscriptionEntitlements :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM billing.entitlements ent
 WHERE ent.merchant_id = $2::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -872,15 +872,15 @@ type ListExtendableSubscriptionEntitlementsParams struct {
 	EndAt      time.Time
 }
 
-func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, arg ListExtendableSubscriptionEntitlementsParams) ([]OpenrailsEntitlement, error) {
+func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, arg ListExtendableSubscriptionEntitlementsParams) ([]BillingEntitlement, error) {
 	rows, err := q.db.Query(ctx, listExtendableSubscriptionEntitlements, arg.SourceID, arg.MerchantID, arg.EndAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsEntitlement
+	var items []BillingEntitlement
 	for rows.Next() {
-		var i OpenrailsEntitlement
+		var i BillingEntitlement
 		if err := rows.Scan(
 			&i.ID,
 			&i.Entitlement,
@@ -911,7 +911,7 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 }
 
 const materializeEntitlement = `-- name: MaterializeEntitlement :exec
-INSERT INTO openrails.entitlements (
+INSERT INTO billing.entitlements (
     merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::text,
@@ -953,8 +953,8 @@ SELECT p.id AS product_id,
        p.display_name AS product_display_name,
        p.tier_rank,
        ent.entitlement
-FROM openrails.products p
-JOIN openrails.entitlements ent
+FROM billing.products p
+JOIN billing.entitlements ent
   ON ent.merchant_id = p.merchant_id
  AND ent.entitlement IN (SELECT jsonb_object_keys(p.entitlements_spec))
 WHERE p.merchant_id = $1
@@ -1010,13 +1010,13 @@ func (q *Queries) ResolveEffectiveTier(ctx context.Context, arg ResolveEffective
 }
 
 const resumeEntitlementsBySubscription = `-- name: ResumeEntitlementsBySubscription :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = NULL,
     updated_at = $2::timestamptz
 WHERE ent.merchant_id = $3::uuid AND ent.deleted_at IS NULL
   AND ent.id IN (
     SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
-    FROM openrails.entitlements e
+    FROM billing.entitlements e
     WHERE e.merchant_id = $3::uuid AND e.source_type = 'subscription'
       AND e.source_id = $1
       AND e.revoked_at IS NULL
@@ -1043,7 +1043,7 @@ func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg Resu
 }
 
 const revokeActiveOneOffEntitlements = `-- name: RevokeActiveOneOffEntitlements :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = $2::timestamptz,
     revoked_at = $3::timestamptz,
     revoke_reason = $4,
@@ -1076,7 +1076,7 @@ func (q *Queries) RevokeActiveOneOffEntitlements(ctx context.Context, arg Revoke
 }
 
 const revokeActiveTimelineWindows = `-- name: RevokeActiveTimelineWindows :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     revoked_at = $3::timestamptz,
     revoke_reason = $4::text,
     updated_at = $3::timestamptz
@@ -1116,7 +1116,7 @@ func (q *Queries) RevokeActiveTimelineWindows(ctx context.Context, arg RevokeAct
 }
 
 const revokeEntitlementByID = `-- name: RevokeEntitlementByID :execrows
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     revoked_at = $2::timestamptz,
     revoke_reason = $3::text,
     updated_at = $2::timestamptz
@@ -1146,7 +1146,7 @@ func (q *Queries) RevokeEntitlementByID(ctx context.Context, arg RevokeEntitleme
 }
 
 const shiftEntitlementTimelineWindows = `-- name: ShiftEntitlementTimelineWindows :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     start_at = ent.start_at + ($3::bigint * interval '1 second'),
     end_at = CASE WHEN ent.end_at IS NULL THEN NULL
              ELSE ent.end_at + ($3::bigint * interval '1 second') END,
@@ -1184,7 +1184,7 @@ func (q *Queries) ShiftEntitlementTimelineWindows(ctx context.Context, arg Shift
 
 const softDeleteEntitlementByID = `-- name: SoftDeleteEntitlementByID :exec
 WITH retracted AS (
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.merchant_id = $3::uuid AND ent.id = $1
@@ -1192,13 +1192,13 @@ WHERE ent.merchant_id = $3::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
     RETURNING ent.grant_id
 )
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, $2::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
@@ -1219,7 +1219,7 @@ func (q *Queries) SoftDeleteEntitlementByID(ctx context.Context, arg SoftDeleteE
 }
 
 const softDeleteFutureEntitlementsBySubscription = `-- name: SoftDeleteFutureEntitlementsBySubscription :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'subscription'
@@ -1250,7 +1250,7 @@ func (q *Queries) SoftDeleteFutureEntitlementsBySubscription(ctx context.Context
 
 const softDeleteFutureOneOffEntitlements = `-- name: SoftDeleteFutureOneOffEntitlements :exec
 WITH retracted AS (
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = $2::timestamptz,
     updated_at = $2::timestamptz
 WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'one_off'
@@ -1260,13 +1260,13 @@ WHERE ent.merchant_id = $3::uuid AND ent.source_type = 'one_off'
   AND ent.start_at >= $4::timestamptz
     RETURNING ent.grant_id
 )
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, $2::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $3::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
@@ -1294,7 +1294,7 @@ func (q *Queries) SoftDeleteFutureOneOffEntitlements(ctx context.Context, arg So
 
 const softDeleteFutureTimelineWindows = `-- name: SoftDeleteFutureTimelineWindows :exec
 WITH retracted AS (
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE ent.merchant_id = $4::uuid AND ent.customer_id = $1
@@ -1306,13 +1306,13 @@ WHERE ent.merchant_id = $4::uuid AND ent.customer_id = $1
   AND ($6::uuid IS NULL OR ent.source_id = $6::uuid)
     RETURNING ent.grant_id
 )
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, $3::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $4::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
@@ -1346,7 +1346,7 @@ func (q *Queries) SoftDeleteFutureTimelineWindows(ctx context.Context, arg SoftD
 
 const standingSubscriptionEntitlementExists = `-- name: StandingSubscriptionEntitlementExists :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements e
+    SELECT 1 FROM billing.entitlements e
     WHERE e.merchant_id = $1::uuid
       AND e.customer_id = $2::uuid
       AND e.entitlement = $3::text
@@ -1382,7 +1382,7 @@ func (q *Queries) StandingSubscriptionEntitlementExists(ctx context.Context, arg
 
 const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $3::uuid AND ent.customer_id = $1
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
@@ -1405,7 +1405,7 @@ func (q *Queries) TimelineHasIndefinite(ctx context.Context, arg TimelineHasInde
 }
 
 const updateEntitlementEndAtIfMatch = `-- name: UpdateEntitlementEndAtIfMatch :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = $2::timestamptz,
     updated_at = $3::timestamptz
 WHERE ent.merchant_id = $4::uuid AND ent.id = $1

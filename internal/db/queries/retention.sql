@@ -5,7 +5,7 @@
 -- runs per-merchant under RunInMerchantScope. Capped and cursored: one pass is
 -- bounded work and the next resumes at the merchant after the last one handled.
 -- name: ListRetentionWorkMerchants :many
-SELECT merchant_id FROM openrails.retention_work_merchant_ids(
+SELECT merchant_id FROM billing.retention_work_merchant_ids(
     sqlc.arg(now)::timestamptz,
     sqlc.arg(notification_cutoff)::timestamptz,
     sqlc.arg(notification_seen_cutoff)::timestamptz,
@@ -17,7 +17,7 @@ SELECT merchant_id FROM openrails.retention_work_merchant_ids(
     sqlc.arg(merchant_limit)::int);
 
 -- name: GetSweepCursor :one
-SELECT cursor_merchant_id, cursor_version FROM openrails.worker_state
+SELECT cursor_merchant_id, cursor_version FROM billing.worker_state
 WHERE worker_kind = sqlc.arg(worker_kind)::text;
 
 -- NULL parks the cursor at the start of the ring: the pass drained its queue.
@@ -26,10 +26,10 @@ WHERE worker_kind = sqlc.arg(worker_kind)::text;
 -- the pass read, bumped by every applied save. A pass finishing after a newer
 -- pass already moved the cursor affects 0 rows and keeps the newer position.
 -- name: SaveSweepCursor :execrows
-INSERT INTO openrails.worker_state (worker_kind, cursor_merchant_id, cursor_version)
+INSERT INTO billing.worker_state (worker_kind, cursor_merchant_id, cursor_version)
 VALUES (sqlc.arg(worker_kind)::text, sqlc.narg(cursor_merchant_id)::uuid, 1)
 ON CONFLICT (worker_kind) DO UPDATE
     SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        cursor_version = openrails.worker_state.cursor_version + 1
-    WHERE openrails.worker_state.cursor_version
+        cursor_version = billing.worker_state.cursor_version + 1
+    WHERE billing.worker_state.cursor_version
           = sqlc.arg(expected_cursor_version)::bigint;

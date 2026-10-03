@@ -86,13 +86,13 @@ type EnqueueParams struct {
 
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
-func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
 	scope, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if scope.UUID() != p.MerchantID {
-		return gen.OpenrailsRailIntent{}, errors.New("intent merchant does not match context")
+		return gen.BillingRailIntent{}, errors.New("intent merchant does not match context")
 	}
 	if p.IntentType == subscriptions.TypeInitialMembership {
 		return s.enqueueInitialMembership(ctx, p)
@@ -104,7 +104,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		return s.enqueueNMIMethodDelete(ctx, p)
 	}
 	if p.IntentType == TypeHyperSwitchMethodDelete {
-		return gen.OpenrailsRailIntent{}, errors.New("custodian deletion requires owned method admission")
+		return gen.BillingRailIntent{}, errors.New("custodian deletion requires owned method admission")
 	}
 	if p.IntentType == "nmi_sale" {
 		return s.enqueueSale(ctx, p)
@@ -113,17 +113,17 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		return s.enqueue(ctx, p)
 	}
 	if p.SubscriptionID == nil {
-		return gen.OpenrailsRailIntent{}, errors.New("recurring operation requires a subscription")
+		return gen.BillingRailIntent{}, errors.New("recurring operation requires a subscription")
 	}
 	var engineCustomer uuid.UUID
 	if p.IntentType == subscriptions.TypeSubscriptionCollection {
 		observed, err := subscriptions.NewSubscriptionRepo(s.db).GetByID(ctx, *p.SubscriptionID)
 		if err != nil {
-			return gen.OpenrailsRailIntent{}, err
+			return gen.BillingRailIntent{}, err
 		}
 		engineCustomer = observed.CustomerID
 	}
-	var row gen.OpenrailsRailIntent
+	var row gen.BillingRailIntent
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
 		if engineCustomer != uuid.Nil {
@@ -285,14 +285,14 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	return row, err
 }
 
-func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingRailIntent, error) {
 	if p.IntentType == TypeNMIPaymentMethodDelete || p.IntentType == TypeHyperSwitchMethodDelete {
 		if err := validatePaymentMethodDeleteAuthority(ctx, p); err != nil {
-			return gen.OpenrailsRailIntent{}, err
+			return gen.BillingRailIntent{}, err
 		}
 	}
 	if p.IntentType == "" || p.IdempotencyKey == "" {
-		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
+		return gen.BillingRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
 	// or#893/or#795 (rail_intents_addressed): the intent names the account it
 	// will execute against — a PSP, or a custodian for the writes addressed to
@@ -306,7 +306,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.PspID == uuid.Nil && p.CustodianID == uuid.Nil {
 		psp, err := db.RequirePSPID(ctx)
 		if err != nil {
-			return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
+			return gen.BillingRailIntent{}, fmt.Errorf("intents: enqueue %s: %w", p.IntentType, err)
 		}
 		p.PspID = psp
 	}
@@ -314,7 +314,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.Payload != nil {
 		b, err := json.Marshal(p.Payload)
 		if err != nil {
-			return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
+			return gen.BillingRailIntent{}, fmt.Errorf("intents: marshal payload: %w", err)
 		}
 		payload = b
 	}
@@ -339,7 +339,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			IntentType: p.IntentType,
 			Origin:     p.Origin,
 		}, time.Now().UTC()); err != nil {
-			return gen.OpenrailsRailIntent{}, err
+			return gen.BillingRailIntent{}, err
 		}
 	}
 
@@ -349,7 +349,7 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	}
 	// psp_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
-	var row gen.OpenrailsRailIntent
+	var row gen.BillingRailIntent
 	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
@@ -400,10 +400,10 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 // ClaimByID leases ONE specific intent for the synchronous execute path.
 // ok=false means the row is not claimable (terminal, expired, or leased by a
 // live executor) — the caller inspects the canonical row instead.
-func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error) {
+func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingRailIntent, bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
-		return gen.OpenrailsRailIntent{}, false, scopeErr
+		return gen.BillingRailIntent{}, false, scopeErr
 	}
 	row, err := s.db.Gen(ctx).ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
 		MerchantID: scopeMerchantID.UUID(),
@@ -413,18 +413,18 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsRailIntent{}, false, nil
+			return gen.BillingRailIntent{}, false, nil
 		}
-		return gen.OpenrailsRailIntent{}, false, err
+		return gen.BillingRailIntent{}, false, err
 	}
 	return row, true, nil
 }
 
 // Get returns the intent row by id.
-func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
-		return gen.OpenrailsRailIntent{}, scopeErr
+		return gen.BillingRailIntent{}, scopeErr
 	}
 	return s.db.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 }
@@ -435,7 +435,7 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent,
 // merchant's intents. Under the since-removed RLS a bare-context claim leased
 // ZERO intents — silently, with no error — which is how the entire outbound
 // provider-mutation plane came to be inert while its tests passed.
-func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingRailIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
@@ -476,7 +476,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
 // merchant-pin requirement as ClaimDue (or#862).
-func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingRailIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
@@ -494,20 +494,20 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 
 // ClaimUnknownByID leases one unknown operation for operator resolution.
 // ok=false means it is not unknown or another worker holds its lease.
-func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error) {
+func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingRailIntent, bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
-		return gen.OpenrailsRailIntent{}, false, scopeErr
+		return gen.BillingRailIntent{}, false, scopeErr
 	}
 	row, err := s.db.Gen(ctx).ClaimUnknownRailIntentByID(ctx, gen.ClaimUnknownRailIntentByIDParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.OpenrailsRailIntent{}, false, nil
+		return gen.BillingRailIntent{}, false, nil
 	}
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, false, err
+		return gen.BillingRailIntent{}, false, err
 	}
 	return row, true, nil
 }
@@ -880,20 +880,20 @@ func uuidPtrOrNil(id uuid.UUID) *uuid.UUID {
 }
 
 // GetByIdempotencyKey reads the immutable operation for a request replay.
-func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.OpenrailsRailIntent, error) {
+func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.BillingRailIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	return s.db.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
 }
 
 // LiveTierChange returns the unresolved tier change (NMI upgrade, Stripe tier
 // change or engine upgrade) that owns the subscription; db.IsNotFound when none does.
-func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (gen.BillingRailIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	return s.db.Gen(ctx).GetLiveTierChangeRailIntent(ctx, gen.GetLiveTierChangeRailIntentParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
 }

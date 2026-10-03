@@ -265,8 +265,8 @@ LEFT JOIN LATERAL (
   FROM (
     SELECT la.customer_id, la.currency,
            SUM(CASE WHEN lt.credit_account_id = la.id THEN lt.amount ELSE -lt.amount END) AS balance
-    FROM openrails.ledger_accounts la
-    JOIN openrails.ledger_transfers lt
+    FROM billing.ledger_accounts la
+    JOIN billing.ledger_transfers lt
       ON (lt.credit_account_id = la.id OR lt.debit_account_id = la.id)
      AND lt.merchant_id = la.merchant_id
      AND lt.created_at < edge.bucket
@@ -275,7 +275,7 @@ LEFT JOIN LATERAL (
   ) bal
   JOIN (
     SELECT ue.customer_id, ue.currency, SUM(ue.amount) AS burn
-    FROM openrails.usage_events ue
+    FROM billing.usage_events ue
     WHERE ue.merchant_id = $1 AND ue.occurred_at > edge.bucket - interval '7 days' AND ue.occurred_at <= edge.bucket
     GROUP BY ue.customer_id, ue.currency
   ) burn ON burn.customer_id = bal.customer_id AND burn.currency = bal.currency

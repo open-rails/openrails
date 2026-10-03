@@ -25,7 +25,7 @@ import (
 // stalled River stalled its own detector and could only report health in the
 // cases where health was never in doubt. ProgressMonitor is a plain goroutine
 // owned by OpenRails: it reads River's OWN `river_job` table plus the
-// openrails.worker_state rows and decides whether the periodic fleet is
+// billing.worker_state rows and decides whether the periodic fleet is
 // progressing, without needing a job to run to find out.
 //
 // river_job is the primary signal deliberately. worker_state.last_success_at
@@ -69,7 +69,7 @@ type KindProgress struct {
 	// LastEnqueuedAt/LastCompletedAt come from river_job (River's own writes).
 	LastEnqueuedAt  *time.Time
 	LastCompletedAt *time.Time
-	// LastSuccessAt comes from openrails.worker_state (middleware bookkeeping).
+	// LastSuccessAt comes from billing.worker_state (middleware bookkeeping).
 	LastSuccessAt *time.Time
 	Overdue       int64
 	// Reason is "" when healthy.
@@ -284,7 +284,7 @@ func (m *ProgressMonitor) Check(ctx context.Context) (ProgressReport, error) {
 	}
 
 	report := ProgressReport{CheckedAt: now, ShortestPeriod: shortest}
-	byKind := make(map[string]gen.OpenrailsWorkerState, len(rows))
+	byKind := make(map[string]gen.BillingWorkerState, len(rows))
 	for _, row := range rows {
 		byKind[row.WorkerKind] = row
 	}
@@ -420,7 +420,7 @@ func laterOf(a, b *time.Time) *time.Time {
 // Progress evidence is taken from river_job FIRST (River's own writes) and only
 // then from worker_state.last_success_at, so a deployment whose middleware is
 // missing reports the truth instead of never_succeeded for everything.
-func evaluateKindProgress(row gen.OpenrailsWorkerState, kp KindProgress, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
+func evaluateKindProgress(row gen.BillingWorkerState, kp KindProgress, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
 	if int(row.ConsecutiveFailures) >= failureThreshold {
 		return ProgressConsecutiveFailures
 	}
@@ -447,7 +447,7 @@ func evaluateKindProgress(row gen.OpenrailsWorkerState, kp KindProgress, now tim
 
 // workerAlertDue dedupes: alert on first trip, on a fresh incident (progress
 // happened since the last alert), or on the re-alert pacing while it persists.
-func workerAlertDue(row gen.OpenrailsWorkerState, now time.Time, reAlertEvery time.Duration) bool {
+func workerAlertDue(row gen.BillingWorkerState, now time.Time, reAlertEvery time.Duration) bool {
 	if row.LastAlertedAt == nil {
 		return true
 	}
@@ -469,7 +469,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 	if err != nil {
 		return fmt.Errorf("river progress: list worker health: %w", err)
 	}
-	byKind := make(map[string]gen.OpenrailsWorkerState, len(rows))
+	byKind := make(map[string]gen.BillingWorkerState, len(rows))
 	for _, row := range rows {
 		byKind[row.WorkerKind] = row
 	}
@@ -503,7 +503,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 		}
 		row, ok := byKind[kp.Kind]
 		if !ok {
-			row = gen.OpenrailsWorkerState{WorkerKind: kp.Kind}
+			row = gen.BillingWorkerState{WorkerKind: kp.Kind}
 		}
 		if !workerAlertDue(row, report.CheckedAt, m.reAlertEvery()) {
 			continue
@@ -535,7 +535,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 // fleet stall gets the same durable, deduped alert row every other kind gets.
 const fleetHealthKind = "openrails.river_fleet"
 
-func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.OpenrailsWorkerState, reason string, now time.Time, report ProgressReport) error {
+func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.BillingWorkerState, reason string, now time.Time, report ProgressReport) error {
 	// Cross-merchant read on purpose: the alert fans out to every active
 	// merchant, so this must be the explicit directory accessor, not a
 	// merchant-scoped handle (or#861/or#877).

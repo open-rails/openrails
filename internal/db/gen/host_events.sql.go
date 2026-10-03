@@ -13,7 +13,7 @@ import (
 )
 
 const acknowledgeHostEvent = `-- name: AcknowledgeHostEvent :execrows
-UPDATE openrails.host_outbox
+UPDATE billing.host_outbox
 SET delivered_at = COALESCE(delivered_at, $1::timestamptz)
 WHERE merchant_id = $2::uuid AND id = $3::uuid
 `
@@ -35,8 +35,8 @@ func (q *Queries) AcknowledgeHostEvent(ctx context.Context, arg AcknowledgeHostE
 const listHostEvents = `-- name: ListHostEvents :many
 SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
   p.subscription_id AS payment_subscription_id
-FROM openrails.host_outbox h
-LEFT JOIN openrails.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
+FROM billing.host_outbox h
+LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = $1::uuid
   AND ($2::text = '' OR h.event_type = $2::text)
   AND ($3::uuid IS NULL OR h.payment_id = $3::uuid)

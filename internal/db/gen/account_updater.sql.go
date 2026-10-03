@@ -13,7 +13,7 @@ import (
 )
 
 const completeAccountUpdaterBatchByJobRef = `-- name: CompleteAccountUpdaterBatchByJobRef :execrows
-UPDATE openrails.account_updater_batches SET
+UPDATE billing.account_updater_batches SET
     status = 'completed',
     result_counts = $1,
     completed_at = $2::timestamptz,
@@ -51,7 +51,7 @@ func (q *Queries) CompleteAccountUpdaterBatchByJobRef(ctx context.Context, arg C
 }
 
 const createAccountUpdaterBatch = `-- name: CreateAccountUpdaterBatch :one
-INSERT INTO openrails.account_updater_batches (
+INSERT INTO billing.account_updater_batches (
     merchant_id, custodian_id, instruments
 ) VALUES (
     $1, $2, $3
@@ -68,9 +68,9 @@ type CreateAccountUpdaterBatchParams struct {
 // The durable batch is written BEFORE the custodian is touched: the row IS the
 // job ref that makes a restart resume rather than resubmit. The partial unique
 // index (one open batch per custodian) is the duplicate-submit guard.
-func (q *Queries) CreateAccountUpdaterBatch(ctx context.Context, arg CreateAccountUpdaterBatchParams) (OpenrailsAccountUpdaterBatch, error) {
+func (q *Queries) CreateAccountUpdaterBatch(ctx context.Context, arg CreateAccountUpdaterBatchParams) (BillingAccountUpdaterBatch, error) {
 	row := q.db.QueryRow(ctx, createAccountUpdaterBatch, arg.MerchantID, arg.CustodianID, arg.Instruments)
-	var i OpenrailsAccountUpdaterBatch
+	var i BillingAccountUpdaterBatch
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -90,7 +90,7 @@ func (q *Queries) CreateAccountUpdaterBatch(ctx context.Context, arg CreateAccou
 }
 
 const failAccountUpdaterBatch = `-- name: FailAccountUpdaterBatch :execrows
-UPDATE openrails.account_updater_batches SET
+UPDATE billing.account_updater_batches SET
     status = 'failed',
     failure_reason = $1,
     completed_at = $2::timestamptz,
@@ -124,7 +124,7 @@ func (q *Queries) FailAccountUpdaterBatch(ctx context.Context, arg FailAccountUp
 }
 
 const getAccountUpdaterBatch = `-- name: GetAccountUpdaterBatch :one
-SELECT id, merchant_id, custodian_id, job_ref, status, instruments, result_counts, failure_reason, submitted_at, last_polled_at, completed_at, created_at, updated_at FROM openrails.account_updater_batches
+SELECT id, merchant_id, custodian_id, job_ref, status, instruments, result_counts, failure_reason, submitted_at, last_polled_at, completed_at, created_at, updated_at FROM billing.account_updater_batches
 WHERE merchant_id = $1 AND id = $2
 `
 
@@ -133,9 +133,9 @@ type GetAccountUpdaterBatchParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetAccountUpdaterBatch(ctx context.Context, arg GetAccountUpdaterBatchParams) (OpenrailsAccountUpdaterBatch, error) {
+func (q *Queries) GetAccountUpdaterBatch(ctx context.Context, arg GetAccountUpdaterBatchParams) (BillingAccountUpdaterBatch, error) {
 	row := q.db.QueryRow(ctx, getAccountUpdaterBatch, arg.MerchantID, arg.ID)
-	var i OpenrailsAccountUpdaterBatch
+	var i BillingAccountUpdaterBatch
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -155,7 +155,7 @@ func (q *Queries) GetAccountUpdaterBatch(ctx context.Context, arg GetAccountUpda
 }
 
 const listAccountUpdaterOpenBatchMerchants = `-- name: ListAccountUpdaterOpenBatchMerchants :many
-SELECT merchant_id FROM openrails.account_updater_open_batch_merchant_ids(
+SELECT merchant_id FROM billing.account_updater_open_batch_merchant_ids(
     $1::int)
 `
 
@@ -182,7 +182,7 @@ func (q *Queries) ListAccountUpdaterOpenBatchMerchants(ctx context.Context, merc
 
 const listAccountUpdaterWorkMerchants = `-- name: ListAccountUpdaterWorkMerchants :many
 
-SELECT merchant_id FROM openrails.account_updater_work_merchant_ids(
+SELECT merchant_id FROM billing.account_updater_work_merchant_ids(
     $1::text,
     $2::text,
     $3::timestamptz,
@@ -237,7 +237,7 @@ func (q *Queries) ListAccountUpdaterWorkMerchants(ctx context.Context, arg ListA
 
 const listDueAccountUpdaterInstruments = `-- name: ListDueAccountUpdaterInstruments :many
 SELECT pm.id, pm.rail_method_ref, pm.expiry_date
-FROM openrails.payment_methods pm
+FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1
   AND pm.custodian_id = $2::uuid
   AND pm.custodian = $3
@@ -245,7 +245,7 @@ WHERE pm.merchant_id = $1
   AND (pm.account_updater_checked_at IS NULL
        OR pm.account_updater_checked_at < $4::timestamptz)
   AND EXISTS (
-        SELECT 1 FROM openrails.subscriptions s
+        SELECT 1 FROM billing.subscriptions s
          WHERE s.payment_method_id = pm.id
            AND s.merchant_id = pm.merchant_id
            AND s.deleted_at IS NULL
@@ -303,7 +303,7 @@ func (q *Queries) ListDueAccountUpdaterInstruments(ctx context.Context, arg List
 }
 
 const listOpenAccountUpdaterBatches = `-- name: ListOpenAccountUpdaterBatches :many
-SELECT id, merchant_id, custodian_id, job_ref, status, instruments, result_counts, failure_reason, submitted_at, last_polled_at, completed_at, created_at, updated_at FROM openrails.account_updater_batches
+SELECT id, merchant_id, custodian_id, job_ref, status, instruments, result_counts, failure_reason, submitted_at, last_polled_at, completed_at, created_at, updated_at FROM billing.account_updater_batches
 WHERE merchant_id = $1
   AND status IN ('pending', 'submitted')
 ORDER BY created_at
@@ -318,15 +318,15 @@ type ListOpenAccountUpdaterBatchesParams struct {
 // Bounded twice over: the one-open-batch-per-custodian unique index means a
 // merchant has at most as many rows here as it has declared custodians, and
 // the caller still caps the pass.
-func (q *Queries) ListOpenAccountUpdaterBatches(ctx context.Context, arg ListOpenAccountUpdaterBatchesParams) ([]OpenrailsAccountUpdaterBatch, error) {
+func (q *Queries) ListOpenAccountUpdaterBatches(ctx context.Context, arg ListOpenAccountUpdaterBatchesParams) ([]BillingAccountUpdaterBatch, error) {
 	rows, err := q.db.Query(ctx, listOpenAccountUpdaterBatches, arg.MerchantID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsAccountUpdaterBatch
+	var items []BillingAccountUpdaterBatch
 	for rows.Next() {
-		var i OpenrailsAccountUpdaterBatch
+		var i BillingAccountUpdaterBatch
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -353,7 +353,7 @@ func (q *Queries) ListOpenAccountUpdaterBatches(ctx context.Context, arg ListOpe
 }
 
 const markAccountUpdaterBatchPolled = `-- name: MarkAccountUpdaterBatchPolled :execrows
-UPDATE openrails.account_updater_batches SET
+UPDATE billing.account_updater_batches SET
     last_polled_at = $1::timestamptz,
     updated_at = now()
 WHERE merchant_id = $2
@@ -375,7 +375,7 @@ func (q *Queries) MarkAccountUpdaterBatchPolled(ctx context.Context, arg MarkAcc
 }
 
 const markAccountUpdaterBatchSubmitted = `-- name: MarkAccountUpdaterBatchSubmitted :execrows
-UPDATE openrails.account_updater_batches SET
+UPDATE billing.account_updater_batches SET
     status = 'submitted',
     submitted_at = COALESCE(submitted_at, $1::timestamptz),
     updated_at = now()
@@ -399,7 +399,7 @@ func (q *Queries) MarkAccountUpdaterBatchSubmitted(ctx context.Context, arg Mark
 }
 
 const setAccountUpdaterBatchJobRef = `-- name: SetAccountUpdaterBatchJobRef :execrows
-UPDATE openrails.account_updater_batches SET
+UPDATE billing.account_updater_batches SET
     job_ref = $1,
     updated_at = now()
 WHERE merchant_id = $2
@@ -424,7 +424,7 @@ func (q *Queries) SetAccountUpdaterBatchJobRef(ctx context.Context, arg SetAccou
 }
 
 const stampAccountUpdaterChecked = `-- name: StampAccountUpdaterChecked :execrows
-UPDATE openrails.payment_methods SET
+UPDATE billing.payment_methods SET
     account_updater_checked_at = $1::timestamptz,
     updated_at = now()
 WHERE merchant_id = $2

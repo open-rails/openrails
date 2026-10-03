@@ -25,7 +25,7 @@ type hyperSwitchCollectionAdapter struct {
 // without invoking invoice preparation or choosing an unscheduled agreement.
 // The caller rechecks method ownership against its frozen instrument and owns
 // the durable submission fence. This helper compares the retained HS binding.
-func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.OpenrailsPaymentMethod, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
+func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.BillingPaymentMethod, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
 	if resolver == nil || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
 		return nil, charge.ErrInstrumentChanged
 	}
@@ -60,14 +60,14 @@ func (s *MoneyService) SetHyperSwitchDeployment(apiBaseURL string) error {
 	return nil
 }
 
-func collectionHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.OpenrailsPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
+func collectionHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
 	return charge.FreezeHyperSwitchBinding(ctx, q, method, deployment)
 }
-func hyperSwitchBinding(row gen.OpenrailsCustodian, deployment string) (charge.HyperSwitchBinding, error) {
+func hyperSwitchBinding(row gen.BillingCustodian, deployment string) (charge.HyperSwitchBinding, error) {
 	return charge.HyperSwitchBindingFromAccount(row, deployment)
 }
 
-func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
+func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
 	if req.HyperSwitch == nil || *req.HyperSwitch != a.binding {
 		return nil, fmt.Errorf("%w: accepted HyperSwitch custody profile changed", charge.ErrInstrumentChanged)
 	}

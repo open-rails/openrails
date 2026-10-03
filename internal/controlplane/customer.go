@@ -80,7 +80,7 @@ type MerchantForSubject struct {
 // BEFORE a merchant is chosen. As a plain pool query under the since-removed
 // RLS, the customers half of the join matched nothing and the portal's
 // merchant list was always EMPTY. The customers lookup now goes through the
-// SECURITY DEFINER directory function (migration 0016); openrails.merchants is
+// SECURITY DEFINER directory function (migration 0016); billing.merchants is
 // a global table, so the rest is an ordinary query.
 func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject string) ([]MerchantForSubject, error) {
 	subject = strings.TrimSpace(subject)

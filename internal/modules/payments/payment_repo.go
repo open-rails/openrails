@@ -215,15 +215,15 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
-	payment, err := models.PaymentFromGen(row.OpenrailsPayment)
+	payment, err := models.PaymentFromGen(row.BillingPayment)
 	if err != nil {
 		return nil, nil, err
 	}
-	price, err := r.db.PriceFromGen(ctx, row.OpenrailsPrice)
+	price, err := r.db.PriceFromGen(ctx, row.BillingPrice)
 	if err != nil {
 		return nil, nil, err
 	}
-	product, err := models.ProductFromGen(row.OpenrailsProduct)
+	product, err := models.ProductFromGen(row.BillingProduct)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -693,11 +693,11 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 			return err
 		}
 		for _, row := range rows {
-			price, err := models.PriceFromGen(row.OpenrailsPrice)
+			price, err := models.PriceFromGen(row.BillingPrice)
 			if err != nil {
 				return err
 			}
-			product, err := models.ProductFromGen(row.OpenrailsProduct)
+			product, err := models.ProductFromGen(row.BillingProduct)
 			if err != nil {
 				return err
 			}

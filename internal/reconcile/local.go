@@ -35,7 +35,7 @@ func localRailNames(p Provider) []string {
 	}
 }
 
-// LocalSubscription is the slice of openrails.subscriptions the diff engine
+// LocalSubscription is the slice of billing.subscriptions the diff engine
 // consumes.
 type LocalSubscription struct {
 	ID                    uuid.UUID
@@ -77,7 +77,7 @@ func (s *LocalSubscription) IsLive() bool {
 	return false
 }
 
-// LocalPayment is the slice of openrails.payments the diff engine consumes.
+// LocalPayment is the slice of billing.payments the diff engine consumes.
 type LocalPayment struct {
 	ID                uuid.UUID
 	CustomerID        uuid.UUID
@@ -90,7 +90,7 @@ type LocalPayment struct {
 	PurchasedAt       time.Time
 }
 
-// LocalPaymentMethod is the slice of openrails.payment_methods the diff engine
+// LocalPaymentMethod is the slice of billing.payment_methods the diff engine
 // consumes.
 type LocalPaymentMethod struct {
 	ID              uuid.UUID
@@ -105,7 +105,7 @@ type LocalPaymentMethod struct {
 	ExpiryDate    string
 }
 
-// LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
+// LocalPrice is the slice of billing.prices the PS-1 materializer consumes:
 // the normalized price bindings map remote plan ids onto
 // local prices.
 type LocalPrice struct {
@@ -309,7 +309,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 	return out, nil
 }
 
-// SolanaSubscriptionSourceFromDB adapts openrails.solana_subscriptions into the
+// SolanaSubscriptionSourceFromDB adapts billing.solana_subscriptions into the
 // SolanaFetcher's subscription source (one-line phase-2 wiring promised by
 // the phase-1 design).
 func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
@@ -402,7 +402,7 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 		}
 		out := make(map[string]struct{}, len(rows))
 		for _, r := range rows {
-			out[r.OpenrailsSolanaSubscription.SubscriptionPda] = struct{}{}
+			out[r.BillingSolanaSubscription.SubscriptionPda] = struct{}{}
 		}
 		return out, nil
 	}

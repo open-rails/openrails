@@ -16,7 +16,7 @@ import (
 )
 
 // DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
-// openrails.maintenance_runs ledger (or#859 §5.1 — the same ledger --prune
+// billing.maintenance_runs ledger (or#859 §5.1 — the same ledger --prune
 // writes, so one query answers "what did this deployment destroy, and who
 // asked for it").
 const DestructiveRunKindMerchantPurge = "merchant_purge"
@@ -155,7 +155,7 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 // real per-merchant archive is or#859 phase 2 (`openrails merchant snapshot`);
 // until that exists, a purge is one-way.
 type PurgeInventory struct {
-	// ID is the openrails.maintenance_runs row id.
+	// ID is the billing.maintenance_runs row id.
 	ID string
 	// MerchantSlug is the merchant this inventory describes.
 	MerchantSlug string
@@ -213,7 +213,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 }
 
 // TakePurgeInventory records what a purge of this merchant would destroy and
-// returns it. It writes an openrails.maintenance_runs row that Delete
+// returns it. It writes a billing.maintenance_runs row that Delete
 // then requires — the gate exists so the operator has SEEN the blast radius,
 // not because the inventory can undo anything. See PurgeInventory.
 //

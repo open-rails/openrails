@@ -87,7 +87,7 @@ type engineTakeoverProgress struct {
 	Completed       bool   `json:"completed,omitempty"`
 }
 
-func DecodeNMIEngineTakeover(in gen.OpenrailsRailIntent) (NMIEngineTakeoverPayload, engineTakeoverProgress, error) {
+func DecodeNMIEngineTakeover(in gen.BillingRailIntent) (NMIEngineTakeoverPayload, engineTakeoverProgress, error) {
 	var p NMIEngineTakeoverPayload
 	var g engineTakeoverProgress
 	if in.IntentType != TypeNMIEngineTakeover {
@@ -117,7 +117,7 @@ func (*NMIEngineTakeover) PrunePolicy() (bool, bool)     { return true, true }
 func (*NMIEngineTakeover) CommitsTerminalOutcome() bool  { return true }
 func (h *NMIEngineTakeover) now() time.Time              { return h.Clock.Now().UTC() }
 
-func (h *NMIEngineTakeover) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *NMIEngineTakeover) CheckRelevance(context.Context, gen.BillingRailIntent) (Relevance, error) {
 	return StillRelevant(), nil
 }
 
@@ -224,7 +224,7 @@ func (h *NMIEngineTakeover) Preview(ctx context.Context, id uuid.UUID) (*billing
 	if err != nil {
 		return nil, err
 	}
-	return takeoverResult(gen.OpenrailsRailIntent{Status: "ready"}, p, engineTakeoverProgress{}), nil
+	return takeoverResult(gen.BillingRailIntent{Status: "ready"}, p, engineTakeoverProgress{}), nil
 }
 
 func takeoverKey(key string) (string, error) {
@@ -236,8 +236,8 @@ func takeoverKey(key string) (string, error) {
 
 // admit records one takeover operation under the subscription lock; an
 // existing key replays its original operation.
-func (h *NMIEngineTakeover) admit(ctx context.Context, runner *Runner, id uuid.UUID, key string, origin Origin, reason string) (gen.OpenrailsRailIntent, error) {
-	var in gen.OpenrailsRailIntent
+func (h *NMIEngineTakeover) admit(ctx context.Context, runner *Runner, id uuid.UUID, key string, origin Origin, reason string) (gen.BillingRailIntent, error) {
+	var in gen.BillingRailIntent
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
 		store := NewStore(d)
@@ -282,7 +282,7 @@ func (h *NMIEngineTakeover) admit(ctx context.Context, runner *Runner, id uuid.U
 	return in, err
 }
 
-func (h *NMIEngineTakeover) result(in gen.OpenrailsRailIntent) (*billing.EngineTakeover, error) {
+func (h *NMIEngineTakeover) result(in gen.BillingRailIntent) (*billing.EngineTakeover, error) {
 	p, g, err := DecodeNMIEngineTakeover(in)
 	if err != nil {
 		return nil, err
@@ -373,19 +373,19 @@ func (h *NMIEngineTakeover) Batch(ctx context.Context, runner *Runner, req billi
 }
 
 // latest returns the newest takeover operation for the legacy subscription.
-func (h *NMIEngineTakeover) latest(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (h *NMIEngineTakeover) latest(ctx context.Context, id uuid.UUID) (gen.BillingRailIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	opID, err := h.DB.Gen(ctx).GetLatestRailIntentIDForSubscription(ctx, gen.GetLatestRailIntentIDForSubscriptionParams{
 		MerchantID: mid.UUID(), IntentType: TypeNMIEngineTakeover, SubscriptionID: id,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.OpenrailsRailIntent{}, takeoverRefusal(http.StatusNotFound, billing.CodeEngineTakeoverNotFound, "no engine takeover for this subscription")
+		return gen.BillingRailIntent{}, takeoverRefusal(http.StatusNotFound, billing.CodeEngineTakeoverNotFound, "no engine takeover for this subscription")
 	}
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	return NewStore(h.DB).Get(ctx, opID)
 }
@@ -431,7 +431,7 @@ func (h *NMIEngineTakeover) Abandon(ctx context.Context, id uuid.UUID) (*billing
 	return h.Get(ctx, id)
 }
 
-func takeoverResult(in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, g engineTakeoverProgress) *billing.EngineTakeover {
+func takeoverResult(in gen.BillingRailIntent, p NMIEngineTakeoverPayload, g engineTakeoverProgress) *billing.EngineTakeover {
 	r := &billing.EngineTakeover{ID: in.ID, SubscriptionID: billing.SubscriptionID(p.LegacySubscriptionID), RailSubscriptionID: p.RailSubscriptionID,
 		Anchor: p.Anchor, Cutoff: p.Cutoff, Amount: p.Agreement.Amount, Currency: p.Agreement.Currency, Status: in.Status, Stage: "pending"}
 	if in.LastFailureReason != nil {
@@ -456,17 +456,17 @@ func takeoverResult(in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, g en
 	return r
 }
 
-func (h *NMIEngineTakeover) Execute(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
+func (h *NMIEngineTakeover) Execute(ctx context.Context, in gen.BillingRailIntent) Outcome {
 	return h.advance(ctx, in, true)
 }
 
-func (h *NMIEngineTakeover) Verify(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
+func (h *NMIEngineTakeover) Verify(ctx context.Context, in gen.BillingRailIntent) Outcome {
 	return h.advance(ctx, in, false)
 }
 
 // notExecuted ends the operation before any NMI write; the legacy
 // subscription stays NMI-billed.
-func (h *NMIEngineTakeover) notExecuted(ctx context.Context, in gen.OpenrailsRailIntent, code, reason string) Outcome {
+func (h *NMIEngineTakeover) notExecuted(ctx context.Context, in gen.BillingRailIntent, code, reason string) Outcome {
 	evidence := map[string]any{"not_executed": code}
 	wctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -476,7 +476,7 @@ func (h *NMIEngineTakeover) notExecuted(ctx context.Context, in gen.OpenrailsRai
 	return TerminalWithEvidence(reason, evidence)
 }
 
-func (h *NMIEngineTakeover) drift(ctx context.Context, in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload, detail map[string]any) Outcome {
+func (h *NMIEngineTakeover) drift(ctx context.Context, in gen.BillingRailIntent, p NMIEngineTakeoverPayload, detail map[string]any) Outcome {
 	detail["rail_subscription_id"] = p.RailSubscriptionID
 	detail["subscription_id"] = billing.SubscriptionID(p.LegacySubscriptionID).String()
 	raw, _ := json.Marshal(detail)
@@ -488,7 +488,7 @@ func (h *NMIEngineTakeover) drift(ctx context.Context, in gen.OpenrailsRailInten
 	return h.notExecuted(ctx, in, "schedule_drift", fmt.Sprintf("NMI schedule drift: %v", detail))
 }
 
-func (h *NMIEngineTakeover) advance(ctx context.Context, in gen.OpenrailsRailIntent, send bool) Outcome {
+func (h *NMIEngineTakeover) advance(ctx context.Context, in gen.BillingRailIntent, send bool) Outcome {
 	current, err := NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
 		return Ambiguous("read takeover: " + err.Error())
@@ -579,7 +579,7 @@ func (h *NMIEngineTakeover) advance(ctx context.Context, in gen.OpenrailsRailInt
 // commit ends the legacy row and opens the engine successor, marking the
 // operation succeeded in the same transaction: it is the successor's paid
 // agreement at the boundary.
-func (h *NMIEngineTakeover) commit(ctx context.Context, in gen.OpenrailsRailIntent, p NMIEngineTakeoverPayload) Outcome {
+func (h *NMIEngineTakeover) commit(ctx context.Context, in gen.BillingRailIntent, p NMIEngineTakeoverPayload) Outcome {
 	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeComplete, Kind: TypeNMIEngineTakeover, Operation: in.ID, Subscription: p.LegacySubscriptionID}); err != nil {
 		return Ambiguous(err.Error())
 	}
@@ -632,7 +632,7 @@ func (h *NMIEngineTakeover) commit(ctx context.Context, in gen.OpenrailsRailInte
 
 // TakeoverAgreement qualifies a succeeded takeover as the successor's paid
 // engine agreement at its boundary.
-func TakeoverAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op gen.OpenrailsRailIntent) (subscriptions.RenewalTerms, error) {
+func TakeoverAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op gen.BillingRailIntent) (subscriptions.RenewalTerms, error) {
 	p, _, err := DecodeNMIEngineTakeover(op)
 	if err != nil {
 		return subscriptions.RenewalTerms{}, err

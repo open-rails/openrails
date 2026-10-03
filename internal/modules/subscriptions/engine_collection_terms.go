@@ -55,7 +55,7 @@ func SelectEngineRenewalPeriod(terms RenewalTerms, admittedAt time.Time) (Renewa
 	return terms, terms.Validate()
 }
 
-func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (SubscriptionCollectionPayload, error) {
+func DecodeSubscriptionCollectionPayload(in gen.BillingRailIntent) (SubscriptionCollectionPayload, error) {
 	var p SubscriptionCollectionPayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err

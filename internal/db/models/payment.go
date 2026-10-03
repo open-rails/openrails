@@ -54,7 +54,7 @@ type Payment struct {
 	Currency   string `json:"currency"`
 	Status     string `json:"status"`
 
-	// PspID is the PSP (openrails.psps.id)
+	// PspID is the PSP (billing.psps.id)
 	// that processed this charge (#641). Nil only for off-rail manual entries.
 	PspID *uuid.UUID `json:"psp_id,omitempty"`
 

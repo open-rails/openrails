@@ -55,7 +55,7 @@ func Fingerprint(credential string) string {
 }
 
 // CredentialVersion reads the existing cross-node security-key watermark.
-func CredentialVersion(row gen.OpenrailsPsp) (int, error) {
+func CredentialVersion(row gen.BillingPsp) (int, error) {
 	var document struct {
 		Versions map[string]int `json:"credential_versions"`
 	}
@@ -85,7 +85,7 @@ func ValidEvidenceReference(value string) bool {
 
 // BindManifest accepts the public qualification shape only. In particular, a
 // supplied fingerprint is rejected; the secret reader owns that value.
-func BindManifest(row gen.OpenrailsPsp, input []byte, credential func(int) (string, error)) ([]byte, error) {
+func BindManifest(row gen.BillingPsp, input []byte, credential func(int) (string, error)) ([]byte, error) {
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(input, &document); err != nil {
 		return nil, ErrInvalid
@@ -143,7 +143,7 @@ func BindManifest(row gen.OpenrailsPsp, input []byte, credential func(int) (stri
 	return json.Marshal(document)
 }
 
-func validate(record *Record, row gen.OpenrailsPsp) error {
+func validate(record *Record, row gen.BillingPsp) error {
 	if record == nil {
 		return nil
 	}
@@ -157,7 +157,7 @@ func validate(record *Record, row gen.OpenrailsPsp) error {
 
 // Current validates the same stored shape used by manifest ingestion and the
 // control-plane setter. Absence means unqualified; malformed records refuse.
-func Current(row gen.OpenrailsPsp) (*BoundRecord, error) {
+func Current(row gen.BillingPsp) (*BoundRecord, error) {
 	var doc struct {
 		Settings map[string]json.RawMessage `json:"settings"`
 	}

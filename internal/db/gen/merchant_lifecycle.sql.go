@@ -12,7 +12,7 @@ import (
 )
 
 const countMerchantRowsCatalogDriftEvents = `-- name: CountMerchantRowsCatalogDriftEvents :one
-SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
+SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
 `
 
 func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -23,7 +23,7 @@ func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merch
 }
 
 const countMerchantRowsCheckoutSessions = `-- name: CountMerchantRowsCheckoutSessions :one
-SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id = $1
+SELECT count(*) FROM billing.checkout_sessions WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsCheckoutSessions(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -34,7 +34,7 @@ func (q *Queries) CountMerchantRowsCheckoutSessions(ctx context.Context, merchan
 }
 
 const countMerchantRowsEntitlements = `-- name: CountMerchantRowsEntitlements :one
-SELECT count(*) FROM openrails.entitlements WHERE merchant_id = $1
+SELECT count(*) FROM billing.entitlements WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsEntitlements(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -45,7 +45,7 @@ func (q *Queries) CountMerchantRowsEntitlements(ctx context.Context, merchantID 
 }
 
 const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
-SELECT count(*) FROM openrails.rail_mutation_logs WHERE merchant_id = $1
+SELECT count(*) FROM billing.rail_mutation_logs WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -56,7 +56,7 @@ func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Cont
 }
 
 const countMerchantRowsMoneyAccounts = `-- name: CountMerchantRowsMoneyAccounts :one
-SELECT count(*) FROM openrails.money_settings WHERE merchant_id = $1
+SELECT count(*) FROM billing.money_settings WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsMoneyAccounts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -67,7 +67,7 @@ func (q *Queries) CountMerchantRowsMoneyAccounts(ctx context.Context, merchantID
 }
 
 const countMerchantRowsNMIHistoryMonths = `-- name: CountMerchantRowsNMIHistoryMonths :one
-SELECT count(*) FROM openrails.nmi_history_months WHERE merchant_id = $1
+SELECT count(*) FROM billing.nmi_history_months WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -78,7 +78,7 @@ func (q *Queries) CountMerchantRowsNMIHistoryMonths(ctx context.Context, merchan
 }
 
 const countMerchantRowsNotificationQueue = `-- name: CountMerchantRowsNotificationQueue :one
-SELECT count(*) FROM openrails.notifications WHERE merchant_id = $1
+SELECT count(*) FROM billing.notifications WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -89,7 +89,7 @@ func (q *Queries) CountMerchantRowsNotificationQueue(ctx context.Context, mercha
 }
 
 const countMerchantRowsPaymentAttempts = `-- name: CountMerchantRowsPaymentAttempts :one
-SELECT count(*) FROM openrails.payment_attempts WHERE merchant_id = $1
+SELECT count(*) FROM billing.payment_attempts WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsPaymentAttempts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -100,7 +100,7 @@ func (q *Queries) CountMerchantRowsPaymentAttempts(ctx context.Context, merchant
 }
 
 const countMerchantRowsPaymentMethodUpdates = `-- name: CountMerchantRowsPaymentMethodUpdates :one
-SELECT count(*) FROM openrails.payment_method_updates WHERE merchant_id = $1
+SELECT count(*) FROM billing.payment_method_updates WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsPaymentMethodUpdates(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -111,7 +111,7 @@ func (q *Queries) CountMerchantRowsPaymentMethodUpdates(ctx context.Context, mer
 }
 
 const countMerchantRowsPaymentMethods = `-- name: CountMerchantRowsPaymentMethods :one
-SELECT count(*) FROM openrails.payment_methods WHERE merchant_id = $1
+SELECT count(*) FROM billing.payment_methods WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsPaymentMethods(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -122,7 +122,7 @@ func (q *Queries) CountMerchantRowsPaymentMethods(ctx context.Context, merchantI
 }
 
 const countMerchantRowsPayments = `-- name: CountMerchantRowsPayments :one
-SELECT count(*) FROM openrails.payments WHERE merchant_id = $1
+SELECT count(*) FROM billing.payments WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsPayments(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -133,7 +133,7 @@ func (q *Queries) CountMerchantRowsPayments(ctx context.Context, merchantID uuid
 }
 
 const countMerchantRowsPrices = `-- name: CountMerchantRowsPrices :one
-SELECT count(*) FROM openrails.prices WHERE merchant_id = $1
+SELECT count(*) FROM billing.prices WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsPrices(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -145,7 +145,7 @@ func (q *Queries) CountMerchantRowsPrices(ctx context.Context, merchantID uuid.U
 
 const countMerchantRowsProducts = `-- name: CountMerchantRowsProducts :one
 
-SELECT count(*) FROM openrails.products WHERE merchant_id = $1
+SELECT count(*) FROM billing.products WHERE merchant_id = $1
 `
 
 // Tenant lifecycle (#225): per-table purge/count queries for tenant
@@ -160,7 +160,7 @@ func (q *Queries) CountMerchantRowsProducts(ctx context.Context, merchantID uuid
 }
 
 const countMerchantRowsProviderIntents = `-- name: CountMerchantRowsProviderIntents :one
-SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1
+SELECT count(*) FROM billing.rail_intents WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -171,7 +171,7 @@ func (q *Queries) CountMerchantRowsProviderIntents(ctx context.Context, merchant
 }
 
 const countMerchantRowsRailCustomers = `-- name: CountMerchantRowsRailCustomers :one
-SELECT count(*) FROM openrails.rail_customer_accounts WHERE merchant_id = $1
+SELECT count(*) FROM billing.rail_customer_accounts WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -182,7 +182,7 @@ func (q *Queries) CountMerchantRowsRailCustomers(ctx context.Context, merchantID
 }
 
 const countMerchantRowsRebillCycles = `-- name: CountMerchantRowsRebillCycles :one
-SELECT count(*) FROM openrails.rebill_cycles WHERE merchant_id = $1
+SELECT count(*) FROM billing.rebill_cycles WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsRebillCycles(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -193,7 +193,7 @@ func (q *Queries) CountMerchantRowsRebillCycles(ctx context.Context, merchantID 
 }
 
 const countMerchantRowsSolanaPayReceipts = `-- name: CountMerchantRowsSolanaPayReceipts :one
-SELECT count(*) FROM openrails.solana_pay_receipts WHERE merchant_id = $1
+SELECT count(*) FROM billing.solana_pay_receipts WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsSolanaPayReceipts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -204,7 +204,7 @@ func (q *Queries) CountMerchantRowsSolanaPayReceipts(ctx context.Context, mercha
 }
 
 const countMerchantRowsSolanaPayReferences = `-- name: CountMerchantRowsSolanaPayReferences :one
-SELECT count(*) FROM openrails.solana_pay_references WHERE merchant_id = $1
+SELECT count(*) FROM billing.solana_pay_references WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsSolanaPayReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -215,7 +215,7 @@ func (q *Queries) CountMerchantRowsSolanaPayReferences(ctx context.Context, merc
 }
 
 const countMerchantRowsSubscriptions = `-- name: CountMerchantRowsSubscriptions :one
-SELECT count(*) FROM openrails.subscriptions WHERE merchant_id = $1
+SELECT count(*) FROM billing.subscriptions WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsSubscriptions(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -226,7 +226,7 @@ func (q *Queries) CountMerchantRowsSubscriptions(ctx context.Context, merchantID
 }
 
 const purgeMerchantRowsCatalogDriftEvents = `-- name: PurgeMerchantRowsCatalogDriftEvents :exec
-DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
+DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
 `
 
 func (q *Queries) PurgeMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) error {
@@ -235,7 +235,7 @@ func (q *Queries) PurgeMerchantRowsCatalogDriftEvents(ctx context.Context, merch
 }
 
 const purgeMerchantRowsCheckoutSessions = `-- name: PurgeMerchantRowsCheckoutSessions :exec
-DELETE FROM openrails.checkout_sessions WHERE merchant_id = $1
+DELETE FROM billing.checkout_sessions WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsCheckoutSessions(ctx context.Context, merchantID uuid.UUID) error {
@@ -244,7 +244,7 @@ func (q *Queries) PurgeMerchantRowsCheckoutSessions(ctx context.Context, merchan
 }
 
 const purgeMerchantRowsEntitlements = `-- name: PurgeMerchantRowsEntitlements :exec
-DELETE FROM openrails.entitlements WHERE merchant_id = $1
+DELETE FROM billing.entitlements WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsEntitlements(ctx context.Context, merchantID uuid.UUID) error {
@@ -253,7 +253,7 @@ func (q *Queries) PurgeMerchantRowsEntitlements(ctx context.Context, merchantID 
 }
 
 const purgeMerchantRowsExternalProviderMutationLogs = `-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
-DELETE FROM openrails.rail_mutation_logs WHERE merchant_id = $1
+DELETE FROM billing.rail_mutation_logs WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) error {
@@ -262,7 +262,7 @@ func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Cont
 }
 
 const purgeMerchantRowsMoneyAccounts = `-- name: PurgeMerchantRowsMoneyAccounts :exec
-DELETE FROM openrails.money_settings WHERE merchant_id = $1
+DELETE FROM billing.money_settings WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsMoneyAccounts(ctx context.Context, merchantID uuid.UUID) error {
@@ -271,7 +271,7 @@ func (q *Queries) PurgeMerchantRowsMoneyAccounts(ctx context.Context, merchantID
 }
 
 const purgeMerchantRowsNMIHistoryMonths = `-- name: PurgeMerchantRowsNMIHistoryMonths :exec
-DELETE FROM openrails.nmi_history_months WHERE merchant_id = $1
+DELETE FROM billing.nmi_history_months WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsNMIHistoryMonths(ctx context.Context, merchantID uuid.UUID) error {
@@ -280,7 +280,7 @@ func (q *Queries) PurgeMerchantRowsNMIHistoryMonths(ctx context.Context, merchan
 }
 
 const purgeMerchantRowsNotificationQueue = `-- name: PurgeMerchantRowsNotificationQueue :exec
-DELETE FROM openrails.notifications WHERE merchant_id = $1
+DELETE FROM billing.notifications WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) error {
@@ -289,7 +289,7 @@ func (q *Queries) PurgeMerchantRowsNotificationQueue(ctx context.Context, mercha
 }
 
 const purgeMerchantRowsPaymentAttempts = `-- name: PurgeMerchantRowsPaymentAttempts :exec
-DELETE FROM openrails.payment_attempts WHERE merchant_id = $1
+DELETE FROM billing.payment_attempts WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsPaymentAttempts(ctx context.Context, merchantID uuid.UUID) error {
@@ -298,7 +298,7 @@ func (q *Queries) PurgeMerchantRowsPaymentAttempts(ctx context.Context, merchant
 }
 
 const purgeMerchantRowsPaymentMethodUpdates = `-- name: PurgeMerchantRowsPaymentMethodUpdates :exec
-DELETE FROM openrails.payment_method_updates WHERE merchant_id = $1
+DELETE FROM billing.payment_method_updates WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsPaymentMethodUpdates(ctx context.Context, merchantID uuid.UUID) error {
@@ -307,7 +307,7 @@ func (q *Queries) PurgeMerchantRowsPaymentMethodUpdates(ctx context.Context, mer
 }
 
 const purgeMerchantRowsPaymentMethods = `-- name: PurgeMerchantRowsPaymentMethods :exec
-DELETE FROM openrails.payment_methods WHERE merchant_id = $1
+DELETE FROM billing.payment_methods WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsPaymentMethods(ctx context.Context, merchantID uuid.UUID) error {
@@ -316,7 +316,7 @@ func (q *Queries) PurgeMerchantRowsPaymentMethods(ctx context.Context, merchantI
 }
 
 const purgeMerchantRowsPayments = `-- name: PurgeMerchantRowsPayments :exec
-DELETE FROM openrails.payments WHERE merchant_id = $1
+DELETE FROM billing.payments WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsPayments(ctx context.Context, merchantID uuid.UUID) error {
@@ -325,7 +325,7 @@ func (q *Queries) PurgeMerchantRowsPayments(ctx context.Context, merchantID uuid
 }
 
 const purgeMerchantRowsPrices = `-- name: PurgeMerchantRowsPrices :exec
-DELETE FROM openrails.prices WHERE merchant_id = $1
+DELETE FROM billing.prices WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsPrices(ctx context.Context, merchantID uuid.UUID) error {
@@ -334,7 +334,7 @@ func (q *Queries) PurgeMerchantRowsPrices(ctx context.Context, merchantID uuid.U
 }
 
 const purgeMerchantRowsProducts = `-- name: PurgeMerchantRowsProducts :exec
-DELETE FROM openrails.products WHERE merchant_id = $1
+DELETE FROM billing.products WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsProducts(ctx context.Context, merchantID uuid.UUID) error {
@@ -343,7 +343,7 @@ func (q *Queries) PurgeMerchantRowsProducts(ctx context.Context, merchantID uuid
 }
 
 const purgeMerchantRowsProviderIntents = `-- name: PurgeMerchantRowsProviderIntents :exec
-DELETE FROM openrails.rail_intents WHERE merchant_id = $1
+DELETE FROM billing.rail_intents WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsProviderIntents(ctx context.Context, merchantID uuid.UUID) error {
@@ -352,7 +352,7 @@ func (q *Queries) PurgeMerchantRowsProviderIntents(ctx context.Context, merchant
 }
 
 const purgeMerchantRowsRailCustomers = `-- name: PurgeMerchantRowsRailCustomers :exec
-DELETE FROM openrails.rail_customer_accounts WHERE merchant_id = $1
+DELETE FROM billing.rail_customer_accounts WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsRailCustomers(ctx context.Context, merchantID uuid.UUID) error {
@@ -361,7 +361,7 @@ func (q *Queries) PurgeMerchantRowsRailCustomers(ctx context.Context, merchantID
 }
 
 const purgeMerchantRowsRebillCycles = `-- name: PurgeMerchantRowsRebillCycles :exec
-DELETE FROM openrails.rebill_cycles WHERE merchant_id = $1
+DELETE FROM billing.rebill_cycles WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsRebillCycles(ctx context.Context, merchantID uuid.UUID) error {
@@ -370,7 +370,7 @@ func (q *Queries) PurgeMerchantRowsRebillCycles(ctx context.Context, merchantID 
 }
 
 const purgeMerchantRowsSolanaPayReceipts = `-- name: PurgeMerchantRowsSolanaPayReceipts :exec
-DELETE FROM openrails.solana_pay_receipts WHERE merchant_id = $1
+DELETE FROM billing.solana_pay_receipts WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsSolanaPayReceipts(ctx context.Context, merchantID uuid.UUID) error {
@@ -379,7 +379,7 @@ func (q *Queries) PurgeMerchantRowsSolanaPayReceipts(ctx context.Context, mercha
 }
 
 const purgeMerchantRowsSolanaPayReferences = `-- name: PurgeMerchantRowsSolanaPayReferences :exec
-DELETE FROM openrails.solana_pay_references WHERE merchant_id = $1
+DELETE FROM billing.solana_pay_references WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsSolanaPayReferences(ctx context.Context, merchantID uuid.UUID) error {
@@ -388,7 +388,7 @@ func (q *Queries) PurgeMerchantRowsSolanaPayReferences(ctx context.Context, merc
 }
 
 const purgeMerchantRowsSubscriptions = `-- name: PurgeMerchantRowsSubscriptions :exec
-DELETE FROM openrails.subscriptions WHERE merchant_id = $1
+DELETE FROM billing.subscriptions WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsSubscriptions(ctx context.Context, merchantID uuid.UUID) error {

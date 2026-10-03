@@ -6,7 +6,7 @@ windows per (customer, entitlement)**. The timeline is the single source of trut
 
 ## The row model
 
-`openrails.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `start_at`,
+`billing.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `start_at`,
 `end_at` (NULL = indefinite), `source_type` + `source_id`, `grant_id`, `revoked_at` +
 `revoke_reason`, `deleted_at`. Windows are half-open `[start_at, end_at)`; a generated
 `period` tstzrange plus an exclusion constraint forbids overlap among active windows of
@@ -50,7 +50,7 @@ never edit existing ones.
 
 ## Grants vs entitlements
 
-The **grant ledger** (`openrails.grants`, #514) is the append-only access-domain sibling of
+The **grant ledger** (`billing.grants`, #514) is the append-only access-domain sibling of
 the money ledger. Derive-1 appends immutable events (grant / revoke / expire / supersede —
 a revoke is a NEW event referencing the original); derive-2 (`MaterializeGrant`) folds the
 log into projections: **entitlement windows** (rows carry the producing `grant_id`),

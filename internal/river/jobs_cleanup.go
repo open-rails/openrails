@@ -50,7 +50,7 @@ type CleanupConfig struct {
 	NotificationUnseenRetention time.Duration
 
 	// WebhookEventRetention is how long completed webhook dedup marks
-	// (openrails.webhook_events, #678) are kept. Default: 90 days.
+	// (billing.webhook_events, #678) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
 
 	// PaymentSettlementAckedRetention is how long acknowledged (delivered)
@@ -158,7 +158,7 @@ type CleanupResult struct {
 //   - merchants come from migration 0056's indexed work queue: only those
 //     holding a row past one of THIS config's cutoffs, capped at
 //     cleanupMerchantBatch;
-//   - a durable cursor (openrails.worker_state) makes the next pass
+//   - a durable cursor (billing.worker_state) makes the next pass
 //     resume after the last merchant handled, so a capped pass cannot re-serve
 //     the same head forever and starve the tail. Draining the queue clears the
 //     cursor and the ring starts over;

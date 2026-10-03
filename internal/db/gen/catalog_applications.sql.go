@@ -12,7 +12,7 @@ import (
 )
 
 const advanceCatalogRevision = `-- name: AdvanceCatalogRevision :one
-UPDATE openrails.merchants SET catalog_revision=catalog_revision+1 WHERE id=$1::uuid RETURNING catalog_revision
+UPDATE billing.merchants SET catalog_revision=catalog_revision+1 WHERE id=$1::uuid RETURNING catalog_revision
 `
 
 func (q *Queries) AdvanceCatalogRevision(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -23,7 +23,7 @@ func (q *Queries) AdvanceCatalogRevision(ctx context.Context, merchantID uuid.UU
 }
 
 const getCatalogApplication = `-- name: GetCatalogApplication :one
-SELECT merchant_id, application_id, catalog_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM openrails.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
+SELECT merchant_id, application_id, catalog_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
 `
 
 type GetCatalogApplicationParams struct {
@@ -31,9 +31,9 @@ type GetCatalogApplicationParams struct {
 	ApplicationID string
 }
 
-func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogApplicationParams) (OpenrailsCatalogApplication, error) {
+func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogApplicationParams) (BillingCatalogApplication, error) {
 	row := q.db.QueryRow(ctx, getCatalogApplication, arg.MerchantID, arg.ApplicationID)
-	var i OpenrailsCatalogApplication
+	var i BillingCatalogApplication
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ApplicationID,
@@ -49,7 +49,7 @@ func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogAppli
 }
 
 const getCatalogRevision = `-- name: GetCatalogRevision :one
-SELECT catalog_revision FROM openrails.merchants WHERE id=$1::uuid
+SELECT catalog_revision FROM billing.merchants WHERE id=$1::uuid
 `
 
 func (q *Queries) GetCatalogRevision(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -60,12 +60,12 @@ func (q *Queries) GetCatalogRevision(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const getDefaultApplicationCatalog = `-- name: GetDefaultApplicationCatalog :one
-SELECT id, merchant_id, owner_subject, created_at, updated_at FROM openrails.catalogs WHERE merchant_id=$1::uuid AND owner_subject IS NULL
+SELECT id, merchant_id, owner_subject, created_at, updated_at FROM billing.catalogs WHERE merchant_id=$1::uuid AND owner_subject IS NULL
 `
 
-func (q *Queries) GetDefaultApplicationCatalog(ctx context.Context, merchantID uuid.UUID) (OpenrailsCatalog, error) {
+func (q *Queries) GetDefaultApplicationCatalog(ctx context.Context, merchantID uuid.UUID) (BillingCatalog, error) {
 	row := q.db.QueryRow(ctx, getDefaultApplicationCatalog, merchantID)
-	var i OpenrailsCatalog
+	var i BillingCatalog
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -77,7 +77,7 @@ func (q *Queries) GetDefaultApplicationCatalog(ctx context.Context, merchantID u
 }
 
 const insertCatalogApplication = `-- name: InsertCatalogApplication :exec
-INSERT INTO openrails.catalog_applications (merchant_id,application_id,catalog_id,schema_version,request_sha256,base_revision,applied_revision,result)
+INSERT INTO billing.catalog_applications (merchant_id,application_id,catalog_id,schema_version,request_sha256,base_revision,applied_revision,result)
 VALUES ($1::uuid,$2::text,$3::uuid,$4::bigint,$5::bytea,$6::bigint,$7::bigint,$8::jsonb)
 `
 
@@ -107,7 +107,7 @@ func (q *Queries) InsertCatalogApplication(ctx context.Context, arg InsertCatalo
 }
 
 const lockCatalogApplicationPSP = `-- name: LockCatalogApplicationPSP :one
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM openrails.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id, pending_signer_public_key FROM billing.psps WHERE merchant_id=$1::uuid AND id=$2::uuid FOR SHARE NOWAIT
 `
 
 type LockCatalogApplicationPSPParams struct {
@@ -115,9 +115,9 @@ type LockCatalogApplicationPSPParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalogApplicationPSPParams) (OpenrailsPsp, error) {
+func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalogApplicationPSPParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, lockCatalogApplicationPSP, arg.MerchantID, arg.ID)
-	var i OpenrailsPsp
+	var i BillingPsp
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -139,7 +139,7 @@ func (q *Queries) LockCatalogApplicationPSP(ctx context.Context, arg LockCatalog
 }
 
 const lockCatalogRevision = `-- name: LockCatalogRevision :one
-SELECT catalog_revision FROM openrails.merchants WHERE id=$1::uuid FOR UPDATE
+SELECT catalog_revision FROM billing.merchants WHERE id=$1::uuid FOR UPDATE
 `
 
 func (q *Queries) LockCatalogRevision(ctx context.Context, merchantID uuid.UUID) (int64, error) {

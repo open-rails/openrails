@@ -14,7 +14,7 @@ import (
 
 const adminGrantExistsForSource = `-- name: AdminGrantExistsForSource :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.grants g
+    SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = $1::uuid
       AND g.event = 'grant' AND g.kind = 'entitlement'
       AND g.source_type = 'admin' AND g.source_id = $2::text
@@ -39,14 +39,14 @@ func (q *Queries) AdminGrantExistsForSource(ctx context.Context, arg AdminGrantE
 
 const checkProductAccess = `-- name: CheckProductAccess :many
 SELECT candidate.product_id, EXISTS (
- SELECT 1 FROM openrails.grants g
+ SELECT 1 FROM billing.grants g
  WHERE g.merchant_id = $1::uuid
    AND g.customer_id = $2::uuid
    AND g.product_id = candidate.product_id
    AND g.kind = 'ownership' AND g.event = 'grant'
    AND g.starts_at <= $3::timestamptz
    AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
-   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   AND NOT EXISTS (SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
       AND t.event IN ('revoke','expire','supersede'))
 ) AS has_access
@@ -91,14 +91,14 @@ func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccess
 }
 
 const countUnpaidEngineRenewalGrants = `-- name: CountUnpaidEngineRenewalGrants :one
-SELECT count(*) FROM openrails.grants g
+SELECT count(*) FROM billing.grants g
 WHERE g.merchant_id=$1::uuid AND g.source_type='subscription'
   AND g.event='grant'
-  AND EXISTS (SELECT 1 FROM openrails.rail_intents i
+  AND EXISTS (SELECT 1 FROM billing.rail_intents i
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id
       AND g.starts_at >= (i.payload->'renewal'->>'period_start')::timestamptz)
-  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
@@ -117,7 +117,7 @@ func (q *Queries) CountUnpaidEngineRenewalGrants(ctx context.Context, merchantID
 
 const entitlementExistsForGrant = `-- name: EntitlementExistsForGrant :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements
+    SELECT 1 FROM billing.entitlements
     WHERE merchant_id = $1::uuid
       AND grant_id = $2::uuid
       AND entitlement = $3::text
@@ -139,7 +139,7 @@ func (q *Queries) EntitlementExistsForGrant(ctx context.Context, arg Entitlement
 }
 
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND kind = 'credit' AND event = 'grant'
@@ -156,9 +156,9 @@ type GetCreditGrantBySourceIDParams struct {
 
 // GetCreditGrantBySourceID: idempotency lookup for a deposit-as-credit-grant by
 // its natural source_id key (the deposit's SourceID).
-func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGrantBySourceIDParams) (OpenrailsGrant, error) {
+func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGrantBySourceIDParams) (BillingGrant, error) {
 	row := q.db.QueryRow(ctx, getCreditGrantBySourceID, arg.MerchantID, arg.CustomerID, arg.SourceID)
-	var i OpenrailsGrant
+	var i BillingGrant
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -183,11 +183,11 @@ func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGra
 
 const getCreditLotRemaining = `-- name: GetCreditLotRemaining :one
 SELECT (g.amount - COALESCE((
-    SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+    SELECT SUM(t.amount) FROM billing.ledger_transfers t
     WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
       AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
 ), 0))::bigint AS remaining
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $1::uuid AND g.id = $2::uuid
   AND g.kind = 'credit' AND g.event = 'grant'
 `
@@ -209,7 +209,7 @@ func (q *Queries) GetCreditLotRemaining(ctx context.Context, arg GetCreditLotRem
 }
 
 const getGrant = `-- name: GetGrant :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -218,9 +218,9 @@ type GetGrantParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (OpenrailsGrant, error) {
+func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (BillingGrant, error) {
 	row := q.db.QueryRow(ctx, getGrant, arg.MerchantID, arg.ID)
-	var i OpenrailsGrant
+	var i BillingGrant
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -245,7 +245,7 @@ func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (OpenrailsGr
 
 const grantCreditDeposited = `-- name: GrantCreditDeposited :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.ledger_transfers
+    SELECT 1 FROM billing.ledger_transfers
     WHERE merchant_id = $1::uuid
       AND transfer_type = 'deposit' AND grant_id = $2::uuid
 ) AS deposited
@@ -266,7 +266,7 @@ func (q *Queries) GrantCreditDeposited(ctx context.Context, arg GrantCreditDepos
 }
 
 const hasInitialMembershipGrant = `-- name: HasInitialMembershipGrant :one
-SELECT EXISTS(SELECT 1 FROM openrails.grants
+SELECT EXISTS(SELECT 1 FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='subscription'
   AND source_id=$2::uuid::text AND event='grant')::boolean
 `
@@ -286,13 +286,13 @@ func (q *Queries) HasInitialMembershipGrant(ctx context.Context, arg HasInitialM
 
 const hasPermanentProductOwnership = `-- name: HasPermanentProductOwnership :one
 SELECT EXISTS (
- SELECT 1 FROM openrails.grants g
+ SELECT 1 FROM billing.grants g
  WHERE g.merchant_id = $1::uuid
    AND g.customer_id = $2::uuid
    AND g.product_id = $3::uuid
    AND g.kind = 'ownership' AND g.event = 'grant'
    AND g.starts_at <= $4::timestamptz AND g.ends_at IS NULL
-   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   AND NOT EXISTS (SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
       AND t.event IN ('revoke','expire','supersede'))
 )
@@ -320,7 +320,7 @@ func (q *Queries) HasPermanentProductOwnership(ctx context.Context, arg HasPerma
 
 const insertGrant = `-- name: InsertGrant :one
 
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 ) VALUES (
@@ -351,10 +351,10 @@ type InsertGrantParams struct {
 	Reason       *string
 }
 
-// #514 append-only grant ledger (openrails.grants). derive-1 appends events here;
+// #514 append-only grant ledger (billing.grants). derive-1 appends events here;
 // derive-2 folds them into projections (entitlement windows, #512 credit deposits;
 // ownership is read directly off this table).
-func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (OpenrailsGrant, error) {
+func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (BillingGrant, error) {
 	row := q.db.QueryRow(ctx, insertGrant,
 		arg.MerchantID,
 		arg.CustomerID,
@@ -372,7 +372,7 @@ func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (Openr
 		arg.Currency,
 		arg.Reason,
 	)
-	var i OpenrailsGrant
+	var i BillingGrant
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -397,7 +397,7 @@ func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (Openr
 
 const isGrantTerminated = `-- name: IsGrantTerminated :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.grants t
+    SELECT 1 FROM billing.grants t
     WHERE t.merchant_id = $1::uuid
       AND t.supersedes_id = $2::uuid
       AND t.event IN ('revoke', 'expire', 'supersede')
@@ -418,7 +418,7 @@ func (q *Queries) IsGrantTerminated(ctx context.Context, arg IsGrantTerminatedPa
 
 const latestEntitlementGrantEndForSource = `-- name: LatestEntitlementGrantEndForSource :one
 SELECT COALESCE(max(g.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.kind = 'entitlement' AND g.event = 'grant'
@@ -454,7 +454,7 @@ func (q *Queries) LatestEntitlementGrantEndForSource(ctx context.Context, arg La
 }
 
 const listActiveOwnershipGrantsPage = `-- name: ListActiveOwnershipGrantsPage :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
@@ -462,7 +462,7 @@ WHERE g.merchant_id = $1::uuid
   AND g.starts_at <= $3::timestamptz
   AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
   AND g.id > $4::uuid
-  AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+  AND NOT EXISTS (SELECT 1 FROM billing.grants t
    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
     AND t.event IN ('revoke','expire','supersede'))
 ORDER BY g.id
@@ -478,7 +478,7 @@ type ListActiveOwnershipGrantsPageParams struct {
 }
 
 // ListActiveOwnershipGrantsPage returns a bounded, stable ID-ordered page.
-func (q *Queries) ListActiveOwnershipGrantsPage(ctx context.Context, arg ListActiveOwnershipGrantsPageParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListActiveOwnershipGrantsPage(ctx context.Context, arg ListActiveOwnershipGrantsPageParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listActiveOwnershipGrantsPage,
 		arg.MerchantID,
 		arg.CustomerID,
@@ -490,9 +490,9 @@ func (q *Queries) ListActiveOwnershipGrantsPage(ctx context.Context, arg ListAct
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -524,14 +524,14 @@ func (q *Queries) ListActiveOwnershipGrantsPage(ctx context.Context, arg ListAct
 
 const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many
 SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $1::uuid AND g.kind = 'credit' AND g.event = 'grant'
   AND g.ends_at IS NOT NULL AND g.ends_at <= $2::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.merchant_id = $1::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = $1::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
   AND (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+        SELECT SUM(t.amount) FROM billing.ledger_transfers t
         WHERE t.merchant_id = $1::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0)) > 0
@@ -574,7 +574,7 @@ func (q *Queries) ListCustomersWithLapsedCreditLots(ctx context.Context, arg Lis
 }
 
 const listGrantsByCustomer = `-- name: ListGrantsByCustomer :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND event = 'grant'
@@ -588,15 +588,15 @@ type ListGrantsByCustomerParams struct {
 
 // ListGrantsByCustomer: every grant-event for the customer (live or terminated),
 // the full input to a customer-scoped re-derive.
-func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCustomerParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCustomerParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listGrantsByCustomer, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -627,7 +627,7 @@ func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCust
 }
 
 const listInitialMembershipGrants = `-- name: ListInitialMembershipGrants :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='subscription'
   AND source_id=$2::uuid::text AND event='grant'
   AND starts_at < $3::timestamptz
@@ -643,7 +643,7 @@ type ListInitialMembershipGrantsParams struct {
 
 // Original source events before the accepted initial period ends; later renewal
 // events and later revocations do not rewrite this initial history.
-func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListInitialMembershipGrantsParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListInitialMembershipGrantsParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listInitialMembershipGrants,
 		arg.MerchantID,
 		arg.SubscriptionID,
@@ -654,9 +654,9 @@ func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListIniti
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -687,7 +687,7 @@ func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListIniti
 }
 
 const listLapsedCreditLotMerchants = `-- name: ListLapsedCreditLotMerchants :many
-SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
+SELECT merchant_id FROM billing.lapsed_credit_lot_merchant_ids(
     $1::timestamptz,
     $2::int)
 `
@@ -726,17 +726,17 @@ func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLaps
 const listLapsedCreditLots = `-- name: ListLapsedCreditLots :many
 SELECT g.id,
     (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+        SELECT SUM(t.amount) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0))::bigint AS remaining
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = $3::text
   AND g.ends_at IS NOT NULL AND g.ends_at <= $4::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
 ORDER BY g.ends_at ASC
 `
@@ -781,12 +781,12 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 }
 
 const listLiveGrantsByCustomer = `-- name: ListLiveGrantsByCustomer :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.event = 'grant'
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
 ORDER BY g.created_at
@@ -799,15 +799,15 @@ type ListLiveGrantsByCustomerParams struct {
 
 // ListLiveGrantsByCustomer: grant-events not terminated by a later revoke/expire/
 // supersede event. The fold's input.
-func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGrantsByCustomerParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGrantsByCustomerParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listLiveGrantsByCustomer, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -838,12 +838,12 @@ func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGran
 }
 
 const listLiveGrantsMissingEffects = `-- name: ListLiveGrantsMissingEffects :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
   AND g.event = 'grant'
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
@@ -851,7 +851,7 @@ WHERE g.merchant_id = $1::uuid
         SELECT 1 FROM jsonb_array_elements_text(
                  COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb)) AS feat
         WHERE NOT EXISTS (
-            SELECT 1 FROM openrails.entitlements e
+            SELECT 1 FROM billing.entitlements e
             WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
               AND e.entitlement = feat AND e.deleted_at IS NULL)
           -- #691: one live STANDING subscription window satisfies every
@@ -859,8 +859,8 @@ WHERE g.merchant_id = $1::uuid
           -- ensure-standing skip — detection and repair must agree or the
           -- sweep never converges).
           AND NOT (g.source_type = 'subscription' AND EXISTS (
-            SELECT 1 FROM openrails.entitlements e2
-            JOIN openrails.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
+            SELECT 1 FROM billing.entitlements e2
+            JOIN billing.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
               AND NOT (s2.collection_policy='engine' AND s2.rail IN ('nmi','stripe'))
             WHERE e2.merchant_id = g.merchant_id
               AND e2.customer_id = g.customer_id
@@ -873,7 +873,7 @@ WHERE g.merchant_id = $1::uuid
 
     OR
     (g.kind = 'credit' AND NOT EXISTS (
-        SELECT 1 FROM openrails.ledger_transfers lt
+        SELECT 1 FROM billing.ledger_transfers lt
         WHERE lt.merchant_id = g.merchant_id AND lt.transfer_type = 'deposit' AND lt.grant_id = g.id))
   )
 ORDER BY g.created_at
@@ -891,15 +891,15 @@ type ListLiveGrantsMissingEffectsParams struct {
 // materialized); credit: no #512 deposit transfer. ownership has no effect (never
 // flagged). customer_id nullable: NULL = merchant-wide sweep. Repair =
 // MaterializeGrant (idempotent), so re-running converges to empty.
-func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLiveGrantsMissingEffectsParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLiveGrantsMissingEffectsParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listLiveGrantsMissingEffects, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -931,17 +931,17 @@ func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLive
 
 const listLiveGrantsWithRefundedPayment = `-- name: ListLiveGrantsWithRefundedPayment :many
 SELECT g.id, g.kind, g.payment_id
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
   AND g.event = 'grant'
   AND g.payment_id IS NOT NULL
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt
+      SELECT 1 FROM billing.grants tt
       WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
   AND EXISTS (
-      SELECT 1 FROM openrails.payments p
+      SELECT 1 FROM billing.payments p
       WHERE p.id = g.payment_id AND p.merchant_id = g.merchant_id AND p.deleted_at IS NULL AND p.status = 'refunded'
   )
 ORDER BY g.id
@@ -985,7 +985,7 @@ func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg Lis
 }
 
 const listOriginalPurchaseGrants = `-- name: ListOriginalPurchaseGrants :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='purchase'
   AND source_id=$2::uuid::text AND event='grant'
 ORDER BY id LIMIT $3::int
@@ -999,15 +999,15 @@ type ListOriginalPurchaseGrantsParams struct {
 
 // Original immutable events, including later-revoked sources. Accepted purchase
 // replay validates the original windows without reopening revoked projections.
-func (q *Queries) ListOriginalPurchaseGrants(ctx context.Context, arg ListOriginalPurchaseGrantsParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListOriginalPurchaseGrants(ctx context.Context, arg ListOriginalPurchaseGrantsParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listOriginalPurchaseGrants, arg.MerchantID, arg.PaymentID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -1041,8 +1041,8 @@ const listOwnershipGrantsWithStatus = `-- name: ListOwnershipGrantsWithStatus :m
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
        g.payment_id, g.starts_at, g.ends_at, g.created_at,
        term.starts_at AS revoked_at, term.reason AS revoke_reason
-FROM openrails.grants g
-LEFT JOIN openrails.grants term
+FROM billing.grants g
+LEFT JOIN billing.grants term
   ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
@@ -1112,7 +1112,7 @@ func (q *Queries) ListOwnershipGrantsWithStatus(ctx context.Context, arg ListOwn
 }
 
 const listRenewalGrantsForArchive = `-- name: ListRenewalGrantsForArchive :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='subscription'
   AND source_id=$2::uuid::text AND event='grant'
   AND starts_at=$3::timestamptz
@@ -1126,7 +1126,7 @@ type ListRenewalGrantsForArchiveParams struct {
 	RowLimit       int32
 }
 
-func (q *Queries) ListRenewalGrantsForArchive(ctx context.Context, arg ListRenewalGrantsForArchiveParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListRenewalGrantsForArchive(ctx context.Context, arg ListRenewalGrantsForArchiveParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listRenewalGrantsForArchive,
 		arg.MerchantID,
 		arg.SubscriptionID,
@@ -1137,9 +1137,9 @@ func (q *Queries) ListRenewalGrantsForArchive(ctx context.Context, arg ListRenew
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -1172,18 +1172,18 @@ func (q *Queries) ListRenewalGrantsForArchive(ctx context.Context, arg ListRenew
 const listSpendableCreditLots = `-- name: ListSpendableCreditLots :many
 SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
-        SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+        SELECT SUM(t.amount) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0))::bigint AS remaining
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = $3::text
   AND g.starts_at <= $4::timestamptz
   AND (g.ends_at IS NULL OR g.ends_at > $4::timestamptz)
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
 ORDER BY g.ends_at ASC NULLS LAST, g.created_at ASC
 `
@@ -1237,9 +1237,9 @@ func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendable
 
 const listUngrantedGrantablePayments = `-- name: ListUngrantedGrantablePayments :many
 SELECT p.id, p.amount, p.currency
-FROM openrails.payments p
-JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
-JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
+FROM billing.payments p
+JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
   AND p.deleted_at IS NULL
@@ -1250,7 +1250,7 @@ WHERE p.merchant_id = $1::uuid
         (pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
       )
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND (g.payment_id = p.id OR g.source_id = p.id::text)
   )
@@ -1309,8 +1309,8 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at,
        pd.entitlements_spec
-FROM openrails.subscriptions s
-JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
+FROM billing.subscriptions s
+JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
@@ -1322,7 +1322,7 @@ WHERE s.merchant_id = $1::uuid
   AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)
   AND COALESCE(s.current_period_ends_at, s.ended_at) >= $3::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
         AND g.source_type = 'subscription' AND g.source_id = s.id::text
   )
@@ -1339,7 +1339,7 @@ type ListUngrantedSubscriptionsRow struct {
 	ID                    uuid.UUID
 	CustomerID            uuid.UUID
 	ProductID             uuid.UUID
-	Status                OpenrailsSubscriptionStatus
+	Status                BillingSubscriptionStatus
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	StartedAt             time.Time
@@ -1396,9 +1396,9 @@ const listUngrantedWalletPayments = `-- name: ListUngrantedWalletPayments :many
 SELECT p.id, p.customer_id, p.purchased_at,
        (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at,
        pd.entitlements_spec
-FROM openrails.payments p
-JOIN openrails.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
-JOIN openrails.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
+FROM billing.payments p
+JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
+JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR p.customer_id = $2::uuid)
   AND p.deleted_at IS NULL
@@ -1412,7 +1412,7 @@ WHERE p.merchant_id = $1::uuid
   AND (p.metadata->>'expiration_rfc3339')::timestamptz >= $3::timestamptz
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants g
+      SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
         AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
   )
@@ -1468,24 +1468,24 @@ func (q *Queries) ListUngrantedWalletPayments(ctx context.Context, arg ListUngra
 }
 
 const listUnretractedTerminations = `-- name: ListUnretractedTerminations :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
   AND g.event = 'grant'
   AND EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
         AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
     (g.kind = 'entitlement' AND EXISTS (
-        SELECT 1 FROM openrails.entitlements e
+        SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
           AND e.revoked_at IS NULL AND e.deleted_at IS NULL))
     OR
     (g.kind = 'credit' AND (
         g.amount - COALESCE((
-            SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+            SELECT SUM(t.amount) FROM billing.ledger_transfers t
             WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
               AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke')
         ), 0)) > 0)
@@ -1504,15 +1504,15 @@ type ListUnretractedTerminationsParams struct {
 // entitlement: a non-revoked, non-deleted entitlement row; credit: lot remainder
 // (amount − spend/expire/revoke transfers) > 0. customer_id nullable: NULL =
 // merchant-wide sweep. Repair = MaterializeGrant (retracts) — idempotent.
-func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnretractedTerminationsParams) ([]OpenrailsGrant, error) {
+func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnretractedTerminationsParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listUnretractedTerminations, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsGrant
+	var items []BillingGrant
 	for rows.Next() {
-		var i OpenrailsGrant
+		var i BillingGrant
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -1543,7 +1543,7 @@ func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnret
 }
 
 const revokeEntitlementsByGrant = `-- name: RevokeEntitlementsByGrant :execrows
-UPDATE openrails.entitlements
+UPDATE billing.entitlements
 SET revoked_at = $1::timestamptz,
     revoke_reason = $2::text,
     updated_at = now()
@@ -1573,14 +1573,14 @@ func (q *Queries) RevokeEntitlementsByGrant(ctx context.Context, arg RevokeEntit
 }
 
 const revokeOwnershipGrantByID = `-- name: RevokeOwnershipGrantByID :execrows
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, $1::timestamptz, NULL,
        g.amount, g.currency, $2::text
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $3::uuid
   AND g.id = $4::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
@@ -1615,14 +1615,14 @@ func (q *Queries) RevokeOwnershipGrantByID(ctx context.Context, arg RevokeOwners
 }
 
 const revokeOwnershipGrantsByPayment = `-- name: RevokeOwnershipGrantsByPayment :execrows
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, $1::timestamptz, NULL,
        g.amount, g.currency, $2::text
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = $3::uuid
   AND g.payment_id = $4::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'

@@ -7,7 +7,7 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| Merchant | The billing/isolation namespace — scopes subscriptions, payments, credits, catalog, webhooks, analytics. `openrails.merchants`; every tenant-scoped query carries an explicit `merchant_id` (or `psp_id`) predicate, backed by composite foreign keys. Deliberately controlled by exactly **one** AuthKit group (1:1). |
+| Merchant | The billing/isolation namespace — scopes subscriptions, payments, credits, catalog, webhooks, analytics. `billing.merchants`; every tenant-scoped query carries an explicit `merchant_id` (or `psp_id`) predicate, backed by composite foreign keys. Deliberately controlled by exactly **one** AuthKit group (1:1). |
 | Org / permission-group | The AuthKit-side controller of a merchant. The merchant row stores `permission_group_id`; AuthKit decides which users, API keys, and remote applications act for that group. OpenRails carries no auth of its own. |
 | Customer (payer / tenant_subject) | The payable subject under a merchant — a UUID; identity is `(merchant, subject)`. "Tenant" survives only in payer contexts, never as a top-level identity word. |
 | `delegated_sub` | External OIDC subject from a registered issuer — the host app's end user, carried in AuthKit delegated access tokens. OpenRails resolves the issuer to its merchant and touches the customer `(merchant_id, delegated_sub)`; tokens never carry merchant claims. |
@@ -20,8 +20,8 @@ to concrete code (enum, table, or manifest key).
 |---|---|
 | Native units | Amounts are integer units at the currency's registered scale (`billing.Currencies()` / `GET /v1/currencies`): micros for USD/EUR, 10^4 per yen for JPY; decimal strings on the wire. |
 | Money ledger | Double-entry ledger, the source of truth for money. FX inside the ledger is forbidden — no cross-currency transfers. |
-| Grant | An immutable event in the append-only grant ledger (`openrails.grants`), kind `entitlement`/`ownership`/`credit`. Revoke/expire/supersede are new events referencing the original; a credit grant IS the FIFO lot. |
-| Entitlement | A plain string (e.g. `premium`) a customer holds over time — a timeline of windows in `openrails.entitlements`, materialized from grants. See `docs/entitlements_timeline.md`. |
+| Grant | An immutable event in the append-only grant ledger (`billing.grants`), kind `entitlement`/`ownership`/`credit`. Revoke/expire/supersede are new events referencing the original; a credit grant IS the FIFO lot. |
+| Entitlement | A plain string (e.g. `premium`) a customer holds over time — a timeline of windows in `billing.entitlements`, materialized from grants. See `docs/entitlements_timeline.md`. |
 | Grace | A bounded, revocable generosity window (`source_type='grace'`) appended beyond the paid term; revoked or lapsed the moment truth arrives. |
 
 ## Rails & PSPs
@@ -29,14 +29,14 @@ to concrete code (enum, table, or manifest key).
 | Term | Meaning |
 |---|---|
 | Rail | A payment gateway **kind** OpenRails codes against — `models.Rail`: `nmi`, `ccbill`, `stripe`, `solana`. One adapter per rail under `internal/integrations/<rail>`. |
-| PSP | A merchant's concrete **account on a rail** — credentials + operator-declared `account_id` + manifest key. Row: `openrails.psps` (`psps.key`, e.g. `mobius` on rail `nmi`); manifest: `merchants.<slug>.psps.<key>.<rail>`. Catalog `psp_links` and the checkout wire speak PSP keys. Renamed from `rail_merchant_accounts` (earlier `provider_accounts`) — the retired names fail loudly, no aliases. |
-| Custodian account | A merchant's concrete **account with a custodian** — credentials + operator-declared `account_id` (the vendor's tenant id) + manifest key. Row: `openrails.custodians` (`custodians.key`); manifest: `merchants.<slug>.custodians.<key>.<kind>`. Referenced by `psps.custodian_id`, so several PSPs can charge cards out of one vault (or#880). |
+| PSP | A merchant's concrete **account on a rail** — credentials + operator-declared `account_id` + manifest key. Row: `billing.psps` (`psps.key`, e.g. `mobius` on rail `nmi`); manifest: `merchants.<slug>.psps.<key>.<rail>`. Catalog `psp_links` and the checkout wire speak PSP keys. Renamed from `rail_merchant_accounts` (earlier `provider_accounts`) — the retired names fail loudly, no aliases. |
+| Custodian account | A merchant's concrete **account with a custodian** — credentials + operator-declared `account_id` (the vendor's tenant id) + manifest key. Row: `billing.custodians` (`custodians.key`); manifest: `merchants.<slug>.custodians.<key>.<kind>`. Referenced by `psps.custodian_id`, so several PSPs can charge cards out of one vault (or#880). |
 | `account_id` | Operator-declared, opaque PSP (or custodian) label — never derived from credentials at runtime, on **every** rail. It is a segment of the merchant-secret path (`psps/<rail>/<env>/<account_id>/<key>`, `custodians/<kind>/<env>/<account_id>/<key>`), so deriving it from a credential would need the credential, which needs the path, which needs the id. NMI = the dashboard Gateway ID; Stripe = `acct_…`; CCBill = `clientAccnum-clientSubacc` (dash-joined); Solana = derived from the signer pubkey (a declared value is warned and ignored). |
 | Custodian | Who **holds** a stored card, orthogonal to who charges it — `payment_methods.custodian`: `psp` (inside the processor: a Stripe `pm_`, an NMI customer vault) or `basis_theory` (a neutral third-party custodian proxying the PAN into the rail's gateway). Declared ONCE per merchant as `custodians.<key>.<kind>` and referenced by each PSP that charges its cards (`custodian: <key>`, or#880); a custodian is NEVER a rail (or#879). Never empty; "no stored instrument" (CCBill, Solana) is the absence of a `payment_methods` row. See `docs/payment-method-custody.md`. |
 | Channel | An off-rail source for **recording** a payment that never flowed through a gateway — `models.Channel`: `admin`, `manual`. No adapter, no credentials, no PSP; stored in the same `payments.rail` column, kept distinct by the two Go enums. |
 | Armed | A rail is usable for a merchant iff it has an active PSP row, resolved per-merchant at request time through the one seam `internal/railresolve` (fail closed on `ErrRailNotArmed`). |
 | Integration | The Go client speaking a rail's external API: `internal/integrations/{nmi,stripeapi,ccbill,solana}`. All Stripe HTTP goes through `stripeapi`; all NMI HTTP through `nmi`. |
-| Provider intent | A durable outbox row (`openrails.rail_intents`) posted before **every** outbound provider mutation, executed effectively-once by a scheduled runner. Outcomes: succeeded, retryable, `unknown_needs_verify` (ambiguity ⇒ verify via provider reads, never blind retry), terminal, parked. |
+| Provider intent | A durable outbox row (`billing.rail_intents`) posted before **every** outbound provider mutation, executed effectively-once by a scheduled runner. Outcomes: succeeded, retryable, `unknown_needs_verify` (ambiguity ⇒ verify via provider reads, never blind retry), terminal, parked. |
 | Processor (NMI wire) | NMI's own name for its backend acquiring processor (`processor_id`, `processor_response_text`, decline strings). External wire format — a different concept from our rail; never renamed. |
 
 ## Operating knobs

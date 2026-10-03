@@ -141,7 +141,7 @@ func (s *store) unreadCount(ctx context.Context) (int64, error) {
 
 // --- row mapping -------------------------------------------------------------
 
-func webhookFromRow(row gen.OpenrailsMerchantWebhook) Webhook {
+func webhookFromRow(row gen.BillingMerchantWebhook) Webhook {
 	return Webhook{
 		ID: row.ID, MerchantID: row.MerchantID, Name: row.Name, DestinationHost: row.DestinationHost, secretVersion: int(row.SecretVersion),
 		Format: WebhookFormat(row.Format), Enabled: row.Enabled,
@@ -149,7 +149,7 @@ func webhookFromRow(row gen.OpenrailsMerchantWebhook) Webhook {
 	}
 }
 
-func notificationFromRow(row gen.OpenrailsNotification) Notification {
+func notificationFromRow(row gen.BillingNotification) Notification {
 	n := Notification{
 		ID: row.ID, Severity: Severity(row.Severity), Title: row.Title, Body: row.Body,
 		Link: row.Link, CreatedAt: row.CreatedAt, ReadAt: row.ReadAt,

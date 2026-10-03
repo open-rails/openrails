@@ -34,7 +34,7 @@ func (h *NMIProviderCutover) claimCutoverDecision(ctx context.Context, id uuid.U
 	return progress.Decision, nil
 }
 
-func (h *NMIProviderCutover) abandonClients(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload) (*nmi.NMIClient, *nmi.NMIClient, error) {
+func (h *NMIProviderCutover) abandonClients(ctx context.Context, in gen.BillingRailIntent, p nmiCutoverPayload) (*nmi.NMIClient, *nmi.NMIClient, error) {
 	bindings, _, err := cutoverAccountBindings(in, p)
 	if err != nil {
 		return nil, nil, err
@@ -67,7 +67,7 @@ func (h *NMIProviderCutover) sourceRemainsActive(ctx context.Context, source *nm
 		*local.PaymentMethodID == p.SourcePaymentMethodID && local.RailSubscriptionID == p.SourceSubscriptionID
 }
 
-func (h *NMIProviderCutover) requestAbandon(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, r Resolution) (Outcome, error) {
+func (h *NMIProviderCutover) requestAbandon(ctx context.Context, in gen.BillingRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, r Resolution) (Outcome, error) {
 	if r.Step != "target" || !g.CreateSubmitted || g.Target == nil || g.SourceCancelSubmitted || g.SourceCanceled || g.ActivationSubmitted || g.TargetActive || (g.Decision != nil && g.Decision.Action != "abandon") {
 		return Outcome{}, ErrResolutionRejected
 	}
@@ -87,7 +87,7 @@ func (h *NMIProviderCutover) requestAbandon(ctx context.Context, in gen.Openrail
 	return Retryable("operator authorized cancellation of the exact paused target; continue under executor gates"), nil
 }
 
-func (h *NMIProviderCutover) advanceAbandon(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, send bool) Outcome {
+func (h *NMIProviderCutover) advanceAbandon(ctx context.Context, in gen.BillingRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, send bool) Outcome {
 	evidence := func() map[string]any {
 		b, _ := json.Marshal(g)
 		var m map[string]any

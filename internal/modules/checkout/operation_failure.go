@@ -11,14 +11,14 @@ import (
 
 // operationFailure renders a refused card operation's retained provider
 // evidence as the customer-facing decline. Raw codes stay in the evidence.
-func operationFailure(in gen.OpenrailsRailIntent) *billing.PaymentFailure {
+func operationFailure(in gen.BillingRailIntent) *billing.PaymentFailure {
 	failure := operationReason(in).Failure()
 	return &failure
 }
 
 // operationReason classifies a refused card operation's retained provider
 // evidence.
-func operationReason(in gen.OpenrailsRailIntent) billing.DeclineReason {
+func operationReason(in gen.BillingRailIntent) billing.DeclineReason {
 	evidence := map[string]json.RawMessage{}
 	_ = json.Unmarshal(in.ResultEvidence, &evidence)
 	if raw, ok := evidence["qualified_initial_refusal"]; ok {

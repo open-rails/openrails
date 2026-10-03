@@ -6,7 +6,7 @@ import "strings"
 
 // Rail is a payment GATEWAY integration OpenRails codes against. There is one
 // adapter per rail under internal/integrations/<rail>. A rail hosts 1..N
-// credentialed PSPs (openrails.psps); e.g. "mobius"
+// credentialed PSPs (billing.psps); e.g. "mobius"
 // and "paykings" are PSP NAMES on rail "nmi", not rails themselves.
 type Rail string
 

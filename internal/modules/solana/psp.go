@@ -34,7 +34,7 @@ func resolveActiveSolanaPSP(ctx context.Context, database *db.DB, cfg *config.Co
 		environment = config.ExpectedProviderEnvironment(cfg.IsTestMode())
 	}
 
-	var row gen.OpenrailsPsp
+	var row gen.BillingPsp
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
 		var qerr error
 		row, qerr = database.Gen(ctx).GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{

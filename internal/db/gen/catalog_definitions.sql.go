@@ -13,7 +13,7 @@ import (
 )
 
 const deleteCatalogMeter = `-- name: DeleteCatalogMeter :exec
-DELETE FROM openrails.catalog_meters
+DELETE FROM billing.catalog_meters
 WHERE merchant_id = $1::uuid AND key = $2::text
 `
 
@@ -28,7 +28,7 @@ func (q *Queries) DeleteCatalogMeter(ctx context.Context, arg DeleteCatalogMeter
 }
 
 const deleteDefaultCatalogRateCard = `-- name: DeleteDefaultCatalogRateCard :exec
-DELETE FROM openrails.catalog_rate_cards
+DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND customer_id IS NULL
 `
 
@@ -43,7 +43,7 @@ func (q *Queries) DeleteDefaultCatalogRateCard(ctx context.Context, arg DeleteDe
 }
 
 const getCatalogRevisionForShare = `-- name: GetCatalogRevisionForShare :one
-SELECT catalog_revision FROM openrails.merchants WHERE id = $1::uuid FOR SHARE
+SELECT catalog_revision FROM billing.merchants WHERE id = $1::uuid FOR SHARE
 `
 
 func (q *Queries) GetCatalogRevisionForShare(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -61,7 +61,7 @@ SELECT key,
        COALESCE(aggregation, '')::text AS aggregation,
        COALESCE(unit, '')::text AS unit,
        group_by
-FROM openrails.catalog_meters
+FROM billing.catalog_meters
 WHERE merchant_id = $1::uuid
 ORDER BY key
 `
@@ -106,8 +106,8 @@ func (q *Queries) ListCatalogMeters(ctx context.Context, merchantID uuid.UUID) (
 
 const listCatalogProductRateCards = `-- name: ListCatalogProductRateCards :many
 SELECT rc.product_id::uuid AS product_id, rc.ordinal, rc.meter_key, rc.payment_term, rc.filter, rc.allowance, rc.price
-FROM openrails.catalog_rate_cards rc
-JOIN openrails.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
+FROM billing.catalog_rate_cards rc
+JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
 WHERE rc.merchant_id = $1::uuid AND p.catalog_id = $2::uuid
   AND rc.customer_id IS NULL
 ORDER BY rc.product_id, rc.ordinal
@@ -160,8 +160,8 @@ const listDefaultCatalogRateCards = `-- name: ListDefaultCatalogRateCards :many
 SELECT rc.id, rc.created_at, COALESCE(p.key, '')::text AS product_key, rc.ordinal,
        COALESCE(rc.meter_key, '')::text AS meter_key, rc.payment_term, rc.filter,
        rc.allowance, rc.price
-FROM openrails.catalog_rate_cards rc
-LEFT JOIN openrails.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
+FROM billing.catalog_rate_cards rc
+LEFT JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
 WHERE rc.merchant_id = $1::uuid AND rc.customer_id IS NULL
 `
 
@@ -215,13 +215,13 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.aut
                'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
                'recurring_billing_option_id', binding.recurring_billing_option_id, 'plan_pda', binding.plan_pda,
                'flex_id', binding.flex_id)))
-           FROM openrails.price_psp_bindings binding
-           JOIN openrails.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
+           FROM billing.price_psp_bindings binding
+           JOIN billing.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
            WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id
        ), '{}'::jsonb)::jsonb AS psp_links,
        p.archived
-FROM openrails.prices p
-JOIN openrails.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
+FROM billing.prices p
+JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
 WHERE p.merchant_id = $1::uuid AND product.catalog_id = $2::uuid AND NOT p.archived
 ORDER BY p.product_id, p.amount, p.currency
 `
@@ -278,7 +278,7 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, arg Lis
 const listLiveCatalogProducts = `-- name: ListLiveCatalogProducts :many
 SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec,
        tier_group, tier_rank, archived
-FROM openrails.products
+FROM billing.products
 WHERE merchant_id = $1::uuid AND catalog_id = $2::uuid AND NOT archived
 ORDER BY COALESCE(tier_group, ''), tier_rank, key
 `
@@ -329,7 +329,7 @@ func (q *Queries) ListLiveCatalogProducts(ctx context.Context, arg ListLiveCatal
 }
 
 const syncCatalogMeter = `-- name: SyncCatalogMeter :exec
-INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+INSERT INTO billing.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
 VALUES (
     $1::uuid, $2::text,
     NULLIF($3::text, ''), NULLIF($4::text, ''),
@@ -368,7 +368,7 @@ func (q *Queries) SyncCatalogMeter(ctx context.Context, arg SyncCatalogMeterPara
 }
 
 const syncCatalogRateCard = `-- name: SyncCatalogRateCard :exec
-INSERT INTO openrails.catalog_rate_cards
+INSERT INTO billing.catalog_rate_cards
     (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price, id, created_at)
 VALUES (
     $1::uuid, $2::uuid, $3::bigint,

@@ -441,7 +441,7 @@ func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) 
 // check-then-write, so overlapping converge runs must serialize with each
 // other and with spends. The entitlement/ownership legs are lock-cheap no-ops
 // when already projected.
-func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.OpenrailsGrant) error {
+func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.BillingGrant) error {
 	ctx = merchant.WithID(ctx, scope.Merchant)
 	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		gl := grants.New(gen.New(tx), scope.Merchant.UUID())
@@ -771,7 +771,7 @@ func isModeParkedReason(reason string) bool { return strings.Contains(reason, "m
 // stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the BARE
 // intent id — ledger continuity with the legacy pull-engine emissions of the
 // same finding type. Provider is the intent's own rail.
-func stuckIntentFinding(si *gen.OpenrailsRailIntent, now time.Time) ConvergeFinding {
+func stuckIntentFinding(si *gen.BillingRailIntent, now time.Time) ConvergeFinding {
 	age := now.Sub(si.CreatedAt)
 	ev := map[string]any{
 		"intent_id":       si.ID.String(),

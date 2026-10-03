@@ -55,7 +55,7 @@ func validatePaymentMethodDeleteAuthority(ctx context.Context, p EnqueueParams) 
 // Admission establishes this attribution from verified context and locked
 // ownership. Recovery needs no live caller session; operator/system work and
 // malformed or unattributed rows retain the maintenance gate.
-func isSelfServicePaymentMethodDelete(in gen.OpenrailsRailIntent) bool {
+func isSelfServicePaymentMethodDelete(in gen.BillingRailIntent) bool {
 	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.Origin != string(OriginUser) || in.Actor == nil {
 		return false
 	}

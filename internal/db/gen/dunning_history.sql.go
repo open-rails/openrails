@@ -33,7 +33,7 @@ FROM (
            'failed' AS status,
            a.amount AS amount_micros,
            a.attempted_at AS occurred_at
-    FROM openrails.payment_attempts a
+    FROM billing.payment_attempts a
     WHERE a.merchant_id = $1::uuid
       AND a.rail = ANY($2::text[])
       AND a.subscription_id IS NOT NULL

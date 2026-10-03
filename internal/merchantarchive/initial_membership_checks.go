@@ -36,7 +36,7 @@ func validateInitialEnrollmentReferences(ctx context.Context, tx pgx.Tx, mid mer
 	}
 }
 
-func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op gen.OpenrailsRailIntent) error {
+func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op gen.BillingRailIntent) error {
 	if err := intents.ValidateInitialMembershipTerminal(op); err != nil {
 		return err
 	}

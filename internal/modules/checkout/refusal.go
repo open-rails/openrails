@@ -27,7 +27,7 @@ var ErrPaymentMethodRequired = fmt.Errorf("%w: payment_method_id or payment_toke
 // stale instrument becomes ErrPaymentMethodStale; any other terminal outcome
 // (request rejected before the provider answered, verified non-execution)
 // stays an opaque failure.
-func terminalCheckoutError(intent gen.OpenrailsRailIntent, prefix string) error {
+func terminalCheckoutError(intent gen.BillingRailIntent, prefix string) error {
 	reason := prefix
 	if intent.LastFailureReason != nil && strings.TrimSpace(*intent.LastFailureReason) != "" {
 		reason = prefix + ": " + *intent.LastFailureReason

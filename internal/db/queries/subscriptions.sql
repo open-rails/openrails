@@ -1,8 +1,8 @@
--- openrails.subscriptions. tier_group is set by the
+-- billing.subscriptions. tier_group is set by the
 -- trg_subscriptions_set_tier_group trigger — never written by the app.
 
 -- name: CreateSubscription :execrows
-INSERT INTO openrails.subscriptions (
+INSERT INTO billing.subscriptions (
     id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
     entitlements_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, rail,
@@ -13,7 +13,7 @@ INSERT INTO openrails.subscriptions (
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::openrails.subscription_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::billing.subscription_status,
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
     sqlc.arg(rail), sqlc.arg(rail_subscription_id),
@@ -30,11 +30,11 @@ INSERT INTO openrails.subscriptions (
 -- name: UpdateSubscriptionAt :execrows
 -- Full-column update (nil pointers CLEAR fields like cancelled_at) against the
 -- row version it was read at (#1102): a stale image never reverts a change.
-UPDATE openrails.subscriptions SET
+UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
-    status = sqlc.arg(status)::openrails.subscription_status,
+    status = sqlc.arg(status)::billing.subscription_status,
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
     current_period_starts_at = sqlc.narg(current_period_starts_at),
@@ -65,11 +65,11 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
 -- status, paid period and cancellation, against the revision it was decided on.
 -- Full-column update (the bun version listed every column explicitly so nil
 -- pointers CLEAR fields like cancelled_at on reactivation).
-UPDATE openrails.subscriptions SET
+UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
-    status = sqlc.arg(status)::openrails.subscription_status,
+    status = sqlc.arg(status)::billing.subscription_status,
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
     current_period_starts_at = sqlc.narg(current_period_starts_at),
@@ -100,39 +100,39 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND set_config('billing.decision', sqlc.arg(decision)::text, true) IS NOT NULL;
 
 -- name: DeleteSubscription :execrows
-DELETE FROM openrails.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+DELETE FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: GetSubscriptionByID :one
-SELECT * FROM openrails.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: GetSubscriptionByIDForUpdate :one
 -- Lifecycle read-modify-writes hold this lock through their transaction.
-SELECT * FROM openrails.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
+SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: ListSubscriptionsByIDs :many
-SELECT * FROM openrails.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
   AND deleted_at IS NULL;
 
 -- name: GetLatestSubscriptionByCustomer :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
 -- name: GetSubscriptionByCustomerAndPrice :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1 AND sub.price_id = $2
   AND sub.deleted_at IS NULL
 LIMIT 1;
 
 -- name: GetLifecycleSubscriptionByCustomerAndProduct :one
 -- NULLS FIRST prioritizes indefinite subscriptions.
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
@@ -141,7 +141,7 @@ ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
 -- name: GetActiveSubscriptionByCustomerAt :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.status = 'active'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
@@ -150,7 +150,7 @@ ORDER BY sub.created_at DESC
 LIMIT 1;
 
 -- name: GetSubscriptionByPSPSubID :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
   AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
@@ -159,7 +159,7 @@ LIMIT 1;
 -- name: GetSubscriptionByPSPSubIDForUpdate :one
 -- Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
 -- UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
   AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
@@ -167,7 +167,7 @@ LIMIT 1
 FOR UPDATE;
 
 -- name: GetSubscriptionByPSPMetadataValue :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
   AND sub.rail = $1
   AND sub.gateway_response ->> sqlc.arg(key)::text = sqlc.arg(value)::text
@@ -175,7 +175,7 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(ps
 LIMIT 1;
 
 -- name: ListActiveSubscriptionsByCustomer :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
   AND sub.customer_id = sqlc.arg(customer_id)::uuid
   AND sub.status = 'active'
@@ -186,7 +186,7 @@ ORDER BY sub.created_at DESC;
 -- Stripe provider truth owns the payment-method selection for Stripe-managed
 -- subscriptions. The exact PSP predicate prevents one account's webhook from
 -- relinking a sibling account's subscription.
-UPDATE openrails.subscriptions SET
+UPDATE billing.subscriptions SET
     payment_method_id = sqlc.narg(payment_method_id)::uuid,
     updated_at = now()
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
@@ -198,7 +198,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe
 -- name: ClearStripePaymentMethodSubscriptions :execrows
 -- A detached Stripe method can no longer be charged or reattached. Clear only
 -- links owned by the exact PSP that delivered the detach event.
-UPDATE openrails.subscriptions SET
+UPDATE billing.subscriptions SET
     payment_method_id = NULL,
     updated_at = now()
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
@@ -207,7 +207,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe
   AND deleted_at IS NULL;
 
 -- name: ListActiveSubscriptionsForPSP :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
   AND sub.rail = $1 AND sub.status = 'active'
   AND sub.deleted_at IS NULL;
@@ -216,24 +216,24 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(ps
 -- reprice_all_prior_versions(key, ...) match set (a key's prior-version price
 -- ids). Uses idx_subscriptions_price_id.
 -- name: ListActiveSubscriptionsByPriceIDs :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = ANY(sqlc.arg(price_ids)::uuid[]) AND sub.status = 'active'
   AND sub.deleted_at IS NULL;
 
 -- name: CountSubscriptionsByCustomer :one
-SELECT count(*) FROM openrails.subscriptions sub
+SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.deleted_at IS NULL;
 
 -- name: ListSubscriptionsByCustomerPaged :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountSubscriptionsFiltered :one
-SELECT count(*) FROM openrails.subscriptions sub
+SELECT count(*) FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -246,7 +246,7 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id):
   AND sub.deleted_at IS NULL;
 
 -- name: ListSubscriptionsFiltered :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id)::uuid IS NULL OR sub.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR sub.status::text = sqlc.narg(status)::text)
   AND (sqlc.narg(price_id)::uuid IS NULL OR sub.price_id = sqlc.narg(price_id)::uuid)
@@ -267,8 +267,8 @@ ORDER BY
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetLifecycleSubscriptionByCustomerAndTierGroup :one
-SELECT sub.* FROM openrails.subscriptions sub
-JOIN openrails.products prod ON prod.id = sub.product_id
+SELECT sub.* FROM billing.subscriptions sub
+JOIN billing.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
   AND prod.tier_group = $2
@@ -280,7 +280,7 @@ LIMIT 1;
 -- may still be alive (and billing) at the provider — a re-purchase would
 -- double-bill. These lookups back the subscribe-time rejection.
 -- name: GetUnknownSubscriptionByCustomerAndProduct :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status = 'unverified'
@@ -289,8 +289,8 @@ ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
 -- name: GetUnknownSubscriptionByCustomerAndTierGroup :one
-SELECT sub.* FROM openrails.subscriptions sub
-JOIN openrails.products prod ON prod.id = sub.product_id
+SELECT sub.* FROM billing.subscriptions sub
+JOIN billing.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.status = 'unverified'
   AND prod.tier_group = $2
@@ -304,8 +304,8 @@ LIMIT 1;
 -- (one-off/rental) prices keep bounded interval windows.
 -- name: SubscriptionProjectsStandingAccess :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.subscriptions s
-    JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+    SELECT 1 FROM billing.subscriptions s
+    JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
     WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
       AND s.id = sqlc.arg(id)::uuid
       AND s.deleted_at IS NULL
@@ -315,14 +315,14 @@ SELECT EXISTS (
 ) AS standing;
 
 -- name: ListSubscriptionsByPaymentMethodIDs :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[])
   AND sub.deleted_at IS NULL;
 
 -- name: MarkCancelledSubscriptionsSuperseded :execrows
 -- Preserve cancelled subscriptions for refund/chargeback correlation while
 -- stamping them superseded by the new activation (gateway_response patch).
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET gateway_response = CASE WHEN jsonb_typeof(gateway_response) = 'object'
         THEN gateway_response || jsonb_build_object('superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
         ELSE jsonb_build_object('previous_gateway_response', gateway_response, 'superseded_at', current_timestamp, 'superseded_by_subscription_id', sqlc.narg(superseded_by)::text)
@@ -341,7 +341,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = 
 -- scheduled dunning had never retried, parked or terminated anything. Ids only
 -- — the due rows and every charge run per-merchant under RunInMerchantScope.
 -- name: ListDueDunningMerchants :many
-SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
+SELECT merchant_id FROM billing.due_dunning_merchant_ids(
     sqlc.arg(rails)::text[],
     sqlc.arg(now)::timestamptz,
     sqlc.arg(merchant_limit)::int, sqlc.arg(include_engine)::boolean);
@@ -358,20 +358,20 @@ SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
 -- An engine renewal whose stored method is unusable is due too, so admission
 -- routes it to awaiting_method (never the default card); a membership
 -- awaiting a method past its dunning window is due to end.
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
   AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
        OR (sub.status='awaiting_method' AND sub.grace_ends_at <= sqlc.arg(now)::timestamptz
            AND ((sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine') OR (sub.collection_policy='nmi_schedule' AND sub.rail='nmi')))
        OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
-           AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
+           AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
 ORDER BY CASE WHEN sub.status='awaiting_method' THEN sub.grace_ends_at WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetLatestResumableCancelledSubscription :one
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.status = 'cancelled'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > sqlc.arg(now)::timestamptz)
@@ -384,16 +384,16 @@ LIMIT 1;
 -- dunning recovers would otherwise renew on the old plan and silently escape
 -- the migration.
 -- name: ListMigratableSubscriptionsByPriceID :many
-SELECT * FROM openrails.subscriptions sub
+SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = sqlc.arg(price_id)::uuid
-  AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status, 'awaiting_method'::openrails.subscription_status)
+  AND sub.status IN ('active'::billing.subscription_status, 'past_due'::billing.subscription_status, 'awaiting_method'::billing.subscription_status)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
 
 -- NMI deletion completion owns only this read-model marker. A full-row replay
 -- can undo another command's price/card/period/quote while waiting for the lock.
 -- name: ClearSubscriptionDeletionMarker :execrows
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET deletion_scheduled_at=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND psp_id=sqlc.arg(psp_id)::uuid
@@ -403,19 +403,19 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 
 -- name: GetInitialMembershipForUpdate :one
 -- Accepted completion must see tombstones so it never resurrects a membership.
-SELECT * FROM openrails.subscriptions
+SELECT * FROM billing.subscriptions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 FOR UPDATE;
 
 -- name: GetInitialMembershipForArchive :one
-SELECT * FROM openrails.subscriptions
+SELECT * FROM billing.subscriptions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
 -- name: ListSubscriptionsToWake :many
 -- The delinquent memberships OpenRails collects that a replaced card retries
 -- at the next due pass, and those awaiting a card
 -- (subscriptions.WakeForReplacedMethod).
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND collection_policy IN ('engine', 'nmi_schedule')
@@ -425,7 +425,7 @@ ORDER BY id;
 
 -- name: ListLiveSubscriptionsOnMethod :many
 -- #1115: the memberships a stored card pays for.
-SELECT id FROM openrails.subscriptions
+SELECT id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
@@ -434,19 +434,19 @@ ORDER BY id;
 
 -- Declared import: seed-time forensics land on the new row only.
 -- name: StampImportedSubscriptionEvidence :exec
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET gateway_response = COALESCE(sqlc.narg(gateway_response)::jsonb, gateway_response),
     retry_attempts = GREATEST(retry_attempts, sqlc.arg(retry_attempts)::bigint),
     last_retry_at = COALESCE(sqlc.narg(last_retry_at)::timestamptz, last_retry_at)
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL;
 
 -- name: LinkImportedSubscriptionPaymentMethod :exec
-UPDATE openrails.subscriptions SET payment_method_id = sqlc.arg(payment_method_id)::uuid
+UPDATE billing.subscriptions SET payment_method_id = sqlc.arg(payment_method_id)::uuid
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id IS NULL
   AND deleted_at IS NULL;
 
 -- name: ScheduleImportedSubscriptionDeletion :exec
-UPDATE openrails.subscriptions
+UPDATE billing.subscriptions
 SET deletion_scheduled_at = sqlc.arg(at)::timestamptz, updated_at = sqlc.arg(at)::timestamptz
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deletion_scheduled_at IS NULL
   AND deleted_at IS NULL;

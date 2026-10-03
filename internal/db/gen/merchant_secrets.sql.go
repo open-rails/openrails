@@ -12,7 +12,7 @@ import (
 )
 
 const deleteAllMerchantSecrets = `-- name: DeleteAllMerchantSecrets :exec
-DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid
+DELETE FROM billing.merchant_secrets WHERE merchant_id = $1::uuid
 `
 
 func (q *Queries) DeleteAllMerchantSecrets(ctx context.Context, merchantID uuid.UUID) error {
@@ -21,7 +21,7 @@ func (q *Queries) DeleteAllMerchantSecrets(ctx context.Context, merchantID uuid.
 }
 
 const deleteMerchantSecret = `-- name: DeleteMerchantSecret :exec
-DELETE FROM openrails.merchant_secrets
+DELETE FROM billing.merchant_secrets
 WHERE merchant_id = $1::uuid AND name = $2::text
 `
 
@@ -37,7 +37,7 @@ func (q *Queries) DeleteMerchantSecret(ctx context.Context, arg DeleteMerchantSe
 
 const getMerchantSecret = `-- name: GetMerchantSecret :one
 
-SELECT name, value, version FROM openrails.merchant_secrets
+SELECT name, value, version FROM billing.merchant_secrets
 WHERE merchant_id = $1::uuid AND name = $2::text
 `
 
@@ -61,7 +61,7 @@ func (q *Queries) GetMerchantSecret(ctx context.Context, arg GetMerchantSecretPa
 }
 
 const listMerchantSecretNames = `-- name: ListMerchantSecretNames :many
-SELECT name FROM openrails.merchant_secrets
+SELECT name FROM billing.merchant_secrets
 WHERE merchant_id = $1::uuid
 ORDER BY name
 `
@@ -87,13 +87,13 @@ func (q *Queries) ListMerchantSecretNames(ctx context.Context, merchantID uuid.U
 }
 
 const putMerchantSecret = `-- name: PutMerchantSecret :one
-INSERT INTO openrails.merchant_secrets (merchant_id, name, value, version)
+INSERT INTO billing.merchant_secrets (merchant_id, name, value, version)
 VALUES ($1::uuid, $2::text, $3::text, 1)
 ON CONFLICT (merchant_id, name) DO UPDATE
     SET value = EXCLUDED.value,
-        version = CASE WHEN openrails.merchant_secrets.value = EXCLUDED.value
-                       THEN openrails.merchant_secrets.version
-                       ELSE openrails.merchant_secrets.version + 1 END,
+        version = CASE WHEN billing.merchant_secrets.value = EXCLUDED.value
+                       THEN billing.merchant_secrets.version
+                       ELSE billing.merchant_secrets.version + 1 END,
         updated_at = current_timestamp
 RETURNING name, value, version
 `
@@ -119,7 +119,7 @@ func (q *Queries) PutMerchantSecret(ctx context.Context, arg PutMerchantSecretPa
 }
 
 const stageMerchantSecret = `-- name: StageMerchantSecret :exec
-INSERT INTO openrails.merchant_secrets (merchant_id, name, value, version)
+INSERT INTO billing.merchant_secrets (merchant_id, name, value, version)
 VALUES ($1::uuid, $2::text, $3::text, 1)
 ON CONFLICT (merchant_id, name) DO NOTHING
 `

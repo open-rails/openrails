@@ -67,7 +67,7 @@ func TestRenewalNeverFallsBackToDefaultCard(t *testing.T) {
 	e.c.setDefault(embedded, other)
 	subID := strings.TrimPrefix(e.sub.String(), "sub_")
 	// The FK's ON DELETE SET NULL outcome of a removed stored method.
-	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE openrails.subscriptions SET payment_method_id = NULL WHERE id = $1::uuid`), subID)
+	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.subscriptions SET payment_method_id = NULL WHERE id = $1::uuid`), subID)
 	require.NoError(t, err)
 	charges := len(e.providerLedger())
 	end := e.periodEnd()

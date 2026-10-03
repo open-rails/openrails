@@ -1,8 +1,8 @@
--- openrails.entitlements. The model is bun-soft-delete (deleted_at): every
+-- billing.entitlements. The model is bun-soft-delete (deleted_at): every
 -- read filters deleted_at IS NULL explicitly here (bun added it implicitly).
 
 -- name: CreateEntitlement :one
-INSERT INTO openrails.entitlements (
+INSERT INTO billing.entitlements (
     id, merchant_id, customer_id, entitlement, start_at, end_at,
     source_id, source_type, grant_id, revoked_at, revoke_reason, created_at, updated_at
 ) VALUES (
@@ -18,7 +18,7 @@ RETURNING id;
 
 -- name: EntitlementExistsActive :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
@@ -30,7 +30,7 @@ SELECT EXISTS (
 
 -- name: EntitlementHasActiveIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = $1
       AND ent.customer_id = $2
       AND ent.entitlement = $3
@@ -44,7 +44,7 @@ SELECT EXISTS (
 -- name: EntitlementCoverage :one
 SELECT COALESCE(bool_or(ent.end_at IS NULL), false)::boolean AS indefinite,
        COALESCE(max(ent.end_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end_at
-FROM openrails.entitlements ent
+FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ent.customer_id = sqlc.arg(customer_id)::uuid
   AND ent.entitlement = ANY(sqlc.arg(entitlements)::text[])
@@ -55,7 +55,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: ListActiveEntitlementNames :many
 -- No merchant_id predicate: matches the bun-era user-keyed variant exactly.
-SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
+SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
@@ -63,7 +63,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL;
 
 -- name: ListActiveEntitlementNamesMerchant :many
-SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
+SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.start_at <= sqlc.arg(at)::timestamptz
@@ -84,8 +84,8 @@ SELECT p.id AS product_id,
        p.display_name AS product_display_name,
        p.tier_rank,
        ent.entitlement
-FROM openrails.products p
-JOIN openrails.entitlements ent
+FROM billing.products p
+JOIN billing.entitlements ent
   ON ent.merchant_id = p.merchant_id
  AND ent.entitlement IN (SELECT jsonb_object_keys(p.entitlements_spec))
 WHERE p.merchant_id = $1
@@ -104,7 +104,7 @@ LIMIT 1;
 -- keyset-paginated by customer_id (after_id is an exclusive lower bound — pass the
 -- zero uuid to start). merchant_id is an explicit predicate, matching
 -- ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
-SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
+SELECT DISTINCT ent.customer_id FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.entitlement = sqlc.arg(entitlement)::text
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
@@ -115,7 +115,7 @@ ORDER BY ent.customer_id
 LIMIT sqlc.arg(lim)::int;
 
 -- name: ListActiveEntitlementRecordsMerchant :many
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = $1
   AND ent.customer_id = $2
   AND ent.revoked_at IS NULL
@@ -125,7 +125,7 @@ WHERE ent.merchant_id = $1
 ORDER BY ent.start_at ASC;
 
 -- name: ListDistinctEntitlementNamesBySource :many
-SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
+SELECT DISTINCT ent.entitlement FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
   AND ent.source_id = $2
   AND ent.revoked_at IS NULL
@@ -137,7 +137,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
 -- a dead system cannot extend a cancelled sub. start_at < end_at keeps the
 -- generated period range valid; future-start windows are handled by
 -- SoftDeleteFutureEntitlementsBySubscription.
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = sqlc.arg(end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz,
     revoked_at = CASE WHEN sqlc.arg(set_revoked)::boolean THEN sqlc.arg(now)::timestamptz ELSE ent.revoked_at END,
@@ -152,7 +152,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
 -- name: SoftDeleteFutureEntitlementsBySubscription :exec
 -- #691 closure companion: scheduled windows starting at/after the proven end
 -- cannot be bounded (end <= start); remove them.
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
@@ -162,7 +162,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
   AND ent.start_at >= sqlc.arg(end_at)::timestamptz;
 
 -- name: ListExtendableSubscriptionEntitlements :many
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
@@ -170,7 +170,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subsc
   AND ent.end_at IS NOT NULL AND ent.end_at < sqlc.arg(end_at)::timestamptz;
 
 -- name: UpdateEntitlementEndAtIfMatch :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = sqlc.arg(new_end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
@@ -184,13 +184,13 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
 -- cancel closure. This also repairs the historical split-commit case after the
 -- bounded window has elapsed. Older bounded windows remain historical. Other
 -- sources may overlap and cannot prevent this source from resuming.
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
   AND ent.id IN (
     SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
-    FROM openrails.entitlements e
+    FROM billing.entitlements e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.source_type = 'subscription'
       AND e.source_id = $1
       AND e.revoked_at IS NULL
@@ -201,7 +201,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
 
 -- name: SoftDeleteFutureOneOffEntitlements :exec
 WITH retracted AS (
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
@@ -211,13 +211,13 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_o
   AND ent.start_at >= sqlc.arg(end_at)::timestamptz
     RETURNING ent.grant_id
 )
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
@@ -226,7 +226,7 @@ WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
 -- name: RevokeActiveOneOffEntitlements :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     end_at = sqlc.arg(end_at)::timestamptz,
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.narg(revoke_reason),
@@ -240,7 +240,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_o
 
 -- name: EntitlementExistsBySource :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
@@ -249,19 +249,19 @@ SELECT EXISTS (
 );
 
 -- name: ListEntitlementsByCustomer :many
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC;
 
 -- name: GetEntitlementByID :one
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1;
 
 -- name: RevokeEntitlementByID :execrows
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = sqlc.arg(now)::timestamptz
@@ -275,7 +275,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
 SELECT pg_advisory_xact_lock(sqlc.arg(key)::bigint);
 
 -- name: ShiftEntitlementTimelineWindows :exec
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     start_at = ent.start_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second'),
     end_at = CASE WHEN ent.end_at IS NULL THEN NULL
              ELSE ent.end_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second') END,
@@ -289,7 +289,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
 
 -- name: TimelineHasIndefinite :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements ent
+    SELECT 1 FROM billing.entitlements ent
     WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
@@ -298,7 +298,7 @@ SELECT EXISTS (
 );
 
 -- name: GetTimelineIndefinite :one
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -309,7 +309,7 @@ LIMIT 1;
 
 -- name: GetTimelineTailEnd :one
 -- The latest finite end on the timeline (the tail a new window starts after).
-SELECT ent.end_at FROM openrails.entitlements ent
+SELECT ent.end_at FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -320,7 +320,7 @@ LIMIT 1;
 
 -- name: GetTimelineCoveringWindow :one
 -- The window covering instant `at` (for already-covered EndAt requests).
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
@@ -332,7 +332,7 @@ LIMIT 1;
 
 -- name: SoftDeleteEntitlementByID :exec
 WITH retracted AS (
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
@@ -340,13 +340,13 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
     RETURNING ent.grant_id
 )
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
@@ -357,7 +357,7 @@ DO NOTHING;
 -- name: RevokeActiveTimelineWindows :exec
 -- Revoke every currently-active window on the timeline, optionally filtered
 -- to one source (NULL filter = any).
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = sqlc.arg(now)::timestamptz
@@ -374,7 +374,7 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
 -- Soft-delete every future scheduled window on the timeline, optionally
 -- filtered to one source (NULL filter = any).
 WITH retracted AS (
-UPDATE openrails.entitlements ent SET
+UPDATE billing.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
@@ -386,13 +386,13 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND (sqlc.narg(source_id)::uuid IS NULL OR ent.source_id = sqlc.narg(source_id)::uuid)
     RETURNING ent.grant_id
 )
-INSERT INTO openrails.grants (
+INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
     event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
 )
 SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
        'revoke', g.id, g.spec_snapshot, sqlc.arg(now)::timestamptz, NULL, g.amount, g.currency, 'entitlement window retracted'
-FROM openrails.grants g
+FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
@@ -406,7 +406,7 @@ DO NOTHING;
 -- per-customer round trips. customers is UUID-only (#491): the caller derives the
 -- customer ids (FederatedCustomerID / the subject UUID) and maps results back.
 -- Customers with no active rows simply do not appear.
-SELECT ent.* FROM openrails.entitlements ent
+SELECT ent.* FROM billing.entitlements ent
 WHERE ent.merchant_id = sqlc.arg(merchant_id)
   AND ent.customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
   AND ent.revoked_at IS NULL
@@ -418,7 +418,7 @@ ORDER BY ent.customer_id, ent.start_at ASC;
 -- name: GetEntitlementByGrant :one
 -- #511 fetch-back: the entitlement window MaterializeGrant projected for a given
 -- grant + feature (so PushNewEntitlement can return the created row).
-SELECT * FROM openrails.entitlements
+SELECT * FROM billing.entitlements
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND grant_id = sqlc.arg(grant_id)::uuid
   AND entitlement = sqlc.arg(entitlement)::text
@@ -431,7 +431,7 @@ LIMIT 1;
 -- source? One standing window satisfies every per-period grant of the sub —
 -- the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
 SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements e
+    SELECT 1 FROM billing.entitlements e
     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
       AND e.customer_id = sqlc.arg(customer_id)::uuid
       AND e.entitlement = sqlc.arg(entitlement)::text
@@ -444,7 +444,7 @@ SELECT EXISTS (
 
 -- name: MaterializeEntitlement :exec
 -- Concurrent replay of one immutable grant cannot duplicate its projection.
-INSERT INTO openrails.entitlements (
+INSERT INTO billing.entitlements (
     merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(entitlement)::text,
@@ -454,7 +454,7 @@ INSERT INTO openrails.entitlements (
 ON CONFLICT (merchant_id, grant_id, entitlement) WHERE grant_id IS NOT NULL AND deleted_at IS NULL DO NOTHING;
 
 -- name: GetLatestEntitlementBySource :one
-SELECT * FROM openrails.entitlements
+SELECT * FROM billing.entitlements
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND entitlement = sqlc.arg(entitlement)::text
@@ -465,7 +465,7 @@ LIMIT 1;
 
 -- name: GetEntitlementByIDForUpdate :one
 -- Customer and timeline locks must precede this row lock.
-SELECT * FROM openrails.entitlements ent
+SELECT * FROM billing.entitlements ent
 WHERE ent.merchant_id=sqlc.arg(merchant_id)::uuid AND ent.id=sqlc.arg(id)::uuid
   AND ent.deleted_at IS NULL
 FOR UPDATE;

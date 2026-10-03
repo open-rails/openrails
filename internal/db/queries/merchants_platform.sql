@@ -1,5 +1,5 @@
 -- Platform merchant directory (#721): cross-merchant operator reads over the
--- GLOBAL openrails.merchants table, plus the directory-only
+-- GLOBAL billing.merchants table, plus the directory-only
 -- soft-delete/restore tombstone. Soft delete here is DIRECTORY state (list
 -- exclusion + merchant-auth resolution failure); it is NOT the #225 gated purge
 -- (internal/merchants/delete.go), which stays the only row-destroying path.
@@ -7,7 +7,7 @@
 -- name: ListPlatformMerchants :many
 -- query searches current names only; former names are not listed.
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
-FROM openrails.merchants
+FROM billing.merchants
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0)
 ORDER BY created_at DESC, id DESC
@@ -15,17 +15,17 @@ LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: CountPlatformMerchants :one
 SELECT count(*)
-FROM openrails.merchants
+FROM billing.merchants
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0);
 
 -- name: GetPlatformMerchant :one
 SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
-FROM openrails.merchants
+FROM billing.merchants
 WHERE id = $1;
 
 -- name: SoftDeletePlatformMerchant :one
-UPDATE openrails.merchants
+UPDATE billing.merchants
    SET status     = 'deleted',
        deleted_at = COALESCE(deleted_at, current_timestamp),
        updated_at = current_timestamp
@@ -33,7 +33,7 @@ UPDATE openrails.merchants
 RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at;
 
 -- name: RestorePlatformMerchant :one
-UPDATE openrails.merchants
+UPDATE billing.merchants
    SET status     = 'active',
        deleted_at = NULL,
        updated_at = current_timestamp
@@ -47,13 +47,13 @@ RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at;
 
 -- name: ListPlatformMerchantRailsArmed :many
 SELECT DISTINCT rail
-FROM openrails.psps
+FROM billing.psps
 WHERE merchant_id = $1 AND NOT archived
 ORDER BY rail;
 
 -- name: GetPlatformMerchantLastPayment :one
 SELECT created_at
-FROM openrails.payments
+FROM billing.payments
 WHERE merchant_id = $1
   AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -63,5 +63,5 @@ LIMIT 1;
 -- the complete merchant directory so an audit cannot silently omit a tenant.
 -- name: ListLedgerAuditMerchants :many
 SELECT id, slug
-FROM openrails.merchants
+FROM billing.merchants
 ORDER BY slug;

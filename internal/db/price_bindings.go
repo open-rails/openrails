@@ -14,7 +14,7 @@ import (
 
 // PriceFromGen loads the normalized account bindings with their current display
 // keys. PSP identity is carried in each entry and never derived from its label.
-func (d *DB) PriceFromGen(ctx context.Context, row gen.OpenrailsPrice) (*models.Price, error) {
+func (d *DB) PriceFromGen(ctx context.Context, row gen.BillingPrice) (*models.Price, error) {
 	price, err := models.PriceFromGen(row)
 	if err != nil {
 		return nil, err

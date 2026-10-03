@@ -249,7 +249,7 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req produ
 		case !db.IsNotFound(err) && !errors.Is(err, pgx.ErrNoRows):
 			return fmt.Errorf("load product archive: %w", err)
 		}
-		var product gen.OpenrailsProduct
+		var product gen.BillingProduct
 		if raw := strings.TrimSpace(req.ProductID); raw != "" {
 			typed, perr := billing.ParseProductID(raw)
 			if perr != nil || typed.IsZero() {

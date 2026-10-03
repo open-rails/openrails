@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/sqlschema"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -516,19 +517,25 @@ func (w *world) wake() {
 	w.settle()
 }
 
+// inSchema relocates authored SQL to a world's schema.
+func inSchema(schema, sql string) string {
+	out, err := sqlschema.Rewrite(sql, schema)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
 // armDestructive is the documented operator arming (docs/operations.md, "The
 // destructive-action kill switch"): the instance switch and this merchant's
 // policy row. A fresh deployment ships with both off.
 func (w *world) armDestructive() {
 	w.t.Helper()
 	ctx := w.t.Context()
-	q := func(sql string) string {
-		return strings.ReplaceAll(sql, "openrails.", pgx.Identifier{w.schema}.Sanitize()+".")
-	}
-	_, err := w.pool.Exec(ctx, q(`UPDATE openrails.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
+	_, err := w.pool.Exec(ctx, w.q(`UPDATE billing.destructive_action_switch SET enabled = true, updated_by = 'e2e'`))
 	require.NoError(w.t, err)
-	_, err = w.pool.Exec(ctx, q(`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
-		SELECT id, true, now(), 'e2e', 'reviewed' FROM openrails.merchants WHERE slug = $1
+	_, err = w.pool.Exec(ctx, w.q(`INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason)
+		SELECT id, true, now(), 'e2e', 'reviewed' FROM billing.merchants WHERE slug = $1
 		ON CONFLICT (merchant_id) DO UPDATE SET enforce_armed_at = now(), destructive_actions_enabled = true`), w.slug)
 	require.NoError(w.t, err)
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// dbDEKStore persists wrapped per-merchant DEKs in openrails.merchant_deks.
+// dbDEKStore persists wrapped per-merchant DEKs in billing.merchant_deks.
 // This is the self-hosted / dev default. A managed deployment can swap in a
 // KMS-backed DEKStore with the same interface and no caller change.
 type dbDEKStore struct {

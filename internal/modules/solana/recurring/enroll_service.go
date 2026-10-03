@@ -85,7 +85,7 @@ type EnrollInput struct {
 
 // ConfirmEnrollment verifies the first payment on-chain, claims it for the
 // checkout, then creates the membership and persists the
-// openrails.solana_subscriptions row. Idempotent for the same checkout and
+// billing.solana_subscriptions row. Idempotent for the same checkout and
 // signature (the claim repeats and CreateMembership upserts on the rail
 // subscription id).
 func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (*models.Subscription, error) {

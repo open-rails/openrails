@@ -192,8 +192,8 @@ func ImportDeclaredSubscriptions(
 		snap.Subscriptions = append(snap.Subscriptions, entry)
 	}
 
-	priceCache := map[uuid.UUID]gen.OpenrailsPrice{}
-	productCache := map[uuid.UUID]gen.OpenrailsProduct{}
+	priceCache := map[uuid.UUID]gen.BillingPrice{}
+	productCache := map[uuid.UUID]gen.BillingProduct{}
 
 	for i := range facts {
 		f := &facts[i]
@@ -389,8 +389,8 @@ func insertDeclaredCancelled(
 	q *gen.Queries,
 	merchantID uuid.UUID,
 	f *DeclaredSubscriptionFact,
-	price gen.OpenrailsPrice,
-	productCache map[uuid.UUID]gen.OpenrailsProduct,
+	price gen.BillingPrice,
+	productCache map[uuid.UUID]gen.BillingProduct,
 	periodStart, periodEnd *time.Time,
 ) (uuid.UUID, error) {
 	product, ok := productCache[price.ProductID]
@@ -473,7 +473,7 @@ func materializeDeclaredUnknown(
 	rows, err := q.ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
 		CollectionPolicy:   string(f.CollectionPolicy),
 		MerchantID:         merchantID,
-		Status:             gen.OpenrailsSubscriptionStatus(models.StatusUnverified),
+		Status:             gen.BillingSubscriptionStatus(models.StatusUnverified),
 		Rail:               f.Rail,
 		RailSubscriptionID: f.RailSubscriptionID,
 		UserEmail:          f.UserEmail,

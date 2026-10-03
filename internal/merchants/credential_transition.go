@@ -57,7 +57,7 @@ func (s *Service) TransitionProviderCredentials(ctx context.Context, id merchant
 	}
 	if len(receipt) > 0 {
 		var meta struct{ TransitionFrom string }
-		var row gen.OpenrailsPsp
+		var row gen.BillingPsp
 		if json.Unmarshal(metadata, &meta) != nil || json.Unmarshal(receipt, &row) != nil {
 			return PaymentProviderConfig{}, ErrSecretBackendUnavailable
 		}
@@ -71,7 +71,7 @@ func (s *Service) TransitionProviderCredentials(ctx context.Context, id merchant
 		}
 		return s.paymentProviderConfigWithObligations(ctx, id, row)
 	}
-	var existing gen.OpenrailsPsp
+	var existing gen.BillingPsp
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {

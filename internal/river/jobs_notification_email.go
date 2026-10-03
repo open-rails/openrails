@@ -49,7 +49,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 		return nil
 	}
 
-	// openrails.merchants is the global directory, so this read genuinely works
+	// billing.merchants is the global directory, so this read genuinely works
 	// on the base pool. It is NOT a privileged read — no such thing exists —
 	// and every merchant-owned query below runs inside RunInMerchantConn
 	// (or#868).

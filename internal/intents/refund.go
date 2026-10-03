@@ -82,7 +82,7 @@ func (r refundReservations) payments() *payments.PaymentService {
 }
 
 // DecodeRefundPayload validates the accepted amount/currency and target for execution and portable replay.
-func DecodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) {
+func DecodeRefundPayload(intent gen.BillingRailIntent) (RefundPayload, error) {
 	var p RefundPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("refund intent has no payload")
@@ -102,7 +102,7 @@ func DecodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) 
 // checkRelevance: a refund intent applies while its local reservation is
 // still open (pending). A completed reservation means the refund already
 // finalized; a released/failed or deleted one means it was abandoned.
-func (r refundReservations) checkRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (r refundReservations) checkRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
@@ -255,7 +255,7 @@ func (r refundReservations) recordReceipt(ctx context.Context, p RefundPayload, 
 
 // recoverReceipt never guesses ownership from an amount or subscription counter.
 // A lost response without an exact stored receipt requires operator verification.
-func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.OpenrailsRailIntent, p RefundPayload) Outcome {
+func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.BillingRailIntent, p RefundPayload) Outcome {
 	ref, err := r.knownReceipt(ctx, intent, p)
 	if err != nil {
 		return Ambiguous("load refund receipt: " + err.Error())
@@ -279,7 +279,7 @@ func (r refundReservations) settle(ctx context.Context, p RefundPayload, ref str
 
 // knownReceipt returns the exact provider refund id captured on the
 // reservation or, when that local write failed, on the operation evidence.
-func (r refundReservations) knownReceipt(ctx context.Context, intent gen.OpenrailsRailIntent, p RefundPayload) (string, error) {
+func (r refundReservations) knownReceipt(ctx context.Context, intent gen.BillingRailIntent, p RefundPayload) (string, error) {
 	reservation, err := r.payments().GetByID(ctx, p.ReservationID)
 	if err != nil {
 		return "", err
@@ -338,11 +338,11 @@ func (h *NMIRefundHandler) Backoff(attempts int32) time.Duration { return h.Poli
 // intent, is the source of truth post-success.
 func (h *NMIRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
-func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
 
-func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
 	if err != nil {
 		return Parked("nmi rail not armable (fail closed): " + err.Error())
@@ -394,7 +394,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // Verify resumes known successful responses. NMI does not expose a caller
 // operation key on refund actions: matching an amount can select an earlier
 // partial refund, and absence in a read cannot prove a lost request never landed.
-func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -406,7 +406,7 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 // approved refund of the reserved amount and currency on the original sale's
 // vault. NMI read absence cannot establish nonexecution of a submitted refund,
 // so that resolution is refused. It never re-sends the refund.
-func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
+func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingRailIntent, resolution Resolution) (Outcome, error) {
 	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Outcome{}, err
@@ -478,11 +478,11 @@ func (h *StripeRefundHandler) Backoff(attempts int32) time.Duration { return h.P
 // PrunePolicy retains the immutable operation payload for replay.
 func (h *StripeRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
-func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
 
-func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -537,7 +537,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status})
 }
 
-func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -588,13 +588,13 @@ func NewCCBillRefundHandler(d *db.DB, clock clockwork.Clock) *CCBillRefundHandle
 func (h *CCBillRefundHandler) Type() string                                  { return TypeCCBillRefund }
 func (h *CCBillRefundHandler) Backoff(attempts int32) time.Duration          { return h.Policy.Delay(attempts) }
 func (h *CCBillRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, true }
-func (h *CCBillRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *CCBillRefundHandler) CheckRelevance(ctx context.Context, intent gen.BillingRailIntent) (Relevance, error) {
 	return h.checkRelevance(ctx, intent)
 }
-func (h *CCBillRefundHandler) Execute(context.Context, gen.OpenrailsRailIntent) Outcome {
+func (h *CCBillRefundHandler) Execute(context.Context, gen.BillingRailIntent) Outcome {
 	return Ambiguous("automatic CCBill refund disabled: retain reservation and receipt; operator must verify the actual transaction, amount, and subscription state")
 }
-func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.Execute(ctx, intent)
 }
 

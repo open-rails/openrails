@@ -101,7 +101,7 @@ type nmiPaymentMethodUpdateProgress struct {
 	Finalized             bool    `json:"finalized,omitempty"`
 }
 
-func decodeNMIPaymentMethodUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMethodUpdatePayload, error) {
+func decodeNMIPaymentMethodUpdatePayload(intent gen.BillingRailIntent) (NMIPaymentMethodUpdatePayload, error) {
 	var payload NMIPaymentMethodUpdatePayload
 	if len(intent.Payload) == 0 {
 		return payload, errors.New("nmi payment method update intent has no payload")
@@ -116,7 +116,7 @@ func decodeNMIPaymentMethodUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPay
 	return payload, nil
 }
 
-func decodeNMIPaymentMethodUpdateProgress(intent gen.OpenrailsRailIntent) (nmiPaymentMethodUpdateProgress, error) {
+func decodeNMIPaymentMethodUpdateProgress(intent gen.BillingRailIntent) (nmiPaymentMethodUpdateProgress, error) {
 	var progress nmiPaymentMethodUpdateProgress
 	if len(intent.ResultEvidence) == 0 {
 		return progress, nil
@@ -154,15 +154,15 @@ func (h *NMIPaymentMethodUpdateHandler) now() time.Time {
 
 // Relevance is resolved from the exact provider card inside Execute/Verify;
 // there is no separate local desired-state field that can supersede the intent.
-func (h *NMIPaymentMethodUpdateHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *NMIPaymentMethodUpdateHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (Relevance, error) {
 	return StillRelevant(), nil
 }
 
-func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.advance(ctx, intent, false)
 }
 
-func (h *NMIPaymentMethodUpdateHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+func (h *NMIPaymentMethodUpdateHandler) Verify(ctx context.Context, intent gen.BillingRailIntent) Outcome {
 	return h.advance(ctx, intent, true)
 }
 
@@ -174,7 +174,7 @@ func verificationOrderID(intentID uuid.UUID) string { return "pmu-" + intentID.S
 // as a recurring agreement, move the method onto it (card and agreement
 // together), then retire the replaced billing entry. Each provider step is
 // resumed from the durable progress; a single-use token is never resubmitted.
-func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.OpenrailsRailIntent, verifying bool) Outcome {
+func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.BillingRailIntent, verifying bool) Outcome {
 	payload, err := decodeNMIPaymentMethodUpdatePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -359,7 +359,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 	return Succeeded(map[string]any{"confirmation": "replacement_card_verified", "payment_method_id": pm.ID, "billing_id": staged, "provider_card": stagedCard, "intent_id": intent.ID})
 }
 
-func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload, progress nmiPaymentMethodUpdateProgress) (*models.PaymentMethod, *nmi.NMIClient, Outcome, bool) {
+func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent gen.BillingRailIntent, payload NMIPaymentMethodUpdatePayload, progress nmiPaymentMethodUpdateProgress) (*models.PaymentMethod, *nmi.NMIClient, Outcome, bool) {
 	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, payload.PaymentMethodID)
 	if err != nil {
 		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
@@ -393,7 +393,7 @@ func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent
 
 // finalize moves the method onto the verified billing entry: its card, its
 // recurring agreement and the durable finalized mark commit together.
-func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, pm *models.PaymentMethod, oldBilling, staged string, card nmiCard, ref, nameOnCard string) Outcome {
+func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen.BillingRailIntent, pm *models.PaymentMethod, oldBilling, staged string, card nmiCard, ref, nameOnCard string) Outcome {
 	metadata := map[string]any{}
 	for k, v := range pm.Metadata {
 		metadata[k] = v
@@ -666,7 +666,7 @@ func valueOrEmpty(value *string) string {
 
 // dataGap ends a replacement NMI cannot describe and raises an operator
 // finding; the local card keeps its last confirmed metadata.
-func (h *NMIPaymentMethodUpdateHandler) dataGap(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload) Outcome {
+func (h *NMIPaymentMethodUpdateHandler) dataGap(ctx context.Context, intent gen.BillingRailIntent, payload NMIPaymentMethodUpdatePayload) Outcome {
 	evidence, _ := json.Marshal(map[string]any{"payment_method_id": payload.PaymentMethodID.String(), "customer_vault_id": payload.RailCustomerRef, "billing_id": payload.RailMethodRef, "intent_id": intent.ID.String()})
 	action := "NMI returned this stored card without its last four digits or expiry. Check the customer vault at NMI; the customer can add the card again."
 	if _, err := h.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{MerchantID: intent.MerchantID, FindingType: PaymentMethodDataGapFinding,
@@ -677,7 +677,7 @@ func (h *NMIPaymentMethodUpdateHandler) dataGap(ctx context.Context, intent gen.
 }
 
 // recordVerification records a refused replacement card verification (#1110).
-func (h *NMIPaymentMethodUpdateHandler) recordVerification(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload, a attempts.Attempt) error {
+func (h *NMIPaymentMethodUpdateHandler) recordVerification(ctx context.Context, intent gen.BillingRailIntent, payload NMIPaymentMethodUpdatePayload, a attempts.Attempt) error {
 	customer, err := uuid.Parse(payload.UserID)
 	if err != nil {
 		return err
@@ -685,7 +685,7 @@ func (h *NMIPaymentMethodUpdateHandler) recordVerification(ctx context.Context, 
 	return recordReplacementVerification(ctx, h.DB, intent, customer, payload.PaymentMethodID, h.now(), a)
 }
 
-func recordReplacementVerification(ctx context.Context, d *db.DB, intent gen.OpenrailsRailIntent, customer, method uuid.UUID, at time.Time, a attempts.Attempt) error {
+func recordReplacementVerification(ctx context.Context, d *db.DB, intent gen.BillingRailIntent, customer, method uuid.UUID, at time.Time, a attempts.Attempt) error {
 	if intent.PspID == nil {
 		return errors.New("card replacement has no PSP")
 	}

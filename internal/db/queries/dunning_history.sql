@@ -20,7 +20,7 @@ FROM (
            'failed' AS status,
            a.amount AS amount_micros,
            a.attempted_at AS occurred_at
-    FROM openrails.payment_attempts a
+    FROM billing.payment_attempts a
     WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
       AND a.rail = ANY(sqlc.arg(rails)::text[])
       AND a.subscription_id IS NOT NULL

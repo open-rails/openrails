@@ -51,7 +51,7 @@ func (r *ResolvedServiceCredential) AllowsCustomer(subject uuid.UUID) bool {
 type ResolvedDelegated struct {
 	CredentialClass billingauth.CredentialClass
 	// Merchant is the resolved merchant's slug, sourced from the issuer registry
-	// (openrails.merchants via the validated `iss`). Delegated tokens carry NO
+	// (billing.merchants via the validated `iss`). Delegated tokens carry NO
 	// merchant claims (authkit v0.23.0 issuer-only profile); the slug is
 	// receiver-side directory data, identical to MerchantSlug.
 	Merchant string

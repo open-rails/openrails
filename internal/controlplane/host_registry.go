@@ -17,9 +17,9 @@ import (
 // Every caller fails closed on this error — there is no fallback merchant.
 var ErrHostMerchantUnknown = errors.New("controlplane: host maps to no active merchant")
 
-// merchantForHost resolves the merchant whose openrails.merchants.api_host
+// merchantForHost resolves the merchant whose billing.merchants.api_host
 // equals host, sharing merchantDirectoryRow with merchantForIssuer (#734):
-// Host resolution is deliberately the SAME openrails.merchants lookup —
+// Host resolution is deliberately the SAME billing.merchants lookup —
 // same active/deleted filtering, same "ambiguous match" guard — issuer
 // resolution uses, not a parallel authority. Resolved LIVE per call: no
 // boot-time host map exists, so a merchant registered (or re-hosted) on any

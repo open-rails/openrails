@@ -1,7 +1,7 @@
 -- name: HasSettledPayment :one
 -- Durable settlement history, independent of host-event acknowledgment/retention.
 SELECT EXISTS (
-    SELECT 1 FROM openrails.payments
+    SELECT 1 FROM billing.payments
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND customer_id = sqlc.arg(customer_id)::uuid
       AND price_id = sqlc.arg(price_id)::uuid

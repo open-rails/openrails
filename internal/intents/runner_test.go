@@ -21,8 +21,8 @@ type ledgerRec struct {
 
 // fakeLedger is an in-memory ledger: row is what Enqueue/Get/ClaimByID see.
 type fakeLedger struct {
-	row                    gen.OpenrailsRailIntent
-	due, dueVerify         []gen.OpenrailsRailIntent
+	row                    gen.BillingRailIntent
+	due, dueVerify         []gen.BillingRailIntent
 	refuseClaim            bool
 	markErr, logErr        error
 	recs                   map[uuid.UUID]*ledgerRec
@@ -39,10 +39,10 @@ func (f *fakeLedger) set(id uuid.UUID, status, reason string, next time.Time, ev
 	return nil
 }
 
-func (f *fakeLedger) Enqueue(context.Context, EnqueueParams) (gen.OpenrailsRailIntent, error) {
+func (f *fakeLedger) Enqueue(context.Context, EnqueueParams) (gen.BillingRailIntent, error) {
 	return f.row, nil
 }
-func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.BillingRailIntent, error) {
 	row := f.row
 	row.ID = id
 	if r := f.recs[id]; r != nil {
@@ -50,24 +50,24 @@ func (f *fakeLedger) Get(_ context.Context, id uuid.UUID) (gen.OpenrailsRailInte
 	}
 	return row, nil
 }
-func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) (gen.OpenrailsRailIntent, bool, error) {
+func (f *fakeLedger) ClaimByID(_ context.Context, id uuid.UUID, _, _ time.Time) (gen.BillingRailIntent, bool, error) {
 	f.claims++
 	if f.refuseClaim {
-		return gen.OpenrailsRailIntent{}, false, nil
+		return gen.BillingRailIntent{}, false, nil
 	}
 	row := f.row
 	row.ID, row.Status = id, StatusInFlight
 	row.Attempts++
 	return row, true, nil
 }
-func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsRailIntent, error) {
+func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]gen.BillingRailIntent, error) {
 	return f.due, nil
 }
-func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsRailIntent, error) {
+func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64) ([]gen.BillingRailIntent, error) {
 	return f.dueVerify, nil
 }
-func (f *fakeLedger) ClaimUnknownByID(context.Context, uuid.UUID, time.Time, time.Time) (gen.OpenrailsRailIntent, bool, error) {
-	return gen.OpenrailsRailIntent{}, false, nil
+func (f *fakeLedger) ClaimUnknownByID(context.Context, uuid.UUID, time.Time, time.Time) (gen.BillingRailIntent, bool, error) {
+	return gen.BillingRailIntent{}, false, nil
 }
 func (f *fakeLedger) ReleaseUnknownClaim(context.Context, uuid.UUID) (bool, error) { return false, nil }
 func (f *fakeLedger) RenewClaim(context.Context, uuid.UUID, string, int32, time.Time, time.Time) (bool, error) {
@@ -121,14 +121,14 @@ type fakeHandler struct {
 }
 
 func (h *fakeHandler) Type() string { return h.typ }
-func (h *fakeHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
+func (h *fakeHandler) CheckRelevance(context.Context, gen.BillingRailIntent) (Relevance, error) {
 	return h.relevance, h.relErr
 }
-func (h *fakeHandler) Execute(context.Context, gen.OpenrailsRailIntent) Outcome {
+func (h *fakeHandler) Execute(context.Context, gen.BillingRailIntent) Outcome {
 	h.executed++
 	return h.execute
 }
-func (h *fakeHandler) Verify(context.Context, gen.OpenrailsRailIntent) Outcome {
+func (h *fakeHandler) Verify(context.Context, gen.BillingRailIntent) Outcome {
 	h.verified++
 	return h.verify
 }
@@ -147,8 +147,8 @@ func (g *fakeKillSwitch) AllowDestructive(context.Context, uuid.UUID) (bool, str
 	return g.allow, "instance kill switch is OFF"
 }
 
-func testIntent(typ string, origin Origin, attempts int32) gen.OpenrailsRailIntent {
-	return gen.OpenrailsRailIntent{
+func testIntent(typ string, origin Origin, attempts int32) gen.BillingRailIntent {
+	return gen.BillingRailIntent{
 		ID: uuid.New(), MerchantID: uuid.New(), IntentType: typ, Rail: "nmi",
 		IdempotencyKey: "intent-" + uuid.NewString(), Origin: string(origin), Attempts: attempts, Status: StatusInFlight,
 	}
@@ -205,7 +205,7 @@ func TestRunnerExecuteDecisions(t *testing.T) {
 				h.relevance = StillRelevant()
 			}
 			intent := testIntent(tc.typ, origin, 3)
-			ledger := &fakeLedger{due: []gen.OpenrailsRailIntent{intent}, logErr: tc.logErr}
+			ledger := &fakeLedger{due: []gen.BillingRailIntent{intent}, logErr: tc.logErr}
 			r := &Runner{Store: ledger, Registry: NewRegistry(&h), Config: tc.mode}
 			if tc.kill != nil {
 				r.Destructive = tc.kill
@@ -243,7 +243,7 @@ func TestRunnerExecuteDecisions(t *testing.T) {
 
 func TestRunnerNeverReportsUncommittedSuccess(t *testing.T) {
 	intent := testIntent("t", OriginUser, 1)
-	ledger := &fakeLedger{due: []gen.OpenrailsRailIntent{intent}, markErr: errors.New("commit failed")}
+	ledger := &fakeLedger{due: []gen.BillingRailIntent{intent}, markErr: errors.New("commit failed")}
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
 	stats, err := (&Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull}).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -270,7 +270,7 @@ func TestRunnerVerifyResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			intent := testIntent("t", OriginSystem, 2)
 			intent.Status = StatusUnknownNeedsVerify
-			ledger := &fakeLedger{dueVerify: []gen.OpenrailsRailIntent{intent}}
+			ledger := &fakeLedger{dueVerify: []gen.BillingRailIntent{intent}}
 			h := &fakeHandler{typ: "t", relevance: tc.relevance, verify: tc.verify}
 			_, err := (&Runner{Store: ledger, Registry: NewRegistry(h), Config: modeReadonly}).RunVerifyOnce(context.Background())
 			require.NoError(t, err)
@@ -282,14 +282,14 @@ func TestRunnerVerifyResolution(t *testing.T) {
 	}
 
 	intent := testIntent("unknown_type", OriginSystem, 2)
-	ledger := &fakeLedger{dueVerify: []gen.OpenrailsRailIntent{intent}}
+	ledger := &fakeLedger{dueVerify: []gen.BillingRailIntent{intent}}
 	_, err := (&Runner{Store: ledger, Registry: NewRegistry()}).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, StatusUnknownNeedsVerify, ledger.recs[intent.ID].status, "no handler: stays unknown, never pending")
 }
 
 func TestEnqueueAndExecute(t *testing.T) {
-	run := func(status string, refuse bool) (*fakeLedger, *fakeHandler, gen.OpenrailsRailIntent) {
+	run := func(status string, refuse bool) (*fakeLedger, *fakeHandler, gen.BillingRailIntent) {
 		ledger := &fakeLedger{row: testIntent("t", OriginSystem, 0), refuseClaim: refuse}
 		ledger.row.Status = status
 		h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}

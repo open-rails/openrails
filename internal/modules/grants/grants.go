@@ -2,9 +2,9 @@
 // sibling of the #512 money ledger.
 //
 //   - derive-1 (Grant / Revoke / Expire / Supersede) appends immutable grant
-//     events; it is the SOLE writer of openrails.grants.
+//     events; it is the SOLE writer of billing.grants.
 //   - derive-2 (Materialize) folds the grant log into projections: entitlement
-//     windows in openrails.entitlements and credit lots as ledger deposits.
+//     windows in billing.entitlements and credit lots as ledger deposits.
 //
 // Grants are immutable: revoke/expire/supersede are NEW events referencing the
 // original. A credit grant carries the lot amount+currency and IS the FIFO lot.
@@ -116,12 +116,12 @@ type GrantInput struct {
 
 // Grant appends a 'grant' event (derive-1). Call Materialize afterwards (or rely
 // on the convergence sweep) to project it.
-func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.OpenrailsGrant, error) {
+func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, error) {
 	var spec []byte
 	if in.Spec != nil {
 		b, err := json.Marshal(in.Spec)
 		if err != nil {
-			return gen.OpenrailsGrant{}, fmt.Errorf("grants: marshal spec: %w", err)
+			return gen.BillingGrant{}, fmt.Errorf("grants: marshal spec: %w", err)
 		}
 		spec = b
 	}
@@ -140,7 +140,7 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.OpenrailsGrant, 
 
 // Revoke appends a 'revoke' event terminating the grant (derive-1), effective now.
 // The grant row is never edited. A grant may be terminated at most once (unique index).
-func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (gen.OpenrailsGrant, error) {
+func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (gen.BillingGrant, error) {
 	return l.terminate(ctx, grantID, "revoke", reason, time.Time{})
 }
 
@@ -148,7 +148,7 @@ func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (
 // recorded on the termination's starts_at — for converge-not-replay revocations
 // (e.g. grace lapsed last Tuesday), so the grant ledger agrees with the entitlement
 // effect instead of stamping convergence wall-clock. The zero Time means "now".
-func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason string, asOf time.Time) (gen.OpenrailsGrant, error) {
+func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason string, asOf time.Time) (gen.BillingGrant, error) {
 	return l.terminate(ctx, grantID, "revoke", reason, asOf)
 }
 
@@ -158,13 +158,13 @@ func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason strin
 // ends_at is ALWAYS NULL: a termination is a window-less point event (see the
 // clock convention on Ledger), so it never trips grants_valid_window even when the
 // grant it terminates already expired.
-func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string, asOf time.Time) (gen.OpenrailsGrant, error) {
+func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string, asOf time.Time) (gen.BillingGrant, error) {
 	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
 	if err != nil {
-		return gen.OpenrailsGrant{}, fmt.Errorf("grants: load grant %s: %w", grantID, err)
+		return gen.BillingGrant{}, fmt.Errorf("grants: load grant %s: %w", grantID, err)
 	}
 	if g.Event != "grant" {
-		return gen.OpenrailsGrant{}, fmt.Errorf("grants: %s is a %q event, not a grant", grantID, g.Event)
+		return gen.BillingGrant{}, fmt.Errorf("grants: %s is a %q event, not a grant", grantID, g.Event)
 	}
 	effective := asOf
 	if effective.IsZero() {
@@ -194,7 +194,7 @@ func entitlementSourceType(grantSource string) string {
 	return grantSource
 }
 
-func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) error {
+func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error {
 	if g.Event != "grant" {
 		return fmt.Errorf("grants: MaterializeGrant needs a grant event, got %q", g.Event)
 	}
@@ -318,7 +318,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 // step). Idempotent: GetCreditLotRemaining nets out prior credit_revoke
 // transfers, so a re-derive of an already-clawed lot moves nothing. (#514, see
 // docs/consistency-invariants.md §11 decision 4.)
-func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.OpenrailsGrant) error {
+func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.BillingGrant) error {
 	if g.Currency == nil {
 		return fmt.Errorf("grants: revoked credit grant %s missing currency", g.ID)
 	}
@@ -392,7 +392,7 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 // MissingEffects returns live grants whose derived grant effects are NOT fully
 // materialized — the detection behind `derive.grant_effect.missing` (#511 DERIVE
 // plane). Repair = MaterializeGrant (idempotent), so re-running converges to empty.
-func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID) ([]gen.OpenrailsGrant, error) {
+func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID) ([]gen.BillingGrant, error) {
 	return l.q.ListLiveGrantsMissingEffects(ctx, gen.ListLiveGrantsMissingEffectsParams{
 		MerchantID: l.merchant, CustomerID: customer,
 	})
@@ -402,7 +402,7 @@ func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID) ([]gen
 // live — the detection behind `derive.grant_effect.excess` (#511): a revoke/expire
 // event was recorded but its retraction never propagated. Repair = MaterializeGrant,
 // which retracts (entitlement → revoke window; credit → clawback) — idempotent.
-func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUID) ([]gen.OpenrailsGrant, error) {
+func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUID) ([]gen.BillingGrant, error) {
 	return l.q.ListUnretractedTerminations(ctx, gen.ListUnretractedTerminationsParams{
 		MerchantID: l.merchant, CustomerID: customer,
 	})

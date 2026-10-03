@@ -7,14 +7,14 @@
 //     Data Encryption Key (DEK). The master key comes from config/env in
 //     self-hosted mode and from a KMS in production; it never touches the DB.
 //   - Each merchant has its own 32-byte DEK, generated lazily on first use and
-//     stored WRAPPED (sealed with the master key) in openrails.merchant_deks. One
+//     stored WRAPPED (sealed with the master key) in billing.merchant_deks. One
 //     merchant's DEK can never decrypt another merchant's ciphertext.
 //   - Field values are encrypted with the merchant DEK using AES-256-GCM. Each
 //     ciphertext is self-describing: nonce || ciphertext || tag, base64-encoded
 //     for storage in TEXT columns.
 //
 // The DEK store is pluggable (DEKStore) so the wrapped-DEK directory can live in
-// Postgres (openrails.merchant_deks) in self-hosted mode or be swapped for a KMS /
+// Postgres (billing.merchant_deks) in self-hosted mode or be swapped for a KMS /
 // external store in production without changing callers.
 package crypto
 

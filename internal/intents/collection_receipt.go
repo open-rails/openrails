@@ -54,7 +54,7 @@ type collectedTerms struct {
 	OrderReference      string
 }
 
-func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
+func decodeCollectedTerms(in gen.BillingRailIntent) (collectedTerms, error) {
 	switch in.IntentType {
 	case payments.TypeNMISale:
 		p, err := payments.DecodeNMISalePayload(in)
@@ -92,7 +92,7 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 	}
 }
 
-func collectionBinding(in gen.OpenrailsRailIntent) (receiptBinding, error) {
+func collectionBinding(in gen.BillingRailIntent) (receiptBinding, error) {
 	if _, err := decodeCollectedTerms(in); err != nil {
 		return receiptBinding{}, err
 	}
@@ -115,7 +115,7 @@ func collectionBinding(in gen.OpenrailsRailIntent) (receiptBinding, error) {
 
 // ReadNMICollectionReceipt resolves the accepted PSP and reads the actual order
 // match and exact transaction from that account. Terms are never caller inputs.
-func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, resolver NMIClientResolver, reference string) (CollectedReceipt, bool, error) {
+func ReadNMICollectionReceipt(ctx context.Context, in gen.BillingRailIntent, resolver NMIClientResolver, reference string) (CollectedReceipt, bool, error) {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return CollectedReceipt{}, false, err
@@ -145,7 +145,7 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 // ReadStripeCollectionReceipt accepts an account-scoped reader, whose PSP must
 // be the immutable account resolved by the credential plane. It never accepts
 // caller-supplied amount/customer terms or a boolean settled verdict.
-func ReadStripeCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) (CollectedReceipt, bool, error) {
+func ReadStripeCollectionReceipt(ctx context.Context, in gen.BillingRailIntent, service *subscriptions.StripeService, reference string) (CollectedReceipt, bool, error) {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return CollectedReceipt{}, false, err
@@ -166,7 +166,7 @@ func ReadStripeCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent
 	return receipt, true, receipt.Validate(in)
 }
 
-func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
+func (r CollectedReceipt) Validate(in gen.BillingRailIntent) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
@@ -240,7 +240,7 @@ func (r CollectedReceipt) ExternalInvoiceID() string {
 	return ""
 }
 
-func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, error) {
+func LoadCollectedReceipt(in gen.BillingRailIntent) (CollectedReceipt, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return CollectedReceipt{}, false, nil
@@ -287,7 +287,7 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 // RetainCollectedReceipt commits custody before local effects. A transaction-
 // bound store is refused: a receipt rolled back with failed local settlement
 // would leave the next worker dependent on another provider read.
-func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.OpenrailsRailIntent, receipt CollectedReceipt) (CollectedReceipt, error) {
+func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.BillingRailIntent, receipt CollectedReceipt) (CollectedReceipt, error) {
 	if err := receipt.Validate(in); err != nil {
 		return CollectedReceipt{}, err
 	}
@@ -308,8 +308,8 @@ func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.OpenrailsRail
 // retainQualifiedEvidence is the single durable writer for sealed payment and
 // enrollment receipts. Only their typed entry points call it, after validation.
 // It never shares the domain transaction and never overwrites a different proof.
-func (s *Store) retainQualifiedEvidence(ctx context.Context, in gen.OpenrailsRailIntent, key string, proof any) (gen.OpenrailsRailIntent, error) {
-	var empty gen.OpenrailsRailIntent
+func (s *Store) retainQualifiedEvidence(ctx context.Context, in gen.BillingRailIntent, key string, proof any) (gen.BillingRailIntent, error) {
+	var empty gen.BillingRailIntent
 	if s == nil || s.db == nil || s.db.Pool() == nil {
 		return empty, errors.New("receipt custody requires the base database, outside a transaction")
 	}
@@ -369,7 +369,7 @@ type CollectionCandidate struct {
 
 // RetainCollectionCandidate preserves a possible provider object, not proof of
 // payment. Replaying it always performs qualification before any local effect.
-func (s *Store) RetainCollectionCandidate(ctx context.Context, in gen.OpenrailsRailIntent, candidate CollectionCandidate) error {
+func (s *Store) RetainCollectionCandidate(ctx context.Context, in gen.BillingRailIntent, candidate CollectionCandidate) error {
 	if _, err := collectionBinding(in); err != nil {
 		return err
 	}
@@ -395,7 +395,7 @@ func (s *Store) RetainCollectionCandidate(ctx context.Context, in gen.OpenrailsR
 	return nil
 }
 
-func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, bool, error) {
+func LoadCollectionCandidate(in gen.BillingRailIntent) (CollectionCandidate, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
 		return CollectionCandidate{}, false, nil
@@ -426,7 +426,7 @@ func refuseCustodyKeys(evidence map[string]any) error {
 	return nil
 }
 
-func engineCollectionOperation(in gen.OpenrailsRailIntent) bool {
+func engineCollectionOperation(in gen.BillingRailIntent) bool {
 	if in.IntentType == subscriptions.TypeSubscriptionCollection {
 		return true
 	}

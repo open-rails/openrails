@@ -1,7 +1,7 @@
--- openrails.psps: merchant-scoped PSP (payment-service-provider account) registry.
+-- billing.psps: merchant-scoped PSP (payment-service-provider account) registry.
 
 -- name: UpsertPSP :one
-INSERT INTO openrails.psps (
+INSERT INTO billing.psps (
     id, merchant_id, rail, environment, account_id, key,
     archived, evidence, last_verified_at, custodian_id
 ) VALUES (
@@ -24,28 +24,28 @@ INSERT INTO openrails.psps (
     sqlc.narg(custodian_id)::uuid
 )
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET
-    key = COALESCE(EXCLUDED.key, openrails.psps.key),
+    key = COALESCE(EXCLUDED.key, billing.psps.key),
     archived = EXCLUDED.archived,
     -- or#880: custody is DECLARATIVE — a re-apply that no longer names a
     -- custodian must un-arm the arrangement, not leave a stale pointer that
     -- keeps routing charges through a vault the operator stopped declaring.
     custodian_id = EXCLUDED.custodian_id,
     replaced_at = CASE
-        WHEN EXCLUDED.archived THEN COALESCE(openrails.psps.replaced_at, now())
+        WHEN EXCLUDED.archived THEN COALESCE(billing.psps.replaced_at, now())
         ELSE NULL
     END,
-    evidence = COALESCE(EXCLUDED.evidence, openrails.psps.evidence),
-    last_verified_at = COALESCE(EXCLUDED.last_verified_at, openrails.psps.last_verified_at),
+    evidence = COALESCE(EXCLUDED.evidence, billing.psps.evidence),
+    last_verified_at = COALESCE(EXCLUDED.last_verified_at, billing.psps.last_verified_at),
     updated_at = now()
-WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
+WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
 RETURNING *;
 
 -- name: GetPSP :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetPSPByIdentity :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
@@ -53,14 +53,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 LIMIT 1;
 
 -- name: GetPSPByRailIdentity :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
 
 -- name: ListPSPsForMerchant :many
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(rail)::text IS NULL OR rail = lower(sqlc.narg(rail)::text))
 ORDER BY rail, environment, archived, created_at, id;
@@ -68,7 +68,7 @@ ORDER BY rail, environment, archived, created_at, id;
 -- name: GetActivePSPForNewWork :one
 -- The newest non-archived account on a rail+environment. Existing provider-bound
 -- work must use its recorded psp_id instead of this selector.
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
@@ -77,14 +77,14 @@ ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
 -- name: CountActivePSPsForNewWork :one
-SELECT count(*)::bigint FROM openrails.psps
+SELECT count(*)::bigint FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND archived = false;
 
 -- name: CountPSPsForRailEnvironment :one
-SELECT count(*)::bigint FROM openrails.psps
+SELECT count(*)::bigint FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live');
@@ -96,7 +96,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- (migration 0016) is the sanctioned way to make that read.
 -- name: ResolvePSPOwnerByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id
-FROM openrails.psp_owner_by_identity(
+FROM billing.psp_owner_by_identity(
     lower(sqlc.arg(rail)::text),
     COALESCE(sqlc.narg(environment)::text, 'live'),
     sqlc.arg(account_id)::text
@@ -109,7 +109,7 @@ FROM openrails.psp_owner_by_identity(
 -- version-bumped. Ids only — each merchant's PSP rows are read inside its own
 -- scope.
 -- name: ListRailArmedMerchants :many
-SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
+SELECT merchant_id FROM billing.psp_rail_merchant_ids(
     sqlc.arg(rails)::text[],
     sqlc.arg(merchant_limit)::int,
     sqlc.narg(after_merchant_id)::uuid);
@@ -118,7 +118,7 @@ SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
 -- second leg of the ListRailArmedMerchants fan-out).
 -- name: ListLivePSPsForRail :many
 SELECT id, merchant_id, rail, environment, account_id, key
-FROM openrails.psps
+FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND rail = sqlc.arg(rail)::text
   AND archived = false
@@ -130,17 +130,17 @@ ORDER BY account_id;
 -- well-defined answer.
 
 -- name: GetPSPForCutoverWrite :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 FOR SHARE;
 
 -- name: GetPSPForQualificationUpdate :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
 FOR NO KEY UPDATE;
 
 -- name: SetPSPCutoverQualification :execrows
-UPDATE openrails.psps
+UPDATE billing.psps
 SET evidence = CASE WHEN sqlc.narg(qualification)::jsonb IS NULL
     THEN COALESCE(evidence, '{}'::jsonb) #- '{settings,nmi_cutover_qualification}'
     ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{settings}',
@@ -152,17 +152,17 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid;
 -- Declaration supplies attribution only. A matching existing account retains
 -- its original ID, alias, archive state, custody and credential evidence.
 -- name: DeclarePSPIdentity :one
-INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key)
+INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text,
         sqlc.arg(environment)::text, sqlc.arg(account_id)::text, sqlc.arg(key)::text)
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=openrails.psps.id
-WHERE openrails.psps.merchant_id=EXCLUDED.merchant_id
-  AND openrails.psps.key IS NOT DISTINCT FROM EXCLUDED.key
+ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=billing.psps.id
+WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
+  AND billing.psps.key IS NOT DISTINCT FROM EXCLUDED.key
 RETURNING id;
 
 -- name: SetPSPPendingSigner :execrows
 -- #1101: record the unapproved public key a changed Transit signer reports.
-UPDATE openrails.psps
+UPDATE billing.psps
 SET pending_signer_public_key = sqlc.arg(public_key)::text,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -171,7 +171,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: ApprovePSPPendingSigner :execrows
 -- #1101: the operator approval is the only writer that clears a pending
 -- signer. The stored identity drains; the approved one is provisioned next.
-UPDATE openrails.psps
+UPDATE billing.psps
 SET pending_signer_public_key = NULL,
     archived = true,
     replaced_at = COALESCE(replaced_at, now()),
@@ -181,61 +181,61 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND pending_signer_public_key = sqlc.arg(public_key)::text;
 
 -- name: MerchantHasPSPs :one
-SELECT EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid);
+SELECT EXISTS (SELECT 1 FROM billing.psps WHERE merchant_id = sqlc.arg(merchant_id)::uuid);
 
 -- name: ArchivedPSPKeyExists :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.psps
+    SELECT 1 FROM billing.psps
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lower(key) = lower(sqlc.arg(key)::text)
       AND environment = sqlc.arg(environment)::text AND archived = true
 );
 
 -- name: GetActivePSPByKey :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND lower(key) = lower(sqlc.arg(key)::text)
   AND environment = sqlc.arg(environment)::text AND archived = false
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListActivePSPsForRailEnvironment :many
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
   AND environment = sqlc.arg(environment)::text AND archived = false
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListActivePSPsForEnvironment :many
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND environment = sqlc.arg(environment)::text AND archived = false
 ORDER BY rail ASC, created_at DESC, id DESC;
 
 -- Archived included: the drain-pull leg (#699).
 -- name: GetNewestPSPForRail :one
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
   AND environment = sqlc.arg(environment)::text
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
 -- name: GetPSPIDByRailAccount :one
-SELECT id FROM openrails.psps
+SELECT id FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;
 
 -- name: GetPSPEnvironmentForRail :one
-SELECT environment FROM openrails.psps
+SELECT environment FROM billing.psps
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text;
 
 -- One lock order so concurrent archives serialize instead of deadlocking.
 -- name: LockPSPsForRailEnvironment :many
-SELECT * FROM openrails.psps
+SELECT * FROM billing.psps
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND rail = sqlc.arg(rail)::text
   AND environment = sqlc.arg(environment)::text
 ORDER BY created_at, id
 FOR UPDATE;
 
 -- name: ArchivePSP :one
-UPDATE openrails.psps
+UPDATE billing.psps
 SET archived = true,
     evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{configuration_revision}',
         to_jsonb(COALESCE((evidence ->> 'configuration_revision')::bigint, 0) + 1)),
@@ -246,15 +246,15 @@ RETURNING *;
 
 -- name: CountPSPOpenObligations :many
 SELECT psp.id AS psp_id,
-       ((SELECT count(*) FROM openrails.subscriptions sub
+       ((SELECT count(*) FROM billing.subscriptions sub
           WHERE sub.merchant_id = psp.merchant_id AND sub.psp_id = psp.id
             AND sub.status IN ('active', 'pending', 'past_due') AND sub.deleted_at IS NULL)
-      + (SELECT count(*) FROM openrails.payments payment
+      + (SELECT count(*) FROM billing.payments payment
           WHERE payment.merchant_id = psp.merchant_id AND payment.psp_id = psp.id
             AND payment.status = 'pending' AND payment.deleted_at IS NULL)
-      + (SELECT count(*) FROM openrails.rail_intents intent
+      + (SELECT count(*) FROM billing.rail_intents intent
           WHERE intent.merchant_id = psp.merchant_id AND intent.psp_id = psp.id
             AND intent.status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify'))
        )::bigint AS open_obligations
-FROM openrails.psps psp
+FROM billing.psps psp
 WHERE psp.merchant_id = sqlc.arg(merchant_id)::uuid AND psp.id = ANY(sqlc.arg(psp_ids)::uuid[]);

@@ -341,7 +341,7 @@ func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 func (w *world) accessEndedNotices(customerID string) int {
 	w.t.Helper()
 	var n int
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM openrails.notifications WHERE customer_id = $1::uuid AND event_type = 'premium_ended'`), customerID).Scan(&n))
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM billing.notifications WHERE customer_id = $1::uuid AND event_type = 'premium_ended'`), customerID).Scan(&n))
 	return n
 }
 

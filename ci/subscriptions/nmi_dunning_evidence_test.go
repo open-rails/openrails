@@ -108,7 +108,7 @@ func TestNMIPullIgnoresRowsCreatedDuringTheFetch(t *testing.T) {
 		if hidden {
 			deleted = "now()"
 		}
-		_, err := w.pool.Exec(t.Context(), w.sql(`UPDATE openrails.subscriptions SET deleted_at = `+deleted+` WHERE id = $1`), late.sub.UUID())
+		_, err := w.pool.Exec(t.Context(), w.sql(`UPDATE billing.subscriptions SET deleted_at = `+deleted+` WHERE id = $1`), late.sub.UUID())
 		require.NoError(t, err)
 		w.nmi.EditSchedule(late.railSub, func(s *nmimock.Schedule) { s.Deleted = hidden })
 	}

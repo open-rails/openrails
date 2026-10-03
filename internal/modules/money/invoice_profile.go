@@ -179,7 +179,7 @@ func (s *MoneyService) GetCustomerInvoiceProfile(ctx context.Context, payer iden
 	return out, err
 }
 
-func invoiceProfileFromGen(row gen.OpenrailsCustomerInvoiceProfile) (*CustomerInvoiceProfile, error) {
+func invoiceProfileFromGen(row gen.BillingCustomerInvoiceProfile) (*CustomerInvoiceProfile, error) {
 	p := &CustomerInvoiceProfile{
 		NetTermsDays:     int(row.NetTermsDays),
 		CollectionMethod: row.CollectionMethod,

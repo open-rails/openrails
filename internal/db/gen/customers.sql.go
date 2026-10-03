@@ -13,12 +13,12 @@ import (
 )
 
 const countSearchCustomers = `-- name: CountSearchCustomers :one
-SELECT count(*) FROM openrails.customers c
+SELECT count(*) FROM billing.customers c
 WHERE c.merchant_id = $1
   AND ($2::text = ''
    OR c.id::text ILIKE $2 || '%'
    OR EXISTS (
-        SELECT 1 FROM openrails.subscriptions se
+        SELECT 1 FROM billing.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
           AND se.merchant_id = $1
@@ -40,10 +40,10 @@ func (q *Queries) CountSearchCustomers(ctx context.Context, arg CountSearchCusto
 
 const ensureCustomer = `-- name: EnsureCustomer :one
 
-INSERT INTO openrails.customers (id, merchant_id, issuer)
+INSERT INTO billing.customers (id, merchant_id, issuer)
 VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
-  issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
+  issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
 RETURNING id, merchant_id, issuer, created_at, last_seen_at
 `
@@ -58,9 +58,9 @@ type EnsureCustomerParams struct {
 // the same person can have independent billing relationships with merchants.
 // Refresh only the selected merchant's row. Issuer is audit metadata and does
 // not participate in identity; callers without an issuer preserve its value.
-func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (OpenrailsCustomer, error) {
+func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (BillingCustomer, error) {
 	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Issuer)
-	var i OpenrailsCustomer
+	var i BillingCustomer
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -72,7 +72,7 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 }
 
 const ensureCustomerRow = `-- name: EnsureCustomerRow :exec
-INSERT INTO openrails.customers (id, merchant_id)
+INSERT INTO billing.customers (id, merchant_id)
 VALUES ($1, $2)
 ON CONFLICT (merchant_id, id) DO NOTHING
 `
@@ -92,7 +92,7 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 const getLatestCustomerEmail = `-- name: GetLatestCustomerEmail :one
 SELECT COALESCE((
   SELECT BTRIM(s.user_email)
-  FROM openrails.subscriptions s
+  FROM billing.subscriptions s
   WHERE s.customer_id = $1
     AND s.merchant_id = $2
     AND s.deleted_at IS NULL
@@ -119,11 +119,11 @@ func (q *Queries) GetLatestCustomerEmail(ctx context.Context, arg GetLatestCusto
 
 const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
 SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
-FROM openrails.merchants m
+FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
   AND m.id IN (
-      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject($1::uuid)
+      SELECT merchant_id FROM billing.customer_merchant_ids_for_subject($1::uuid)
   )
 ORDER BY m.slug
 `
@@ -135,7 +135,7 @@ type ListMerchantsForCustomerSubjectRow struct {
 }
 
 // #824: the hosted portal's "which merchants am I a customer of" directory
-// (openrails-saas #18). openrails.merchants is global, so only the
+// (openrails-saas #18). billing.merchants is global, so only the
 // customers half needs the SECURITY DEFINER cross-merchant reader (0016).
 func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject uuid.UUID) ([]ListMerchantsForCustomerSubjectRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
@@ -159,17 +159,17 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject u
 
 const searchCustomers = `-- name: SearchCustomers :many
 SELECT c.id, c.id::text AS subject, c.created_at, c.last_seen_at,
-  (SELECT s.user_email FROM openrails.subscriptions s
+  (SELECT s.user_email FROM billing.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
        AND s.deleted_at IS NULL
        AND s.user_email IS NOT NULL
      ORDER BY s.created_at DESC LIMIT 1) AS email
-FROM openrails.customers c
+FROM billing.customers c
 WHERE c.merchant_id = $1
   AND ($2::text = ''
    OR c.id::text ILIKE $2 || '%'
    OR EXISTS (
-        SELECT 1 FROM openrails.subscriptions se
+        SELECT 1 FROM billing.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
           AND se.merchant_id = $1

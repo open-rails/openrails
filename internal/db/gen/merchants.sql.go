@@ -13,7 +13,7 @@ import (
 )
 
 const countMatchingPurgeInventories = `-- name: CountMatchingPurgeInventories :one
-SELECT count(*) FROM openrails.maintenance_runs
+SELECT count(*) FROM billing.maintenance_runs
 WHERE id = $1::uuid AND merchant_id = $2::uuid
   AND kind = 'purge_inventory' AND status = 'completed'
   AND inventory_total_rows = $3::bigint
@@ -40,7 +40,7 @@ func (q *Queries) CountMatchingPurgeInventories(ctx context.Context, arg CountMa
 }
 
 const deleteMerchantAPIHostClaim = `-- name: DeleteMerchantAPIHostClaim :exec
-DELETE FROM openrails.merchant_api_host_claims WHERE merchant_id = $1::uuid
+DELETE FROM billing.merchant_api_host_claims WHERE merchant_id = $1::uuid
 `
 
 func (q *Queries) DeleteMerchantAPIHostClaim(ctx context.Context, merchantID uuid.UUID) error {
@@ -49,7 +49,7 @@ func (q *Queries) DeleteMerchantAPIHostClaim(ctx context.Context, merchantID uui
 }
 
 const deleteProvenMerchantAPIHostClaim = `-- name: DeleteProvenMerchantAPIHostClaim :execrows
-DELETE FROM openrails.merchant_api_host_claims
+DELETE FROM billing.merchant_api_host_claims
 WHERE merchant_id = $1::uuid AND api_host = $2::text AND token = $3::text
 `
 
@@ -68,12 +68,12 @@ func (q *Queries) DeleteProvenMerchantAPIHostClaim(ctx context.Context, arg Dele
 }
 
 const getMerchantAPIHostClaim = `-- name: GetMerchantAPIHostClaim :one
-SELECT merchant_id, api_host, token, created_at FROM openrails.merchant_api_host_claims WHERE merchant_id = $1::uuid
+SELECT merchant_id, api_host, token, created_at FROM billing.merchant_api_host_claims WHERE merchant_id = $1::uuid
 `
 
-func (q *Queries) GetMerchantAPIHostClaim(ctx context.Context, merchantID uuid.UUID) (OpenrailsMerchantApiHostClaim, error) {
+func (q *Queries) GetMerchantAPIHostClaim(ctx context.Context, merchantID uuid.UUID) (BillingMerchantApiHostClaim, error) {
 	row := q.db.QueryRow(ctx, getMerchantAPIHostClaim, merchantID)
-	var i OpenrailsMerchantApiHostClaim
+	var i BillingMerchantApiHostClaim
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ApiHost,
@@ -84,13 +84,13 @@ func (q *Queries) GetMerchantAPIHostClaim(ctx context.Context, merchantID uuid.U
 }
 
 const getMerchantByGroupID = `-- name: GetMerchantByGroupID :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM openrails.merchants WHERE permission_group_id = $1::text
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM billing.merchants WHERE permission_group_id = $1::text
 `
 
 // Includes retired rows so a group cannot silently acquire a new identity.
-func (q *Queries) GetMerchantByGroupID(ctx context.Context, groupID string) (OpenrailsMerchant, error) {
+func (q *Queries) GetMerchantByGroupID(ctx context.Context, groupID string) (BillingMerchant, error) {
 	row := q.db.QueryRow(ctx, getMerchantByGroupID, groupID)
-	var i OpenrailsMerchant
+	var i BillingMerchant
 	err := row.Scan(
 		&i.ID,
 		&i.Slug,
@@ -111,12 +111,12 @@ func (q *Queries) GetMerchantByGroupID(ctx context.Context, groupID string) (Ope
 
 const getMerchantBySlugOrAlias = `-- name: GetMerchantBySlugOrAlias :one
 SELECT m.id, m.slug, m.status, m.permission_group_id
-FROM openrails.merchants m
+FROM billing.merchants m
 WHERE m.slug = $1::text AND m.deleted_at IS NULL
 UNION ALL
 SELECT m.id, m.slug, m.status, m.permission_group_id
-FROM openrails.merchant_slug_aliases a
-JOIN openrails.merchants m ON m.id = a.merchant_id
+FROM billing.merchant_slug_aliases a
+JOIN billing.merchants m ON m.id = a.merchant_id
 WHERE a.slug = $1::text AND (a.expires_at IS NULL OR a.expires_at > now()) AND m.deleted_at IS NULL
 LIMIT 1
 `
@@ -142,13 +142,13 @@ func (q *Queries) GetMerchantBySlugOrAlias(ctx context.Context, slug string) (Ge
 }
 
 const getUnretiredLiveMerchant = `-- name: GetUnretiredLiveMerchant :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM openrails.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM billing.merchants
 WHERE id = $1::uuid AND deleted_at IS NULL AND retired_at IS NULL
 `
 
-func (q *Queries) GetUnretiredLiveMerchant(ctx context.Context, id uuid.UUID) (OpenrailsMerchant, error) {
+func (q *Queries) GetUnretiredLiveMerchant(ctx context.Context, id uuid.UUID) (BillingMerchant, error) {
 	row := q.db.QueryRow(ctx, getUnretiredLiveMerchant, id)
-	var i OpenrailsMerchant
+	var i BillingMerchant
 	err := row.Scan(
 		&i.ID,
 		&i.Slug,
@@ -169,7 +169,7 @@ func (q *Queries) GetUnretiredLiveMerchant(ctx context.Context, id uuid.UUID) (O
 
 const insertMerchant = `-- name: InsertMerchant :exec
 
-INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
+INSERT INTO billing.merchants (id, slug, status, permission_group_id)
 VALUES ($1::uuid, $2::text, 'active', $3::text)
 `
 
@@ -186,7 +186,7 @@ func (q *Queries) InsertMerchant(ctx context.Context, arg InsertMerchantParams) 
 }
 
 const insertMerchantSlugAlias = `-- name: InsertMerchantSlugAlias :exec
-INSERT INTO openrails.merchant_slug_aliases (slug, merchant_id, expires_at)
+INSERT INTO billing.merchant_slug_aliases (slug, merchant_id, expires_at)
 VALUES (
     $1::text, $2::uuid,
     CASE WHEN $3::boolean THEN NULL
@@ -212,7 +212,7 @@ func (q *Queries) InsertMerchantSlugAlias(ctx context.Context, arg InsertMerchan
 }
 
 const insertRestoredMerchant = `-- name: InsertRestoredMerchant :one
-INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
+INSERT INTO billing.merchants (id, slug, status, permission_group_id)
 VALUES ($1::uuid, $2::text, 'active', NULLIF($3::text, ''))
 ON CONFLICT DO NOTHING
 RETURNING id
@@ -233,7 +233,7 @@ func (q *Queries) InsertRestoredMerchant(ctx context.Context, arg InsertRestored
 }
 
 const listAllMerchantIDs = `-- name: ListAllMerchantIDs :many
-SELECT id FROM openrails.merchants ORDER BY id
+SELECT id FROM billing.merchants ORDER BY id
 `
 
 func (q *Queries) ListAllMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
@@ -257,20 +257,20 @@ func (q *Queries) ListAllMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 const listLiveMerchantsByAPIHost = `-- name: ListLiveMerchantsByAPIHost :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM openrails.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM billing.merchants
 WHERE api_host = $1::text AND deleted_at IS NULL
 LIMIT 2
 `
 
-func (q *Queries) ListLiveMerchantsByAPIHost(ctx context.Context, apiHost string) ([]OpenrailsMerchant, error) {
+func (q *Queries) ListLiveMerchantsByAPIHost(ctx context.Context, apiHost string) ([]BillingMerchant, error) {
 	rows, err := q.db.Query(ctx, listLiveMerchantsByAPIHost, apiHost)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsMerchant
+	var items []BillingMerchant
 	for rows.Next() {
-		var i OpenrailsMerchant
+		var i BillingMerchant
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,
@@ -297,21 +297,21 @@ func (q *Queries) ListLiveMerchantsByAPIHost(ctx context.Context, apiHost string
 }
 
 const listLiveMerchantsByGroupID = `-- name: ListLiveMerchantsByGroupID :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM openrails.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at FROM billing.merchants
 WHERE permission_group_id = $1::text AND deleted_at IS NULL
 LIMIT 2
 `
 
 // LIMIT 2: a second match means the caller must name the merchant.
-func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string) ([]OpenrailsMerchant, error) {
+func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string) ([]BillingMerchant, error) {
 	rows, err := q.db.Query(ctx, listLiveMerchantsByGroupID, groupID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsMerchant
+	var items []BillingMerchant
 	for rows.Next() {
-		var i OpenrailsMerchant
+		var i BillingMerchant
 		if err := rows.Scan(
 			&i.ID,
 			&i.Slug,
@@ -339,7 +339,7 @@ func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string
 
 const listLiveMerchantsByGroupIDs = `-- name: ListLiveMerchantsByGroupIDs :many
 SELECT id, slug, COALESCE(display_name, '')::text AS display_name, permission_group_id::text AS group_id
-FROM openrails.merchants
+FROM billing.merchants
 WHERE permission_group_id = ANY($1::text[]) AND deleted_at IS NULL
 ORDER BY slug
 `
@@ -387,7 +387,7 @@ func (q *Queries) LockMerchantManifestBootstrap(ctx context.Context, lockKey int
 
 const lockMerchantNameForRename = `-- name: LockMerchantNameForRename :one
 SELECT slug, slug_changed_at, now()::timestamptz AS now
-FROM openrails.merchants
+FROM billing.merchants
 WHERE id = $1::uuid AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -407,7 +407,7 @@ func (q *Queries) LockMerchantNameForRename(ctx context.Context, id uuid.UUID) (
 
 const merchantAPIHostTaken = `-- name: MerchantAPIHostTaken :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.merchants
+    SELECT 1 FROM billing.merchants
     WHERE api_host = $1::text AND id <> $2::uuid AND deleted_at IS NULL
 )
 `
@@ -425,7 +425,7 @@ func (q *Queries) MerchantAPIHostTaken(ctx context.Context, arg MerchantAPIHostT
 }
 
 const recordPurgeInventory = `-- name: RecordPurgeInventory :one
-INSERT INTO openrails.maintenance_runs (merchant_id, kind, status, inventory_manifest, inventory_total_rows, finished_at)
+INSERT INTO billing.maintenance_runs (merchant_id, kind, status, inventory_manifest, inventory_total_rows, finished_at)
 VALUES ($1::uuid, 'purge_inventory', 'completed', $2::jsonb,
         ($2::jsonb ->> 'total_rows')::bigint, current_timestamp)
 RETURNING id
@@ -444,7 +444,7 @@ func (q *Queries) RecordPurgeInventory(ctx context.Context, arg RecordPurgeInven
 }
 
 const renameMerchant = `-- name: RenameMerchant :exec
-UPDATE openrails.merchants SET slug = $1::text, slug_changed_at = now(), updated_at = now()
+UPDATE billing.merchants SET slug = $1::text, slug_changed_at = now(), updated_at = now()
 WHERE id = $2::uuid
 `
 
@@ -459,7 +459,7 @@ func (q *Queries) RenameMerchant(ctx context.Context, arg RenameMerchantParams) 
 }
 
 const setMerchantAPIHost = `-- name: SetMerchantAPIHost :execrows
-UPDATE openrails.merchants SET api_host = NULLIF($1::text, ''), updated_at = current_timestamp
+UPDATE billing.merchants SET api_host = NULLIF($1::text, ''), updated_at = current_timestamp
 WHERE id = $2::uuid AND deleted_at IS NULL
 `
 
@@ -477,7 +477,7 @@ func (q *Queries) SetMerchantAPIHost(ctx context.Context, arg SetMerchantAPIHost
 }
 
 const setMerchantDisplayName = `-- name: SetMerchantDisplayName :execrows
-UPDATE openrails.merchants SET display_name = $1::text, updated_at = current_timestamp
+UPDATE billing.merchants SET display_name = $1::text, updated_at = current_timestamp
 WHERE id = $2::uuid AND status = 'active' AND deleted_at IS NULL
 `
 
@@ -495,9 +495,9 @@ func (q *Queries) SetMerchantDisplayName(ctx context.Context, arg SetMerchantDis
 }
 
 const upsertMerchantAPIHostClaim = `-- name: UpsertMerchantAPIHostClaim :one
-INSERT INTO openrails.merchant_api_host_claims (merchant_id, api_host, token)
+INSERT INTO billing.merchant_api_host_claims (merchant_id, api_host, token)
 SELECT id, $1::text, $2::text
-FROM openrails.merchants WHERE id = $3::uuid AND deleted_at IS NULL
+FROM billing.merchants WHERE id = $3::uuid AND deleted_at IS NULL
 ON CONFLICT (merchant_id) DO UPDATE
     SET api_host = EXCLUDED.api_host, token = EXCLUDED.token, created_at = now()
 RETURNING merchant_id, api_host, token, created_at
@@ -509,9 +509,9 @@ type UpsertMerchantAPIHostClaimParams struct {
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) UpsertMerchantAPIHostClaim(ctx context.Context, arg UpsertMerchantAPIHostClaimParams) (OpenrailsMerchantApiHostClaim, error) {
+func (q *Queries) UpsertMerchantAPIHostClaim(ctx context.Context, arg UpsertMerchantAPIHostClaimParams) (BillingMerchantApiHostClaim, error) {
 	row := q.db.QueryRow(ctx, upsertMerchantAPIHostClaim, arg.ApiHost, arg.Token, arg.MerchantID)
-	var i OpenrailsMerchantApiHostClaim
+	var i BillingMerchantApiHostClaim
 	err := row.Scan(
 		&i.MerchantID,
 		&i.ApiHost,

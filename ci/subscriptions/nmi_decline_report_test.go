@@ -38,7 +38,7 @@ func (w *world) declineReport(since time.Time, format string) string {
 func (w *world) rows(table string) int {
 	w.t.Helper()
 	var n int
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM openrails.`+table)).Scan(&n))
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT count(*) FROM billing.`+table)).Scan(&n))
 	return n
 }
 

@@ -14,7 +14,7 @@ import (
 
 const checkoutVerifiedPaymentMethod = `-- name: CheckoutVerifiedPaymentMethod :one
 SELECT EXISTS (
-    SELECT 1 FROM openrails.payment_attempts
+    SELECT 1 FROM billing.payment_attempts
     WHERE merchant_id = $1::uuid
       AND customer_id = $2::uuid
       AND checkout_target = $3::text
@@ -47,9 +47,9 @@ func (q *Queries) CheckoutVerifiedPaymentMethod(ctx context.Context, arg Checkou
 }
 
 const deletePaymentAttemptsBefore = `-- name: DeletePaymentAttemptsBefore :execrows
-DELETE FROM openrails.payment_attempts
+DELETE FROM billing.payment_attempts
 WHERE id IN (
-    SELECT a.id FROM openrails.payment_attempts a
+    SELECT a.id FROM billing.payment_attempts a
     WHERE a.merchant_id = $1::uuid
       AND a.attempted_at < $2::timestamptz
     LIMIT $3::int
@@ -73,7 +73,7 @@ func (q *Queries) DeletePaymentAttemptsBefore(ctx context.Context, arg DeletePay
 }
 
 const enrichPaymentAttempt = `-- name: EnrichPaymentAttempt :execrows
-UPDATE openrails.payment_attempts SET
+UPDATE billing.payment_attempts SET
     card_bin = COALESCE(card_bin, $1::text),
     card_brand = COALESCE(card_brand, $2::text),
     card_last4 = COALESCE(card_last4, $3::text),
@@ -123,7 +123,7 @@ func (q *Queries) EnrichPaymentAttempt(ctx context.Context, arg EnrichPaymentAtt
 }
 
 const getPaymentAttempt = `-- name: GetPaymentAttempt :one
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, rail_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM openrails.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, rail_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -132,9 +132,9 @@ type GetPaymentAttemptParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptParams) (OpenrailsPaymentAttempt, error) {
+func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptParams) (BillingPaymentAttempt, error) {
 	row := q.db.QueryRow(ctx, getPaymentAttempt, arg.MerchantID, arg.ID)
-	var i OpenrailsPaymentAttempt
+	var i BillingPaymentAttempt
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -178,7 +178,7 @@ func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptPa
 }
 
 const insertPaymentAttempt = `-- name: InsertPaymentAttempt :execrows
-INSERT INTO openrails.payment_attempts (
+INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
@@ -288,7 +288,7 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 
 const latestPaymentCheckoutAttempt = `-- name: LatestPaymentCheckoutAttempt :one
 SELECT checkout_id::uuid AS checkout_id, kind, category
-FROM openrails.payment_attempts
+FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND checkout_target = $3::text
@@ -324,7 +324,7 @@ func (q *Queries) LatestPaymentCheckoutAttempt(ctx context.Context, arg LatestPa
 }
 
 const listCycleAttempts = `-- name: ListCycleAttempts :many
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, rail_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM openrails.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, rail_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND cycle_id = $2::uuid
 ORDER BY attempted_at, id
 `
@@ -335,15 +335,15 @@ type ListCycleAttemptsParams struct {
 }
 
 // #1116: a rebill cycle's attempts, oldest first.
-func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsParams) ([]OpenrailsPaymentAttempt, error) {
+func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsParams) ([]BillingPaymentAttempt, error) {
 	rows, err := q.db.Query(ctx, listCycleAttempts, arg.MerchantID, arg.CycleID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsPaymentAttempt
+	var items []BillingPaymentAttempt
 	for rows.Next() {
-		var i OpenrailsPaymentAttempt
+		var i BillingPaymentAttempt
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -395,7 +395,7 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 
 const listPaymentAttempts = `-- name: ListPaymentAttempts :many
 SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.checkout_id, a.checkout_target, a.subscription_id, a.payment_method_id, a.payment_id, a.rail_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.enriched_at, count(*) OVER () AS total
-FROM openrails.payment_attempts a
+FROM billing.payment_attempts a
 WHERE a.merchant_id = $1::uuid
   AND ($2::text[] IS NULL OR a.kind = ANY($2::text[]))
   AND ($3::text[] IS NULL OR a.owner = ANY($3::text[]))
@@ -442,8 +442,8 @@ type ListPaymentAttemptsParams struct {
 }
 
 type ListPaymentAttemptsRow struct {
-	OpenrailsPaymentAttempt OpenrailsPaymentAttempt
-	Total                   int64
+	BillingPaymentAttempt BillingPaymentAttempt
+	Total                 int64
 }
 
 // #1116: the merchant's attempts, newest first; every filter is optional and
@@ -479,43 +479,43 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 	for rows.Next() {
 		var i ListPaymentAttemptsRow
 		if err := rows.Scan(
-			&i.OpenrailsPaymentAttempt.ID,
-			&i.OpenrailsPaymentAttempt.MerchantID,
-			&i.OpenrailsPaymentAttempt.CustomerID,
-			&i.OpenrailsPaymentAttempt.PspID,
-			&i.OpenrailsPaymentAttempt.Rail,
-			&i.OpenrailsPaymentAttempt.Kind,
-			&i.OpenrailsPaymentAttempt.Owner,
-			&i.OpenrailsPaymentAttempt.CardEntry,
-			&i.OpenrailsPaymentAttempt.Source,
-			&i.OpenrailsPaymentAttempt.ObservedVia,
-			&i.OpenrailsPaymentAttempt.Category,
-			&i.OpenrailsPaymentAttempt.Reason,
-			&i.OpenrailsPaymentAttempt.Action,
-			&i.OpenrailsPaymentAttempt.ResponseCode,
-			&i.OpenrailsPaymentAttempt.ResponseText,
-			&i.OpenrailsPaymentAttempt.TransactionID,
-			&i.OpenrailsPaymentAttempt.AvsResult,
-			&i.OpenrailsPaymentAttempt.CvvResult,
-			&i.OpenrailsPaymentAttempt.CardBrand,
-			&i.OpenrailsPaymentAttempt.CardLast4,
-			&i.OpenrailsPaymentAttempt.TokenType,
-			&i.OpenrailsPaymentAttempt.Amount,
-			&i.OpenrailsPaymentAttempt.Currency,
-			&i.OpenrailsPaymentAttempt.AttemptedAt,
-			&i.OpenrailsPaymentAttempt.CheckoutID,
-			&i.OpenrailsPaymentAttempt.CheckoutTarget,
-			&i.OpenrailsPaymentAttempt.SubscriptionID,
-			&i.OpenrailsPaymentAttempt.PaymentMethodID,
-			&i.OpenrailsPaymentAttempt.PaymentID,
-			&i.OpenrailsPaymentAttempt.RailIntentID,
-			&i.OpenrailsPaymentAttempt.Step,
-			&i.OpenrailsPaymentAttempt.CreatedAt,
-			&i.OpenrailsPaymentAttempt.CycleID,
-			&i.OpenrailsPaymentAttempt.CardBin,
-			&i.OpenrailsPaymentAttempt.IssuerCode,
-			&i.OpenrailsPaymentAttempt.IssuerText,
-			&i.OpenrailsPaymentAttempt.EnrichedAt,
+			&i.BillingPaymentAttempt.ID,
+			&i.BillingPaymentAttempt.MerchantID,
+			&i.BillingPaymentAttempt.CustomerID,
+			&i.BillingPaymentAttempt.PspID,
+			&i.BillingPaymentAttempt.Rail,
+			&i.BillingPaymentAttempt.Kind,
+			&i.BillingPaymentAttempt.Owner,
+			&i.BillingPaymentAttempt.CardEntry,
+			&i.BillingPaymentAttempt.Source,
+			&i.BillingPaymentAttempt.ObservedVia,
+			&i.BillingPaymentAttempt.Category,
+			&i.BillingPaymentAttempt.Reason,
+			&i.BillingPaymentAttempt.Action,
+			&i.BillingPaymentAttempt.ResponseCode,
+			&i.BillingPaymentAttempt.ResponseText,
+			&i.BillingPaymentAttempt.TransactionID,
+			&i.BillingPaymentAttempt.AvsResult,
+			&i.BillingPaymentAttempt.CvvResult,
+			&i.BillingPaymentAttempt.CardBrand,
+			&i.BillingPaymentAttempt.CardLast4,
+			&i.BillingPaymentAttempt.TokenType,
+			&i.BillingPaymentAttempt.Amount,
+			&i.BillingPaymentAttempt.Currency,
+			&i.BillingPaymentAttempt.AttemptedAt,
+			&i.BillingPaymentAttempt.CheckoutID,
+			&i.BillingPaymentAttempt.CheckoutTarget,
+			&i.BillingPaymentAttempt.SubscriptionID,
+			&i.BillingPaymentAttempt.PaymentMethodID,
+			&i.BillingPaymentAttempt.PaymentID,
+			&i.BillingPaymentAttempt.RailIntentID,
+			&i.BillingPaymentAttempt.Step,
+			&i.BillingPaymentAttempt.CreatedAt,
+			&i.BillingPaymentAttempt.CycleID,
+			&i.BillingPaymentAttempt.CardBin,
+			&i.BillingPaymentAttempt.IssuerCode,
+			&i.BillingPaymentAttempt.IssuerText,
+			&i.BillingPaymentAttempt.EnrichedAt,
 			&i.Total,
 		); err != nil {
 			return nil, err
@@ -529,7 +529,7 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 }
 
 const listUnenrichedAttemptMerchants = `-- name: ListUnenrichedAttemptMerchants :many
-SELECT merchant_id FROM openrails.unenriched_attempt_merchant_ids(
+SELECT merchant_id FROM billing.unenriched_attempt_merchant_ids(
     $1::timestamptz, $2::timestamptz, $3::int)
 `
 
@@ -561,7 +561,7 @@ func (q *Queries) ListUnenrichedAttemptMerchants(ctx context.Context, arg ListUn
 
 const listUnenrichedNMIAttempts = `-- name: ListUnenrichedNMIAttempts :many
 SELECT id, psp_id, transaction_id::text AS transaction_id, attempted_at
-FROM openrails.payment_attempts
+FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid
   AND enriched_at IS NULL AND rail = 'nmi' AND transaction_id IS NOT NULL
   AND attempted_at >= $2::timestamptz AND attempted_at < $3::timestamptz

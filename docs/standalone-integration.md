@@ -36,7 +36,7 @@ there is no separate private/service listener.
 
 **Production needs:**
 
-- **Postgres 18+.** OpenRails owns the `openrails` schema; it can share your
+- **Postgres 18+.** OpenRails owns one schema (`db.schema`, default `billing`); it can share your
   app's database. Apply migrations with `openrails migrate up` before each new
   version boots (the server validates and refuses to start on missing migrations).
 - **A Redis-compatible service** (we recommend Garnet) — optional, backs

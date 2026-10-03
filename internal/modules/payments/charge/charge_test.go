@@ -79,7 +79,7 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 		require.Equal(t, tc.ok, tc.in.Validate() == nil, tc.name)
 	}
 
-	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), PspID: psp, Custodian: models.CustodianPSP, RailCustomerRef: " vault ", RailMethodRef: "billing", StoredCredentialRecurringRef: " rec ", StoredCredentialUnscheduledRef: "unsch"}
+	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: psp, Custodian: models.CustodianPSP, RailCustomerRef: " vault ", RailMethodRef: "billing", StoredCredentialRecurringRef: " rec ", StoredCredentialUnscheduledRef: "unsch"}
 	frozen := FreezeInstrument(method)
 	require.Equal(t, "vault", frozen.RailCustomerRef)
 	require.Equal(t, "rec", frozen.StoredCredentialRecurringRef)
@@ -94,14 +94,14 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 	require.NoError(t, frozen.Matches(changed, AgreementRecurring))
 	require.ErrorIs(t, frozen.Matches(changed, AgreementUnscheduled), ErrInstrumentChanged)
 
-	for name, mutate := range map[string]func(*gen.OpenrailsPaymentMethod){
-		"account":  func(m *gen.OpenrailsPaymentMethod) { m.PspID = uuid.New() },
-		"customer": func(m *gen.OpenrailsPaymentMethod) { m.RailCustomerRef = "vault2" },
-		"method":   func(m *gen.OpenrailsPaymentMethod) { m.RailMethodRef = "billing2" },
-		"custody": func(m *gen.OpenrailsPaymentMethod) {
+	for name, mutate := range map[string]func(*gen.BillingPaymentMethod){
+		"account":  func(m *gen.BillingPaymentMethod) { m.PspID = uuid.New() },
+		"customer": func(m *gen.BillingPaymentMethod) { m.RailCustomerRef = "vault2" },
+		"method":   func(m *gen.BillingPaymentMethod) { m.RailMethodRef = "billing2" },
+		"custody": func(m *gen.BillingPaymentMethod) {
 			m.Custodian, m.CustodianID = models.CustodianBasisTheory, &custodian
 		},
-		"recurring": func(m *gen.OpenrailsPaymentMethod) { m.StoredCredentialRecurringRef = "rec2" },
+		"recurring": func(m *gen.BillingPaymentMethod) { m.StoredCredentialRecurringRef = "rec2" },
 	} {
 		m := method
 		mutate(&m)

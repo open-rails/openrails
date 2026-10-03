@@ -17,13 +17,13 @@ import (
 // selected merchant's provider accounts. Storage/read failures are distinct.
 var ErrInvalidPSPReference = apperr.New(http.StatusBadRequest, "invalid_psp_reference", "invalid PSP reference")
 
-// pspResolver turns a declared PSPRef into a real openrails.psps id, against the
+// pspResolver turns a declared PSPRef into a real billing.psps id, against the
 // merchant's own catalog. or#893: an import that cannot attribute a row is
 // REFUSED — writing it unattributed is what made a legacy row invisible to a
 // PSP-scoped prune and collidable with a sibling account's provider ids.
 type pspResolver struct {
-	byID  map[uuid.UUID]gen.OpenrailsPsp
-	byKey map[string]gen.OpenrailsPsp // "<rail>\x1f<key>"
+	byID  map[uuid.UUID]gen.BillingPsp
+	byKey map[string]gen.BillingPsp // "<rail>\x1f<key>"
 	// fallback is the book's DEFAULT_PSP. It is a declared value, not a guess:
 	// nothing here ever infers a PSP from "the merchant only has one".
 	fallback PSPRef
@@ -36,8 +36,8 @@ func newPSPResolver(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f
 		return nil, fmt.Errorf("import billing: read PSP catalog: %w", err)
 	}
 	r := &pspResolver{
-		byID:     make(map[uuid.UUID]gen.OpenrailsPsp, len(rows)),
-		byKey:    make(map[string]gen.OpenrailsPsp, len(rows)),
+		byID:     make(map[uuid.UUID]gen.BillingPsp, len(rows)),
+		byKey:    make(map[string]gen.BillingPsp, len(rows)),
 		fallback: fallback,
 	}
 	for _, p := range rows {

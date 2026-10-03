@@ -13,7 +13,7 @@ import (
 )
 
 const applyScheduledRepriceForSubscriptionPrice = `-- name: ApplyScheduledRepriceForSubscriptionPrice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'applied',
     applied_at = now()
 WHERE subscription_reprices.merchant_id = $1::uuid AND subscription_id = $2::uuid
@@ -39,7 +39,7 @@ func (q *Queries) ApplyScheduledRepriceForSubscriptionPrice(ctx context.Context,
 }
 
 const applySubscriptionReprice = `-- name: ApplySubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'applied',
     applied_at = now()
 WHERE subscription_reprices.merchant_id = $1::uuid AND id = $2 AND status = 'scheduled'
@@ -59,7 +59,7 @@ func (q *Queries) ApplySubscriptionReprice(ctx context.Context, arg ApplySubscri
 }
 
 const blockSubscriptionReprice = `-- name: BlockSubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'blocked',
     blocked_reason = $1::text
 WHERE subscription_reprices.merchant_id = $2::uuid AND id = $3 AND status = 'scheduled'
@@ -82,7 +82,7 @@ func (q *Queries) BlockSubscriptionReprice(ctx context.Context, arg BlockSubscri
 }
 
 const cancelSubscriptionReprice = `-- name: CancelSubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
 WHERE merchant_id = $1::uuid AND id = $2 AND status = 'scheduled'
@@ -105,7 +105,7 @@ const countPlanMigrationBatchRows = `-- name: CountPlanMigrationBatchRows :one
 SELECT
     count(*) FILTER (WHERE status = 'blocked')  AS blocked,
     count(*) FILTER (WHERE status <> 'blocked') AS scheduled
-FROM openrails.subscription_reprices
+FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = $1::uuid AND reprice_batch_id = $2::uuid
 `
 
@@ -131,7 +131,7 @@ func (q *Queries) CountPlanMigrationBatchRows(ctx context.Context, arg CountPlan
 }
 
 const createBlockedSubscriptionReprice = `-- name: CreateBlockedSubscriptionReprice :one
-INSERT INTO openrails.subscription_reprices (
+INSERT INTO billing.subscription_reprices (
     merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, kind, status, blocked_reason
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
@@ -155,7 +155,7 @@ type CreateBlockedSubscriptionRepriceParams struct {
 // #813: a per-subscription ledger row for a cohort member the engine could
 // NOT auto-schedule (rail requires user action / missing rail config / rail
 // push failure). Terminal at insert.
-func (q *Queries) CreateBlockedSubscriptionReprice(ctx context.Context, arg CreateBlockedSubscriptionRepriceParams) (OpenrailsSubscriptionReprice, error) {
+func (q *Queries) CreateBlockedSubscriptionReprice(ctx context.Context, arg CreateBlockedSubscriptionRepriceParams) (BillingSubscriptionReprice, error) {
 	row := q.db.QueryRow(ctx, createBlockedSubscriptionReprice,
 		arg.MerchantID,
 		arg.SubscriptionID,
@@ -166,7 +166,7 @@ func (q *Queries) CreateBlockedSubscriptionReprice(ctx context.Context, arg Crea
 		arg.Kind,
 		arg.BlockedReason,
 	)
-	var i OpenrailsSubscriptionReprice
+	var i BillingSubscriptionReprice
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -188,7 +188,7 @@ func (q *Queries) CreateBlockedSubscriptionReprice(ctx context.Context, arg Crea
 
 const createSubscriptionReprice = `-- name: CreateSubscriptionReprice :one
 
-INSERT INTO openrails.subscription_reprices (
+INSERT INTO billing.subscription_reprices (
     merchant_id, subscription_id, from_price_id, to_price_id, effective_at, reprice_batch_id, acknowledged_short_notice, kind
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
@@ -209,9 +209,9 @@ type CreateSubscriptionRepriceParams struct {
 	Kind                    string
 }
 
-// openrails.subscription_reprices (#773): per-subscription scheduled/applied/
+// billing.subscription_reprices (#773): per-subscription scheduled/applied/
 // canceled price move.
-func (q *Queries) CreateSubscriptionReprice(ctx context.Context, arg CreateSubscriptionRepriceParams) (OpenrailsSubscriptionReprice, error) {
+func (q *Queries) CreateSubscriptionReprice(ctx context.Context, arg CreateSubscriptionRepriceParams) (BillingSubscriptionReprice, error) {
 	row := q.db.QueryRow(ctx, createSubscriptionReprice,
 		arg.MerchantID,
 		arg.SubscriptionID,
@@ -222,7 +222,7 @@ func (q *Queries) CreateSubscriptionReprice(ctx context.Context, arg CreateSubsc
 		arg.AcknowledgedShortNotice,
 		arg.Kind,
 	)
-	var i OpenrailsSubscriptionReprice
+	var i BillingSubscriptionReprice
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -243,7 +243,7 @@ func (q *Queries) CreateSubscriptionReprice(ctx context.Context, arg CreateSubsc
 }
 
 const getScheduledRepriceForSubscription = `-- name: GetScheduledRepriceForSubscription :one
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = $1::uuid AND subscription_id = $2::uuid AND status = 'scheduled'
 LIMIT 1
 `
@@ -257,9 +257,9 @@ type GetScheduledRepriceForSubscriptionParams struct {
 // uq_subscription_reprices_one_scheduled) — used both to refuse a second
 // schedule and, at the renewal boundary, to check whether it is DUE
 // (effective_at <= now, checked in Go).
-func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, arg GetScheduledRepriceForSubscriptionParams) (OpenrailsSubscriptionReprice, error) {
+func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, arg GetScheduledRepriceForSubscriptionParams) (BillingSubscriptionReprice, error) {
 	row := q.db.QueryRow(ctx, getScheduledRepriceForSubscription, arg.MerchantID, arg.SubscriptionID)
-	var i OpenrailsSubscriptionReprice
+	var i BillingSubscriptionReprice
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -280,7 +280,7 @@ func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, arg Ge
 }
 
 const getSubscriptionRepriceByID = `-- name: GetSubscriptionRepriceByID :one
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices WHERE merchant_id = $1::uuid AND id = $2::uuid
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
 type GetSubscriptionRepriceByIDParams struct {
@@ -290,9 +290,9 @@ type GetSubscriptionRepriceByIDParams struct {
 
 // Merchant identity is explicit so both request and context-scoped worker calls
 // are isolated without depending on a connection-local GUC.
-func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, arg GetSubscriptionRepriceByIDParams) (OpenrailsSubscriptionReprice, error) {
+func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, arg GetSubscriptionRepriceByIDParams) (BillingSubscriptionReprice, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionRepriceByID, arg.MerchantID, arg.ID)
-	var i OpenrailsSubscriptionReprice
+	var i BillingSubscriptionReprice
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -313,7 +313,7 @@ func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, arg GetSubscri
 }
 
 const listRedrivableBlockedPlanChangeReprices = `-- name: ListRedrivableBlockedPlanChangeReprices :many
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
 WHERE subscription_reprices.merchant_id = $1::uuid AND kind = 'plan_change'
   AND status = 'blocked'
   AND blocked_reason LIKE 'rail_push_failed:%'
@@ -331,15 +331,15 @@ type ListRedrivableBlockedPlanChangeRepricesParams struct {
 // push-verified-then-crash window); classification blocks
 // (rail_requires_user_action, interval/cent mismatches, missing rail config
 // at classify time) never carried a push attempt and stay terminal.
-func (q *Queries) ListRedrivableBlockedPlanChangeReprices(ctx context.Context, arg ListRedrivableBlockedPlanChangeRepricesParams) ([]OpenrailsSubscriptionReprice, error) {
+func (q *Queries) ListRedrivableBlockedPlanChangeReprices(ctx context.Context, arg ListRedrivableBlockedPlanChangeRepricesParams) ([]BillingSubscriptionReprice, error) {
 	rows, err := q.db.Query(ctx, listRedrivableBlockedPlanChangeReprices, arg.MerchantID, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsSubscriptionReprice
+	var items []BillingSubscriptionReprice
 	for rows.Next() {
-		var i OpenrailsSubscriptionReprice
+		var i BillingSubscriptionReprice
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -367,7 +367,7 @@ func (q *Queries) ListRedrivableBlockedPlanChangeReprices(ctx context.Context, a
 }
 
 const listRedrivablePlanChangeMerchants = `-- name: ListRedrivablePlanChangeMerchants :many
-SELECT merchant_id FROM openrails.redrivable_plan_change_merchant_ids(
+SELECT merchant_id FROM billing.redrivable_plan_change_merchant_ids(
     $1::int)
 `
 
@@ -397,7 +397,7 @@ func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchan
 }
 
 const listSubscriptionReprices = `-- name: ListSubscriptionReprices :many
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
   AND ($3::uuid IS NULL OR reprice_batch_id = $3::uuid)
@@ -415,7 +415,7 @@ type ListSubscriptionRepricesParams struct {
 	PageLimit      int32
 }
 
-func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscriptionRepricesParams) ([]OpenrailsSubscriptionReprice, error) {
+func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscriptionRepricesParams) ([]BillingSubscriptionReprice, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionReprices,
 		arg.MerchantID,
 		arg.SubscriptionID,
@@ -428,9 +428,9 @@ func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscrip
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsSubscriptionReprice
+	var items []BillingSubscriptionReprice
 	for rows.Next() {
-		var i OpenrailsSubscriptionReprice
+		var i BillingSubscriptionReprice
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -458,7 +458,7 @@ func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscrip
 }
 
 const unblockSubscriptionReprice = `-- name: UnblockSubscriptionReprice :execrows
-UPDATE openrails.subscription_reprices SET
+UPDATE billing.subscription_reprices SET
     status = 'scheduled',
     blocked_reason = ''
 WHERE subscription_reprices.merchant_id = $1::uuid AND id = $2 AND status = 'blocked'

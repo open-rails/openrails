@@ -44,16 +44,16 @@ func OperationTerminal(status string) bool {
 // PrepareDispatch touches only this operation. Expiration retains every existing
 // submission/hold guard. A lost executor lease becomes an unknown result, never
 // an execute retry: the provider may already have accepted the mutation.
-func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time) (gen.OpenrailsRailIntent, error) {
+func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time) (gen.BillingRailIntent, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if _, err := s.db.Gen(ctx).RecoverAbandonedRailIntentByID(ctx, gen.RecoverAbandonedRailIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now}); err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	if _, err := s.db.Gen(ctx).ExpireRailIntentByID(ctx, gen.ExpireRailIntentByIDParams{MerchantID: mid.UUID(), ID: id, Now: now, BreakerHeldTypes: DestructiveIntentTypes()}); err != nil {
-		return gen.OpenrailsRailIntent{}, err
+		return gen.BillingRailIntent{}, err
 	}
 	return s.Get(ctx, id)
 }

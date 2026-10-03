@@ -1,7 +1,7 @@
 -- th-045 OpenRails-owned provider billing evidence and qualification.
 
 -- name: InsertProviderBillingQualification :one
-INSERT INTO openrails.provider_billing_qualifications (
+INSERT INTO billing.provider_billing_qualifications (
     merchant_id,
     operation_id,
     provider,
@@ -37,8 +37,8 @@ RETURNING *;
 
 -- name: GetProviderBillingQualificationWithAuthorization :one
 SELECT sqlc.embed(q), sqlc.embed(a)
-FROM openrails.provider_billing_qualifications q
-JOIN openrails.operation_authorizations a
+FROM billing.provider_billing_qualifications q
+JOIN billing.operation_authorizations a
   ON a.merchant_id = q.merchant_id
  AND a.operation_id = q.operation_id
 WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -46,13 +46,13 @@ WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: GetProviderBillingQualificationForUpdate :one
 SELECT *
-FROM openrails.provider_billing_qualifications
+FROM billing.provider_billing_qualifications
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text
 FOR UPDATE;
 
 -- name: InsertProviderBillingObservation :one
-INSERT INTO openrails.provider_billing_observations (
+INSERT INTO billing.provider_billing_observations (
     merchant_id,
     operation_id,
     observation_id,
@@ -94,13 +94,13 @@ RETURNING *;
 
 -- name: GetProviderBillingObservation :one
 SELECT *
-FROM openrails.provider_billing_observations
+FROM billing.provider_billing_observations
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text
   AND observation_id = sqlc.arg(observation_id)::text;
 
 -- name: UpdateProviderBillingQualification :one
-UPDATE openrails.provider_billing_qualifications
+UPDATE billing.provider_billing_qualifications
 SET state = sqlc.arg(state)::text,
     reason = sqlc.arg(reason)::text,
     baseline_observation_id = sqlc.narg(baseline_observation_id)::text,

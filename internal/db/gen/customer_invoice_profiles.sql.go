@@ -13,7 +13,7 @@ import (
 )
 
 const getCustomerInvoiceProfile = `-- name: GetCustomerInvoiceProfile :one
-SELECT merchant_id, customer_id, net_terms_days, collection_method, po_number, tax, billing_contacts, memo, created_at, updated_at FROM openrails.customer_invoice_profiles
+SELECT merchant_id, customer_id, net_terms_days, collection_method, po_number, tax, billing_contacts, memo, created_at, updated_at FROM billing.customer_invoice_profiles
 WHERE merchant_id = $1 AND customer_id = $2
 LIMIT 1
 `
@@ -23,9 +23,9 @@ type GetCustomerInvoiceProfileParams struct {
 	CustomerID uuid.UUID
 }
 
-func (q *Queries) GetCustomerInvoiceProfile(ctx context.Context, arg GetCustomerInvoiceProfileParams) (OpenrailsCustomerInvoiceProfile, error) {
+func (q *Queries) GetCustomerInvoiceProfile(ctx context.Context, arg GetCustomerInvoiceProfileParams) (BillingCustomerInvoiceProfile, error) {
 	row := q.db.QueryRow(ctx, getCustomerInvoiceProfile, arg.MerchantID, arg.CustomerID)
-	var i OpenrailsCustomerInvoiceProfile
+	var i BillingCustomerInvoiceProfile
 	err := row.Scan(
 		&i.MerchantID,
 		&i.CustomerID,
@@ -42,7 +42,7 @@ func (q *Queries) GetCustomerInvoiceProfile(ctx context.Context, arg GetCustomer
 }
 
 const insertCustomerInvoiceProfileIfAbsent = `-- name: InsertCustomerInvoiceProfileIfAbsent :execrows
-INSERT INTO openrails.customer_invoice_profiles (
+INSERT INTO billing.customer_invoice_profiles (
     merchant_id, customer_id, net_terms_days, collection_method,
     po_number, tax, billing_contacts, memo, created_at, updated_at
 ) VALUES (
@@ -86,7 +86,7 @@ func (q *Queries) InsertCustomerInvoiceProfileIfAbsent(ctx context.Context, arg 
 
 const upsertCustomerInvoiceProfile = `-- name: UpsertCustomerInvoiceProfile :exec
 
-INSERT INTO openrails.customer_invoice_profiles (
+INSERT INTO billing.customer_invoice_profiles (
     merchant_id, customer_id, net_terms_days, collection_method,
     po_number, tax, billing_contacts, memo, created_at, updated_at
 ) VALUES (
@@ -117,7 +117,7 @@ type UpsertCustomerInvoiceProfileParams struct {
 	Now              time.Time
 }
 
-// openrails.customer_invoice_profiles: per-payer enterprise invoicing profile
+// billing.customer_invoice_profiles: per-payer enterprise invoicing profile
 // (#798) — net-N terms, collection method and the document fields snapshotted
 // onto invoices at finalize.
 func (q *Queries) UpsertCustomerInvoiceProfile(ctx context.Context, arg UpsertCustomerInvoiceProfileParams) error {

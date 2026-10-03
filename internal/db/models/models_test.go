@@ -19,21 +19,21 @@ func TestGenMappingPreservesStoredValues(t *testing.T) {
 		require.Equal(t, want, *IntPtrTo32(ptr(in)), "clamp, never wrap")
 	}
 
-	payment, err := PaymentFromGen(gen.OpenrailsPayment{Rail: "paypal", Metadata: []byte(`{"order_id":"o-1"}`)})
+	payment, err := PaymentFromGen(gen.BillingPayment{Rail: "paypal", Metadata: []byte(`{"order_id":"o-1"}`)})
 	require.NoError(t, err)
 	require.Equal(t, Rail("paypal"), payment.Rail, "an unregistered persisted rail is preserved, not rejected")
 	require.Equal(t, "o-1", payment.Metadata["order_id"])
-	_, err = PaymentFromGen(gen.OpenrailsPayment{Metadata: []byte(`{`)})
+	_, err = PaymentFromGen(gen.BillingPayment{Metadata: []byte(`{`)})
 	require.ErrorContains(t, err, "payments.metadata")
 
-	product, err := ProductFromGen(gen.OpenrailsProduct{TierRank: 3, EntitlementsSpec: []byte(`{"forever":null,"day":24}`)})
+	product, err := ProductFromGen(gen.BillingProduct{TierRank: 3, EntitlementsSpec: []byte(`{"forever":null,"day":24}`)})
 	require.NoError(t, err)
 	require.Equal(t, 3, product.TierRank)
 	require.Nil(t, product.EntitlementsSpec["forever"])
 	require.Contains(t, product.EntitlementsSpec, "forever", "an indefinite entitlement is a nil value, not a missing key")
 	require.Equal(t, 24, *product.EntitlementsSpec["day"])
 
-	sub, err := SubscriptionFromGen(gen.OpenrailsSubscription{RetryAttempts: ptr(int32(2)), CancelType: ptr("user"), CollectionPolicy: "engine"})
+	sub, err := SubscriptionFromGen(gen.BillingSubscription{RetryAttempts: ptr(int32(2)), CancelType: ptr("user"), CollectionPolicy: "engine"})
 	require.NoError(t, err)
 	require.Equal(t, 2, *sub.RetryAttempts)
 	require.Equal(t, CancelType("user"), *sub.CancelType)
