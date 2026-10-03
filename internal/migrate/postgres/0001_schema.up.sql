@@ -2349,6 +2349,7 @@ COMMENT ON COLUMN openrails.rebill_cycles.missed_at IS '#1112 when the cycle pas
 
 CREATE UNIQUE INDEX uq_rebill_cycles_due ON openrails.rebill_cycles USING btree (merchant_id, subscription_id, due_at);
 CREATE INDEX idx_rebill_cycles_time ON openrails.rebill_cycles USING btree (merchant_id, due_at);
+CREATE INDEX idx_rebill_cycles_psp ON openrails.rebill_cycles USING btree (merchant_id, psp_id, due_at);
 
 CREATE TABLE openrails.payment_attempts (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2419,6 +2420,8 @@ CREATE UNIQUE INDEX uq_payment_attempts_operation_step ON openrails.payment_atte
 CREATE INDEX idx_payment_attempts_time ON openrails.payment_attempts USING btree (merchant_id, attempted_at);
 CREATE INDEX idx_payment_attempts_checkout ON openrails.payment_attempts USING btree (merchant_id, customer_id, checkout_target, attempted_at) WHERE checkout_target IS NOT NULL;
 CREATE INDEX idx_payment_attempts_cycle ON openrails.payment_attempts USING btree (merchant_id, cycle_id) WHERE cycle_id IS NOT NULL;
+CREATE INDEX idx_payment_attempts_subscription ON openrails.payment_attempts USING btree (merchant_id, subscription_id, attempted_at) WHERE subscription_id IS NOT NULL;
+CREATE INDEX idx_payment_attempts_checkout_id ON openrails.payment_attempts USING btree (merchant_id, checkout_id, attempted_at) WHERE checkout_id IS NOT NULL;
 CREATE INDEX idx_payment_attempts_unenriched ON openrails.payment_attempts USING btree (merchant_id, attempted_at)
     WHERE enriched_at IS NULL AND rail = 'nmi' AND transaction_id IS NOT NULL;
 
@@ -4210,7 +4213,11 @@ BEGIN
        AND NOT EXISTS (
            SELECT 1 FROM openrails.rebill_cycles c
             WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at
-              AND (c.missed_at IS NOT NULL OR EXISTS (SELECT 1 FROM openrails.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)))
+              AND c.missed_at IS NOT NULL)
+       AND NOT EXISTS (
+           SELECT 1 FROM openrails.rebill_cycles c
+             JOIN openrails.payment_attempts a ON a.merchant_id = c.merchant_id AND a.cycle_id = c.id
+            WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.due_at = s.current_period_ends_at)
      GROUP BY s.merchant_id
      ORDER BY MIN(s.current_period_ends_at), s.merchant_id
      LIMIT p_limit;

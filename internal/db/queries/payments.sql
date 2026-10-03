@@ -282,6 +282,13 @@ LEFT JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
   AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
   AND sub.deleted_at IS NULL AND sub.rail::text = p.rail::text
 LEFT JOIN openrails.payment_methods pm ON pm.id = sub.payment_method_id
+-- A lateral probe, not EXISTS under OR, which plans as a hash of every merchant's cards.
+LEFT JOIN LATERAL (
+  SELECT cpm.id FROM openrails.payment_methods cpm
+  WHERE p.subscription_id IS NULL
+    AND cpm.merchant_id = p.merchant_id AND cpm.customer_id = p.customer_id AND cpm.psp_id = p.psp_id
+    AND RIGHT(regexp_replace(COALESCE(cpm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
+  LIMIT 1) customer_card ON true
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid
   AND (p.subscription_id IS NULL OR sub.id IS NOT NULL)
   AND p.refunded_payment_id IS NULL
@@ -291,10 +298,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id
   AND p.amount = sqlc.arg(amount_cents)::bigint * 10000
   AND (RIGHT(regexp_replace(COALESCE(pm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
     OR RIGHT(regexp_replace(COALESCE(p.card_last4, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text
-    OR (p.subscription_id IS NULL AND EXISTS (
-      SELECT 1 FROM openrails.payment_methods cpm
-      WHERE cpm.merchant_id = p.merchant_id AND cpm.customer_id = p.customer_id AND cpm.psp_id = p.psp_id
-        AND RIGHT(regexp_replace(COALESCE(cpm.last_four, ''), '[^0-9]', '', 'g'), 4) = sqlc.arg(last4)::text)))
+    OR customer_card.id IS NOT NULL)
   AND p.purchased_at >= sqlc.arg(from_at)::timestamptz
   AND p.purchased_at <= sqlc.arg(to_at)::timestamptz
 ORDER BY ABS(EXTRACT(EPOCH FROM (p.purchased_at - sqlc.arg(target_at)::timestamptz))) ASC,

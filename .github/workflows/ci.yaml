@@ -88,6 +88,7 @@ jobs:
         run: docker run -d --name e2e-redis -p 6379:6379 redis:7-alpine
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
@@ -99,8 +100,30 @@ jobs:
         run: |
           sqlc_bin="$(scripts/ci-install-tool.sh sqlc)"
           export SQLC_DATABASE_URL="$(scripts/sqlc-vet-db.sh)"
+          echo "SQLC_DATABASE_URL=$SQLC_DATABASE_URL" >> "$GITHUB_ENV"
           "$sqlc_bin" generate
           git diff --exit-code -- internal/db/gen
+      # setup-go's cache is keyed on go.sum alone and never re-saved, so it
+      # would recompile pg_query_go's C parser on every run.
+      - name: Restore query audit build cache
+        id: sqlaudit-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sqlaudit-gocache
+          key: sqlaudit-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'internal/db/sqlaudit/*.go') }}
+          restore-keys: |
+            sqlaudit-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      - name: Query audit (EXPLAIN every sqlc query)
+        env:
+          CGO_ENABLED: "1"
+          GOCACHE: ${{ runner.temp }}/sqlaudit-gocache
+        run: bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
+      - name: Save query audit build cache
+        if: ${{ !cancelled() && steps.sqlaudit-cache.outcome == 'success' && steps.sqlaudit-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sqlaudit-gocache
+          key: ${{ steps.sqlaudit-cache.outputs.cache-primary-key }}
       - name: Run focused e2e contracts
         run: bash scripts/e2e.sh
 
