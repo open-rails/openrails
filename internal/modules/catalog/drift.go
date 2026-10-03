@@ -251,7 +251,7 @@ func BuildDriftSnapshot(products []*models.Product, prices []*models.Price, pspI
 		if pspID != uuid.Nil {
 			account = pr.ForPSP(pspID)
 		}
-		if stripe := account.PSPLinkForRail(models.RailStripe); stripe != nil {
+		for _, stripe := range account.PSPLinksForRail(models.RailStripe) {
 			if id := strings.TrimSpace(stripe[models.RailKeyStripePriceID]); id != "" {
 				snap.StripePriceIDs[id] = pr.ID.String()
 			}
@@ -349,7 +349,7 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 		} else if local.Amount != remoteNative {
 			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteNative, 10))
 		}
-		if !strings.EqualFold(strings.TrimSpace(local.Currency), strings.TrimSpace(sp.Currency)) {
+		if err == nil && !strings.EqualFold(strings.TrimSpace(local.Currency), strings.TrimSpace(sp.Currency)) {
 			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "currency", local.Currency, sp.Currency)
 		}
 		if active := local.IsPurchasable(); active != sp.Active {

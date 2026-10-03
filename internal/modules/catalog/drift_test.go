@@ -120,6 +120,13 @@ func TestComputeStripeDrift(t *testing.T) {
 	jpySnap := BuildDriftSnapshot([]*models.Product{product}, []*models.Price{jpy}, psp)
 	require.Empty(t, ComputeStripeDrift([]StripeProduct{syncedProduct},
 		[]StripePrice{{ID: "price_jpy", UnitAmount: 123, Currency: "JPY", Active: true, Metadata: meta(StripeMetadataOpenRailsPriceKey, "prod-key.jpy.1230000.onetime")}}, jpySnap, now))
+
+	unknownCurrency := syncedPrice
+	unknownCurrency.Currency = "XXQ"
+	events := ComputeStripeDrift([]StripeProduct{syncedProduct}, []StripePrice{unknownCurrency}, snap, now)
+	require.Len(t, events, 1)
+	require.Equal(t, models.CatalogDriftFieldDrift, events[0].Kind)
+	require.Equal(t, []string{"currency", "usd", "XXQ"}, []string{events[0].Field, events[0].OpenRailsValue, events[0].ExternalValue})
 }
 
 func TestComputeNMIDrift(t *testing.T) {
@@ -155,6 +162,47 @@ func TestDriftSnapshotIsScopedToTheReadAccount(t *testing.T) {
 	require.Len(t, events, 1)
 	require.Equal(t, prices[1].ID.String(), events[0].OpenRailsResourceID)
 	require.Len(t, BuildDriftSnapshot(nil, prices, uuid.Nil).NMIPlanByPriceID, 2)
+}
+
+func TestStripeCatalogIndexesRetainEveryAccount(t *testing.T) {
+	a, b := uuid.New(), uuid.New()
+	product := &models.Product{ID: uuid.New(), Key: "premium"}
+	price := stripePrice(product.ID, a, 9_990_000, "USD", "price_a", "prod_a")
+	price.PSPLinks["secondary"] = map[string]string{
+		models.RailKeyRail: "stripe", models.RailKeyPSPID: b.String(),
+		models.RailKeyStripePriceID: "price_b", models.RailKeyStripeProductID: "prod_b",
+	}
+	for _, tc := range []struct {
+		name string
+		psp  uuid.UUID
+		ids  []string
+	}{
+		{"all accounts", uuid.Nil, []string{"a", "b"}},
+		{"first account", a, []string{"a"}},
+		{"second account", b, []string{"b"}},
+		{"unlinked account", uuid.New(), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := BuildDriftSnapshot([]*models.Product{product}, []*models.Price{price}, tc.psp)
+			view := price
+			if tc.psp != uuid.Nil {
+				view = price.ForPSP(tc.psp)
+			}
+			ix := BuildExtrasIndex([]*models.Product{product}, []*models.Price{view})
+			require.Len(t, snap.StripeProductIDs, len(tc.ids))
+			require.Len(t, snap.StripePriceIDs, len(tc.ids))
+			require.Len(t, ix.StripeProductIDs, len(tc.ids))
+			require.Len(t, ix.StripePriceIDs, len(tc.ids))
+			for _, id := range tc.ids {
+				require.Equal(t, product.ID.String(), snap.StripeProductIDs["prod_"+id])
+				require.Equal(t, price.ID.String(), snap.StripePriceIDs["price_"+id])
+				extra, _ := ix.StripeProductExtra(StripeProduct{ID: "prod_" + id})
+				require.False(t, extra)
+				extra, _ = ix.StripePriceExtra(StripePrice{ID: "price_" + id})
+				require.False(t, extra)
+			}
+		})
+	}
 }
 
 func TestExtrasIndexAndContentKeys(t *testing.T) {

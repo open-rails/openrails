@@ -35,8 +35,9 @@ func TestCatalogExtrasClassifyOwnership(t *testing.T) {
 	snap := catalog.BuildDriftSnapshot([]*models.Product{{ID: productID, Key: "premium"}}, []*models.Price{{
 		ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(30 * 24), AutoRenew: true,
 		PSPLinks: map[string]map[string]string{
-			"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_local", models.RailKeyStripeProductID: "prod_local"},
-			"mobius": {models.RailKeyRail: string(models.RailNMI), models.RailKeyPlanID: "premium-usd-23000000-30"},
+			"stripe":           {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_local", models.RailKeyStripeProductID: "prod_local"},
+			"stripe_secondary": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_local_2", models.RailKeyStripeProductID: "prod_local_2"},
+			"mobius":           {models.RailKeyRail: string(models.RailNMI), models.RailKeyPlanID: "premium-usd-23000000-30"},
 		},
 	}}, uuid.Nil)
 
@@ -44,12 +45,14 @@ func TestCatalogExtrasClassifyOwnership(t *testing.T) {
 		[]catalog.StripeProduct{
 			{ID: "prod_matched", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsProductKey: "premium"}},
 			{ID: "prod_local", Active: true},
+			{ID: "prod_local_2", Active: true},
 			{ID: "prod_ours_extra", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsProductKey: "retired"}},
 			{ID: "prod_foreign", Active: true},
 		},
 		[]catalog.StripePrice{
 			{ID: "price_matched", Active: true, LookupKey: "openrails.premium.usd.23000000.30"},
 			{ID: "price_local", Active: true},
+			{ID: "price_local_2", Active: true},
 			{ID: "price_ours_extra", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsPriceKey: "retired.usd.9000000.30"}},
 			{ID: "price_ours_inactive", LookupKey: "openrails.retired.usd.5000000.30"},
 			{ID: "price_foreign", Active: true, Nickname: "merchant price"},
