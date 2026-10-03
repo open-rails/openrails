@@ -15,8 +15,8 @@ func postureConfig(sandbox bool) *Config {
 	return &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: posture}
 }
 
-func stripeRail(key string) *PSPConfig {
-	return &PSPConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: key, WebhookSigningSecret: "whsec_fixture"}}
+func stripeRail(key string) *ResolvedPSP {
+	return &ResolvedPSP{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: key, WebhookSigningSecret: "whsec_fixture"}}
 }
 
 // A key never runs under the opposite posture, archived accounts included, and
@@ -51,18 +51,18 @@ func TestStripeCredentialsMatchDeclaredPosture(t *testing.T) {
 }
 
 func TestRailSetShapeValidation(t *testing.T) {
-	nmi := func(secret string) *PSPConfig {
-		return &PSPConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec", WebhookSigningSecret: secret}}
+	nmi := func(secret string) *ResolvedPSP {
+		return &ResolvedPSP{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec", WebhookSigningSecret: secret}}
 	}
-	ccbill := func(accountID string) *PSPConfig {
-		return &PSPConfig{Rail: models.RailCCBill, AccountID: accountID, CCBill: &CCBillRailConfig{Salt: "s"}}
+	ccbill := func(accountID string) *ResolvedPSP {
+		return &ResolvedPSP{Rail: models.RailCCBill, AccountID: accountID, CCBill: &CCBillRailConfig{Salt: "s"}}
 	}
-	solana := func(provider, key string) *PSPConfig {
-		return &PSPConfig{Rail: models.RailSolana, Solana: &SolanaRailConfig{RPCProvider: provider, RPCAPIKey: key}}
+	solana := func(provider, key string) *ResolvedPSP {
+		return &ResolvedPSP{Rail: models.RailSolana, Solana: &SolanaRailConfig{RPCProvider: provider, RPCAPIKey: key}}
 	}
-	withAccount := func(p *PSPConfig, id string) *PSPConfig { p.AccountID = id; return p }
-	custody := func(rail *PSPConfig, c CustodianConfig) *PSPConfig { rail.Custody = &c; return rail }
-	bt := CustodianConfig{Custodian: models.CustodianBasisTheory, AccountID: "tnt_1", APIKey: "key"}
+	withAccount := func(p *ResolvedPSP, id string) *ResolvedPSP { p.AccountID = id; return p }
+	custody := func(rail *ResolvedPSP, c ResolvedCustodian) *ResolvedPSP { rail.Custody = &c; return rail }
+	bt := ResolvedCustodian{Custodian: models.CustodianBasisTheory, AccountID: "tnt_1", APIKey: "key"}
 
 	for name, row := range map[string]struct {
 		rails PSPSet
@@ -77,7 +77,7 @@ func TestRailSetShapeValidation(t *testing.T) {
 		"nmi security key":            {PSPSet{"mobius": {Rail: models.RailNMI, NMI: &NMIRailConfig{WebhookSigningSecret: "w"}}}, "security_key is required"},
 		"two stripe without ids":      {PSPSet{"a": stripeRail("sk_test_a"), "b": stripeRail("sk_test_b")}, "must declare account_id"},
 		"two stripe with ids":         {PSPSet{"a": withAccount(stripeRail("sk_test_a"), "acct_a"), "b": withAccount(stripeRail("sk_test_b"), "acct_b")}, ""},
-		"archived still needs id":     {PSPSet{"a": func() *PSPConfig { p := stripeRail("sk_test_a"); p.Archived = true; return p }(), "b": stripeRail("sk_test_b")}, "must declare account_id"},
+		"archived still needs id":     {PSPSet{"a": func() *ResolvedPSP { p := stripeRail("sk_test_a"); p.Archived = true; return p }(), "b": stripeRail("sk_test_b")}, "must declare account_id"},
 		"two solana need no id":       {PSPSet{"a": solana("helius", "k"), "b": solana("public", "")}, ""},
 		"ccbill dash identity":        {PSPSet{"ccbill": ccbill("945280-0000")}, ""},
 		"ccbill slash identity":       {PSPSet{"ccbill": ccbill("945280/0000")}, "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000"},
@@ -88,11 +88,11 @@ func TestRailSetShapeValidation(t *testing.T) {
 		"solana unknown provider":     {PSPSet{"solana": solana("quicknode", "k")}, "rpc_provider must be helius or public"},
 		"solana public with key":      {PSPSet{"solana": solana("public", "k")}, "rpc_provider public cannot use rpc_api_key"},
 		"custody on proxy rail":       {PSPSet{"mobius": custody(nmi("w"), bt)}, ""},
-		"custody psp is no custodian": {PSPSet{"stripe": custody(stripeRail("sk_test_x"), CustodianConfig{Custodian: models.CustodianPSP})}, ""},
+		"custody psp is no custodian": {PSPSet{"stripe": custody(stripeRail("sk_test_x"), ResolvedCustodian{Custodian: models.CustodianPSP})}, ""},
 		"custody on non-proxy rail":   {PSPSet{"stripe": custody(stripeRail("sk_test_x"), bt)}, "not supported on this rail"},
-		"custody without tenant":      {PSPSet{"mobius": custody(nmi("w"), CustodianConfig{Custodian: models.CustodianBasisTheory, APIKey: "k"})}, "requires account_id"},
-		"custody without api key":     {PSPSet{"mobius": custody(nmi("w"), CustodianConfig{Custodian: models.CustodianBasisTheory, AccountID: "t"})}, "requires the api_key secret"},
-		"custody unknown kind":        {PSPSet{"mobius": custody(nmi("w"), CustodianConfig{Custodian: "vaultco", AccountID: "t", APIKey: "k"})}, "vaultco"},
+		"custody without tenant":      {PSPSet{"mobius": custody(nmi("w"), ResolvedCustodian{Custodian: models.CustodianBasisTheory, APIKey: "k"})}, "requires account_id"},
+		"custody without api key":     {PSPSet{"mobius": custody(nmi("w"), ResolvedCustodian{Custodian: models.CustodianBasisTheory, AccountID: "t"})}, "requires the api_key secret"},
+		"custody unknown kind":        {PSPSet{"mobius": custody(nmi("w"), ResolvedCustodian{Custodian: "vaultco", AccountID: "t", APIKey: "k"})}, "vaultco"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := ValidateRailSet(postureConfig(true), row.rails)

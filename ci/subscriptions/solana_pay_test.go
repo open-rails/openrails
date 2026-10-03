@@ -24,9 +24,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -60,11 +61,11 @@ func newSolanaPay(t *testing.T) *solanaPay {
 	w := prepareWorld(t, 30)
 	fake, _ := withSolana(t, w)
 	declared := w.declare
-	w.declare = func(psps map[string]embed.PSPConfig) {
+	w.declare = func(psps map[string]openrails.PSPConfig) {
 		declared(psps)
 		psps["solana"]["solana"].Settings["tokens"].(map[string]any)["PYUSD"] = map[string]any{} // Token-2022
 	}
-	w.mount = func(c *embed.HTTPConfig) { c.Checkout = true }
+	w.mount = func(c *openrails.HTTPConfig) { c.Checkout = true }
 	w.start()
 	p := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 	p.runWorkers(w)
@@ -83,12 +84,12 @@ func newSolanaPay(t *testing.T) *solanaPay {
 }
 
 // runWorkers runs a runtime's non-River loops (the Solana Pay poller), as a
-// host does with Runtime.RunWorkers.
+// Client.Start runs them for a host; the test stops them on its own.
 func (p *solanaPay) runWorkers(w *world) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(w.t.Context()))
 	done := make(chan struct{})
 	rt := w.rt
-	go func() { defer close(done); _ = rt.RunWorkers(ctx) }()
+	go func() { defer close(done); _ = engine.Graph(rt).Runtime.RunWorkers(ctx) }()
 	stop := func() { cancel(); <-done }
 	p.stopWorkers[w] = stop
 	w.t.Cleanup(stop)
@@ -367,7 +368,7 @@ func TestSolanaPayGCRemovesOnlySettledRows(t *testing.T) {
 	p.w.clock.Advance(8 * 24 * time.Hour)
 	fresh := p.checkout(p.w.newCustomer())
 
-	res, err := p.w.jobs.Insert(t.Context(), solanaPayGC{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := p.w.jobs.Insert(t.Context(), solanaPayGC{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	p.w.waitJob(res.Job.ID)
 
@@ -644,7 +645,7 @@ func TestSolanaPayGCKeepsAnUnfinishedWalk(t *testing.T) {
 	_, err := p.w.pool.Exec(t.Context(), p.sql(`UPDATE $schema.solana_pay_references SET scan_stack = ARRAY['', $2] WHERE reference = $1`), req.reference, p.pay(req, 1))
 	require.NoError(t, err)
 	p.w.clock.Advance(8 * 24 * time.Hour)
-	res, err := p.w.jobs.Insert(t.Context(), solanaPayGC{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := p.w.jobs.Insert(t.Context(), solanaPayGC{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	p.w.waitJob(res.Job.ID)
 	require.Equal(t, "confirmed", p.referenceStatus(req), "mid-walk, the reference stays")
@@ -767,7 +768,7 @@ func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 
 	var mid uuid.UUID
 	require.NoError(t, p.w.pool.QueryRow(t.Context(), p.sql(`SELECT id FROM $schema.merchants WHERE slug = $1`), p.w.slug).Scan(&mid))
-	require.NoError(t, embedoperator.New(p.w.rt).ResolveSolanaPayReview(t.Context(), merchant.ID(mid), second, "refunded in tx RefundSig"))
+	require.NoError(t, hosttools.ResolveSolanaPayReview(t.Context(), engine.Graph(p.w.rt), merchant.ID(mid), second, "refunded in tx RefundSig"))
 	require.NotEqual(t, "solana_pay_receipts", refusedBy(), "a resolved review no longer holds the archive")
 }
 

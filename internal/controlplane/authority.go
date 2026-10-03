@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	helpersauth "github.com/open-rails/helpers/auth"
 
-	"github.com/open-rails/openrails/internal/auth/policy"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -61,11 +61,11 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Re
 		return merchant.ID{}, "", err
 	}
 	if !allowed {
-		return merchant.ID{}, "", policy.ErrPermissionRequired
+		return merchant.ID{}, "", billing.ErrPermissionRequired
 	}
 	mid, slug, err := c.merchantForGroupID(ctx, groupID)
 	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
-		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+		return merchant.ID{}, "", billing.ErrMerchantUnresolved
 	}
 	return mid, slug, err
 }
@@ -116,13 +116,13 @@ func (c *ControlPlane) merchantGroupByName(ctx context.Context, name string) (st
 	}
 	m, err := directory.GetBySlug(ctx, name)
 	if errors.Is(err, merchants.ErrMerchantNotFound) {
-		return "", policy.ErrMerchantUnresolved
+		return "", billing.ErrMerchantUnresolved
 	}
 	if err != nil {
 		return "", err
 	}
 	if m.PermissionGroupID == "" || m.Status != merchants.StatusActive {
-		return "", policy.ErrMerchantUnresolved
+		return "", billing.ErrMerchantUnresolved
 	}
 	return m.PermissionGroupID, nil
 }
@@ -144,7 +144,7 @@ func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) 
 		groupID = m.Group.ID
 	}
 	if groupID == "" {
-		return "", policy.ErrMerchantUnresolved
+		return "", billing.ErrMerchantUnresolved
 	}
 	return groupID, nil
 }
@@ -186,11 +186,11 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 	}
 	ref := strings.ToLower(strings.TrimSpace(merchantRef))
 	if ref == "" {
-		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+		return merchant.ID{}, "", billing.ErrMerchantUnresolved
 	}
 	mid, mslug, err := c.MerchantScope(ctx, ref)
 	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
-		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+		return merchant.ID{}, "", billing.ErrMerchantUnresolved
 	}
 	if err != nil {
 		return merchant.ID{}, "", err

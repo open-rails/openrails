@@ -12,6 +12,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -58,7 +59,10 @@ func TestAttachRefusesBeforeBuildingResources(t *testing.T) {
 func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 	ctx, a, id := context.Background(), &app.App{Runtime: &app.Runtime{}}, merchant.ID(uuid.New())
 	calls := map[string]func() error{
-		"ProvisionMerchant": func() error { _, err := ProvisionMerchant(ctx, a, ProvisionMerchantRequest{Slug: "shop"}); return err },
+		"ProvisionMerchant": func() error {
+			_, err := ProvisionMerchant(ctx, a, billing.ProvisionMerchantRequest{Slug: "shop"})
+			return err
+		},
 		"ProvisionMerchantForRestore": func() error {
 			_, err := ProvisionMerchantForRestore(ctx, a, ProvisionMerchantForRestoreRequest{MerchantID: id})
 			return err
@@ -112,23 +116,23 @@ func TestOperatorWireShapes(t *testing.T) {
 	week := time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC)
 	id, err := merchant.ParseID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	require.NoError(t, err)
-	roundTrip(t, FleetSnapshot{
+	roundTrip(t, billing.FleetSnapshot{
 		WindowDays: 30,
-		Merchants:  FleetMerchantFunnel{Total: 4, Armed: 3, FirstRevenue: 2, ActiveRevenue: 1},
-		Revenue:    []FleetCurrencyRevenue{{Currency: "USD", Payments: 41, SettledAmount: 9007199254740993}},
-		Rails:      []FleetRailHealth{{Rail: "nmi", Succeeded: 40, Failed: 1}},
-		MRR:        []FleetMRR{{Currency: "JPY", Subscriptions: 3, MonthlyAmount: 297000}},
+		Merchants:  billing.FleetMerchantFunnel{Total: 4, Armed: 3, FirstRevenue: 2, ActiveRevenue: 1},
+		Revenue:    []billing.FleetCurrencyRevenue{{Currency: "USD", Payments: 41, SettledAmount: 9007199254740993}},
+		Rails:      []billing.FleetRailHealth{{Rail: "nmi", Succeeded: 40, Failed: 1}},
+		MRR:        []billing.FleetMRR{{Currency: "JPY", Subscriptions: 3, MonthlyAmount: 297000}},
 	}, `{"window_days":30,"merchants":{"total":4,"armed":3,"first_revenue":2,"active_revenue":1},
 		"revenue":[{"currency":"USD","payments":41,"settled_amount":"9007199254740993"}],
 		"rails":[{"rail":"nmi","succeeded":40,"failed":1,"chargebacks":0}],
 		"mrr":[{"currency":"JPY","subscriptions":3,"monthly_amount":"297000"}]}`)
-	roundTrip(t, FleetSeries{
+	roundTrip(t, billing.FleetSeries{
 		Weeks:  12,
-		Points: []FleetWeeklyPoint{{WeekStart: week, NewMerchants: 2, ActiveMerchants: 5, CancelledSubscriptions: 1}},
-		Volume: []FleetWeeklyVolume{{WeekStart: week, Currency: "USD", Payments: 7, SettledAmount: 495000000}},
+		Points: []billing.FleetWeeklyPoint{{WeekStart: week, NewMerchants: 2, ActiveMerchants: 5, CancelledSubscriptions: 1}},
+		Volume: []billing.FleetWeeklyVolume{{WeekStart: week, Currency: "USD", Payments: 7, SettledAmount: 495000000}},
 	}, `{"weeks":12,"points":[{"week_start":"2026-09-14T00:00:00Z","new_merchants":2,"active_merchants":5,"cancelled_subscriptions":1}],
 		"volume":[{"week_start":"2026-09-14T00:00:00Z","currency":"USD","payments":7,"settled_amount":"495000000"}]}`)
-	roundTrip(t, MerchantRef{ID: id, Slug: "shop"}, `{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","slug":"shop"}`)
+	roundTrip(t, billing.MerchantRef{ID: id, Slug: "shop"}, `{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","slug":"shop"}`)
 }
 
 func roundTrip[T any](t *testing.T, value T, want string) {

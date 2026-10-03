@@ -94,6 +94,11 @@ func envKeyToConfigKey(s string) string {
 	if s == "vault_addr" {
 		return "vault.address"
 	}
+	// The schema is a top-level setting; DB_SCHEMA keeps the env name beside
+	// the other database settings.
+	if s == "db_schema" {
+		return "schema"
+	}
 
 	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
 	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
@@ -179,7 +184,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 
 	// Defaults contain no environment-dependent security exceptions.
-	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &AuthConfig{}}
+	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &billing.AuthConfig{}}
 
 	// A .env in the working directory is a real config source, so consuming
 	// one is LOGGED (or#915): a deployment silently absorbing a stray .env is
@@ -309,10 +314,10 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		}); err != nil {
 			return nil, fmt.Errorf("unmarshaling database config: %w", err)
 		}
-		databaseConfig := &Config{Config: &billing.Config{DB: dbConfig}}
+		databaseConfig := &Config{Config: &billing.Config{DB: dbConfig, Schema: k.String("schema")}}
 		databaseConfig.DB.URL = databaseConfig.DB.GetConnectionString()
-		databaseConfig.DB.Schema = databaseConfig.DB.SchemaName()
-		if err := billing.ValidateDatabase(databaseConfig.DB); err != nil {
+		databaseConfig.Schema = databaseConfig.SchemaName()
+		if err := billing.ValidateDatabase(databaseConfig.Config); err != nil {
 			return nil, err
 		}
 		return databaseConfig, nil
@@ -452,9 +457,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
 	// stored config value matches what SchemaName() resolves to. Validation of the
 	// identifier happens in Validate(). Defaults to `billing` (config.DefaultSchema).
-	if cfg.DB != nil {
-		cfg.DB.Schema = cfg.DB.SchemaName()
-	}
+	cfg.Schema = cfg.SchemaName()
 
 	// Validate the loaded configuration
 	if err := Validate(cfg); err != nil {

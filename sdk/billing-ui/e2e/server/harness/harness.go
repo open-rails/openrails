@@ -13,11 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	authhelpers "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
-	openrailsembed "github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/billingauth"
-	openrailsconfig "github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -44,7 +43,6 @@ const (
 
 type Runtime struct {
 	Auth    *authkit.Client
-	Billing *openrailsembed.Runtime
 	Client  *openrails.Client
 	Catalog Catalog
 	// Solana is the loopback chain the armed Solana PSP reads.
@@ -67,7 +65,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("authkit migrations: %w", err)
 	}
-	if err := openrailsembed.ApplyMigrations(ctx, pool, openrailsembed.MigrationOptions{Schema: BillingSchema}); err != nil {
+	if err := openrails.Migrate(ctx, pool, openrails.Config{Schema: BillingSchema}); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("openrails migrations: %w", err)
 	}
@@ -95,22 +93,20 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			auth.Close()
 		}
 	}()
-	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: auth, Customer: billingauth.SubjectCustomerID})
-	if err != nil {
-		return nil, err
-	}
-	billing, err := openrailsembed.New(ctx, openrailsembed.Options{
-		Auth: identity,
-		HTTP: &openrailsembed.HTTPConfig{CustomerRoutes: []openrailsembed.CustomerRoutesConfig{
-			{Merchant: MerchantSlug, Scope: openrailsembed.CustomerSelfService},
-			{Merchant: MerchantSlug, Scope: openrailsembed.CustomerBillingManagement, Prefix: ManagePrefix},
-		}},
-		Merchant: &openrailsembed.MerchantDeclaration{
-			Slug: MerchantSlug,
-			Config: openrailsembed.MerchantConfig{DisplayName: "billing-ui e2e", CheckoutRouting: checkoutRouting, PSPs: map[string]openrailsembed.PSPConfig{
+	cfg := openrails.Config{
+		Schema:               BillingSchema,
+		TestMode:             openrails.Sandbox,
+		ProviderWriteMode:    openrails.ProviderWritesFull,
+		AllowCatalogUpdates:  true,
+		PublicBillingBaseURL: baseURL + "/billing",
+		ReturnOrigins:        []string{baseURL},
+		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
+		Merchant: openrails.MerchantDeclaration{
+			Slug: MerchantSlug, DisplayName: "billing-ui e2e", CheckoutRouting: checkoutRouting,
+			PSPs: map[string]openrails.PSPConfig{
 				// An armed Solana PSP on devnet: checkout offers it (#1078).
 				SolanaPSPKey: {"solana": {
-					Signer:   &openrailsembed.PSPSignerConfig{Mode: "local_keypair"},
+					Signer:   &openrails.PSPSignerConfig{Mode: "local_keypair"},
 					Secrets:  map[string]string{"private_key": signer.String()},
 					Settings: map[string]any{"rpc_provider": "public", "tokens": map[string]any{"SOL": map[string]any{}, "DUSD": map[string]any{}}},
 				}},
@@ -119,32 +115,29 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 					Secrets:   map[string]string{"security_key": "e2e-security-key", "webhook_signing_secret": "e2e-webhook-secret"},
 					Settings:  map[string]any{"tokenization_key": CardTokenizationKey},
 				}},
-			}},
-			PSPs: []openrailsembed.PSPDeclaration{{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}},
+			},
 		},
-		Config: &openrailsconfig.Config{
-			TestMode:             openrailsconfig.CredentialPostureSandbox,
-			ProviderWriteMode:    openrailsconfig.ProviderWriteModeFull,
-			AllowCatalogUpdates:  true,
-			DB:                   &openrailsconfig.DBConfig{URL: dsn, Schema: BillingSchema},
-			PublicBillingBaseURL: baseURL + "/billing",
-			ReturnOrigins:        []string{baseURL},
-			ProviderSandbox:      &openrailsconfig.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
-		},
-		PGXPool:    pool,
-		RunWorkers: workers,
-	})
+		HTTP: &openrails.HTTPConfig{CustomerRoutes: []openrails.CustomerRoutesConfig{
+			{Scope: openrails.CustomerSelfService},
+			{Scope: openrails.CustomerBillingManagement, Prefix: ManagePrefix},
+		}},
+	}
+	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, Authenticate: authenticate(auth), RecentSignIn: recentSignIn(auth)})
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}
 	defer func() {
 		if err != nil {
-			_ = billing.Close(context.Background())
+			_ = client.Close(context.Background())
 		}
 	}()
-	client, err := billing.Client()
-	if err != nil {
+	if _, err := client.DeclarePSP(ctx, client.MerchantID(), billing.PSPDeclaration{Key: PSPKey, Rail: PSPRail, AccountID: PSPAccountID}); err != nil {
 		return nil, err
+	}
+	if workers {
+		if err := client.Start(ctx); err != nil {
+			return nil, err
+		}
 	}
 	catalog, err := seedCatalog(ctx, client, chain, signer.PublicKey())
 	if err != nil {
@@ -153,7 +146,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err := armDestructive(ctx, pool); err != nil {
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}
-	return &Runtime{Auth: auth, Billing: billing, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
+	return &Runtime{Auth: auth, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
 }
 
 // authConfig is AuthKit's configuration: its JSON API at /auth/v1 beside
@@ -172,14 +165,42 @@ func authConfig(issuer string) authkit.Config {
 
 // checkoutRouting sells the card product through the card PSP and everything
 // else through Solana; the declared-only NMI account never sells.
-var checkoutRouting = []openrailsembed.CheckoutRoutingRuleConfig{
-	{Match: openrailsembed.CheckoutRoutingMatchConfig{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
+var checkoutRouting = []openrails.CheckoutRoutingRuleConfig{
+	{Match: openrails.CheckoutRoutingMatchConfig{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
 	{Prefer: []string{SolanaPSPKey}},
 }
 
 // BillingRoutes returns the embedded billing routes, relative to /billing.
-func (r *Runtime) BillingRoutes() ([]openrailsembed.HTTPRoute, error) {
-	return r.Billing.HTTPRoutes()
+func (r *Runtime) BillingRoutes() ([]openrails.Route, error) {
+	return r.Client.Routes()
+}
+
+// authenticate maps an AuthKit user session to the paying customer: each user
+// pays for themselves.
+func authenticate(auth *authkit.Client) func(*http.Request) (openrails.Identity, error) {
+	return func(r *http.Request) (openrails.Identity, error) {
+		claims, err := auth.VerifyRequest(r)
+		if err != nil || claims.UserID == "" {
+			return openrails.Identity{}, openrails.ErrUnauthenticated
+		}
+		return openrails.Identity{Kind: openrails.User, Issuer: claims.Issuer, SubjectID: claims.UserID, CustomerID: claims.UserID}, nil
+	}
+}
+
+// recentSignIn asks AuthKit whether the user signed in recently enough to
+// move money.
+func recentSignIn(auth *authkit.Client) func(*http.Request) error {
+	return func(r *http.Request) error {
+		principal, err := auth.AuthenticateRequest(r.Context(), r)
+		if err != nil {
+			return err
+		}
+		checker, ok := principal.(authhelpers.RecentSignInChecker)
+		if !ok {
+			return errors.New("harness: AuthKit principal cannot report its sign-in time")
+		}
+		return checker.CheckRecentSignIn(r.Context())
+	}
 }
 
 // Mount registers AuthKit at /auth/v1 and OpenRails at /billing on mux.
@@ -187,15 +208,11 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 	if err := r.Auth.Mount(mux); err != nil {
 		return err
 	}
-	billing, err := openrailshttp.Routes(r.Billing)
-	if err != nil {
-		return err
-	}
-	return billing.Mount(mux, "/billing")
+	return openrailshttp.Mount(mux, r.Client, "/billing")
 }
 
 func (r *Runtime) Close() {
-	_ = r.Billing.Close(context.Background())
+	_ = r.Client.Close(context.Background())
 	r.Auth.Close()
 	r.Solana.Close()
 	r.NMI.Close()

@@ -17,19 +17,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
-)
-
-// ErrEmailUnverified / ErrVaultedPaymentMethodRequired are the admission
-// refusals: an unverified account never claims a merchant name, and a user past
-// the free allowance needs a vaulted payment method on file.
-var (
-	ErrEmailUnverified              = controlplane.ErrMerchantCreationEmailUnverified
-	ErrVaultedPaymentMethodRequired = controlplane.ErrMerchantCreationPaymentMethodRequired
 )
 
 // MerchantCreationPolicy parameterizes MerchantCreationAdmission.
@@ -70,7 +62,7 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 			return fmt.Errorf("resolve creating user: %w", err)
 		}
 		if !u.EmailVerified {
-			return ErrEmailUnverified
+			return billing.ErrMerchantCreationEmailUnverified
 		}
 		ownedGroups, err := cp.OwnedMerchantGroups(ctx, ownerUserID)
 		if err != nil {
@@ -97,14 +89,14 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 			return nil
 		}
 		if policy.HasVaultedPaymentMethod == nil {
-			return fmt.Errorf("%w (allowance %d reached)", ErrVaultedPaymentMethodRequired, policy.FreeAllowance)
+			return fmt.Errorf("%w (allowance %d reached)", billing.ErrMerchantCreationPaymentMethodRequired, policy.FreeAllowance)
 		}
 		ok, err := policy.HasVaultedPaymentMethod(ctx, ownerUserID)
 		if err != nil {
 			return fmt.Errorf("vaulted payment method check: %w", err)
 		}
 		if !ok {
-			return fmt.Errorf("%w (allowance %d reached)", ErrVaultedPaymentMethodRequired, policy.FreeAllowance)
+			return fmt.Errorf("%w (allowance %d reached)", billing.ErrMerchantCreationPaymentMethodRequired, policy.FreeAllowance)
 		}
 		return nil
 	}, nil

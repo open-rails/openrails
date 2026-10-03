@@ -548,16 +548,13 @@ func (p *planner) targetPSPID() *uuid.UUID {
 
 func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if pool != nil {
-		schema := config.DefaultSchema
-		if cfg != nil && cfg.DB != nil {
-			schema = cfg.DB.SchemaName()
-		}
+		schema := cfg.SchemaName()
 		return db.NewWithPGXPool(pool, schema)
 	}
 	if cfg == nil || cfg.DB == nil {
 		return nil, errors.New("custody migration: config database is required")
 	}
-	database, err := db.NewDB(ctx, cfg.DB)
+	database, err := db.NewDB(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("custody migration: open postgres: %w", err)
 	}

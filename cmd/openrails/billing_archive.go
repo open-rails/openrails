@@ -19,12 +19,11 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/operator"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -216,27 +215,6 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	return client, close, nil
 }
 
-func openBillingTargetRuntime(ctx context.Context, cfg *config.Config) (*embed.Runtime, func(), error) {
-	database, err := openCLIDB(ctx, cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Hosted identity preparation needs the control plane to verify live group ownership.
-	opts := embed.Options{}
-	opts.Config = cfg
-	opts.PGXPool = database.Pool()
-	opts.River = embed.RiverManagedByOpenRails()
-	rt, err := embed.New(ctx, opts)
-	if err != nil {
-		_ = database.Close()
-		return nil, nil, err
-	}
-	return rt, func() {
-		_ = rt.Close(context.WithoutCancel(ctx))
-		_ = database.Close()
-	}, nil
-}
-
 func readBillingArchiveToken(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -367,16 +345,19 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				rt, close, err := openBillingTargetRuntime(ctx, cfg)
+				// Hosted identity preparation verifies live group ownership
+				// through the control plane.
+				database, err := openCLIDB(ctx, cfg)
 				if err != nil {
 					return err
 				}
-				defer close()
-				cp, err := embedcontrolplane.Attach(ctx, rt, embedcontrolplane.Options{})
+				defer database.Close()
+				client, graph, err := openEngine(ctx, cfg, openrails.Deps{Postgres: database.Pool()}, true)
 				if err != nil {
 					return err
 				}
-				if _, err := cp.ProvisionMerchantForRestore(ctx, embedcontrolplane.ProvisionMerchantForRestoreRequest{
+				defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
+				if _, err := operator.ProvisionMerchantForRestore(ctx, graph, operator.ProvisionMerchantForRestoreRequest{
 					MerchantID: mid, Slug: strings.TrimSpace(slug), ExistingGroupID: strings.TrimSpace(groupID), OwnerUserID: strings.TrimSpace(ownerID),
 				}); err != nil {
 					return err

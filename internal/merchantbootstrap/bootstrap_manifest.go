@@ -76,7 +76,7 @@ var ValidInvoiceBoundaries = map[string]struct{}{
 	"calendar_month": {}, "anniversary": {}, "fixed_interval": {},
 }
 
-func ValidateManifestInvoice(slug string, inv *InvoiceConfig) error {
+func ValidateManifestInvoice(slug string, inv *config.InvoiceConfig) error {
 	if inv == nil {
 		return nil
 	}
@@ -100,7 +100,7 @@ func ValidateManifestInvoice(slug string, inv *InvoiceConfig) error {
 	return nil
 }
 
-func ValidateManifestWastedWindows(slug string, windows []BudgetWindowConfig) error {
+func ValidateManifestWastedWindows(slug string, windows []config.BudgetWindowConfig) error {
 	seen := map[string]struct{}{}
 	for i, w := range windows {
 		key := strings.TrimSpace(w.Key)
@@ -121,7 +121,7 @@ func ValidateManifestWastedWindows(slug string, windows []BudgetWindowConfig) er
 	return nil
 }
 
-func ValidateManifestPSP(slug string, key string, account PSPConfig) error {
+func ValidateManifestPSP(slug string, key string, account config.PSPConfig) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return fmt.Errorf("merchant %q accounts key is required", slug)
@@ -172,7 +172,7 @@ func ValidateManifestPSP(slug string, key string, account PSPConfig) error {
 	return nil
 }
 
-func SolanaSignerConfigured(cfg ProviderRailAccountConfig) bool {
+func SolanaSignerConfigured(cfg config.ProviderRailAccountConfig) bool {
 	if cfg.Signer != nil {
 		return true
 	}

@@ -69,7 +69,7 @@ func requireNativeTreasuryPermission(r *request.Request, authority NativeTreasur
 	}
 	err := authority.Authorize(r.Request.Context(), permission, authority.Target)
 	if err == nil && r.Request.Method != http.MethodGet && r.Request.Method != http.MethodHead {
-		err = billingauth.RequireRecentSignIn(r.Request.Context(), billingauth.Principal{Kind: billingauth.NativeUser}, authority.RecentSignIn)
+		err = billingauth.RequireRecentSignIn(r.Request.Context(), billingauth.Principal{Kind: billingauth.User}, authority.RecentSignIn)
 	}
 	if err != nil {
 		var gate billingauth.GateError

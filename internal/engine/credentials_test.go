@@ -1,4 +1,4 @@
-package embed
+package engine
 
 import (
 	"context"
@@ -31,7 +31,7 @@ func TestCredentialSnapshotStripePostureIsAtomic(t *testing.T) {
 				rt, store := snapshotRuntime(t, posture)
 				id := merchant.ID(uuid.New())
 				first := "sk" + prefix + "first"
-				err := loadProviderCredentialSnapshot(context.Background(), rt, []ProviderCredentialSnapshot{
+				err := loadProviderCredentialSnapshot(context.Background(), rt, []config.ProviderCredentialSnapshot{
 					{MerchantID: id, Rail: "stripe", AccountID: "acct_first", Credentials: map[string]string{"secret_key": first}},
 					{MerchantID: id, Rail: " STRIPE ", AccountID: "acct_second", Credentials: map[string]string{"secret_key": key}},
 				})
@@ -57,10 +57,10 @@ func TestCredentialSnapshotStripePostureIsAtomic(t *testing.T) {
 
 func TestCredentialSnapshotRefusals(t *testing.T) {
 	id := merchant.ID(uuid.New())
-	entry := func(mid merchant.ID, credentials map[string]string) ProviderCredentialSnapshot {
-		return ProviderCredentialSnapshot{MerchantID: mid, Rail: "nmi", AccountID: "100001", Credentials: credentials}
+	entry := func(mid merchant.ID, credentials map[string]string) config.ProviderCredentialSnapshot {
+		return config.ProviderCredentialSnapshot{MerchantID: mid, Rail: "nmi", AccountID: "100001", Credentials: credentials}
 	}
-	for name, values := range map[string][]ProviderCredentialSnapshot{
+	for name, values := range map[string][]config.ProviderCredentialSnapshot{
 		"zero merchant":  {entry(merchant.ID{}, map[string]string{"security_key": "k"})},
 		"no credentials": {entry(id, nil)},
 		"blank value":    {entry(id, map[string]string{"security_key": "  "})},
@@ -73,6 +73,6 @@ func TestCredentialSnapshotRefusals(t *testing.T) {
 	}
 	rt, _ := snapshotRuntime(t, config.CredentialPostureSandbox)
 	rt.Config.SecretBackend = config.SecretBackendDB
-	require.ErrorContains(t, loadProviderCredentialSnapshot(context.Background(), rt, []ProviderCredentialSnapshot{entry(id, map[string]string{"security_key": "k"})}), "snapshot credential custody")
+	require.ErrorContains(t, loadProviderCredentialSnapshot(context.Background(), rt, []config.ProviderCredentialSnapshot{entry(id, map[string]string{"security_key": "k"})}), "snapshot credential custody")
 	require.NoError(t, loadProviderCredentialSnapshot(context.Background(), rt, nil), "no snapshot needs no custody")
 }

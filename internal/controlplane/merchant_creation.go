@@ -2,13 +2,13 @@ package controlplane
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -29,18 +29,6 @@ type MerchantCreationConfig struct {
 	// nil = allow.
 	Admission func(ctx context.Context, instanceSlug, ownerUserID string) error
 }
-
-// ErrMerchantSlugReserved refuses a user-claimed name on the deployment's
-// reserved list or outside its creation pattern.
-var ErrMerchantSlugReserved = errors.New("controlplane: merchant slug is reserved")
-
-// ErrMerchantCreationRefused is the typed refusal from the deployment's
-// admission (cost) gate. The standard gate's reasons wrap it too.
-var (
-	ErrMerchantCreationRefused               = errors.New("controlplane: merchant creation refused")
-	ErrMerchantCreationEmailUnverified       = errors.New("merchant creation requires a verified email")
-	ErrMerchantCreationPaymentMethodRequired = errors.New("merchant creation beyond the free allowance requires a payment method on file")
-)
 
 // ReservedMerchantSlugs is the deployment's reserved namespace:
 // merchant.ReservedHostedSlugs plus MerchantCreationConfig.ReservedSlugs.
@@ -64,7 +52,7 @@ func (c *ControlPlane) authorizeNameClaim(ctx context.Context, name, userID stri
 	}
 	name = merchant.NormalizeSlug(name)
 	if c.merchantCreationPattern != nil && !c.merchantCreationPattern.MatchString(name) {
-		return fmt.Errorf("%w: slug %q does not match the deployment's creation pattern", ErrMerchantSlugReserved, name)
+		return fmt.Errorf("%w: slug %q does not match the deployment's creation pattern", billing.ErrMerchantSlugReserved, name)
 	}
 	if !slices.Contains(c.ReservedMerchantSlugs(), name) {
 		return nil
@@ -75,7 +63,7 @@ func (c *ControlPlane) authorizeNameClaim(ctx context.Context, name, userID stri
 			return err
 		}
 	}
-	return fmt.Errorf("%w: %q", ErrMerchantSlugReserved, name)
+	return fmt.Errorf("%w: %q", billing.ErrMerchantSlugReserved, name)
 }
 
 // holdsRootRole reports whether userID holds the root role named role, bare
@@ -102,7 +90,7 @@ func (c *ControlPlane) EnforceMerchantCreationPolicy(ctx context.Context, name, 
 	}
 	if admit := c.merchantCreation.Admission; admit != nil {
 		if err := admit(ctx, merchant.NormalizeSlug(name), ownerUserID); err != nil {
-			return fmt.Errorf("%w: %w", ErrMerchantCreationRefused, err)
+			return fmt.Errorf("%w: %w", billing.ErrMerchantCreationRefused, err)
 		}
 	}
 	return nil

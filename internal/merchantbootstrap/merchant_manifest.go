@@ -38,8 +38,8 @@ import (
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
 
 type BillingConfig struct {
-	Version   int                       `yaml:"version" koanf:"version"`
-	Merchants map[string]MerchantConfig `yaml:"merchants" koanf:"merchants"`
+	Version   int                                   `yaml:"version" koanf:"version"`
+	Merchants map[string]config.MerchantDeclaration `yaml:"merchants" koanf:"merchants"`
 }
 
 // LoadMerchantConfigManifest reads and validates a merchant config manifest.
@@ -241,7 +241,7 @@ func mergeMerchantConfigManifest(dst, src *BillingConfig) {
 		return
 	}
 	if dst.Merchants == nil {
-		dst.Merchants = map[string]MerchantConfig{}
+		dst.Merchants = map[string]config.MerchantDeclaration{}
 	}
 	for slug, srcMerchant := range src.Merchants {
 		dstMerchant := dst.Merchants[slug]
@@ -250,7 +250,7 @@ func mergeMerchantConfigManifest(dst, src *BillingConfig) {
 	}
 }
 
-func MergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
+func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDeclaration) {
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
 	}
@@ -260,7 +260,7 @@ func MergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	MergeMerchantProfileConfig(&dst.Profile, src.Profile)
 	if src.Invoice != nil {
 		if dst.Invoice == nil {
-			dst.Invoice = &InvoiceConfig{}
+			dst.Invoice = &config.InvoiceConfig{}
 		}
 		MergeInvoiceConfig(dst.Invoice, src.Invoice)
 	}
@@ -272,12 +272,12 @@ func MergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	}
 	if len(src.Custodians) > 0 {
 		if dst.Custodians == nil {
-			dst.Custodians = map[string]CustodianConfig{}
+			dst.Custodians = map[string]config.CustodianConfig{}
 		}
 		for key, srcKinds := range src.Custodians {
 			dstKinds := dst.Custodians[key]
 			if dstKinds == nil {
-				dstKinds = CustodianConfig{}
+				dstKinds = config.CustodianConfig{}
 			}
 			for kind, srcEntry := range srcKinds {
 				dstEntry := dstKinds[kind]
@@ -289,7 +289,7 @@ func MergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	}
 	if len(src.BillingPolicies) > 0 {
 		if dst.BillingPolicies == nil {
-			dst.BillingPolicies = map[string]BillingPolicyConfig{}
+			dst.BillingPolicies = map[string]config.BillingPolicyConfig{}
 		}
 		for name, policy := range src.BillingPolicies {
 			dst.BillingPolicies[name] = policy
@@ -300,12 +300,12 @@ func MergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	}
 	if len(src.PSPs) > 0 {
 		if dst.PSPs == nil {
-			dst.PSPs = map[string]PSPConfig{}
+			dst.PSPs = map[string]config.PSPConfig{}
 		}
 		for key, srcRails := range src.PSPs {
 			dstRails := dst.PSPs[key]
 			if dstRails == nil {
-				dstRails = PSPConfig{}
+				dstRails = config.PSPConfig{}
 			}
 			for rail, srcAccount := range srcRails {
 				dstAccount := dstRails[rail]
@@ -317,7 +317,7 @@ func MergeMerchantConfig(dst *MerchantConfig, src MerchantConfig) {
 	}
 }
 
-func MergeMerchantProfileConfig(dst *MerchantProfileConfig, src MerchantProfileConfig) {
+func MergeMerchantProfileConfig(dst *config.MerchantProfileConfig, src config.MerchantProfileConfig) {
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
 	}
@@ -335,7 +335,7 @@ func MergeMerchantProfileConfig(dst *MerchantProfileConfig, src MerchantProfileC
 	}
 }
 
-func MergeInvoiceConfig(dst, src *InvoiceConfig) {
+func MergeInvoiceConfig(dst, src *config.InvoiceConfig) {
 	if src.CollectionThreshold != nil {
 		dst.CollectionThreshold = src.CollectionThreshold
 	}
@@ -347,7 +347,7 @@ func MergeInvoiceConfig(dst, src *InvoiceConfig) {
 	}
 }
 
-func MergeCustodianAccountConfig(dst *CustodianAccountConfig, src CustodianAccountConfig) {
+func MergeCustodianAccountConfig(dst *config.CustodianAccountConfig, src config.CustodianAccountConfig) {
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
 	}
@@ -372,7 +372,7 @@ func MergeCustodianAccountConfig(dst *CustodianAccountConfig, src CustodianAccou
 	}
 }
 
-func MergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src ProviderRailAccountConfig) {
+func MergeProviderRailAccountConfig(dst *config.ProviderRailAccountConfig, src config.ProviderRailAccountConfig) {
 	if strings.TrimSpace(src.LegacyEnvironment) != "" {
 		dst.LegacyEnvironment = src.LegacyEnvironment
 	}
@@ -406,115 +406,8 @@ func MergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src Provider
 	}
 }
 
-type MerchantConfig struct {
-	DisplayName string `yaml:"display_name" koanf:"display_name"`
-	// APIHost is the merchant's canonical #734 API host (e.g. "api.myapp.example"):
-	// the Host-header value public routes resolve this merchant from (#850).
-	// Globally unique across active merchants. Omitted leaves the stored value
-	// untouched (it can also be assigned via PUT /v1/merchant/api-host).
-	APIHost string                `yaml:"api_host,omitempty" koanf:"api_host"`
-	Profile MerchantProfileConfig `yaml:"profile,omitempty" koanf:"profile"`
-	// Invoice is the merchant's billing/collection policy (#643/#646): when/how the
-	// accrued balance is invoiced. Omitted leaves all values at the service default;
-	// an omitted field within the block leaves that field as-is.
-	Invoice *InvoiceConfig `yaml:"invoice,omitempty" koanf:"invoice"`
-	// DelegatedInvokerWastedSpendWindows are merchant-wide abuse cutoffs for
-	// delegated invokers (#646): per-window spend ceilings on wasted (failed/abused)
-	// generation. Empty leaves the service-default windows (burst 15m/$5, sustained 5h/$20).
-	DelegatedInvokerWastedSpendWindows []BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
-	// PSPs is the operator-declared PSP catalog: the merchant's payment
-	// service providers, keyed by PSP key (e.g. mobius), one rail each.
-	// merchants.<slug>. nothing else it could mean). ONE word everywhere: the
-	// DB table (billing.psps) and the merchant-secret name prefix (`psps/…`)
-	// speak the same vocabulary as this key.
-	PSPs map[string]PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
-	// Custodians is the operator-declared CUSTODIAN catalog (or#880), keyed by
-	// custodian key, one kind each — the exact shape of `psps:` one axis over.
-	// A custodian holds the card; a PSP charges it. Declared ONCE here and
-	// referenced by every PSP whose gateway those cards are charged through,
-	// so a merchant running a live and a sandbox gateway against the same
-	// vault has one tenant id and one application key, not two copies that
-	// drift.
-	Custodians map[string]CustodianConfig `yaml:"custodians,omitempty" koanf:"custodians"`
-	// CheckoutRouting (or#288) is the merchant's processor preference policy:
-	// ordered rules, first match wins, each naming a ranked PSP list. Omitted
-	// leaves the stored policy untouched; declared REPLACES it whole (an
-	// ordered list has no meaningful per-element merge).
-	CheckoutRouting []CheckoutRoutingRuleConfig `yaml:"checkout_routing,omitempty" koanf:"checkout_routing"`
-	// BillingPolicies (or#897) are the merchant's named billing policies, keyed by
-	// name. Each declares WHICH quantity is capped; BillingPolicyBindings decides
-	// who gets which. Validated by the SAME normalizer the config API runs, so a
-	// manifest that boots cannot declare a policy the API would refuse.
-	BillingPolicies map[string]BillingPolicyConfig `yaml:"billing_policies,omitempty" koanf:"billing_policies"`
-	// BillingPolicyBindings (or#897) point DECLARATIVE rungs at policy names:
-	// `tier` for a trust tier, omitted for the merchant default. Per-customer
-	// binding is the mode-2 API's runtime lever, not manifest truth.
-	BillingPolicyBindings []BillingPolicyBindingConfig `yaml:"billing_policy_bindings,omitempty" koanf:"billing_policy_bindings"`
-}
-
-// BillingPolicyConfig is one manifest billing policy (or#897). Amounts are in
-// the currency's micros; window durations are Go durations ("720h").
-type BillingPolicyConfig struct {
-	// Kind: outstanding_cap | window_spend_cap | accrual_rate_cap.
-	Kind string `yaml:"kind" koanf:"kind"`
-	// OutstandingCap (micros, kind=outstanding_cap) is the credit line on unpaid
-	// arrears. Omitted defers to the payer's own arrears credit limit.
-	OutstandingCap int64 `yaml:"outstanding_cap,omitempty" koanf:"outstanding_cap"`
-	// SpendWindows (kind=window_spend_cap) are the rolling NEW-spend ceilings.
-	SpendWindows []BudgetWindowConfig `yaml:"spend_windows,omitempty" koanf:"spend_windows"`
-	// AccrualRateCapPerHour (micros per HOUR, kind=accrual_rate_cap) is the cloud
-	// quota. AccrualRateWindow is the measurement lookback as a Go duration
-	// ("1h"); omitted means one hour. It changes the smoothing, never the unit.
-	AccrualRateCapPerHour int64  `yaml:"accrual_rate_cap_per_hour,omitempty" koanf:"accrual_rate_cap_per_hour"`
-	AccrualRateWindow     string `yaml:"accrual_rate_window,omitempty" koanf:"accrual_rate_window"`
-	// BadSpendWindows are the #497 per-PAYER wasted-spend grace windows.
-	BadSpendWindows []BudgetWindowConfig `yaml:"bad_spend_windows,omitempty" koanf:"bad_spend_windows"`
-	// CollectionThreshold (micros) is when payers bound here are invoiced;
-	// DelinquencyGraceDays / DelinquencyAmountFloor are their delinquency policy.
-	// Each overrides the merchant-wide `invoice:` block for those payers only.
-	CollectionThreshold *int64 `yaml:"collection_threshold,omitempty" koanf:"collection_threshold"`
-	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
-	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
-	// stays merchant-wide. Declaring it here fails with that reason.
-	CollectionCycleBoundary string `yaml:"collection_cycle_boundary,omitempty" koanf:"collection_cycle_boundary"`
-	DelinquencyGraceDays    *int   `yaml:"delinquency_grace_days,omitempty" koanf:"delinquency_grace_days"`
-	DelinquencyAmountFloor  *int64 `yaml:"delinquency_amount_floor,omitempty" koanf:"delinquency_amount_floor"`
-	PolicyCurrency          string `yaml:"policy_currency,omitempty" koanf:"policy_currency"`
-}
-
-// BillingPolicyBindingConfig binds one DECLARATIVE rung to a policy name: a
-// trust tier, or the merchant default when `tier` is omitted.
-//
-// There is deliberately no per-customer rung here. Binding a policy to one
-// payer is the merchant's RUNTIME lever (mode-2 API), not declared truth: in
-// mode 1 the YAML is the whole configuration and changing it means a reboot,
-// which is the wrong shape for per-customer segmentation. It would also put
-// customer identifiers into a committed manifest.
-type BillingPolicyBindingConfig struct {
-	Policy string `yaml:"policy" koanf:"policy"`
-	Tier   string `yaml:"tier,omitempty" koanf:"tier"`
-}
-
-// CheckoutRoutingRuleConfig is one manifest routing rule. Prefer speaks the
-// checkout selector vocabulary (#848): PSP keys, or a rail kind where exactly
-// one PSP is armed on it.
-type CheckoutRoutingRuleConfig struct {
-	Match  CheckoutRoutingMatchConfig `yaml:"match,omitempty" koanf:"match"`
-	Prefer []string                   `yaml:"prefer" koanf:"prefer"`
-}
-
-// CheckoutRoutingMatchConfig is a rule's condition; every set field must match,
-// and an all-empty match is the catch-all (which must be the last rule).
-type CheckoutRoutingMatchConfig struct {
-	Currency string `yaml:"currency,omitempty" koanf:"currency"`
-	Product  string `yaml:"product,omitempty" koanf:"product"`
-	Price    string `yaml:"price,omitempty" koanf:"price"`
-	Mode     string `yaml:"mode,omitempty" koanf:"mode"`
-	Country  string `yaml:"country,omitempty" koanf:"country"`
-}
-
 // CheckoutRoutingRules projects the manifest rules onto the stored model.
-func CheckoutRoutingRules(in []CheckoutRoutingRuleConfig) []models.CheckoutRoutingRule {
+func CheckoutRoutingRules(in []config.CheckoutRoutingRuleConfig) []models.CheckoutRoutingRule {
 	if len(in) == 0 {
 		return nil
 	}
@@ -532,96 +425,6 @@ func CheckoutRoutingRules(in []CheckoutRoutingRuleConfig) []models.CheckoutRouti
 		})
 	}
 	return out
-}
-
-// InvoiceConfig is the merchant invoice/collection policy block, mirroring
-// the merchant_configurations invoice fields. Amounts are in the currency's micros.
-type InvoiceConfig struct {
-	// CollectionThreshold: invoice an arrears customer once their accrued balance
-	// reaches this (micros). Default 50_000_000 ($50).
-	CollectionThreshold *int64 `yaml:"collection_threshold,omitempty" koanf:"collection_threshold"`
-	// MonthlyFloor: don't bother collecting below this (micros). Default 1_000_000 ($1).
-	MonthlyFloor *int64 `yaml:"monthly_floor,omitempty" koanf:"monthly_floor"`
-	// BillingPeriodBoundary: calendar_month | anniversary | fixed_interval.
-	// Default fixed_interval (rolling 30d). calendar_month resets on the 1st.
-	BillingPeriodBoundary string `yaml:"billing_period_boundary,omitempty" koanf:"billing_period_boundary"`
-	// DelinquencyGraceDays (or#878): days past an invoice's due date before the
-	// payer is DELINQUENT — new spend refused and the host signalled to shut off
-	// whatever it runs. Business policy, so it is the merchant's. Default 14;
-	// 0 means delinquent as soon as it is overdue.
-	DelinquencyGraceDays *int `yaml:"delinquency_grace_days,omitempty" koanf:"delinquency_grace_days"`
-	// DelinquencyAmountFloor (micros): the smallest overdue balance that can
-	// escalate. Unset DERIVES from monthly_floor — a debt too small to bother
-	// collecting is too small to cut anyone off for.
-	DelinquencyAmountFloor *int64 `yaml:"delinquency_amount_floor,omitempty" koanf:"delinquency_amount_floor"`
-}
-
-// BudgetWindowConfig is one delegated-invoker wasted-spend window. Window is a
-// Go duration ("15m", "5h"); Limit is the per-window ceiling in the currency's micros.
-type BudgetWindowConfig struct {
-	Key      string `yaml:"key" koanf:"key"`
-	Window   string `yaml:"window" koanf:"window"`
-	Limit    int64  `yaml:"limit" koanf:"limit"`
-	Currency string `yaml:"currency,omitempty" koanf:"currency"`
-}
-
-type MerchantProfileConfig struct {
-	DisplayName string `yaml:"display_name,omitempty" koanf:"display_name"`
-	LogoURL     string `yaml:"logo_url,omitempty" koanf:"logo_url"`
-	FromEmail   string `yaml:"from_email,omitempty" koanf:"from_email"`
-	SupportURL  string `yaml:"support_url,omitempty" koanf:"support_url"`
-	SignupURL   string `yaml:"signup_url,omitempty" koanf:"signup_url"`
-}
-
-type PSPConfig map[string]ProviderRailAccountConfig
-
-// CustodianConfig is one declared custodian's kind block: exactly one entry,
-// keyed by the vendor kind (basis_theory), mirroring PSPConfig's rail key.
-type CustodianConfig map[string]CustodianAccountConfig
-
-// CustodianAccountConfig is one merchant-owned account with a custodian.
-type CustodianAccountConfig struct {
-	// AccountID is the custodian-native tenant identity (Basis Theory: the
-	// tenant id). Operator-declared — there is no runtime whoami (#592).
-	AccountID string `yaml:"account_id,omitempty" koanf:"account_id"`
-	// Archived drains the custodian: instruments it holds stay chargeable, no
-	// new arrangement may reference it.
-	Archived bool `yaml:"archived,omitempty" koanf:"archived"`
-	// Settings are the declared NON-secret knobs, validated against the kind's
-	// registry (internal/custodians): public_api_key, network_tokens.
-	Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
-	// Secrets are the kind's credential slots (Basis Theory: api_key, the
-	// private application key). Stored under
-	// custodians/<kind>/<environment>/<account_id>/<key>.
-	Secrets map[string]string `yaml:"secrets,omitempty" koanf:"secrets"`
-}
-
-type ProviderRailAccountConfig struct {
-	// LegacyEnvironment keeps the retired `environment:` key parseable ONLY so a
-	// manifest that still declares it fails loudly (#882). The environment is
-	// DERIVED from test_mode — it never was anything else, since a declared value
-	// that disagreed refused to boot and one that agreed was a no-op.
-	LegacyEnvironment string `yaml:"environment,omitempty" koanf:"environment"`
-	AccountID         string `yaml:"account_id,omitempty" koanf:"account_id"`
-	Archived          bool   `yaml:"archived,omitempty" koanf:"archived"`
-	// Custodian REFERENCES a declared custodian by key (or#880):
-	// merchants.<slug>.custodians.<key>. "" = this PSP holds its own
-	// instruments (Stripe pm_, NMI customer vault), which is the common case
-	// and needs no configuration. A key with no matching custodian entry is a
-	// hard error, never an unarmed default.
-	Custodian string            `yaml:"custodian,omitempty" koanf:"custodian"`
-	Signer    *PSPSignerConfig  `yaml:"signer,omitempty" koanf:"signer"`
-	Secrets   map[string]string `yaml:"secrets,omitempty" koanf:"secrets"`
-	// Settings are per-account NON-SECRET runtime knobs, stored on the
-	// psps row (NMI: tokenization_key/tokenization_url;
-	// Solana: rpc_provider, rpc_api_key, tokens,
-	// recipient_wallet — see config.SolanaAccountSettings, #711).
-	Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
-}
-
-type PSPSignerConfig struct {
-	Mode string `yaml:"mode,omitempty" koanf:"mode"`
-	Key  string `yaml:"key,omitempty" koanf:"key"`
 }
 
 // MerchantManifestReconcileOptions selects the apply tier (#527). The default
@@ -666,7 +469,7 @@ type MerchantManifestReconcileOptions struct {
 }
 
 type ManifestProviderIdentityResolver interface {
-	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error)
+	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error)
 }
 
 type ManifestProviderIdentity struct {
@@ -695,7 +498,7 @@ type ProvisionMerchantRequest struct {
 	SecretStore   merchants.MerchantSecretStore
 	SolanaTransit solana.TransitClient
 	Slug          string
-	Merchant      MerchantConfig
+	Merchant      config.MerchantDeclaration
 	Options       MerchantManifestReconcileOptions
 }
 
@@ -763,7 +566,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	if found && !req.Options.Overwrite {
 		mt.DisplayName = ""
 		mt.APIHost = ""
-		mt.Profile = MerchantProfileConfig{}
+		mt.Profile = config.MerchantProfileConfig{}
 		mt.Invoice = nil
 		mt.DelegatedInvokerWastedSpendWindows = nil
 		mt.CheckoutRouting = nil
@@ -776,7 +579,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	return tn, nil
 }
 
-func provisionMerchantIdentity(ctx context.Context, database *db.DB, slug string, mt MerchantConfig) (*merchants.Merchant, error) {
+func provisionMerchantIdentity(ctx context.Context, database *db.DB, slug string, mt config.MerchantDeclaration) (*merchants.Merchant, error) {
 	id, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
 	if err != nil {
 		return nil, err
@@ -788,7 +591,7 @@ func provisionMerchantIdentity(ctx context.Context, database *db.DB, slug string
 	return directory.Get(ctx, id)
 }
 
-func sortedMerchantKeys(in map[string]MerchantConfig) []string {
+func sortedMerchantKeys(in map[string]config.MerchantDeclaration) []string {
 	keys := make([]string, 0, len(in))
 	for key := range in {
 		keys = append(keys, key)
@@ -800,10 +603,10 @@ func sortedMerchantKeys(in map[string]MerchantConfig) []string {
 type PspEntry struct {
 	key    string
 	rail   string
-	config ProviderRailAccountConfig
+	config config.ProviderRailAccountConfig
 }
 
-func PspEntries(in map[string]PSPConfig) []PspEntry {
+func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
 		keys = append(keys, key)
@@ -826,10 +629,10 @@ func PspEntries(in map[string]PSPConfig) []PspEntry {
 type CustodianEntry struct {
 	key    string
 	kind   string
-	config CustodianAccountConfig
+	config config.CustodianAccountConfig
 }
 
-func CustodianEntries(in map[string]CustodianConfig) []CustodianEntry {
+func CustodianEntries(in map[string]config.CustodianConfig) []CustodianEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
 		keys = append(keys, key)
@@ -925,7 +728,7 @@ func SeedManifestCustodianSecrets(ctx context.Context, merchantID merchant.ID, r
 // returns them by declared key, so the PSP pass can resolve its `custodian:`
 // reference to a row id. Custodians land BEFORE PSPs for the obvious reason:
 // psps.custodian_id is a foreign key.
-func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) (map[string]gen.BillingCustodian, error) {
+func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore, opts MerchantManifestReconcileOptions) (map[string]gen.BillingCustodian, error) {
 	out := map[string]gen.BillingCustodian{}
 	entries := CustodianEntries(mt.Custodians)
 	if len(entries) == 0 {
@@ -1033,7 +836,7 @@ func NonNilSettings(in map[string]any) map[string]any {
 // the merchant's declared custodians. An undeclared key is a HARD error: a PSP
 // that means to charge a vault-held card and cannot find the vault must not
 // arm as though its gateway held the card.
-func ResolveManifestCustodianReference(rail string, account ProviderRailAccountConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
+func ResolveManifestCustodianReference(rail string, account config.ProviderRailAccountConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
 	key := strings.ToLower(strings.TrimSpace(account.Custodian))
 	if key == "" {
 		return nil, nil
@@ -1061,7 +864,7 @@ func ResolveManifestCustodianReference(rail string, account ProviderRailAccountC
 	return &id, nil
 }
 
-func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, slug string, mt MerchantConfig, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, slug string, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	mctx := merchant.WithID(ctx, merchantID)
 	// #850: declared api_host is asserted on every apply (declarative identity,
 	// like display_name — not seed-once); omitted leaves the stored value
@@ -1192,7 +995,7 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 // The WHOLE document is validated before ANY of it is written: a bad third
 // policy must not leave the first two installed and the merchant enforcing half
 // a decision.
-func ReconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt MerchantConfig) error {
+func ReconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt config.MerchantDeclaration) error {
 	policies, bindings, err := normalizeManifestBillingPolicies(mt)
 	if err != nil {
 		return err
@@ -1213,7 +1016,7 @@ func ReconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt M
 
 // ManifestBudgetWindows projects manifest windows (Go duration strings) onto the
 // stored model (seconds). The shared normalizer validates the result.
-func ManifestBudgetWindows(policyName, field string, in []BudgetWindowConfig) ([]models.BudgetWindowPolicy, error) {
+func ManifestBudgetWindows(policyName, field string, in []config.BudgetWindowConfig) ([]models.BudgetWindowPolicy, error) {
 	if len(in) == 0 {
 		return nil, nil
 	}
@@ -1236,7 +1039,7 @@ func ManifestBudgetWindows(policyName, field string, in []BudgetWindowConfig) ([
 // PruneManifestSecrets deletes secrets held for the merchant that the manifest
 // no longer declares (#527 --prune), reconciling the stored secret set to the
 // file. Names are derived exactly as Put derives them.
-func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt MerchantConfig, secretStore merchants.MerchantSecretStore) error {
+func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt config.MerchantDeclaration, secretStore merchants.MerchantSecretStore) error {
 	declared := map[string]struct{}{}
 	for _, entry := range CustodianEntries(mt.Custodians) {
 		rc, err := ResolveManifestCustodian(cfg, entry)
@@ -1301,7 +1104,7 @@ func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID me
 	return nil
 }
 
-func HasManifestProfile(p MerchantProfileConfig) bool {
+func HasManifestProfile(p config.MerchantProfileConfig) bool {
 	return strings.TrimSpace(p.DisplayName) != "" ||
 		strings.TrimSpace(p.LogoURL) != "" ||
 		strings.TrimSpace(p.FromEmail) != "" ||
@@ -1322,7 +1125,7 @@ type ResolvedManifestRailAccount struct {
 	signerEvidence map[string]string
 }
 
-func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account ProviderRailAccountConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (ResolvedManifestRailAccount, error) {
+func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account config.ProviderRailAccountConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (ResolvedManifestRailAccount, error) {
 	out := ResolvedManifestRailAccount{rail: NormalizeManifestRail(rail)}
 	if out.rail == "" {
 		return out, fmt.Errorf("PSP rail is required")
@@ -1398,7 +1201,7 @@ func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail st
 // values the server's boot reconcile seeds into its runtime plane. MODE-1
 // one-off processes (pull-provider CLI, #723) build their ephemeral in-memory
 // plane through it and arm per-merchant fetchers from the on-disk manifest.
-func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt MerchantConfig, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
+func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, merchantID merchant.ID, mt config.MerchantDeclaration, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
 	if store == nil {
 		return fmt.Errorf("merchant manifest secret plane: store is required")
 	}
@@ -1433,7 +1236,7 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, me
 	return nil
 }
 
-func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID merchant.ID, merchantSlug, localKey, rail string, account config.ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	ra, err := ResolveManifestRailAccount(ctx, cfg, rail, account, transit, opts.IdentityResolver)
 	if err != nil {
 		return err
@@ -1610,7 +1413,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 // evidence plus the derived PSP identity. Solana never needs
 // account_id — the stored DB identity is always the signer public key; a declared
 // value is ignored (warned).
-func ManifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account ProviderRailAccountConfig, secrets ManifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
+func ManifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
 	if rail == string(models.RailSolana) && strings.TrimSpace(accountID) != "" {
 		log.Warnf("solana PSP: declared account_id %s is ignored; it is always derived from the signer's public key", strings.TrimSpace(accountID))
 		accountID = ""
@@ -1696,7 +1499,7 @@ func SolanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, k
 // ManifestProviderEnvironment derives a PSP's environment from deployment
 // posture (#681/#882 — test under test_mode, live otherwise). It is never
 // declared: a manifest that still carries `environment:` fails loudly here.
-func ManifestProviderEnvironment(cfg *config.Config, account ProviderRailAccountConfig) (string, error) {
+func ManifestProviderEnvironment(cfg *config.Config, account config.ProviderRailAccountConfig) (string, error) {
 	if strings.TrimSpace(account.LegacyEnvironment) != "" {
 		return "", fmt.Errorf("psp `environment:` is no longer configurable (#882) — it is derived from test_mode (sandbox => test, live => live); remove the key")
 	}
@@ -1783,7 +1586,7 @@ func (v ManifestSecretValues) ResolveIfPresent(key string) (string, bool, error)
 
 type DefaultManifestProviderIdentityResolver struct{}
 
-func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
+func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
 	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
 		return ManifestProviderIdentity{
 			AccountID: accountID,
@@ -1808,7 +1611,7 @@ func StringPtrIfNotEmpty(v string) *string {
 	return &v
 }
 
-func ValidateMerchantDeclaration(cfg *config.Config, mt MerchantConfig) error {
+func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclaration) error {
 	// Validate declarations before identity creation or seed-once suppression.
 	// An existing merchant must not turn malformed input into a successful boot.
 	if _, _, err := normalizeManifestBillingPolicies(mt); err != nil {
@@ -1855,7 +1658,7 @@ type manifestBillingPolicy struct {
 
 type manifestBillingBinding struct{ tier, name string }
 
-func normalizeManifestBillingPolicies(mt MerchantConfig) ([]manifestBillingPolicy, []manifestBillingBinding, error) {
+func normalizeManifestBillingPolicies(mt config.MerchantDeclaration) ([]manifestBillingPolicy, []manifestBillingBinding, error) {
 	names := make([]string, 0, len(mt.BillingPolicies))
 	for name := range mt.BillingPolicies {
 		names = append(names, name)

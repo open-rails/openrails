@@ -3,21 +3,15 @@
 package ci_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
-	embcp "github.com/open-rails/openrails/internal/embedcontrolplane"
-	"github.com/open-rails/openrails/internal/hostconfig"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/open-rails/openrails/permissions"
 )
 
@@ -26,25 +20,7 @@ import (
 // credential hands out only a role its grants cover.
 func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
-	rt, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{
-			TestMode:          config.CredentialPostureSandbox,
-			ProviderWriteMode: config.ProviderWriteModeReadOnly,
-			DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:     []string{"https://e2e.test"},
-		},
-		PGXPool: f.pool,
-		River:   embed.RiverManagedByOpenRails(f.schema),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	_, err = embcp.Attach(t.Context(), rt, embcp.Options{Auth: &hostconfig.AuthConfig{
-		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
-		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
-	}})
-	require.NoError(t, err)
-	cp := operator.Get(app.HostGraph(rt))
+	cp := operator.Get(engine.Graph(f.attachControlPlane(t, nil)))
 	require.NotNil(t, cp)
 
 	held := func(role iam.Role) []string {

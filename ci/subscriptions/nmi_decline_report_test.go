@@ -11,9 +11,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
 // declineReport runs `openrails nmi decline-report` against this world.
@@ -21,10 +22,10 @@ func (w *world) declineReport(since time.Time, format string) string {
 	w.t.Helper()
 	var out strings.Builder
 	err := hosttools.NMIDeclineReport(w.t.Context(), hosttools.NMIDeclineReportOptions{
-		Config:           &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: w.dsn, Schema: w.schema}},
+		Config:           &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: w.dsn}, Schema: w.schema},
 		PGXPool:          w.pool,
 		MerchantID:       w.client[embedded].MerchantID(),
-		MerchantManifest: &hosttools.BillingConfig{Merchants: map[string]embed.MerchantConfig{w.slug: {DisplayName: w.slug, PSPs: w.psps}}},
+		MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}},
 		NMITransport:     http.RoundTripper(w.nmi),
 		Since:            since.UTC().Format(time.RFC3339),
 		Until:            w.clock.Now().UTC().Format(time.RFC3339),

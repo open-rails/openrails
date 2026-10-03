@@ -2,6 +2,7 @@ package openrailshttp
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -19,21 +20,43 @@ import (
 	"github.com/open-rails/openrails/internal/http/routebundle"
 )
 
+// Bundle stands in for a Client's routes in these unit tests.
+type Bundle struct {
+	routes   []openrails.Route
+	rootOnly bool
+}
+
+func Routes(s routeSource) (*Bundle, error) { return &Bundle{routes: s.routes, rootOnly: s.root}, nil }
+
+func toRoutes(in []routebundle.Route) []openrails.Route {
+	out := make([]openrails.Route, len(in))
+	for i, r := range in {
+		out[i] = openrails.Route{Method: r.Method, Path: r.Path, Handler: r.Handler}
+	}
+	return out
+}
+
+func (b *Bundle) Mount(target any, prefix ...string) error {
+	if b == nil {
+		return errors.New("nil bundle")
+	}
+	return mount(target, b.routes, b.rootOnly, false, prefix...)
+}
+
+func (b *Bundle) MountRoot(target any) error { return mount(target, b.routes, b.rootOnly, true) }
+
 type routeSource struct {
-	routes []embed.HTTPRoute
+	routes []openrails.Route
 	root   bool
 }
 
-func (s routeSource) HTTPRoutes() ([]embed.HTTPRoute, error) { return s.routes, nil }
-func (s routeSource) HTTPRequiresRoot() bool                 { return s.root }
-
-// inventoryBundle builds every configured route family the way embed.Runtime does.
+// inventoryBundle builds every configured route family the way the engine does.
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
-	deny := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
+	deny := func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
-	})
+	}
 	auth := &billingauth.Integration{
 		Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
 			return billingauth.Identity{}, billingauth.ErrUnauthenticated
@@ -43,7 +66,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 		}),
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: deny}},
+	policy := &config.HTTPConfig{Checkout: true, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: deny}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
@@ -51,7 +74,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 		table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, "/billing")
 	}
 	require.NoError(t, embedhttp.ValidateRouteTable(table))
-	bundle, err := Routes(routeSource{routes: routebundle.FromTable(table)})
+	bundle, err := Routes(routeSource{routes: toRoutes(routebundle.FromTable(table))})
 	require.NoError(t, err)
 	return bundle
 }
@@ -102,7 +125,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 	const body = "{ \"signed\" : \"bytes\", \"unicode\": \"é\" }\n"
 	const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=unchanged"
 	calls := 0
-	b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b := &Bundle{routes: []openrails.Route{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -124,7 +147,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 
 // Anchored standalone routes refuse prefixes and subrouters before registering anything.
 func TestRootOnlyBundleRequiresTheRootRouter(t *testing.T) {
-	b, err := Routes(routeSource{root: true, routes: []embed.HTTPRoute{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b, err := Routes(routeSource{root: true, routes: []openrails.Route{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/admin/js/site.js?q=raw", r.RequestURI)
 		w.WriteHeader(http.StatusNoContent)
 	})}}})

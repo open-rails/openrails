@@ -21,10 +21,7 @@ func openEmbeddedDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool)
 		err      error
 	)
 	if pool != nil {
-		schema := config.DefaultSchema
-		if cfg != nil && cfg.DB != nil {
-			schema = cfg.DB.SchemaName()
-		}
+		schema := cfg.SchemaName()
 		database, err = db.NewWithPGXPool(pool, schema)
 		if err != nil {
 			return nil, err
@@ -33,7 +30,7 @@ func openEmbeddedDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool)
 		if cfg == nil || cfg.DB == nil {
 			return nil, fmt.Errorf("config database is required")
 		}
-		database, err = db.NewDB(ctx, cfg.DB)
+		database, err = db.NewDB(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("open postgres: %w", err)
 		}

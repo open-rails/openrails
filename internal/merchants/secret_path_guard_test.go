@@ -46,7 +46,7 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 			fragment: `"rail_merchant_accounts`,
 			allowed: map[string]string{
 				"internal/merchantbootstrap/merchant_manifest.go": "legacy manifest-KEY rename check (config keys, not secret paths)",
-				"embed/provision.go":                              "legacy manifest-KEY rename check (config keys, not secret paths)",
+				"internal/config/merchant_declaration.go":         "legacy manifest-KEY rename check (config keys, not secret paths)",
 			},
 		},
 		{

@@ -127,7 +127,7 @@ func TestIntegrationVerifiesOncePerRequestAndChecksAuthorityLive(t *testing.T) {
 	verifier := &fakeVerifier{principal: principal}
 	integration, r, identity, err := authenticate(t, IntegrationOptions{Verifier: verifier, Customer: SubjectCustomerID, Authority: fixedAuthority("g")})
 	require.NoError(t, err)
-	require.Equal(t, Identity{Kind: NativeUser, SubjectID: testCustomer, CustomerID: testCustomer, Issuer: testIssuer, CredentialClass: CredentialClassUserSession}, identity)
+	require.Equal(t, Identity{Kind: User, SubjectID: testCustomer, CustomerID: testCustomer, Issuer: testIssuer, CredentialClass: CredentialClassUserSession}, identity)
 
 	need := Requirement{Permission: "merchant:payments:refund"}
 	for _, mutate := range []func(*Identity){
@@ -170,7 +170,7 @@ func TestIntegrationIdentityMapping(t *testing.T) {
 		{id(auth.KindAPIKey, "key", testIssuer), nil, Machine},
 		{id(auth.KindRemoteApplication, "app", testIssuer), nil, Machine},
 		{id(auth.KindDeviceKey, "dev", testIssuer), nil, Machine},
-		{id(auth.KindDelegated, "sub", testIssuer), nil, DelegatedUser},
+		{id(auth.KindDelegated, "sub", testIssuer), nil, Delegated},
 		{id(auth.KindAPIKey, testCustomer, testIssuer), SubjectCustomerID, Machine},
 		{id("robot", "x", testIssuer), nil, ""},
 		{id(auth.KindUser, testCustomer, ""), nil, ""},
@@ -273,11 +273,11 @@ func TestRequireRecentSignIn(t *testing.T) {
 	integration, r, _, err := authenticate(t, IntegrationOptions{Verifier: &fakeVerifier{principal: userPrincipal(true)}, Customer: SubjectCustomerID})
 	require.NoError(t, err)
 	ctx := r.Context()
-	native := Principal{Kind: NativeUser}
+	native := Principal{Kind: User}
 	unavailable := GateError{Status: 403, Message: "step_up_unavailable"}
 	require.Equal(t, unavailable, RequireRecentSignIn(ctx, native, func(ctx context.Context) error { return integration.RecentSignIn.CheckRecentSignIn(ctx, r) }))
 	require.Equal(t, unavailable, RequireRecentSignIn(ctx, Principal{}, nil), "an unset kind is a native user")
-	for _, kind := range []PrincipalKind{Machine, DelegatedUser} {
+	for _, kind := range []PrincipalKind{Machine, Delegated} {
 		require.NoError(t, RequireRecentSignIn(ctx, Principal{Kind: kind}, nil))
 	}
 	challenge := stepUpChallenge{"step_up_methods": []string{"password"}}

@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -67,9 +67,9 @@ func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) 
 		cfg.ProviderSandbox = &config.ProviderSandboxConfig{SolanaRPCURL: fake.URL()}
 		cfg.PublicBillingBaseURL = "https://e2e.test" + mountPrefix
 	}
-	w.declare = func(psps map[string]embed.PSPConfig) {
-		psps["solana"] = embed.PSPConfig{"solana": {
-			Signer:   &embed.PSPSignerConfig{Mode: "local_keypair"},
+	w.declare = func(psps map[string]openrails.PSPConfig) {
+		psps["solana"] = openrails.PSPConfig{"solana": {
+			Signer:   &openrails.PSPSignerConfig{Mode: "local_keypair"},
 			Secrets:  map[string]string{"private_key": signer.String()},
 			Settings: map[string]any{"rpc_provider": "public", "tokens": map[string]any{"SOL": map[string]any{}, "DUSD": map[string]any{}}},
 		}}
@@ -195,7 +195,7 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 
 func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 	w := prepareWorld(t, 12)
-	w.declare = func(psps map[string]embed.PSPConfig) {
+	w.declare = func(psps map[string]openrails.PSPConfig) {
 		delete(psps, "stripe")
 		delete(psps, "nmi")
 	}

@@ -15,14 +15,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/dns/dnsmessage"
-
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
-	"github.com/open-rails/openrails/internal/hostconfig"
-	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 // txtServer is an authoritative DNS server on loopback answering TXT queries
@@ -110,30 +106,14 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	const shared, console = "api.e2e.test", "console.e2e.test"
 	f := newFixture(t)
 	ctx := t.Context()
-	require.NoError(t, standalonedb.ApplyAuthKit(ctx, f.pool))
 	dns := newTXTServer(t)
-	rt, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{
-			TestMode:             config.CredentialPostureSandbox,
-			ProviderWriteMode:    config.ProviderWriteModeReadOnly,
-			MerchantConfigHTTP:   true,
-			PublicBillingBaseURL: "https://" + shared,
-			DashboardBaseURL:     "https://" + console,
-			DB:                   &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:        []string{"https://e2e.test"},
-		},
-		PGXPool:     f.pool,
-		River:       embed.RiverManagedByOpenRails(f.schema),
-		DNSResolver: dns.resolver(),
+	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
+		cfg.MerchantConfigHTTP = true
+		cfg.PublicBillingBaseURL = "https://" + shared
+		cfg.DashboardBaseURL = "https://" + console
+		deps.DNSResolver = dns.resolver()
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	cp, err := embedcontrolplane.Attach(ctx, rt, embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
-		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
-		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
-	}})
-	require.NoError(t, err)
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 
 	on := func(host, token, method, path, selector string, body any) *httptest.ResponseRecorder {
@@ -156,9 +136,9 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	provision := func(prefix string) shop {
 		owner := newAccount(t, cp)
 		slug := uniqueName(prefix)
-		_, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
+		_, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
 		require.NoError(t, err)
-		return shop{slug, authtest.SignIn(t, cp.Core(), owner).AccessToken}
+		return shop{slug, authtest.SignIn(t, cp.AuthKit(), owner).AccessToken}
 	}
 	victim, squatter := provision("victim"), provision("squatter")
 	w := on(shared, victim.session, http.MethodPost, "/v1/merchant/api-keys", victim.slug, map[string]string{"name": "backend", "role": "owner"})

@@ -1,43 +1,55 @@
-package embed
+package openrails
 
 import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/requestauth"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// A typo'd key must fail loudly instead of provisioning a merchant with no rails.
-func TestParseMerchantConfigIsStrict(t *testing.T) {
-	m, err := ParseMerchantConfig([]byte(`
-display_name: Host One
-psps:
-  mobius:
-    nmi:
-      account_id: "100001"
-      secrets: {security_key: sk, webhook_signing_secret: whs}
-`))
-	require.NoError(t, err)
-	require.Equal(t, "100001", m.PSPs["mobius"]["nmi"].AccountID)
-
-	for doc, want := range map[string]string{
-		"display_name: X\nacounts: {}\n":                "acounts",
-		"display_name: X\nrail_merchant_accounts: {}\n": "rail_merchant_accounts was renamed to psps",
-		"display_name: X\nprovider_accounts: {}\n":      "provider_accounts was renamed to psps",
-	} {
-		_, err := ParseMerchantConfig([]byte(doc))
-		require.ErrorContains(t, err, want)
+// River decodes a job by kind into the worker's args type, so the public args
+// must mirror the engine job field for field or host inserts silently drop data.
+func TestInvoiceSweepArgsMirrorEngineInvoiceJob(t *testing.T) {
+	public, internal := reflect.TypeOf(InvoiceSweepArgs{}), reflect.TypeOf(riverjobs.InvoiceArgs{})
+	require.Equal(t, internal.NumField(), public.NumField())
+	for i := range internal.NumField() {
+		want := internal.Field(i)
+		got, ok := public.FieldByName(want.Name)
+		require.True(t, ok, want.Name)
+		require.Equal(t, want.Type, got.Type, want.Name)
+		require.Equal(t, want.Tag, got.Tag, want.Name)
 	}
+	require.Equal(t, riverjobs.InvoiceArgs{}.Kind(), InvoiceSweepArgs{}.Kind())
+	require.Equal(t, QueueBilling, InvoiceSweepArgs{}.InsertOpts().Queue)
+}
+
+// Hosting operations refuse a remote client instead of pretending.
+func TestRemoteClientRefusesHostingOperations(t *testing.T) {
+	c, err := NewRemote("https://billing.example", WithAPIKey("k"))
+	require.NoError(t, err)
+	require.ErrorIs(t, c.Start(t.Context()), ErrRemoteClient)
+	_, err = c.Routes()
+	require.ErrorIs(t, err, ErrRemoteClient)
+	require.False(t, c.RoutesRequireRoot())
+	require.Nil(t, c.Probes())
+	_, err = c.ProvisionMerchant(t.Context(), billing.ProvisionMerchantRequest{Slug: "x"})
+	require.ErrorIs(t, err, ErrRemoteClient)
+	_, err = c.DeclarePSP(t.Context(), merchant.ID(uuid.New()), billing.PSPDeclaration{})
+	require.ErrorIs(t, err, ErrRemoteClient)
+	require.Nil(t, c.AuthKit())
+	require.NoError(t, c.Close(t.Context()))
 }
 
 // A catalog-owner clone is attenuated: the selector travels as a header, the
@@ -61,8 +73,8 @@ func TestCatalogOwnerClientCannotExpandScope(t *testing.T) {
 		require.NoError(t, json.NewEncoder(w).Encode(billing.CatalogProduct{ID: product}))
 	})
 	transport, capability := inprocess.NewTransport(handler, func() merchant.ID { return mid })
-	admin, err := openrails.NewRemote(inprocessBaseURL, openrails.WithMerchantID(mid), openrails.WithHTTPClient(&http.Client{Transport: transport}),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
+	admin, err := NewRemote(engine.InprocessBaseURL, WithMerchantID(mid), WithHTTPClient(&http.Client{Transport: transport}),
+		WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
 	require.NoError(t, err)
 	_, err = admin.ForCatalogOwner("")
 	require.Error(t, err)

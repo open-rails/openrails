@@ -11,7 +11,7 @@ import (
 
 // PayInvoiceNow requires this Client's token provider to supply verified payer
 // credentials. Merchant/service credentials cannot attest customer presence.
-// Embedded hosts configure the same verifier through embed.Options and supply
+// Embedded hosts configure the same verifier through Deps and supply
 // the customer's explicit token; ambient request context is never authority.
 func (c *Client) PayInvoiceNow(ctx context.Context, request billing.PayInvoiceNowRequest, requestOptions ...RequestOption) (*billing.InvoicePayNowResult, error) {
 	id, err := requireUUID("invoice_id", request.InvoiceID)

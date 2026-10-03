@@ -9,58 +9,28 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-// CustomerHTTPScope selects a library-owned customer capability profile.
-type CustomerHTTPScope uint8
-
-const (
-	// CustomerSelfService exposes the full customer self-service API.
-	CustomerSelfService CustomerHTTPScope = iota
-	// CustomerSubscriptionManagement exposes cancellation, resumption, subscription
-	// payment-method changes and invoice collection-method selection only.
-	CustomerSubscriptionManagement
-	// CustomerBillingManagement adds existing billing history, purchased access,
-	// saved methods and payment recovery without checkout or plan purchases.
-	CustomerBillingManagement
-)
-
-// CustomerRoutesConfig exposes a customer profile with its own explicit authority.
-// Prefix is the exact customer base, relative to the bundle's mount (for example
-// /billing/v1/me). Whole-segment {parameters} are available to the authenticator
-// through Request.PathValue. This surface never includes merchant administration,
-// treasury, provider callbacks or credential management.
-type CustomerRoutesConfig struct {
-	// Prefix defaults to /v1/me. Additional audiences may mount the same
-	// registrations elsewhere with their own explicit delegated payer authority.
-	Prefix string
-	// Merchant is the fixed merchant slug for native customer identity.
-	Merchant string
-	// Treasury adds the separately permission-gated /v1/customers group.
-	Treasury               bool
-	Scope                  CustomerHTTPScope
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-}
-
-func validateCustomerRoutes(exposures []CustomerRoutesConfig, auth *billingauth.Integration) error {
+func validateCustomerRoutes(exposures []config.CustomerRoutesConfig, auth *billingauth.Integration) error {
 	for _, e := range exposures {
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
-		if e.DelegatedAuthenticator == nil && (auth == nil || auth.Authentication == nil) {
+		if e.Authenticate == nil && (auth == nil || auth.Authentication == nil) {
 			return fmt.Errorf("openrails HTTP: customer exposure %q requires its own authenticator", e.Prefix)
 		}
-		if e.DelegatedAuthenticator == nil && strings.TrimSpace(e.Merchant) == "" {
+		if e.Authenticate == nil && strings.TrimSpace(e.Merchant) == "" {
 			return fmt.Errorf("openrails HTTP: native customer routes require an explicit merchant slug")
 		}
 		if e.Treasury && e.Prefix != "/v1/me" {
 			return fmt.Errorf("openrails HTTP: customer treasury requires the canonical customer mount")
 		}
-		if e.Scope != CustomerSelfService && e.Scope != CustomerSubscriptionManagement && e.Scope != CustomerBillingManagement {
+		if e.Scope != config.CustomerSelfService && e.Scope != config.CustomerSubscriptionManagement && e.Scope != config.CustomerBillingManagement {
 			return fmt.Errorf("openrails HTTP: invalid customer scope %d", e.Scope)
 		}
 		if e.Prefix == "" || e.Prefix == "/" || !strings.HasPrefix(e.Prefix, "/") || path.Clean(e.Prefix) != e.Prefix || strings.ContainsAny(e.Prefix, "*+?#%\\ \t\r\n") {
@@ -77,7 +47,7 @@ func validateCustomerRoutes(exposures []CustomerRoutesConfig, auth *billingauth.
 
 // BuildCustomerRoutes builds additional customer audiences from the same
 // authoritative registrations used by the canonical customer surface.
-func BuildCustomerRoutes(a *app.App, exposures []CustomerRoutesConfig, auth *billingauth.Integration) (*router.Table, error) {
+func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutesConfig, auth *billingauth.Integration) (*router.Table, error) {
 	if err := validateCustomerRoutes(exposures, auth); err != nil {
 		return nil, err
 	}
@@ -94,7 +64,13 @@ func BuildCustomerRoutes(a *app.App, exposures []CustomerRoutesConfig, auth *bil
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
-		authn := e.DelegatedAuthenticator
+		var authn billingauth.DelegatedAuthenticator
+		if e.Authenticate != nil {
+			authenticate := e.Authenticate
+			authn = billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+				return authenticate(r)
+			})
+		}
 		native := authn == nil
 		if native {
 			target, err := merchanttarget.Resolve(context.Background(), nil, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), e.Merchant)
@@ -107,9 +83,9 @@ func BuildCustomerRoutes(a *app.App, exposures []CustomerRoutesConfig, auth *bil
 		rr := router.NewMux(table, e.Prefix, a.Runtime)
 		delegated := middleware.DelegatedPrincipalRequired(authn)
 		switch e.Scope {
-		case CustomerSubscriptionManagement:
+		case config.CustomerSubscriptionManagement:
 			httproutes.RegisterCustomerSubscriptionManagementRoutes(rr, a.Runtime, delegated)
-		case CustomerBillingManagement:
+		case config.CustomerBillingManagement:
 			httproutes.RegisterCustomerBillingManagementRoutes(rr, a.Runtime, delegated, providers)
 		default:
 			httproutes.RegisterSelfServiceRoutes(rr, a.Runtime, delegated, providers)

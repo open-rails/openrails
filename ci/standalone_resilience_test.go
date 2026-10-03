@@ -14,12 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
-	"github.com/open-rails/openrails/internal/hostconfig"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/open-rails/openrails/internal/vaultfake"
@@ -47,23 +44,20 @@ merchants:
           signer: { mode: vault_transit, key: `+transitKey+` }
 `), 0o600))
 
-	boot := func() (*embed.Runtime, error) {
-		cfg := &config.Config{
-			TestMode:          config.CredentialPostureSandbox,
-			ProviderWriteMode: config.ProviderWriteModeFull,
-			DB:                &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:     []string{"https://e2e.test"},
-			Vault:             &config.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token},
-			ProviderSandbox:   &config.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"},
-		}
-		rt, err := embed.New(t.Context(), embed.Options{Config: cfg, PGXPool: f.pool, River: embed.RiverManagedByOpenRails(f.schema)})
+	boot := func() (*openrails.Client, error) {
+		cfg := f.config()
+		cfg.AllowCatalogUpdates = false
+		cfg.ProviderWriteMode = openrails.ProviderWritesFull
+		cfg.Vault = &openrails.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token}
+		cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
+		cfg.ControlPlane = &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{
+			Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
+		}}
+		rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		_, err = embedcontrolplane.Attach(t.Context(), rt, embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
-			Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
-		}})
-		require.NoError(t, err)
-		return rt, serverboot.ReconcileBootMerchantManifest(t.Context(), cfg, app.HostGraph(rt), manifest, "")
+		graph := engine.Graph(rt)
+		return rt, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, "")
 	}
 	activeFor := func(account string) int {
 		var n int
@@ -89,7 +83,7 @@ merchants:
 	rotated := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 	rt, err := boot()
 	require.NoError(t, err)
-	graph := app.HostGraph(rt)
+	graph := engine.Graph(rt)
 	m, err := graph.Runtime.Merchants.GetBySlug(t.Context(), slug)
 	require.NoError(t, err)
 	railConfig := func() error {

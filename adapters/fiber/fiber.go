@@ -1,4 +1,4 @@
-// Package openrailsfiber registers configured OpenRails routes natively in Fiber v3.
+// Package openrailsfiber registers an OpenRails Client's routes natively in Fiber v3.
 package openrailsfiber
 
 import (
@@ -8,49 +8,39 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 )
 
 // RouteNamePrefix identifies native OpenRails registrations in Fiber inspection.
 const RouteNamePrefix = "openrails."
 
-type Bundle struct {
-	routes   []embed.HTTPRoute
-	rootOnly bool
-}
-
-type RouteSource interface {
-	HTTPRoutes() ([]embed.HTTPRoute, error)
-	HTTPRequiresRoot() bool
-}
-
-func Routes(runtime RouteSource) (*Bundle, error) {
-	routes, err := runtime.HTTPRoutes()
+// Mount registers one native route per method and path of client.Routes under
+// target. Fiber keeps its native matching and 404/405 behavior; configure
+// CaseSensitive and StrictRouting on the host for exact matching.
+func Mount(target fiber.Router, client *openrails.Client) error {
+	if client == nil || target == nil {
+		return fmt.Errorf("openrails Fiber: client and router are required")
+	}
+	routes, err := client.Routes()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &Bundle{routes: routes, rootOnly: runtime.HTTPRequiresRoot()}, nil
+	return mount(target, routes, client.RoutesRequireRoot())
 }
 
-// Mount registers one route per method/path under the host's router group.
-// Fiber retains its native matching and 404/405 behavior. For case-sensitive,
-// exact slash matching, configure CaseSensitive and StrictRouting on the host.
-func (b *Bundle) Mount(target fiber.Router) error {
-	if b == nil || target == nil {
-		return fmt.Errorf("openrails Fiber: bundle and router are required")
-	}
-	if b.rootOnly {
+func mount(target fiber.Router, routes []openrails.Route, rootOnly bool) error {
+	if rootOnly {
 		if _, ok := target.(*fiber.App); !ok {
 			return fmt.Errorf("openrails Fiber: standalone routes must mount on the root App")
 		}
 	}
 	heads := map[string]bool{}
-	for _, route := range b.routes {
+	for _, route := range routes {
 		if route.Method == http.MethodHead {
 			heads[route.Path] = true
 		}
 	}
-	for _, route := range b.routes {
+	for _, route := range routes {
 		h := adaptor.HTTPHandlerWithContext(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ctx, ok := adaptor.LocalContextFromHTTPRequest(r); ok {
 				r = r.WithContext(ctx)

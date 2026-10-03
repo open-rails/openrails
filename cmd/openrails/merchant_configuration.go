@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"net/http"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -21,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/spf13/cobra"
-	"net/http"
 )
 
 // Both modes use the public Client. Remote mode never loads local infrastructure.

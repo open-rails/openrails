@@ -59,7 +59,7 @@ var ErrRecentSignInUnavailable = errors.New("recent sign-in cannot be checked")
 // native user without one is refused. A stale sign-in is 403
 // step_up_required carrying the provider's challenge.
 func RequireRecentSignIn(ctx context.Context, p Principal, check func(context.Context) error) error {
-	if p.Kind == Machine || p.Kind == DelegatedUser {
+	if p.Kind == Machine || p.Kind == Delegated {
 		return nil
 	}
 	var err error = ErrRecentSignInUnavailable

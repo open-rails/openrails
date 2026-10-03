@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -34,7 +35,7 @@ type NMIDeclineReportOptions struct {
 	Since, Until string
 	// Format is table (default) or json.
 	Format               string
-	MerchantManifest     *BillingConfig
+	MerchantManifest     *merchantbootstrap.BillingConfig
 	MerchantManifestPath string
 	// NMITransport replaces the NMI wire (a test seam); nil is the gateway.
 	NMITransport http.RoundTripper

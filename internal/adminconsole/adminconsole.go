@@ -1,8 +1,6 @@
-// Package adminconsole serves the merchant admin console SPA (#740) from a
-// caller-supplied fs.FS (#754: the engine ships no frontend bytes — whoever
-// builds the binary owns the embed). The standalone binary embeds web/admin/dist
-// (web/admin/embed.go); embedded hosts pass embed.Options.ConsoleAssets.
-// Build assets with scripts/build-admin-console.sh (in-repo: `task admin-build`).
+// Package adminconsole serves the merchant admin console SPA (#740) from
+// web/admin's build (#754): web/admin/dist when it was built before go build
+// (scripts/build-admin-console.sh, in-repo `task admin-build`), else nothing.
 package adminconsole
 
 import (

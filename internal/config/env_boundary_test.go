@@ -33,14 +33,14 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	allowedPrefixes := map[string]string{
 		"cmd/":                 "binary boundary: the process entrypoint owns flags and env",
 		"examples/":            "standalone example apps: each is its own main(), a binary boundary like cmd/",
-		"config/":              "mounted secret-file access for explicit host loading",
+		"internal/config/":     "mounted secret-file access for explicit host loading",
 		"internal/hostconfig/": "standalone configuration-loading boundary",
 		"tests/":               "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
 		"scripts/":             "operational tooling run as its own process, not importable library code",
 		"internal/dbtest/":     "test-support package: container/DSN discovery for test binaries",
 	}
 
-	root, err := filepath.Abs("..")
+	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}

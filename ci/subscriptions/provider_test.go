@@ -12,7 +12,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -226,7 +227,7 @@ func (l *legacy) staleNotice() obj {
 // grants and entitlement windows.
 func (w *world) converge() {
 	w.t.Helper()
-	res, err := embedoperator.New(w.rt).Converge(w.t.Context(), w.client[embedded].MerchantID())
+	res, err := hosttools.Converge(w.t.Context(), engine.Graph(w.rt), w.client[embedded].MerchantID())
 	require.NoError(w.t, err)
 	w.t.Logf("converge: %+v", res)
 	w.settle()

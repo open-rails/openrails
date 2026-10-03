@@ -92,7 +92,7 @@ type custodianInstrumentStore interface {
 // custodialPSP is the resolved arrangement one custodian sale charges through:
 // the PSP's own gateway credentials plus the custodian that holds the card.
 type custodialPSP struct {
-	Custody            *config.CustodianConfig
+	Custody            *config.ResolvedCustodian
 	GatewaySecurityKey string
 	// The charging PSP's exact identity and declared credential set (#1055).
 	MerchantID merchant.ID

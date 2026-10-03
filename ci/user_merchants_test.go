@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
 )
 
 // GET /v1/merchants is the console's merchant list (#1106): the live merchants
@@ -19,38 +18,38 @@ func TestUserMerchantsListing(t *testing.T) {
 	f := newFixture(t)
 	cp := f.attachControlPlane(t, reserving())
 	ctx := t.Context()
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	member, memberToken := newUser(t, cp)
 	owner, ownerToken := newOwner(t, cp)
 	verifyEmail(t, cp, member)
-	u, err := cp.Core().User(ctx, iam.UserByID(member))
+	u, err := cp.AuthKit().User(ctx, iam.UserByID(member))
 	require.NoError(t, err)
 
 	own := uniqueName("a-own")
-	mine, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: own, OwnerUserID: member})
+	mine, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: own, OwnerUserID: member})
 	require.NoError(t, err)
 	require.NoError(t, cp.SetMerchantDisplayName(ctx, mine.MerchantID, "Own Shop"))
 	viewed := uniqueName("b-viewed")
-	theirs, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: viewed, OwnerUserID: owner})
+	theirs, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: viewed, OwnerUserID: owner})
 	require.NoError(t, err)
 	w := call(t, handler, ownerToken, http.MethodPost, "/v1/merchant/team/invites", viewed, map[string]string{"email": *u.Email, "role": "viewer"})
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: uniqueName("c-unrelated"), OwnerUserID: owner})
+	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantRequest{Slug: uniqueName("c-unrelated"), OwnerUserID: owner})
 	require.NoError(t, err)
 
-	list := func(token string) []embedcontrolplane.UserMerchant {
+	list := func(token string) []billing.UserMerchant {
 		w := call(t, handler, token, http.MethodGet, "/v1/merchants", "", nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var body struct {
-			Object string                           `json:"object"`
-			Data   []embedcontrolplane.UserMerchant `json:"data"`
+			Object string                 `json:"object"`
+			Data   []billing.UserMerchant `json:"data"`
 		}
 		require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
 		require.Equal(t, "list", body.Object)
 		return body.Data
 	}
-	require.Equal(t, []embedcontrolplane.UserMerchant{
+	require.Equal(t, []billing.UserMerchant{
 		{ID: mine.MerchantID, Slug: own, DisplayName: "Own Shop", Role: "owner"},
 		{ID: theirs.MerchantID, Slug: viewed, Role: "viewer"},
 	}, list(memberToken))
@@ -61,7 +60,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	result, err := cp.RetireUnusedMerchant(ctx, mine.MerchantID, mine.GroupID)
 	require.NoError(t, err)
 	require.True(t, result.Retired)
-	require.Equal(t, []embedcontrolplane.UserMerchant{{ID: theirs.MerchantID, Slug: viewed, Role: "viewer"}}, list(memberToken))
+	require.Equal(t, []billing.UserMerchant{{ID: theirs.MerchantID, Slug: viewed, Role: "viewer"}}, list(memberToken))
 
 	w = call(t, handler, "not-a-token", http.MethodGet, "/v1/merchants", "", nil)
 	require.Equal(t, http.StatusUnauthorized, w.Code)

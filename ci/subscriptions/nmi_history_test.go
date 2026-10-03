@@ -17,7 +17,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -28,7 +28,7 @@ func (nmiHistoryPass) Kind() string { return "openrails.nmi_history" }
 // readNMIHistory runs one pass of the NMI history job (#1120).
 func (w *world) readNMIHistory() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), nmiHistoryPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(w.t.Context(), nmiHistoryPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
 	w.waitJob(res.Job.ID)
 }

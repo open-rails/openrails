@@ -2,6 +2,7 @@ package openrailsgin
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -19,22 +20,42 @@ import (
 	"github.com/open-rails/openrails/internal/http/routebundle"
 )
 
+// Bundle stands in for a Client's routes in these unit tests.
+type Bundle struct {
+	routes   []openrails.Route
+	rootOnly bool
+}
+
+func Routes(s routeSource) (*Bundle, error) { return &Bundle{routes: s.routes, rootOnly: s.root}, nil }
+
+func toRoutes(in []routebundle.Route) []openrails.Route {
+	out := make([]openrails.Route, len(in))
+	for i, r := range in {
+		out[i] = openrails.Route{Method: r.Method, Path: r.Path, Handler: r.Handler}
+	}
+	return out
+}
+
+func (b *Bundle) Mount(target gin.IRoutes) error {
+	if b == nil || target == nil {
+		return errors.New("nil bundle or router")
+	}
+	return mount(target, b.routes, b.rootOnly)
+}
+
 type routeSource struct {
-	routes []embed.HTTPRoute
+	routes []openrails.Route
 	root   bool
 }
 
-func (s routeSource) HTTPRoutes() ([]embed.HTTPRoute, error) { return s.routes, nil }
-func (s routeSource) HTTPRequiresRoot() bool                 { return s.root }
-
-func denyDelegated(calls *int) billingauth.DelegatedAuthenticator {
-	return billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
+func denyDelegated(calls *int) func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
+	return func(*http.Request) (*billingauth.DelegatedPrincipal, error) {
 		*calls++
 		return nil, billingauth.ErrUnauthenticated
-	})
+	}
 }
 
-// inventoryBundle builds every configured route family the way embed.Runtime does.
+// inventoryBundle builds every configured route family the way the engine does.
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
@@ -47,7 +68,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 		}),
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth}}
-	policy := &embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: denyDelegated(new(int))}},
+	policy := &config.HTTPConfig{Checkout: true, CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true, Authenticate: denyDelegated(new(int))}},
 		MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
@@ -55,7 +76,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 		table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, "/billing")
 	}
 	require.NoError(t, embedhttp.ValidateRouteTable(table))
-	bundle, err := Routes(routeSource{routes: routebundle.FromTable(table)})
+	bundle, err := Routes(routeSource{routes: toRoutes(routebundle.FromTable(table))})
 	require.NoError(t, err)
 	return bundle
 }
@@ -107,7 +128,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 	const body = "{ \"whitespace\": true, \"unicode\": \"é\" }\n"
 	const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=original"
 	calls := 0
-	b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b := &Bundle{routes: []openrails.Route{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -132,7 +153,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 
 func TestRootOnlyBundleRefusesGroupBeforeRegistration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	b, err := Routes(routeSource{root: true, routes: []embed.HTTPRoute{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b, err := Routes(routeSource{root: true, routes: []openrails.Route{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/admin/js/site.js?q=raw", r.RequestURI)
 		w.WriteHeader(http.StatusNoContent)
 	})}}})
@@ -163,9 +184,9 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		{[]string{"/api/v1/merchants/{slug}/billing/me"}, true},
 	} {
 		calls := 0
-		policy := &embed.HTTPConfig{}
+		policy := &config.HTTPConfig{}
 		for _, prefix := range tc.prefixes {
-			policy.CustomerRoutes = append(policy.CustomerRoutes, embed.CustomerRoutesConfig{Prefix: prefix, Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: denyDelegated(&calls)})
+			policy.CustomerRoutes = append(policy.CustomerRoutes, config.CustomerRoutesConfig{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Authenticate: denyDelegated(&calls)})
 		}
 		err := embedhttp.ValidateHTTPConfig(policy, nil)
 		if err == nil {
@@ -173,7 +194,7 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 			require.NoError(t, buildErr)
 			if err = embedhttp.ValidateRouteTable(table); err == nil {
 				engine := gin.New()
-				require.NoError(t, (&Bundle{routes: routebundle.FromTable(table)}).Mount(engine))
+				require.NoError(t, (&Bundle{routes: toRoutes(routebundle.FromTable(table))}).Mount(engine))
 				for _, request := range []struct {
 					method, path string
 					status       int

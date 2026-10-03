@@ -38,7 +38,8 @@ db:
   username: app
   password: app_password
   sslmode: disable
-  schema: billing # every OpenRails table lives here; defaults to 'billing' (env DB_SCHEMA)
+
+schema: billing # every OpenRails table lives here; defaults to 'billing' (env DB_SCHEMA)
 
 redis:
   addr: localhost:6380

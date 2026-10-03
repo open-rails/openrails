@@ -85,7 +85,7 @@ type Config struct {
 	//   - "full":     normal operation
 	//   - "limited":  no system-initiated provider writes
 	//   - "readonly": no provider writes
-	// Required: embed.New (and so run-server) refuses it unset (#1063). Readers
+	// Required: openrails.New (and so run-server) refuses it unset (#1063). Readers
 	// of an unset value still fail closed to "readonly" (Paul 2026-07-02).
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
 
@@ -93,6 +93,23 @@ type Config struct {
 	// authentication, transport security or credential encryption. Constructors
 	// require an explicit posture independently of provider write permissions.
 	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
+
+	// Schema is the Postgres schema OpenRails' tables live in (default
+	// "billing"; env DB_SCHEMA). Read the effective value through SchemaName.
+	Schema string `koanf:"schema,omitempty"`
+	// River selects who runs the job fleet. Zero is RiverManaged.
+	River RiverOwnership `koanf:"-"`
+	// RiverSchema is the managed fleet's schema (default public). A host-owned
+	// fleet keeps River's tables where the host's client puts them.
+	RiverSchema string `koanf:"-"`
+	// Merchant declares the one merchant an embedded engine serves; zero
+	// leaves the engine unbound (callers select a merchant per operation).
+	Merchant MerchantDeclaration `koanf:"-"`
+	// HTTP selects the route groups Client.Routes publishes; nil publishes none.
+	HTTP *HTTPConfig `koanf:"-"`
+	// ControlPlane attaches the OpenRails-owned AuthKit control plane (the
+	// standalone server and hosted products); nil for hosts with their own auth.
+	ControlPlane *ControlPlaneConfig `koanf:"-"`
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1.
 	// Used only to generate provider callbacks and customer billing links.
@@ -121,7 +138,7 @@ type Config struct {
 
 	// AdminConsole gates the merchant admin console SPA served at /admin/
 	// (#740). Default OFF. Enabling it requires console assets in the binary
-	// (#754: `task admin-build` / embed.Options.ConsoleAssets) — enabled
+	// (#754: `task admin-build` builds web/admin) — enabled
 	// without assets refuses boot. Env: ADMIN_CONSOLE_ENABLED,
 	// ADMIN_CONSOLE_AUTH_BASE_URL, ADMIN_CONSOLE_API_BASE_URL.
 	AdminConsole *AdminConsoleConfig `koanf:"admin_console,omitempty"`
@@ -569,11 +586,6 @@ type DBConfig struct {
 	Password string `koanf:"password"`
 	SSLMode  string `koanf:"sslmode"`
 
-	// Schema holds OpenRails billing tables, defaulting to "billing". Configure
-	// it through db.schema or DB_SCHEMA. River's runtime tables live separately.
-	// Read the effective normalized value through SchemaName().
-	Schema string `koanf:"schema"`
-
 	// SQLTrace enables debug-level pgx query tracing on pools OpenRails
 	// constructs (#712; was the ad-hoc OPENRAILS_SQL_TRACE env read). Env:
 	// DB_SQL_TRACE.
@@ -633,9 +645,8 @@ const DefaultSchema = "billing"
 // for this value, so hosts must keep it in lockstep.
 const MigratekitApp = "openrails"
 
-// RiverSchema is the default namespace for managed River tables. Embedded
-// hosts can select another managed schema or supply a client with its own schema.
-const RiverSchema = "public"
+// DefaultRiverSchema is the default namespace for managed River tables.
+const DefaultRiverSchema = "public"
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
 // start with a letter or underscore and contain only letters, digits, and
@@ -643,12 +654,10 @@ const RiverSchema = "public"
 // build search_path / River schema names without quoting hazards.
 var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// SchemaName returns the effective OpenRails Postgres schema (issue #165, #471),
-// applying the `billing` default and normalization (trim + lower-case). All
-// OpenRails code that needs the schema (migrator, River client construction,
-// runtime query rewriting) MUST go through this accessor rather than reading
-// DBConfig.Schema directly or hardcoding a schema name.
-func (c *DBConfig) SchemaName() string {
+// SchemaName returns the effective OpenRails Postgres schema (#165, #471):
+// Schema trimmed and lower-cased, default billing. Code that needs the schema
+// reads it here, never Schema directly.
+func (c *Config) SchemaName() string {
 	if c == nil {
 		return DefaultSchema
 	}
@@ -673,7 +682,7 @@ func validateSchema(raw string) error {
 		return nil // empty == use default; valid
 	}
 	if !schemaIdentRe.MatchString(s) {
-		return fmt.Errorf("db.schema %q is not a valid Postgres identifier (letters, digits, underscore only; must start with a letter or underscore)", raw)
+		return fmt.Errorf("schema %q is not a valid Postgres identifier (letters, digits, underscore only; must start with a letter or underscore)", raw)
 	}
 	return nil
 }
@@ -703,7 +712,7 @@ var ReservedPSPRails = map[string]models.Rail{
 	"solana": models.RailSolana,
 }
 
-// PSPConfig is one configured PSP: the rail (gateway) it
+// ResolvedPSP is one configured PSP: the rail (gateway) it
 // is on plus that rail's credentials. The map key in a PSPSet is the
 // operator-chosen account NAME (e.g. "mobius", "paykings" on rail nmi).
 //
@@ -713,7 +722,7 @@ var ReservedPSPRails = map[string]models.Rail{
 // PROGRAMMATIC-ONLY (#521/#711): no yaml/env loader parses these structs.
 // Embedded hosts build them in code (embedded.PaymentProvider); standalone
 // declares rail accounts in the merchant config manifest instead.
-type PSPConfig struct {
+type ResolvedPSP struct {
 	// ID is the immutable psps row id. Resolution OUTPUT only; zero for static sets.
 	ID uuid.UUID
 	// Key is the merchant's PSP key for this account (psps.key / the manifest
@@ -747,7 +756,7 @@ type PSPConfig struct {
 	// Custody (or#879/or#880) is the axis orthogonal to the rail: nil means
 	// the PSP holds its own instruments. A third-party custodian holds the
 	// card and proxies it into THIS PSP's gateway.
-	Custody *CustodianConfig
+	Custody *ResolvedCustodian
 }
 
 // NMIRailConfig — programmatic-only (see PSPConfig). Field
@@ -792,12 +801,12 @@ type SolanaRailConfig struct {
 	Network string
 }
 
-// CustodianConfig (#795 / or#879 / or#880) is the RESOLVED runtime shape of a
+// ResolvedCustodian (#795 / or#879 / or#880) is the RESOLVED runtime shape of a
 // declared custodian: who holds the card, under what tenant identity, and the
 // credentials to detokenize it into a gateway. It is resolved from ONE
 // custodians row and may be shared by every PSP that references it — the
 // gateway credentials themselves stay on the rail block, one source of truth.
-type CustodianConfig struct {
+type ResolvedCustodian struct {
 	// Key is the merchant's name for this custodian (custodians.key).
 	Key string
 	// Custodian is the vendor KIND (models.CustodianBasisTheory) — the value
@@ -831,11 +840,11 @@ type CustodianConfig struct {
 // is not part of config.yaml/.env; private standalone installs seed provider
 // credentials through merchant bootstrap/Vault state, and embedded hosts may
 // pass a set programmatically during construction.
-type PSPSet map[string]*PSPConfig
+type PSPSet map[string]*ResolvedPSP
 
 // EffectiveRail returns the account's rail (gateway), inferring it from a reserved
 // account name when Rail is unset.
-func (p *PSPConfig) EffectiveRail(name string) models.Rail {
+func (p *ResolvedPSP) EffectiveRail(name string) models.Rail {
 	if p.Rail != "" {
 		return models.Rail(strings.ToLower(string(p.Rail)))
 	}
@@ -849,7 +858,7 @@ func (p *PSPConfig) EffectiveRail(name string) models.Rail {
 // EffectiveAccountID is the account's operator-declared rail-native identity
 // (#641). ValidateRailSet requires account_id — there is NO fallback to the
 // config map name (an account is never indexed by a name we made up).
-func (p *PSPConfig) EffectiveAccountID() string {
+func (p *ResolvedPSP) EffectiveAccountID() string {
 	if p == nil {
 		return ""
 	}
@@ -868,7 +877,7 @@ func ValidateRailAccountID(rail models.Rail, accountID string) error {
 	return nil
 }
 
-func (p *PSPConfig) normalizeTypedBlock(name string) error {
+func (p *ResolvedPSP) normalizeTypedBlock(name string) error {
 	if p == nil {
 		return nil
 	}
@@ -916,33 +925,33 @@ func (p *PSPConfig) normalizeTypedBlock(name string) error {
 }
 
 // IsNMI returns true if this rail config is for an NMI-backed rail.
-func (p *PSPConfig) IsNMI(name string) bool {
+func (p *ResolvedPSP) IsNMI(name string) bool {
 	return p.EffectiveRail(name) == models.RailNMI
 }
 
 // IsCCBill returns true if this rail config is for CCBill.
-func (p *PSPConfig) IsCCBill(name string) bool {
+func (p *ResolvedPSP) IsCCBill(name string) bool {
 	return p.EffectiveRail(name) == models.RailCCBill
 }
 
 // IsStripe returns true if this rail config is for Stripe.
-func (p *PSPConfig) IsStripe(name string) bool {
+func (p *ResolvedPSP) IsStripe(name string) bool {
 	return p.EffectiveRail(name) == models.RailStripe
 }
 
 // IsSolana returns true if this rail config is for Solana.
-func (p *PSPConfig) IsSolana(name string) bool {
+func (p *ResolvedPSP) IsSolana(name string) bool {
 	return p.EffectiveRail(name) == models.RailSolana
 }
 
 // HasThirdPartyCustody reports whether a custodian other than the PSP holds
 // the instruments charged through this PSP (or#879).
-func (p *PSPConfig) HasThirdPartyCustody() bool {
+func (p *ResolvedPSP) HasThirdPartyCustody() bool {
 	return p != nil && p.Custody != nil && p.Custody.Custodian != "" && p.Custody.Custodian != models.CustodianPSP
 }
 
 // CustodianKey is the declared custodian reference for this PSP, normalized.
-func (p *PSPConfig) CustodianKey() string {
+func (p *ResolvedPSP) CustodianKey() string {
 	if p == nil {
 		return ""
 	}
@@ -951,7 +960,7 @@ func (p *PSPConfig) CustodianKey() string {
 
 // ToNMIProviderSettings converts the rail config to NMI client settings.
 // Only valid for NMI-type rails.
-func (p *PSPConfig) ToNMIProviderSettings() *NMIProviderSettings {
+func (p *ResolvedPSP) ToNMIProviderSettings() *NMIProviderSettings {
 	s := &NMIProviderSettings{}
 	if p.NMI != nil {
 		s.SecurityKey = p.NMI.SecurityKey
@@ -977,7 +986,7 @@ func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error) {
 // valid for CCBill-type rails. The clientAccnum/clientSubacc pair is derived
 // from the declared AccountID (#711 — identity is declared once); a malformed
 // AccountID leaves the pair empty and is rejected by validateCCBillRail.
-func (p *PSPConfig) ToCCBillConfig() *CCBillConfig {
+func (p *ResolvedPSP) ToCCBillConfig() *CCBillConfig {
 	c := &CCBillConfig{} // TestMode set by caller based on global test_mode
 	if acc, sub, err := SplitCCBillAccountID(p.EffectiveAccountID()); err == nil {
 		c.ClientAccNum = acc
@@ -1234,7 +1243,7 @@ func Validate(cfg *Config) error {
 	}
 
 	// Always validate database configuration
-	if err := ValidateDatabase(cfg.DB); err != nil {
+	if err := ValidateDatabase(cfg); err != nil {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
@@ -1480,7 +1489,7 @@ func validateRails(cfg *Config, rails PSPSet) error {
 }
 
 // validateNMIRail validates an NMI-type rail
-func validateNMIRail(name string, proc *PSPConfig) error {
+func validateNMIRail(name string, proc *ResolvedPSP) error {
 	nmi := proc.NMI
 	if nmi == nil {
 		return fmt.Errorf("rail '%s' (nmi): nmi block is required", name)
@@ -1498,7 +1507,7 @@ func validateNMIRail(name string, proc *PSPConfig) error {
 }
 
 // validateCCBillRail validates a CCBill-type rail
-func validateCCBillRail(name string, proc *PSPConfig) error {
+func validateCCBillRail(name string, proc *ResolvedPSP) error {
 	// #697/#711: identity checks run even in dev — the clientAccnum/clientSubacc
 	// pair is DERIVED from the dash-joined account_id, so a missing or malformed
 	// account_id is a config bug, not a missing credential.
@@ -1526,7 +1535,7 @@ func validateCCBillRail(name string, proc *PSPConfig) error {
 }
 
 // validateStripeRail validates a Stripe-type rail
-func validateStripeRail(name string, proc *PSPConfig) error {
+func validateStripeRail(name string, proc *ResolvedPSP) error {
 	stripe := proc.Stripe
 	if stripe == nil {
 		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
@@ -1545,7 +1554,7 @@ func validateStripeRail(name string, proc *PSPConfig) error {
 // validateSolanaRail validates only config-loading concerns. Solana token
 // pricing/default policy belongs to internal/modules/solana/tokens and is
 // applied at runtime by configureSolanaRail.
-func validateSolanaRail(name string, proc *PSPConfig) error {
+func validateSolanaRail(name string, proc *ResolvedPSP) error {
 	solana := proc.Solana
 	if solana == nil {
 		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
@@ -1569,7 +1578,7 @@ func validateSolanaRail(name string, proc *PSPConfig) error {
 // rail: only rails the custodian's registry entry names as proxy rails may
 // reference it, and a referenced custodian must be fully armed or the checkout
 // it backs is silently dead.
-func validateCustody(name string, proc *PSPConfig) error {
+func validateCustody(name string, proc *ResolvedPSP) error {
 	if !proc.HasThirdPartyCustody() {
 		return nil
 	}
@@ -1616,7 +1625,7 @@ func (set PSPSet) RailKeysByType(rail models.Rail) []string {
 // rail. Database-backed new-work selection uses created_at to pick the newest
 // active account; config-only callers do not have that timestamp, so they use
 // sorted config keys.
-func (set PSPSet) ActiveRailByType(rail models.Rail) (string, *PSPConfig, error) {
+func (set PSPSet) ActiveRailByType(rail models.Rail) (string, *ResolvedPSP, error) {
 	keys := set.RailKeysByType(rail)
 	for _, key := range keys {
 		proc := set[key]
@@ -1641,7 +1650,7 @@ func (set PSPSet) ActiveRailKeysByType(rail models.Rail) []string {
 
 // FindByAccountID returns the configured account on a rail whose EffectiveAccountID
 // matches accountID (#641), used to target a specific PSP.
-func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfig, bool) {
+func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*ResolvedPSP, bool) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return nil, false
@@ -1655,13 +1664,13 @@ func (set PSPSet) FindByAccountID(rail models.Rail, accountID string) (*PSPConfi
 }
 
 // GetStripeRail returns the configured active Stripe rail.
-func (set PSPSet) GetStripeRail() *PSPConfig {
+func (set PSPSet) GetStripeRail() *ResolvedPSP {
 	_, proc, _ := set.ActiveRailByType(models.RailStripe)
 	return proc
 }
 
 // GetSolanaRail returns the configured active Solana rail.
-func (set PSPSet) GetSolanaRail() *PSPConfig {
+func (set PSPSet) GetSolanaRail() *ResolvedPSP {
 	_, proc, _ := set.ActiveRailByType(models.RailSolana)
 	return proc
 }
@@ -1755,24 +1764,16 @@ func assembleDBURL(cfg *Config) {
 	cfg.DB.URL = connStr
 }
 
-// ValidateDatabase validates database-only configuration for offline operators.
-func ValidateDatabase(cfg *DBConfig) error {
-	if cfg == nil {
+// ValidateDatabase validates the database configuration and schema.
+func ValidateDatabase(cfg *Config) error {
+	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("database configuration is required")
 	}
-
-	// Database is always PostgreSQL
-	// After assembleDBURL, cfg.URL should always be set
-	if cfg.URL == "" {
+	if cfg.DB.URL == "" {
 		return fmt.Errorf("database URL could not be determined")
 	}
-
-	// OpenRails Postgres schema must be a safe identifier (#165).
-	if err := validateSchema(cfg.Schema); err != nil {
-		return err
-	}
-
-	return nil
+	// The schema is interpolated into SQL and must be a safe identifier (#165).
+	return validateSchema(cfg.Schema)
 }
 
 // GetDefaultBillingConfig supplies infrastructure defaults without security exceptions.
@@ -1788,8 +1789,8 @@ func GetDefaultBillingConfig() *Config {
 			Username: "app",
 			Password: "app_password",
 			SSLMode:  "disable",
-			Schema:   DefaultSchema,
 		},
+		Schema: DefaultSchema,
 		Redis: &RedisConfig{
 			// Match docker-compose's host-published Garnet port.
 			Addr:     "localhost:6380",

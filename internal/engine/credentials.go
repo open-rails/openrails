@@ -1,4 +1,4 @@
-package embed
+package engine
 
 import (
 	"context"
@@ -11,22 +11,12 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ProviderCredentialSnapshot supplies immutable host-owned credentials without
-// changing provider metadata or activating an account. Environment comes from
-// the Runtime's explicit credential posture. No values are persisted.
-type ProviderCredentialSnapshot struct {
-	MerchantID  merchant.ID
-	Rail        string
-	AccountID   string
-	Credentials map[string]string
-}
-
-func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values []ProviderCredentialSnapshot) error {
+func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values []config.ProviderCredentialSnapshot) error {
 	if len(values) == 0 {
 		return nil
 	}
 	if rt.Config.SecretStoreBackend() != config.SecretBackendSnapshot || rt.ManifestSecrets == nil {
-		return fmt.Errorf("ProviderCredentials requires snapshot credential custody")
+		return fmt.Errorf("openrails: Deps.ProviderCredentials requires snapshot credential custody")
 	}
 	type entry struct {
 		merchant merchant.ID

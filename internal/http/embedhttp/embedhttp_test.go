@@ -58,14 +58,14 @@ func TestCapabilities(t *testing.T) {
 
 	// Customer features follow the mounted customer scope, not provider support.
 	for _, tc := range []struct {
-		scope          CustomerHTTPScope
+		scope          config.CustomerHTTPScope
 		portal, solana bool
 	}{
-		{CustomerSelfService, true, true},
-		{CustomerBillingManagement, false, true},
-		{CustomerSubscriptionManagement, false, false},
+		{config.CustomerSelfService, true, true},
+		{config.CustomerBillingManagement, false, true},
+		{config.CustomerSubscriptionManagement, false, false},
 	} {
-		caps := configuredCapabilities(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Scope: tc.scope}}}, routesurface.AllProviderRoutes())
+		caps := configuredCapabilities(config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Scope: tc.scope}}}, routesurface.AllProviderRoutes())
 		require.True(t, caps.RouteGroups[RouteSetCustomer])
 		require.Equal(t, tc.portal, caps.Features["stripe_billing_portal"], tc.scope)
 		require.Equal(t, tc.solana, caps.Features["solana_subscription_management"], tc.scope)
@@ -80,33 +80,33 @@ func TestCapabilities(t *testing.T) {
 func TestHTTPConfigValidation(t *testing.T) {
 	authn := identityAuth(billingauth.Identity{}, nil)
 	full := &billingauth.Integration{Authentication: authn.Authentication, Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error { return nil })}
-	host := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) { return nil, nil })
-	customer := func(c CustomerRoutesConfig) *HTTPConfig {
-		return &HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{c}}
+	host := func(*http.Request) (*billingauth.DelegatedPrincipal, error) { return nil, nil }
+	customer := func(c config.CustomerRoutesConfig) *config.HTTPConfig {
+		return &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{c}}
 	}
 	for _, tc := range []struct {
 		name string
-		cfg  *HTTPConfig
+		cfg  *config.HTTPConfig
 		auth *billingauth.Integration
 		ok   bool
 	}{
 		{"no HTTP", nil, nil, true},
-		{"checkout without authentication", &HTTPConfig{Checkout: true}, nil, false},
-		{"checkout", &HTTPConfig{Checkout: true}, authn, true},
-		{"management without authorization", &HTTPConfig{MerchantAdmin: true}, authn, false},
-		{"merchant API without authorization", &HTTPConfig{MerchantAPI: true}, authn, false},
-		{"management", &HTTPConfig{MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}, full, true},
-		{"customer without any authenticator", customer(CustomerRoutesConfig{Merchant: "store"}), nil, false},
-		{"native customer without merchant", customer(CustomerRoutesConfig{}), authn, false},
-		{"native customer", customer(CustomerRoutesConfig{Merchant: "store"}), authn, true},
-		{"treasury off the canonical mount", customer(CustomerRoutesConfig{Prefix: "/v1/tenant/me", Treasury: true, DelegatedAuthenticator: host}), nil, false},
-		{"unknown scope", customer(CustomerRoutesConfig{Scope: 9, DelegatedAuthenticator: host}), nil, false},
-		{"parameterized prefix", customer(CustomerRoutesConfig{Prefix: "/v1/tenants/{tenant}/me", DelegatedAuthenticator: host}), nil, true},
+		{"checkout without authentication", &config.HTTPConfig{Checkout: true}, nil, false},
+		{"checkout", &config.HTTPConfig{Checkout: true}, authn, true},
+		{"management without authorization", &config.HTTPConfig{MerchantAdmin: true}, authn, false},
+		{"merchant API without authorization", &config.HTTPConfig{MerchantAPI: true}, authn, false},
+		{"management", &config.HTTPConfig{MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}, full, true},
+		{"customer without any authenticator", customer(config.CustomerRoutesConfig{Merchant: "store"}), nil, false},
+		{"native customer without merchant", customer(config.CustomerRoutesConfig{}), authn, false},
+		{"native customer", customer(config.CustomerRoutesConfig{Merchant: "store"}), authn, true},
+		{"treasury off the canonical mount", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenant/me", Treasury: true, Authenticate: host}), nil, false},
+		{"unknown scope", customer(config.CustomerRoutesConfig{Scope: 9, Authenticate: host}), nil, false},
+		{"parameterized prefix", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenants/{tenant}/me", Authenticate: host}), nil, true},
 	} {
 		require.Equal(t, tc.ok, ValidateHTTPConfig(tc.cfg, tc.auth) == nil, tc.name)
 	}
 	for _, prefix := range []string{"/", "me", "/a/../b", "/a/", "/a/*", "/a b", "/a/{x.y}", "/a/b{c}", "/a/{}"} {
-		require.Error(t, ValidateHTTPConfig(customer(CustomerRoutesConfig{Prefix: prefix, DelegatedAuthenticator: host}), nil), prefix)
+		require.Error(t, ValidateHTTPConfig(customer(config.CustomerRoutesConfig{Prefix: prefix, Authenticate: host}), nil), prefix)
 	}
 }
 
@@ -149,14 +149,14 @@ func TestNativeCustomerIdentity(t *testing.T) {
 		id   billingauth.Identity
 		ok   bool
 	}{
-		{"canonical customer", billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, true},
-		{"no customer mapping", billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "opaque", Issuer: "issuer-a", CredentialClass: session}, false},
-		{"opaque customer", billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: "user-1", CredentialClass: session}, false},
-		{"non-canonical uuid", billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: strings.ToUpper(customer), CredentialClass: session}, false},
-		{"no issuer", billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "opaque", CustomerID: customer, CredentialClass: session}, false},
-		{"invoker scoped", billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session, Invoker: "x"}, false},
+		{"canonical customer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, true},
+		{"no customer mapping", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CredentialClass: session}, false},
+		{"opaque customer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: "user-1", CredentialClass: session}, false},
+		{"non-canonical uuid", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: strings.ToUpper(customer), CredentialClass: session}, false},
+		{"no issuer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", CustomerID: customer, CredentialClass: session}, false},
+		{"invoker scoped", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session, Invoker: "x"}, false},
 		{"machine", billingauth.Identity{Kind: billingauth.Machine, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
-		{"delegated", billingauth.Identity{Kind: billingauth.DelegatedUser, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
+		{"delegated", billingauth.Identity{Kind: billingauth.Delegated, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
 		{"unknown kind", billingauth.Identity{Kind: "unknown", SubjectID: "opaque", Issuer: "issuer-a", CustomerID: customer, CredentialClass: session}, false},
 	} {
 		calls := 0
@@ -177,7 +177,7 @@ func TestNativeCustomerIdentity(t *testing.T) {
 		require.Equal(t, target.MerchantID.String(), p.MerchantID)
 	}
 
-	auth := identityAuth(billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "s", Issuer: "i", CustomerID: customer, CredentialClass: session}, nil)
+	auth := identityAuth(billingauth.Identity{Kind: billingauth.User, SubjectID: "s", Issuer: "i", CustomerID: customer, CredentialClass: session}, nil)
 	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v2/me/invoices/x", nil))
 	r = r.WithContext(merchanttarget.WithResolved(r.Context(), billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store"}))
 	_, err := nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
@@ -201,7 +201,7 @@ func TestIntegrationGate(t *testing.T) {
 		r := requestauth.Begin(httptest.NewRequest(http.MethodGet, path, nil))
 		return r.WithContext(merchanttarget.WithResolved(r.Context(), target))
 	}
-	staff := billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "staff", Issuer: "i", CredentialClass: billingauth.CredentialClassUserSession}
+	staff := billingauth.Identity{Kind: billingauth.User, SubjectID: "staff", Issuer: "i", CredentialClass: billingauth.CredentialClassUserSession}
 	allow := billingauth.AuthorizationFunc(func(_ context.Context, _ *http.Request, _ billingauth.Identity, q billingauth.Requirement) error {
 		require.Equal(t, target, q.Target)
 		return nil
@@ -214,7 +214,7 @@ func TestIntegrationGate(t *testing.T) {
 
 	p, err := authorize(staff, allow, resolved("/v2/merchant/products"), permissions.MerchantCatalogRead)
 	require.NoError(t, err)
-	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Kind: billingauth.NativeUser, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
+	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Kind: billingauth.User, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
 
 	_, err = authorize(staff, allow, resolved("/v1/catalog"), permissions.MerchantCatalogOwnRead)
 	requireGate(t, err, http.StatusForbidden)

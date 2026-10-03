@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/riverqueue/river"
 )
@@ -206,7 +206,7 @@ func TestEmbeddedRequiresWriteMode(t *testing.T) {
 	pool, err := pgxpool.New(t.Context(), dsn(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	_, err = embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn(t)}}, PGXPool: pool, River: embed.RiverFromHost()})
+	_, err = openrails.New(t.Context(), openrails.Config{TestMode: openrails.Sandbox, River: openrails.RiverHostOwned}, openrails.Deps{Postgres: pool})
 	require.ErrorContains(t, err, "ProviderWriteMode is required")
 }
 
@@ -776,7 +776,7 @@ func TestEngineCrashDurability(t *testing.T) {
 				} else {
 					g = w.nmi.hold(newGate(tc.match[rail], tc.commit))
 				}
-				_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+				_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				promoteCtx, stopPromoting := context.WithCancel(t.Context())
 				promoterDone := make(chan struct{})

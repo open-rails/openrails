@@ -11,8 +11,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
 )
 
 // invoicePass is the hourly invoice pass: arrears past their threshold are
@@ -38,7 +38,7 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	require.NoError(t, err)
 
 	w.advance(time.Minute)
-	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: embed.QueueBilling})
+	res, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(t, err)
 	w.waitJob(res.Job.ID)
 	invoices, _, err := client.ListMerchantInvoices(ctx, billing.MerchantInvoiceFilter{CustomerID: c.id}, 10, 0)

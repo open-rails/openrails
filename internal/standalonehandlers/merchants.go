@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -15,7 +15,7 @@ import (
 
 // MerchantLister is the control-plane surface behind GET /v1/merchants.
 type MerchantLister interface {
-	ListUserMerchants(ctx context.Context, userID string) ([]controlplane.UserMerchant, error)
+	ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error)
 }
 
 // MerchantListMine handles GET /v1/merchants: the live merchants the signed-in
@@ -85,15 +85,15 @@ func merchantCreateError(r *httprequest.Request, err error) {
 	switch {
 	case errors.Is(err, merchants.ErrInvalidName):
 		refuse(http.StatusBadRequest, "invalid_name", err.Error())
-	case errors.Is(err, merchants.ErrMerchantNameTaken):
+	case errors.Is(err, billing.ErrMerchantNameTaken):
 		refuse(http.StatusConflict, "name_taken", "that merchant name is taken")
-	case errors.Is(err, controlplane.ErrMerchantSlugReserved):
+	case errors.Is(err, billing.ErrMerchantSlugReserved):
 		refuse(http.StatusConflict, "name_reserved", "that merchant name is reserved")
-	case errors.Is(err, controlplane.ErrMerchantCreationEmailUnverified):
-		refuse(http.StatusForbidden, "email_unverified", controlplane.ErrMerchantCreationEmailUnverified.Error())
-	case errors.Is(err, controlplane.ErrMerchantCreationPaymentMethodRequired):
-		refuse(http.StatusPaymentRequired, "payment_method_required", controlplane.ErrMerchantCreationPaymentMethodRequired.Error())
-	case errors.Is(err, controlplane.ErrMerchantCreationRefused):
+	case errors.Is(err, billing.ErrMerchantCreationEmailUnverified):
+		refuse(http.StatusForbidden, "email_unverified", billing.ErrMerchantCreationEmailUnverified.Error())
+	case errors.Is(err, billing.ErrMerchantCreationPaymentMethodRequired):
+		refuse(http.StatusPaymentRequired, "payment_method_required", billing.ErrMerchantCreationPaymentMethodRequired.Error())
+	case errors.Is(err, billing.ErrMerchantCreationRefused):
 		refuse(http.StatusForbidden, "creation_refused", "merchant creation refused")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "merchant creation failed")

@@ -13,8 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/failpoint"
+	"github.com/open-rails/openrails/internal/hosttools"
 )
 
 type lifeRow struct {
@@ -125,12 +126,12 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 func TestLegacyImportConvergesAtCommit(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	var res []embedoperator.ConvergeResult
+	var res []hosttools.ConvergeMerchantResult
 	remove := failpoint.Set(func(ctx context.Context, s failpoint.Site) error {
 		if s.Point != failpoint.Committed || s.Kind != "billing_import" {
 			return nil
 		}
-		r, err := embedoperator.New(w.rt).Converge(context.Background(), w.client[embedded].MerchantID())
+		r, err := hosttools.Converge(context.Background(), engine.Graph(w.rt), w.client[embedded].MerchantID())
 		res = append(res, r)
 		return err
 	})

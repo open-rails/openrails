@@ -32,19 +32,10 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// BillingConfig / MerchantConfig alias the bootstrap merchant-manifest model
-// so hosts can hand their parsed manifest to the CLI lanes (#723).
-type BillingConfig = boot.BillingConfig
-type MerchantConfig = boot.MerchantConfig
-
-// InvoiceConfig aliases the merchant invoice/collection policy block so
-// embedded hosts can set it programmatically (#798).
-type InvoiceConfig = boot.InvoiceConfig
-
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
 	StripeClients *stripeapi.Factory
-	// NMITransport replaces the NMI wire (a test seam, like embed.Options'
+	// NMITransport replaces the NMI wire (a test seam, like Deps'
 	// NMITransport); nil is the real gateway.
 	NMITransport http.RoundTripper
 	PGXPool      *pgxpool.Pool
@@ -72,7 +63,7 @@ type PullProviderOptions struct {
 	// MerchantManifest is the parsed MODE-1 merchant manifest (#723) for this
 	// one-off process — embedded hosts pass the same manifest they boot from.
 	// Nil falls back to MerchantManifestPath.
-	MerchantManifest *BillingConfig
+	MerchantManifest *boot.BillingConfig
 	// MerchantManifestPath reads the MODE-1 manifest from disk when
 	// MerchantManifest is nil. Empty tries the conventional
 	// bootstrap.DefaultMerchantConfigManifestPath (optional); an explicit path
@@ -480,7 +471,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	if err != nil {
 		return nil, err
 	}
-	var selected *boot.MerchantConfig
+	var selected *config.MerchantDeclaration
 	for name, mt := range manifest.Merchants {
 		owner, err := directory.GetBySlug(ctx, name)
 		if errors.Is(err, merchants.ErrMerchantNotFound) {

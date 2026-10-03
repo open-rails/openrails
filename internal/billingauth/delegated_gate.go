@@ -41,7 +41,7 @@ func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permissio
 	}
 	return Principal{
 		MerchantID:  mid,
-		Kind:        DelegatedUser,
+		Kind:        Delegated,
 		Subject:     principal.SubjectID,
 		Permissions: append([]string(nil), principal.Permissions...),
 		UserContext: UserContext{

@@ -14,7 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -223,7 +223,7 @@ func newDataLinkWorld(t *testing.T, dl *dataLinkFake) *world {
 	w := prepareWorld(t, 12, func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{CCBillDataLinkURL: dl.URL}
 	})
-	w.declare = func(psps map[string]embed.PSPConfig) {
+	w.declare = func(psps map[string]openrails.PSPConfig) {
 		account := psps["ccbill"]["ccbill"]
 		account.Secrets = map[string]string{"salt": "e2e-ccbill-salt", "datalink_username": "e2e-datalink", "datalink_password": "e2e-datalink-password"}
 		psps["ccbill"]["ccbill"] = account

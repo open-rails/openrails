@@ -11,9 +11,9 @@ import (
 type PrincipalKind string
 
 const (
-	NativeUser    PrincipalKind = "user"
-	Machine       PrincipalKind = "machine"
-	DelegatedUser PrincipalKind = "delegated"
+	User      PrincipalKind = "user"
+	Machine   PrincipalKind = "machine"
+	Delegated PrincipalKind = "delegated"
 )
 
 // Identity is authentication output. Native users carry no role/permission

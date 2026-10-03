@@ -96,7 +96,7 @@ type ProgressReport struct {
 }
 
 // Err renders the report as an error when the fleet is not progressing, so a
-// host health endpoint can `if err := e.CheckJobProgress(ctx); err != nil`.
+// host health endpoint reads it through the openrails_job_progress probe.
 func (r ProgressReport) Err() error {
 	if r.Progressing {
 		return nil

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/permissions"
 )
 
@@ -30,8 +31,8 @@ import (
 // unregistered one. The strings are package permissions' public vocabulary.
 var (
 	Roles           = authkit.NewRoles()
-	merchantPersona = Roles.Persona("merchant", authkit.APIKeys, authkit.RemoteApplications)
-	customerPersona = Roles.Persona("customer")
+	merchantPersona = Roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.RemoteApplications)
+	customerPersona = Roles.Persona(billing.CustomerGroupPersona)
 
 	MerchantType = merchantPersona.Persona
 	CustomerType = customerPersona.Persona

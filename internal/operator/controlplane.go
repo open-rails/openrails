@@ -1,5 +1,5 @@
 // Package operator wires the standalone AuthKit control plane onto an app.
-// Standalone always attaches it; embedding hosts opt in through internal/embedcontrolplane.
+// Standalone always attaches it; embedding hosts opt in with Config.ControlPlane.
 // Billing's directory adapters are explicitly wired here after construction.
 package operator
 
@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
-	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -37,7 +36,7 @@ import (
 // Redis is the app graph's own client (#753), shared for rate limits.
 type AttachOptions struct {
 	// Auth is the explicit standalone identity configuration, separate from billing.
-	Auth *hostconfig.AuthConfig
+	Auth *config.AuthConfig
 
 	// Naming overrides Auth.Naming, the site naming policy for usernames and
 	// merchant names. Nil uses config.
@@ -115,7 +114,7 @@ func Get(a *app.App) *controlplane.ControlPlane {
 // standalone boot path can exit non-zero. injectedPool, when non-nil, is reused
 // as the control-plane pool; otherwise Attach creates an OpenRails-owned pool
 // whose lifecycle App.Close manages.
-func Attach(ctx context.Context, a *app.App, cfg *config.Config, auth *hostconfig.AuthConfig, injectedPool *pgxpool.Pool) error {
+func Attach(ctx context.Context, a *app.App, cfg *config.Config, auth *config.AuthConfig, injectedPool *pgxpool.Pool) error {
 	return AttachWithOptions(ctx, a, cfg, injectedPool, AttachOptions{Auth: auth})
 }
 
@@ -191,7 +190,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		cpOpts = append(cpOpts, controlplane.WithRateLimitOverrides(opts.AuthRateLimitOverrides))
 	}
 	// #753: reuse the app graph's OWN Redis client (the same client
-	// pkg/embedded.Options.Redis / app.BootstrapOptions.Redis produced) for
+	// Deps.Redis / app.BootstrapOptions.Redis produced) for
 	// AuthKit's shared rate limits. Without it the control plane requires
 	// auth.allow_memory (per-process limits, one replica).
 	if a.RedisClient != nil {

@@ -9,9 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/internal/embedcontrolplane"
 )
 
 // SEC (secaudit round 2, D1): the standalone control plane asks AuthKit for
@@ -23,14 +22,14 @@ import (
 func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	f := newFixture(t)
 	cp := f.attachControlPlane(t, reserving())
-	handler, err := cp.Handler()
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
 	shop := uniqueName("stepup")
-	_, err = cp.ProvisionMerchant(t.Context(), embedcontrolplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(t.Context(), billing.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
-	fresh := authtest.SignIn(t, cp.Core(), owner).AccessToken
-	stale := authtest.StaleSession(t, cp.Core(), authtest.SignIn(t, cp.Core(), owner).AccessToken)
+	fresh := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
+	stale := authtest.StaleSession(t, cp.AuthKit(), authtest.SignIn(t, cp.AuthKit(), owner).AccessToken)
 	customer := uuid.NewString()
 
 	for _, op := range []struct {

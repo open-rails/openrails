@@ -44,7 +44,7 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		"reconcile typo":         {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
 		"db missing":             {func(c *Config) { c.DB = nil }, "database configuration is required"},
 		"db url undeterminable":  {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
-		"db schema injection":    {func(c *Config) { c.DB.Schema = "bill;drop" }, "not a valid Postgres identifier"},
+		"db schema injection":    {func(c *Config) { c.Schema = "bill;drop" }, "not a valid Postgres identifier"},
 		"secret backend unknown": {func(c *Config) { c.SecretBackend = "consul" }, "secret_backend must be snapshot, db or vault"},
 		"db custody without key": {func(c *Config) { c.SecretBackend = SecretBackendDB }, "encryption.master_key"},
 		"db custody with key": {func(c *Config) {
@@ -157,9 +157,9 @@ func TestScalarParsingBoundaries(t *testing.T) {
 	}
 
 	for raw, want := range map[string]string{"": DefaultSchema, "  Custom_Billing  ": "custom_billing"} {
-		require.Equal(t, want, (&DBConfig{Schema: raw}).SchemaName())
+		require.Equal(t, want, (&Config{Schema: raw}).SchemaName())
 	}
-	require.Equal(t, DefaultSchema, (*DBConfig)(nil).SchemaName())
+	require.Equal(t, DefaultSchema, (*Config)(nil).SchemaName())
 	for _, raw := range []string{"1schema", "bad schema", "bad-schema", `"quoted"`, "a.b"} {
 		require.Error(t, validateSchema(raw), raw)
 	}

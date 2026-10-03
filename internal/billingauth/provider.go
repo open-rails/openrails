@@ -124,9 +124,9 @@ func (p *providerIntegration) identity(ctx context.Context, r *http.Request) (Id
 	}
 	switch i.Kind {
 	case auth.KindUser:
-		out.Kind, out.CredentialClass = NativeUser, CredentialClassUserSession
+		out.Kind, out.CredentialClass = User, CredentialClassUserSession
 	case auth.KindDelegated:
-		out.Kind = DelegatedUser
+		out.Kind = Delegated
 	case auth.KindAPIKey, auth.KindRemoteApplication, auth.KindDeviceKey:
 		out.Kind = Machine
 	default:

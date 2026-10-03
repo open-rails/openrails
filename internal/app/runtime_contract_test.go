@@ -92,7 +92,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 
 func TestRuntimeWiringPolicies(t *testing.T) {
 	rt := &Runtime{}
-	require.Equal(t, config.RiverSchema, rt.riverSchemaOrDefault())
+	require.Equal(t, config.DefaultRiverSchema, rt.riverSchemaOrDefault())
 	rt.SetRiverSchema("  jobs ")
 	require.Equal(t, "jobs", rt.riverSchemaOrDefault(), "direct River reads follow the bound client's schema")
 

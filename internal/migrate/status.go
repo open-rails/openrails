@@ -17,7 +17,7 @@ func PostgresStatus(ctx context.Context, cfg *config.Config) (status migratekit.
 	if cfg == nil || cfg.DB == nil {
 		return status, fmt.Errorf("missing database config")
 	}
-	schema := cfg.DB.SchemaName()
+	schema := cfg.SchemaName()
 	migrations, err := loadMigrations(schema)
 	if err != nil {
 		return status, err

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	auth "github.com/open-rails/helpers/auth"
@@ -484,7 +485,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				}
 				return billingauth.Principal{
 					MerchantID: resolved.MerchantID,
-					Kind:       billingauth.DelegatedUser,
+					Kind:       billingauth.Delegated,
 					Subject:    resolved.DelegatedSubject,
 					UserContext: billingauth.UserContext{
 						UserID:        resolved.DelegatedSubject,
@@ -512,7 +513,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 		return billingauth.Principal{
 			MerchantID: resolved.MerchantID,
-			Kind:       billingauth.DelegatedUser,
+			Kind:       billingauth.Delegated,
 			Subject:    resolved.DelegatedSubject,
 			UserContext: billingauth.UserContext{
 				UserID:        resolved.DelegatedSubject,
@@ -548,9 +549,9 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		switch {
 		case errors.Is(err, auth.ErrRevoked), errors.Is(err, billingauth.ErrUnauthenticated):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: credentialFailure(err)}
-		case errors.Is(err, authpolicy.ErrPermissionRequired):
+		case errors.Is(err, billing.ErrPermissionRequired):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
-		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
+		case errors.Is(err, billing.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 		default:
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
@@ -582,7 +583,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if mid != membershipMID {
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
-	return billingauth.Principal{MerchantID: mid, Kind: billingauth.NativeUser, Subject: uc.UserID, UserContext: uc}, nil
+	return billingauth.Principal{MerchantID: mid, Kind: billingauth.User, Subject: uc.UserID, UserContext: uc}, nil
 }
 
 // RequireRecentSignIn implements billingauth.Gate with the control plane's

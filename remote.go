@@ -17,12 +17,15 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
+	// engine is the in-process engine behind New; nil for NewRemote.
+	engine                *engine.Engine
 	ProductAccess         *ProductAccessClient
 	Products              *ProductClient
 	Prices                *PriceClient
@@ -150,6 +153,28 @@ func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	}
 	r.initResources()
 	return r, nil
+}
+
+// With returns a client sharing c's transport, and an embedded client's engine,
+// with opts applied: another default merchant or currency, a timeout, or a
+// customer's own credential (WithTokenProvider) over the in-process transport.
+// Closing either closes the shared engine.
+func (c *Client) With(opts ...ClientOption) (*Client, error) {
+	if c == nil {
+		return nil, invalidErr("client is required")
+	}
+	derived := *c
+	derived.setupErr = nil
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&derived)
+		}
+	}
+	if derived.setupErr != nil {
+		return nil, derived.setupErr
+	}
+	derived.initResources()
+	return &derived, nil
 }
 
 // validateBaseURL is the I/O-free static check on the configured base URL.

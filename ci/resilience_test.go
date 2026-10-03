@@ -21,12 +21,11 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/embedoperator"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -63,46 +62,35 @@ type resilientBoot struct {
 	redisDown bool
 }
 
-func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *embed.Runtime {
+func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Client {
 	t.Helper()
 	var rdb *redis.Client
 	if b.redisDown {
 		rdb = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
 		t.Cleanup(func() { _ = rdb.Close() })
 	}
-	psps := map[string]embed.PSPConfig{
+	psps := map[string]openrails.PSPConfig{
 		"stripe": {"stripe": {AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}},
-		"solana": {"solana": {Signer: &embed.PSPSignerConfig{Mode: "vault_transit", Key: transitKey}}},
+		"solana": {"solana": {Signer: &openrails.PSPSignerConfig{Mode: "vault_transit", Key: transitKey}}},
 	}
 	if b.nmi != nil {
-		psps["nmi"] = embed.PSPConfig{"nmi": {AccountID: "e2e-nmi", Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": "whsec_nmi"}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}}
+		psps["nmi"] = openrails.PSPConfig{"nmi": {AccountID: "e2e-nmi", Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": "whsec_nmi"}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}}
 	}
+	cfg := f.config()
+	cfg.ProviderWriteMode = openrails.ProviderWritesFull
+	cfg.Vault = &openrails.VaultConfig{Enabled: true, Address: b.vault.URL(), Token: b.vault.Token}
+	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
 	start := time.Now()
-	rt, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{
-			TestMode:            config.CredentialPostureSandbox,
-			AllowCatalogUpdates: true,
-			ProviderWriteMode:   config.ProviderWriteModeFull,
-			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
-			ReturnOrigins:       []string{"https://e2e.test"},
-			Vault:               &config.VaultConfig{Enabled: true, Address: b.vault.URL(), Token: b.vault.Token},
-			ProviderSandbox:     &config.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"},
-		},
-		Merchant:        &embed.MerchantDeclaration{Slug: b.slug, Config: embed.MerchantConfig{DisplayName: b.slug, PSPs: psps}},
-		PGXPool:         f.pool,
-		Redis:           rdb,
-		River:           embed.RiverManagedByOpenRails(f.schema),
-		RunWorkers:      true,
-		StripeTransport: b.stripe,
-		NMITransport:    b.nmi,
-	})
+	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Redis: rdb, StripeTransport: b.stripe, NMITransport: b.nmi})
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), 20*time.Second, "construction never waits on an optional provider")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	require.NoError(t, rt.Start(t.Context()))
 	return rt
 }
 
-func probe(t *testing.T, rt *embed.Runtime, name string) error {
+func probe(t *testing.T, rt *openrails.Client, name string) error {
 	t.Helper()
 	for _, p := range rt.Probes() {
 		if p.Name == name {
@@ -127,9 +115,9 @@ func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.C
 	return billing.CheckoutPSPConfig{}, false
 }
 
-func sign(t *testing.T, rt *embed.Runtime) ([]byte, error) {
+func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 	t.Helper()
-	return app.HostGraph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
+	return engine.Graph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
 // solanaCheckoutStatus attempts a Solana checkout for a new one-time or
@@ -164,7 +152,7 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 	return status.Status
 }
 
-func waitReady(t *testing.T, rt *embed.Runtime) {
+func waitReady(t *testing.T, rt *openrails.Client) {
 	t.Helper()
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 20*time.Millisecond)
 }
@@ -208,8 +196,7 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	})
 
 	rt := f.resilientRuntime(t, resilientBoot{vault: fake, nmi: nmi, stripe: &stripeCheckoutFake{t: t}, slug: "resilient-" + uuid.NewString()[:8], redisDown: true})
-	client, err := rt.Client()
-	require.NoError(t, err)
+	client := rt
 	waitReady(t, rt)
 	require.ErrorIs(t, probe(t, rt, "openrails_vault"), vault.ErrUnavailable)
 	require.Error(t, probe(t, rt, "openrails_psp_posture"), "the NMI verdict is still unknown")
@@ -220,7 +207,7 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	}
 	_, armed := checkoutPSP(t, client, "solana")
 	require.False(t, armed, "a first boot without Vault leaves only the Solana rail disarmed")
-	_, err = sign(t, rt)
+	_, err := sign(t, rt)
 	require.ErrorIs(t, err, vault.ErrUnavailable)
 
 	fake.SetUp(true)
@@ -248,27 +235,25 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 	want := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
 
 	first := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
-	client, err := first.Client()
-	require.NoError(t, err)
+	client := first
 	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	stored, _ := checkoutPSP(t, client, "solana")
 	require.NoError(t, first.Close(context.Background()))
 
 	fake.SetUp(false)
 	second := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
-	client, err = second.Client()
-	require.NoError(t, err)
+	client = second
 	waitReady(t, second)
 	again, ok := checkoutPSP(t, client, "solana")
 	require.True(t, ok, "the stored identity keeps the rail provisioned")
 	require.Equal(t, stored.PSPID, again.PSPID)
-	_, err = sign(t, second)
+	_, err := sign(t, second)
 	require.ErrorIs(t, err, vault.ErrUnavailable)
 	stripeCheckout(t, client)
 
 	fake.SetUp(true)
 	require.Eventually(t, func() bool { _, err := sign(t, second); return err == nil }, 30*time.Second, 50*time.Millisecond)
-	pub, err := app.HostGraph(second).Runtime.MerchantSecretBackend.SolanaTransit.PublicKey(t.Context(), transitKey)
+	pub, err := engine.Graph(second).Runtime.MerchantSecretBackend.SolanaTransit.PublicKey(t.Context(), transitKey)
 	require.NoError(t, err)
 	require.Equal(t, want, solanago.PublicKeyFromBytes(pub).String())
 }
@@ -284,10 +269,9 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	slug := "rotate-" + uuid.NewString()[:8]
-	boot := func() (*embed.Runtime, *openrails.Client) {
+	boot := func() (*openrails.Client, *openrails.Client) {
 		rt := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
-		client, err := rt.Client()
-		require.NoError(t, err)
+		client := rt
 		return rt, client
 	}
 	solanaRows := func(account string) (active, archived int) {
@@ -305,8 +289,8 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 		}
 		return active, archived
 	}
-	railConfig := func(rt *embed.Runtime, mid merchant.ID) error {
-		_, err := app.HostGraph(rt).Runtime.RailConfigs.RailConfig(merchant.WithID(t.Context(), mid), "solana", "")
+	railConfig := func(rt *openrails.Client, mid merchant.ID) error {
+		_, err := engine.Graph(rt).Runtime.RailConfigs.RailConfig(merchant.WithID(t.Context(), mid), "solana", "")
 		return err
 	}
 	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
@@ -314,7 +298,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
-	mid, _, err := embedoperator.New(first).ResolveMerchant(t.Context(), slug)
+	mid, _, err := hosttools.ResolveMerchant(t.Context(), engine.Graph(first), slug)
 	require.NoError(t, err)
 	require.NoError(t, first.Close(context.Background()))
 
@@ -336,8 +320,8 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
 	require.Equal(t, http.StatusServiceUnavailable, solanaCheckoutStatus(t, client, false), "a one-time Solana checkout answers 503")
 	require.Equal(t, http.StatusServiceUnavailable, solanaCheckoutStatus(t, client, true), "a recurring Solana subscribe answers 503")
-	signer := func(rt *embed.Runtime) solanaint.Signer {
-		r := app.HostGraph(rt).Runtime
+	signer := func(rt *openrails.Client) solanaint.Signer {
+		r := engine.Graph(rt).Runtime
 		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.MerchantSecretBackend.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))
 	}
 	_, err = signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
@@ -350,7 +334,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 
 	// Re-applying the PSP through the generic upsert (a manifest Overwrite)
 	// cannot clear a pending change: only the approval does.
-	database := app.HostGraph(second).Runtime.DB
+	database := engine.Graph(second).Runtime.DB
 	require.NoError(t, database.RunInMerchantScope(t.Context(), mid, "overwrite", func(ctx context.Context) error {
 		rail := "solana"
 		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID(), Rail: &rail})
@@ -375,7 +359,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	broken.Close()
 	brokenDB, err := db.NewWithPGXPool(broken, f.schema)
 	require.NoError(t, err)
-	graph := app.HostGraph(second).Runtime
+	graph := engine.Graph(second).Runtime
 	check := &signeridentity.Transit{TransitClient: graph.MerchantSecretBackend.SolanaTransit, DB: brokenDB, Directory: graph.Merchants,
 		Slug: slug, Environment: config.ExpectedProviderEnvironment(true)}
 	_, err = check.PublicKey(t.Context(), transitKey)
@@ -386,7 +370,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.Zero(t, active)
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved)
 
-	require.NoError(t, embedoperator.New(second).ApproveSolanaSigner(t.Context(), mid, transitKey))
+	require.NoError(t, hosttools.ApproveSolanaSigner(t.Context(), engine.Graph(second), mid, transitKey))
 	require.NoError(t, probe(t, second, "openrails_solana_signer_identity"))
 	require.NoError(t, railConfig(second, mid))
 	pub, err := signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)

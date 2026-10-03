@@ -173,3 +173,6 @@ func FromContext(ctx context.Context) (UserContext, bool) {
 
 // ErrUnauthenticated is returned when authentication is required but not present.
 var ErrUnauthenticated = errors.New("unauthenticated")
+
+// ErrForbidden refuses an authenticated caller the permission (403).
+var ErrForbidden = errors.New("permission required")

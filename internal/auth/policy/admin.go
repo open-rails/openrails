@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -23,6 +22,3 @@ type AdminPermissionChecker interface {
 	// RecentSignInChecker's errors.
 	CheckRecentSignIn(ctx context.Context, r *http.Request) error
 }
-
-var ErrPermissionRequired = errors.New("merchant permission required")
-var ErrMerchantUnresolved = errors.New("merchant identity unresolved")

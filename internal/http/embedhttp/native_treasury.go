@@ -16,7 +16,7 @@ func nativeTreasury(authenticate router.Middleware, auth *billingauth.Integratio
 		return authenticate(func(r *request.Request) {
 			identity, err := authenticateIntegration(r.Request.Context(), r.Request, auth)
 			target, ok := merchanttarget.FromContext(r.Request.Context())
-			if err != nil || !ok || identity.Kind != billingauth.NativeUser || identity.CustomerID == "" {
+			if err != nil || !ok || identity.Kind != billingauth.User || identity.CustomerID == "" {
 				r.AbortJSON(http.StatusUnauthorized, "native customer identity required")
 				return
 			}
