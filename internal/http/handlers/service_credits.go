@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/api"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -16,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // serviceIdempotencyConflict preserves the typed money refusal on the wire.

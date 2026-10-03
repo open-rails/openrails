@@ -6,7 +6,7 @@ control-plane mount). Embedded hosts mount a subset of the same route groups —
 `GET /v1/capabilities` reports which groups a deployment actually serves.
 
 All requests and responses are JSON unless noted. Non-2xx responses use the
-Stripe-shaped error envelope from `pkg/api`:
+Stripe-shaped error envelope from `internal/api`:
 
 ```json
 {

@@ -20,8 +20,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -33,7 +33,7 @@ import (
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
-	attach := func(auth hostconfig.AuthConfig) (*controlplane.ControlPlane, error) {
+	attach := func(auth hostconfig.AuthConfig) (*embedcontrolplane.ControlPlane, error) {
 		t.Helper()
 		rt, err := embed.New(t.Context(), embed.Options{
 			Config: &config.Config{
@@ -49,9 +49,9 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		auth.Issuer = "http://127.0.0.1/" + f.schema
 		auth.AllowMemory, auth.AllowMissingSenders, auth.AllowLoopbackHTTP, auth.DirectPeerIP = true, true, true, true
-		return controlplane.Attach(t.Context(), rt, controlplane.Options{Auth: &auth})
+		return embedcontrolplane.Attach(t.Context(), rt, embedcontrolplane.Options{Auth: &auth})
 	}
-	methods := func(cp *controlplane.ControlPlane) []string {
+	methods := func(cp *embedcontrolplane.ControlPlane) []string {
 		t.Helper()
 		handler, err := cp.Handler()
 		require.NoError(t, err)

@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/query"
+	"github.com/open-rails/openrails/internal/query"
 )
 
 // NotificationService handles notification storage, retrieval, and delivery.

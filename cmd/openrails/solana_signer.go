@@ -9,9 +9,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 )
 
@@ -53,7 +53,7 @@ func runSolanaSignerApprove(ctx context.Context, cfg *config.Config, merchantSlu
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
 	defer func() { _ = rt.Close(context.Background()) }()
-	if _, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: standaloneAuth(ctx)}); err != nil {
+	if _, err := embedcontrolplane.Attach(ctx, rt, embedcontrolplane.Options{Auth: standaloneAuth(ctx)}); err != nil {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 	graph := app.HostGraph(rt)

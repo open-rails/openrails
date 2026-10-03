@@ -30,9 +30,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
 	"github.com/open-rails/openrails/internal/hostauth"
 	"github.com/open-rails/openrails/permissions"
 )
@@ -50,7 +50,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
 	shop := uniqueName("staff")
-	_, err = cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
+	_, err = cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	session := authtest.SignIn(t, cp.Core(), owner).AccessToken
 
@@ -92,7 +92,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 
 // newAccount creates an account with a verified email and a password, which
 // authtest.SignIn signs in. Names are unique: tests share AuthKit's schema.
-func newAccount(t *testing.T, cp *controlplane.ControlPlane) authtest.User {
+func newAccount(t *testing.T, cp *embedcontrolplane.ControlPlane) authtest.User {
 	t.Helper()
 	name := "a" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	email := name + "@e2e.test"
@@ -119,7 +119,7 @@ func TestMerchantIssuerIsTrustedWithinItsGroup(t *testing.T) {
 		}))
 
 	var rt *embed.Runtime
-	cp := f.attachControlPlane(t, func(r *embed.Runtime) controlplane.Options { rt = r; return controlplane.Options{} })
+	cp := f.attachControlPlane(t, func(r *embed.Runtime) embedcontrolplane.Options { rt = r; return embedcontrolplane.Options{} })
 	jwk := keys.PublicJWK(signer.Public(), signer.KID(), "")
 	shop := uniqueName("federated")
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
@@ -210,7 +210,7 @@ merchants:
 	// before its only owner, the application, is disabled.
 	app, err := cp.Core().RemoteApplication(t.Context(), iam.AppByIssuer(issuer))
 	require.NoError(t, err)
-	_, err = cp.Core().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), iam.UserSubject(newAccount(t, cp).ID), controlplane.MerchantType.OwnerRole())
+	_, err = cp.Core().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), iam.UserSubject(newAccount(t, cp).ID), embedcontrolplane.MerchantType.OwnerRole())
 	require.NoError(t, err)
 	app.Enabled = false
 	_, err = cp.Core().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(app.GroupID), app)
@@ -225,7 +225,7 @@ merchants:
 func TestControlPlaneOperatorPaths(t *testing.T) {
 	f := newFixture(t)
 	var rt *embed.Runtime
-	cp := f.attachControlPlane(t, func(r *embed.Runtime) controlplane.Options { rt = r; return controlplane.Options{} })
+	cp := f.attachControlPlane(t, func(r *embed.Runtime) embedcontrolplane.Options { rt = r; return embedcontrolplane.Options{} })
 	ctx := t.Context()
 	require.NoError(t, app.HostGraph(rt).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 	admin := newAccount(t, cp)
@@ -233,12 +233,12 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	slug := uniqueName("unbound")
 	var mid string
 	require.NoError(t, f.pool.QueryRow(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug) VALUES ($1) RETURNING id::text", slug).Scan(&mid))
-	res, err := cp.RunBootstrap(ctx, controlplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
+	res, err := cp.RunBootstrap(ctx, embedcontrolplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.True(t, res.MerchantGroupCreated)
 	require.Equal(t, mid, res.BootstrapMerchantGroupID, "the group is keyed by the merchant")
 	require.True(t, res.APIKeyMinted)
-	again, err := cp.RunBootstrap(ctx, controlplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
+	again, err := cp.RunBootstrap(ctx, embedcontrolplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.False(t, again.MerchantGroupCreated || again.APIKeyMinted, "a rerun changes nothing")
 	roles, err := cp.Core().GroupRoles(ctx, iam.GroupByID(mid), []iam.Subject{iam.UserSubject(admin.ID)})
@@ -254,7 +254,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, customer.ID, group)
 	}
-	roles, err = cp.Core().GroupRoles(ctx, controlplane.CustomerGroup(customer.ID), []iam.Subject{iam.UserSubject(customer.ID)})
+	roles, err = cp.Core().GroupRoles(ctx, embedcontrolplane.CustomerGroup(customer.ID), []iam.Subject{iam.UserSubject(customer.ID)})
 	require.NoError(t, err)
 	require.Equal(t, "owner", roles[iam.UserSubject(customer.ID)].Name())
 

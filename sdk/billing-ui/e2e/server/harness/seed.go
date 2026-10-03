@@ -10,8 +10,8 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
-	"github.com/open-rails/openrails/nmimock"
 )
 
 type Catalog struct {

@@ -3,9 +3,9 @@ package service
 import (
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Catalog refusals (#983). Status and code are the contract; messages are not.

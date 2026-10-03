@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // card is what a browser tokenizes. Decline is "" (approve), a Stripe

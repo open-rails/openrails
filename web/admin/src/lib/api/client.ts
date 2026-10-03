@@ -73,7 +73,7 @@ export function bindStepUp(guard: Guard | null) {
   stepUp = guard ?? unguarded
 }
 
-// Stripe-shaped error envelope (pkg/api).
+// Stripe-shaped error envelope (internal/api).
 export interface ApiErrorBody {
   error?: {
     type?: string

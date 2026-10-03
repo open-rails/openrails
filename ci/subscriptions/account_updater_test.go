@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // acuNotice is NMI's Account Updater notice about one vault (#1115).

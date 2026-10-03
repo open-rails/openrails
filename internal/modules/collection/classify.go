@@ -3,7 +3,7 @@ package collection
 import (
 	"time"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 )
 
 // Action is what ONE failed collection attempt does to the schedule.

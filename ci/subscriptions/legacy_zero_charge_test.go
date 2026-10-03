@@ -25,7 +25,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // importLegacyEvery lands one NMI-owned membership whose legacy plan bills

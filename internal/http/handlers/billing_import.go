@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingimport"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

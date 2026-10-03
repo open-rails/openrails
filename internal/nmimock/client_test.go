@@ -11,7 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // client is OpenRails' own NMI client on the mock's loopback listener, the

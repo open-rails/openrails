@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/metrics"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // GetMerchantDashboard handles GET /v1/merchant/dashboard: the saved widget

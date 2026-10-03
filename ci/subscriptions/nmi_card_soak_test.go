@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // storedCard is a saved method's local row, read as the engine sees it.

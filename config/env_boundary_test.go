@@ -25,19 +25,19 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	// godotenv.Load has exactly ONE consumption point, logged at boot.
 	writeNeedles := []string{"os.Setenv(", "os.Unsetenv(", "godotenv.Load("}
 	writeAllowedFiles := map[string]string{
-		"hostauth/config/load.go": "the ONE standalone godotenv.Load consumption point (logged at boot); no Setenv",
+		"internal/hostconfig/load.go": "the ONE standalone godotenv.Load consumption point (logged at boot); no Setenv",
 	}
 
 	// Allowlisted path prefixes (relative to the module root). One-line
 	// justification per entry — anything else that reads env FAILS.
 	allowedPrefixes := map[string]string{
-		"cmd/":             "binary boundary: the process entrypoint owns flags and env",
-		"examples/":        "standalone example apps: each is its own main(), a binary boundary like cmd/",
-		"config/":          "mounted secret-file access for explicit host loading",
-		"hostauth/config/": "standalone configuration-loading boundary",
-		"tests/":           "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
-		"scripts/":         "operational tooling run as its own process, not importable library code",
-		"internal/dbtest/": "test-support package: container/DSN discovery for test binaries",
+		"cmd/":                 "binary boundary: the process entrypoint owns flags and env",
+		"examples/":            "standalone example apps: each is its own main(), a binary boundary like cmd/",
+		"config/":              "mounted secret-file access for explicit host loading",
+		"internal/hostconfig/": "standalone configuration-loading boundary",
+		"tests/":               "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
+		"scripts/":             "operational tooling run as its own process, not importable library code",
+		"internal/dbtest/":     "test-support package: container/DSN discovery for test binaries",
 	}
 
 	root, err := filepath.Abs("..")

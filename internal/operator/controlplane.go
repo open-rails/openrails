@@ -1,5 +1,5 @@
 // Package operator wires the standalone AuthKit control plane onto an app.
-// Standalone always attaches it; embedding hosts opt in through embed/controlplane.
+// Standalone always attaches it; embedding hosts opt in through internal/embedcontrolplane.
 // Billing's directory adapters are explicitly wired here after construction.
 package operator
 
@@ -12,10 +12,10 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/config"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

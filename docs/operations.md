@@ -217,7 +217,7 @@ Rules:
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
   Archive by id: `POST /v1/merchant/payment-providers/{rail}/accounts/{psp_id}/archive`
-  (`embed/controlplane`: `ArchivePaymentProviderAccount`) makes no provider
+  (`internal/embedcontrolplane`: `ArchivePaymentProviderAccount`) makes no provider
   call, so it works when the old provider is terminated or unreachable. The
   rail-level `DELETE` refuses (`provider_accounts_ambiguous`) while two
   accounts are active, and `PUT … {"enabled": false}` live-probes the stored
@@ -228,7 +228,7 @@ Rules:
   no rebind command.
 - **Per-subscriber cutover off an archived PSP is report-only (#657).**
   `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
-  `embed/controlplane` reads the subscription, the card the subscriber
+  `internal/embedcontrolplane` reads the subscription, the card the subscriber
   re-entered (`ReplacementPaymentMethodID`) and/or a `TargetPSPID` (default:
   the card's PSP), and both PSP rows, and writes nothing. `Executable` is true
   only for the durable payment-source update: an NMI subscription that is
@@ -509,7 +509,7 @@ The window always ends inside one cycle (1h → 30m, 1d → 12h). An unknown
 cycle (≤ 0, e.g. a one-time price behind a membership) is never given a
 schedule: collection refuses to charge, retry or end it and raises
 `life.cadence.unknown` for the operator. What a decline does comes from one
-table (`internal/billing/decline`), the same for every owner:
+table (`internal/decline`), the same for every owner:
 
 - **Retry on the schedule:** issuer soft and generic declines (insufficient
   funds, over limit, do-not-honor, call issuer, retry later) and gateway,

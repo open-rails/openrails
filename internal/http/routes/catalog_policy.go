@@ -4,11 +4,11 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // catalogPolicyRouter excludes disabled mutation capabilities from every

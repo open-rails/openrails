@@ -1,6 +1,6 @@
 // Package attempts records every authorization a PSP answered (#1110): the $0
 // card verification, sales, rebills and retries, approved or not, classified by
-// internal/billing/decline. It is written where the answer is retained, in the
+// internal/decline. It is written where the answer is retained, in the
 // same transaction.
 package attempts
 
@@ -15,9 +15,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 

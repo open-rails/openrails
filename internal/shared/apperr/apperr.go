@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/internal/api"
 )
 
 // Error is a typed refusal. Status and Code are frozen contract; Message is

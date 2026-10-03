@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed/operator"
+	"github.com/open-rails/openrails/internal/embedoperator"
 	"github.com/open-rails/openrails/internal/failpoint"
 )
 
@@ -125,12 +125,12 @@ func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 func TestLegacyImportConvergesAtCommit(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	var res []operator.ConvergeResult
+	var res []embedoperator.ConvergeResult
 	remove := failpoint.Set(func(ctx context.Context, s failpoint.Site) error {
 		if s.Point != failpoint.Committed || s.Kind != "billing_import" {
 			return nil
 		}
-		r, err := operator.New(w.rt).Converge(context.Background(), w.client[embedded].MerchantID())
+		r, err := embedoperator.New(w.rt).Converge(context.Background(), w.client[embedded].MerchantID())
 		res = append(res, r)
 		return err
 	})

@@ -12,10 +12,10 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	embcp "github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	embcp "github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/open-rails/openrails/permissions"

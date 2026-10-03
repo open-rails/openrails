@@ -1,4 +1,4 @@
-// Mirrors OpenRails pkg/api.ErrorResponse:
+// Mirrors OpenRails internal/api.ErrorResponse:
 // {"error":{"type","code","message","request_id?","param?","metadata?"}}.
 export interface BillingErrorBody {
   type: string

@@ -20,8 +20,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
@@ -128,7 +128,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{
+	cp, err := embedcontrolplane.Attach(ctx, rt, embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 	}})
@@ -156,7 +156,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	provision := func(prefix string) shop {
 		owner := newAccount(t, cp)
 		slug := uniqueName(prefix)
-		_, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
+		_, err := cp.ProvisionMerchant(ctx, embedcontrolplane.ProvisionMerchantRequest{Slug: slug, OwnerUserID: owner.ID})
 		require.NoError(t, err)
 		return shop{slug, authtest.SignIn(t, cp.Core(), owner).AccessToken}
 	}

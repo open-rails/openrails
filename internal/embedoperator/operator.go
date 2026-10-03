@@ -1,8 +1,8 @@
-// Package operator provides explicit local maintenance tools for an embedded
+// Package embedoperator provides explicit local maintenance tools for an embedded
 // engine: filesystem manifests, provider imports, restore identity, and rebuilds.
 // Applications use openrails.Client for ordinary billing and catalog operations.
 // These tools require process ownership and cannot be invoked through HTTP.
-package operator
+package embedoperator
 
 import (
 	"github.com/open-rails/openrails/embed"

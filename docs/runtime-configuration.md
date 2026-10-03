@@ -11,8 +11,8 @@ retired inputs and refuse configuration loading.
 
 Embedded billing receives `config.Config` and a provider-neutral authentication
 integration through `Options.Auth`; it does not load AuthKit configuration.
-Standalone hosts use `hostauth/config.Config`, which composes billing settings
-with `hostauth/config.AuthConfig`. Its loader handles YAML, environment variables
+Standalone hosts use `internal/hostconfig.Config`, which composes billing settings
+with `internal/hostconfig.AuthConfig`. Its loader handles YAML, environment variables
 and mounted secret files. Remote consumers only construct a Client.
 
 An embedded host supplying authentication does not need a standalone issuer or

@@ -1,5 +1,5 @@
-// Package config loads standalone host billing and identity configuration.
-package config
+// Package hostconfig loads standalone host billing and identity configuration.
+package hostconfig
 
 import (
 	"fmt"

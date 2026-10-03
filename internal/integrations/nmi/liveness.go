@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 )
 
 // Read-only liveness probes over the NMI Query API (query.php). Shared by the

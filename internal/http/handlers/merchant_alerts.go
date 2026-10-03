@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/alerting"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 func alertService(r *httprequest.Request) (*alerting.Service, bool) {

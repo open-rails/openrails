@@ -16,10 +16,10 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/open-rails/openrails/internal/vaultfake"
@@ -59,7 +59,7 @@ merchants:
 		rt, err := embed.New(t.Context(), embed.Options{Config: cfg, PGXPool: f.pool, River: embed.RiverManagedByOpenRails(f.schema)})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		_, err = controlplane.Attach(t.Context(), rt, controlplane.Options{Auth: &hostconfig.AuthConfig{
+		_, err = embedcontrolplane.Attach(t.Context(), rt, embedcontrolplane.Options{Auth: &hostconfig.AuthConfig{
 			Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
 		}})
 		require.NoError(t, err)

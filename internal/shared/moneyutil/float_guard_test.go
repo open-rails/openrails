@@ -64,7 +64,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"pkg/pricing/",
 		"pkg/catalog/",
 		"internal/service/",
-		"pkg/api/",
+		"internal/api/",
 	}
 
 	// "<path>:<top-level declaration>" -> why this float is not an amount.

@@ -3,9 +3,9 @@ package handlers
 import (
 	"errors"
 
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // writeRefusal answers a typed service refusal (#983) by its status and code.

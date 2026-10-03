@@ -1,10 +1,10 @@
-// Package controlplane attaches the OpenRails-owned AuthKit control plane to an
+// Package embedcontrolplane attaches the OpenRails-owned AuthKit control plane to an
 // embedded runtime and exposes the operator mechanisms a hosted product
 // composes: merchant provisioning and directory,
 // fleet aggregates, retirement and the standalone HTTP surface. Ordinary
 // billing and provider configuration go through openrails.Client; hosts that bring their own AuthKit
 // never import this package.
-package controlplane
+package embedcontrolplane
 
 import (
 	"context"

@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -126,7 +126,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return w.response(req), nil
 }
 
-// conflictResponse synthesizes a 409 response in the pkg/api Stripe error
+// conflictResponse synthesizes a 409 response in the internal/api Stripe error
 // envelope shape ({"error":{"type","code","message"}}) for a merchant binding
 // conflict (#772). remote.go's do/statusErrorFromBody parses this envelope
 // like any real non-2xx wire response, so the call surfaces as a StatusError

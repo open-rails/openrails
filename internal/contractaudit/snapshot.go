@@ -54,7 +54,7 @@ var (
 		"internal/requestauth/",
 		"internal/migrate/postgres/",
 		"permissions/",
-		"pkg/api/",
+		"internal/api/",
 		"pkg/billingauth/",
 		"testdata/wire/",
 	}

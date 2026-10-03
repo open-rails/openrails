@@ -1,6 +1,6 @@
 package recurring
 
-// Crank failure codes. internal/billing/decline maps them onto the shared
+// Crank failure codes. internal/decline maps them onto the shared
 // decline reasons (rail "solana"); the category is the cranker's own next step.
 
 // CrankCode is a stable failure code the crank maps its on-chain program

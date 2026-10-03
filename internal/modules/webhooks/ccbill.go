@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/billing/decline"
-	"github.com/open-rails/openrails/internal/billing/lifecycle"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
 	identitydir "github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"

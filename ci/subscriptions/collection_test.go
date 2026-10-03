@@ -14,7 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/nmimock"
+	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // Exactly-once collection (#1092): one NMI order per obligation, a resend

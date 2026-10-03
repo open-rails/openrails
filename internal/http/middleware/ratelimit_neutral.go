@@ -4,7 +4,7 @@ package middleware
 // single source of truth for OpenRails' rate-limiting and captcha enforcement;
 // since #670 one net/http middleware (RateLimitHTTP) serves the standalone and
 // embedded surfaces alike. The engine returns a RateLimitDecision WITHOUT
-// writing the response; the middleware writes the canonical pkg/api envelope.
+// writing the response; the middleware writes the canonical internal/api envelope.
 
 import (
 	"context"
@@ -21,9 +21,9 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -356,7 +356,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 	for k, v := range decision.Headers {
 		w.Header().Set(k, v)
 	}
-	// Error outcomes emit the canonical pkg/api envelope — identical to the
+	// Error outcomes emit the canonical internal/api envelope — identical to the
 	// retired gin middleware's writers, so the standalone flip (#670) changed no
 	// response bodies (and the embedded surface now matches too).
 	switch decision.Outcome {

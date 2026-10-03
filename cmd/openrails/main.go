@@ -17,12 +17,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/embed/controlplane"
-	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/buildinfo"
+	"github.com/open-rails/openrails/internal/embedcontrolplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/open-rails/openrails/web/admin"
@@ -202,7 +202,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Attach the OpenRails-owned AuthKit control plane (#284). MANDATORY in
 	// standalone mode (#469): construction failure exits non-zero — there is no
 	// verifier-only downgrade.
-	cp, err := controlplane.Attach(context.Background(), embeddedApp, controlplane.Options{Auth: standaloneAuth(cmd.Context())})
+	cp, err := embedcontrolplane.Attach(context.Background(), embeddedApp, embedcontrolplane.Options{Auth: standaloneAuth(cmd.Context())})
 	if err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("attach control plane: %w", err)

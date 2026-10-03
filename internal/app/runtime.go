@@ -71,7 +71,7 @@ type Runtime struct {
 	// stored Solana identity.
 	signerIdentity dependencyState
 	// ApproveSolanaSigner, set by the embedded constructor, accepts the
-	// identity a changed Transit signer now reports (embed/operator).
+	// identity a changed Transit signer now reports (internal/embedoperator).
 	ApproveSolanaSigner func(ctx context.Context, merchantID merchant.ID, key string) error
 	// posturePending counts loaded PSPs whose verdict is not yet known; -1
 	// until StartProviderPosture's first pass completes.

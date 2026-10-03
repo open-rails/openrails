@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/open-rails/openrails/internal/billing/decline"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 
 	"github.com/google/uuid"

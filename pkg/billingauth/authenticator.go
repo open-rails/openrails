@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/internal/api"
 )
 
 // Authenticator is the framework-neutral auth boundary for embedded OpenRails.
