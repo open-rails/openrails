@@ -1,4 +1,4 @@
-// In-memory `/billing/v1/me` for jsdom tests, shaped by the OpenRails wire
+// In-memory `/billing/v1` for jsdom tests, shaped by the OpenRails wire
 // fixtures. Real-server coverage lives in the Playwright e2e suite.
 import { vi, type Mock } from "vitest"
 
@@ -61,6 +61,38 @@ export function payment(overrides: Partial<Row> = {}): Row {
   } as Row
 }
 
+export function product(overrides: Partial<Row> = {}): Row {
+  return {
+    id: "prod_plus",
+    object: "product",
+    key: "plus",
+    name: "Plus",
+    description: "",
+    tier_group: "membership",
+    tier_rank: 2,
+    active: true,
+    metadata: {},
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+    prices: [
+      {
+        id: "price_plus",
+        key: "plus-monthly",
+        object: "price",
+        unit_amount: "19990000",
+        currency: "USD",
+        type: "recurring",
+        recurring: { interval: "720h" },
+        product: "prod_plus",
+        active: true,
+        metadata: {},
+        created_at: "2026-09-01T00:00:00Z",
+      },
+    ],
+    ...overrides,
+  } as Row
+}
+
 const page = (data: Row[], limit: number, offset: number, total: number) => ({
   object: "list",
   data,
@@ -74,6 +106,7 @@ export interface FakeBilling {
   subscriptions: Row[]
   methods: Row[]
   payments: Row[]
+  products: Row[]
   /** Applies queued cancel/resume on the Nth later read (server lag). */
   lag: number
   /** Next response override per "METHOD /path". */
@@ -84,13 +117,14 @@ export interface FakeBilling {
 
 export function fakeBilling(
   seed: Partial<
-    Pick<FakeBilling, "subscriptions" | "methods" | "payments">
+    Pick<FakeBilling, "subscriptions" | "methods" | "payments" | "products">
   > = {}
 ): FakeBilling {
   const state: FakeBilling = {
     subscriptions: seed.subscriptions ?? [subscription()],
     methods: seed.methods ?? [paymentMethod()],
     payments: seed.payments ?? [payment()],
+    products: seed.products ?? [product()],
     lag: 0,
     fail: {},
     calls: [],
@@ -161,6 +195,40 @@ export function fakeBilling(
         })
         return json(202, { status: "queued" })
       }
+      if ((m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/change-tier$/))) {
+        const sub = findSub(decodeURIComponent(m[1]))
+        if (!sub) return apiError(404, "resource_not_found")
+        // Like OpenRails: a tier change without a client key is refused.
+        if (!new Headers(init.headers).get("Idempotency-Key"))
+          return apiError(400, "tier_change_idempotency_key_required")
+        const target = state.products.find((p) =>
+          (p.prices as Row[]).some((price) => price.id === body?.price_id)
+        )
+        if (!target) return apiError(404, "resource_not_found")
+        const price = (target.prices as Row[]).find(
+          (x) => x.id === body.price_id
+        )!
+        Object.assign(sub, {
+          product_id: target.id,
+          price_id: price.id,
+          price: { ...(sub.price as Row), ...price, product_id: target.id },
+          product: { ...(sub.product as Row), display_name: target.name },
+        })
+        return json(200, {
+          object: "tier_change",
+          status: "succeeded",
+          mode: "tier_change",
+          action: "upgrade",
+          effective: "now",
+          price_id: price.id,
+          payment: { rail: sub.rail },
+          subscription_id: sub.id,
+          currency: price.currency,
+          amount_due_now: "10000000",
+          next_charge_amount: price.unit_amount,
+          next_charge_date: "2036-10-16T12:00:00Z",
+        })
+      }
       if (/^POST \/me\/subscriptions\/[^/]+\/solana-cancel-tx$/.test(key))
         return json(200, { transaction: "dHg=", subscription_pda: "pda" })
       if (
@@ -220,6 +288,11 @@ export function fakeBilling(
         }
         return json(200, { success: true })
       }
+      if (key === "GET /products")
+        return json(
+          200,
+          page(state.products, limit, offset, state.products.length)
+        )
       if (key === "GET /me/payments")
         return json(
           200,

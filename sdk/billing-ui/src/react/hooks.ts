@@ -6,7 +6,9 @@ import type {
   NewCard,
   Payment,
   PaymentMethod,
+  Product,
   Subscription,
+  TierChange,
 } from "../client/types"
 import { useBillingContext } from "./context"
 import { sleep, useRemote } from "./remote"
@@ -15,7 +17,7 @@ import { sleep, useRemote } from "./remote"
 export type ActionResult = Promise<BillingError | null>
 
 export type SubscriptionAction =
-  "cancel" | "resume" | "payment_method" | SolanaCancelStage
+  "cancel" | "resume" | "payment_method" | "change_tier" | SolanaCancelStage
 
 export interface SubscriptionsOptions {
   /** Server filter; default `all`. */
@@ -42,6 +44,14 @@ export interface SubscriptionsState {
     subscriptionId: string,
     paymentMethodId: string
   ) => ActionResult
+  /**
+   * Card rails: `client.changeTier`. Resolves to the change, whose `status`
+   * may still be `processing` or `requires_action`, or to the error.
+   */
+  changeTier: (
+    subscriptionId: string,
+    input: { priceId: string; idempotencyKey: string }
+  ) => Promise<TierChange | BillingError>
 }
 
 const cancelApplied = (s: Subscription) =>
@@ -194,6 +204,27 @@ export function useSubscriptions(
     [act, client, notify, replace]
   )
 
+  // An upgrade may open a successor subscription: notify refetches the list.
+  const changeTier = useCallback(
+    async (id: string, input: { priceId: string; idempotencyKey: string }) => {
+      mark(id, "change_tier")
+      try {
+        const change = await client.changeTier(id, input)
+        notify({
+          type: "subscription.tier_changed",
+          subscriptionId: id,
+          change,
+        })
+        return change
+      } catch (err) {
+        return toBillingError(err)
+      } finally {
+        mark(id, null)
+      }
+    },
+    [client, mark, notify]
+  )
+
   return {
     subscriptions: remote.data?.data ?? null,
     total: remote.data?.total ?? null,
@@ -205,6 +236,31 @@ export function useSubscriptions(
     cancelOnChain,
     resume,
     setPaymentMethod,
+    changeTier,
+  }
+}
+
+export interface ProductsState {
+  products: Product[] | null
+  total: number | null
+  loading: boolean
+  error: BillingError | null
+  refetch: () => void
+}
+
+/** The catalog: active products with their active prices. */
+export function useProducts(options: { limit?: number } = {}): ProductsState {
+  const { client } = useBillingContext()
+  const limit = options.limit ?? 100
+  const remote = useRemote(`${limit}`, (signal) =>
+    client.listProducts({ limit, signal })
+  )
+  return {
+    products: remote.data?.data ?? null,
+    total: remote.data?.total ?? null,
+    loading: remote.loading,
+    error: remote.error,
+    refetch: remote.refetch,
   }
 }
 

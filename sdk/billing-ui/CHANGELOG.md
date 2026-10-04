@@ -1,5 +1,19 @@
 # Changelog
 
+## Catalog and plan-change client (openrails#1128)
+
+- `@openrails/billing-ui/client` gains the public catalog (`listProducts`,
+  `listPrices`, `listCurrencies`), plan change (`previewTierChange`,
+  `changeTier`) and Solana (`getSolanaConfig`, `listSolanaTokens`,
+  `prepareSolanaTierChange`, `confirmSolanaTierChange`) calls, with the types
+  `Product`, `Price`, `Currency`, `TierChangePreview`, `TierChange`,
+  `SolanaConfig`, `SolanaToken`, `SolanaTierChangeTx` and `SolanaTierChange`.
+  `changeTier` requires an `idempotencyKey`; reuse it until the change
+  resolves.
+- React: `useProducts`, and `useSubscriptions().changeTier` (per-row `pending`
+  `"change_tier"`, `onChange` `subscription.tier_changed`), which resolves to
+  the `TierChange` or a `BillingError`.
+
 ## Explicit payment method, fail-fast errors (openrails#1087, #1088)
 
 - The checkout pre-selects the customer's default card (`PaymentMethod.default`,

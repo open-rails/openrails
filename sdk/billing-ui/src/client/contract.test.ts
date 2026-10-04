@@ -1,4 +1,5 @@
-// Every OpenRails route the client calls must be in the in-repo route catalog.
+// Every `/me` route the client calls must be in the in-repo route catalog,
+// which does not list the public catalog routes.
 import { expect, it, vi } from "vitest"
 
 import { createBillingClient } from "./client"
@@ -25,6 +26,15 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.cancelSubscription("sub_1", { feedback: "why not" }),
     () => client.resumeSubscription("sub_1"),
     () => client.setSubscriptionPaymentMethod("sub_1", "pm_1"),
+    () => client.previewTierChange("sub_1", "price_1"),
+    () =>
+      client.changeTier("sub_1", { priceId: "price_1", idempotencyKey: "k" }),
+    () => client.prepareSolanaTierChange("sub_1", "price_1"),
+    () =>
+      client.confirmSolanaTierChange("sub_1", {
+        signature: "sig",
+        newPriceId: "price_1",
+      }),
     () => client.cancelSubscriptionOnChain("sub_1", async () => "sig"),
     () => client.listPaymentMethods(),
     () => client.addPaymentMethod({ provider: "nmi", payment_token: "tok" }),
@@ -51,5 +61,5 @@ it("calls only routes OpenRails mounts for customers", async () => {
     return !routes.some((r) => r.method === method && r.pattern.test(path))
   })
   expect(missing).toEqual([])
-  expect(called.size).toBe(20)
+  expect(called.size).toBe(24)
 })

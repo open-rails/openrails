@@ -3,16 +3,23 @@ import type { ReactNode } from "react"
 import { describe, expect, it, vi } from "vitest"
 
 import { createBillingClient } from "../client/client"
+import { isBillingError } from "../client/errors"
 import {
   apiError,
   fakeBilling,
   payment,
   paymentMethod,
+  product,
   subscription,
   type FakeBilling,
 } from "../test/billing-server"
 import { useBillingRefresh } from "./context"
-import { usePaymentMethods, usePayments, useSubscriptions } from "./hooks"
+import {
+  usePaymentMethods,
+  usePayments,
+  useProducts,
+  useSubscriptions,
+} from "./hooks"
 import { BillingProvider, type BillingProviderProps } from "./provider"
 
 function setup<T>(
@@ -119,6 +126,77 @@ describe("useSubscriptions", () => {
       expect(await done).toBeNull()
     })
     expect(result.current.subscriptions![0].status).toBe("cancelled")
+  })
+})
+
+describe("plan change", () => {
+  it("lists the catalog", async () => {
+    const server = fakeBilling({
+      products: [product(), product({ id: "prod_pro", name: "Pro" })],
+    })
+    const { result } = setup(() => useProducts(), server)
+    await waitFor(() => expect(result.current.products).toHaveLength(2))
+    expect(result.current.total).toBe(2)
+    expect(result.current.products![0].prices[0]).toMatchObject({
+      id: "price_plus",
+      unit_amount: "19990000",
+    })
+    expect(server.calls).toEqual(["GET /products"])
+  })
+
+  it("changes tier, refetches the list and notifies the host", async () => {
+    const server = fakeBilling()
+    const onChange = vi.fn()
+    const { result } = setup(() => useSubscriptions(), server, { onChange })
+    await waitFor(() => expect(result.current.subscriptions).toHaveLength(1))
+    const id = result.current.subscriptions![0].id
+
+    let done!: ReturnType<typeof result.current.changeTier>
+    act(() => {
+      done = result.current.changeTier(id, {
+        priceId: "price_plus",
+        idempotencyKey: "key-1",
+      })
+    })
+    expect(result.current.pending[id]).toBe("change_tier")
+    const change = await act(() => done)
+    expect(change).toMatchObject({
+      status: "succeeded",
+      price_id: "price_plus",
+    })
+    expect(result.current.pending[id]).toBeUndefined()
+    await waitFor(() =>
+      expect(result.current.subscriptions![0].price?.id).toBe("price_plus")
+    )
+    expect(onChange).toHaveBeenCalledWith({
+      type: "subscription.tier_changed",
+      subscriptionId: id,
+      change,
+    })
+  })
+
+  it("returns a tier-change refusal instead of throwing", async () => {
+    const server = fakeBilling()
+    const onChange = vi.fn()
+    const { result } = setup(() => useSubscriptions(), server, { onChange })
+    await waitFor(() => expect(result.current.subscriptions).not.toBeNull())
+    const id = result.current.subscriptions![0].id
+    server.fail[`POST /me/subscriptions/${id}/change-tier`] = apiError(
+      409,
+      "tier_change_renewal_due"
+    )
+    const refused = await act(() =>
+      result.current.changeTier(id, {
+        priceId: "price_plus",
+        idempotencyKey: "key-1",
+      })
+    )
+    expect(isBillingError(refused)).toBe(true)
+    expect(refused).toMatchObject({
+      status: 409,
+      code: "tier_change_renewal_due",
+    })
+    expect(onChange).not.toHaveBeenCalled()
   })
 })
 

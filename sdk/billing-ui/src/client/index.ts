@@ -1,4 +1,5 @@
-// Framework-free client for the OpenRails customer surface (`/billing/v1/me/*`).
+// Framework-free client for the OpenRails customer surface (`/billing/v1/me/*`)
+// and public catalog.
 export {
   CANCEL_FEEDBACK_MAX,
   CANCEL_FEEDBACK_MIN,
@@ -24,6 +25,7 @@ export type {
   BillingStatus,
   CardSetup,
   CardSummary,
+  Currency,
   CurrencyScales,
   Invoice,
   NewCard,
@@ -33,9 +35,17 @@ export type {
   PaymentMethod,
   PaymentOperation,
   PaymentRecovery,
+  Price,
+  Product,
+  SolanaConfig,
+  SolanaTierChange,
+  SolanaTierChangeTx,
+  SolanaToken,
   Subscription,
   SubscriptionPrice,
   SubscriptionProduct,
   SubscriptionStatus,
+  TierChange,
+  TierChangePreview,
 } from "./types"
 export { amountToDecimal, formatAmount, type Amount } from "../lib/money"
