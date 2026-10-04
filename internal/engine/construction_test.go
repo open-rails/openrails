@@ -48,8 +48,8 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Merchant: "m"}}}
 		}), config.Deps{}, "must be Delegated"},
-		"merchant without auth":       {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{}, "the merchant surface requires"},
-		"merchant without authorize":  {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{Authenticate: authenticate}, "the merchant surface requires"},
+		"merchant without auth":      {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{}, "the merchant surface requires"},
+		"merchant without authorize": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{Authenticate: authenticate}, "the merchant surface requires"},
 		"control plane with groups": {with(sandbox, func(c *config.Config) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}
