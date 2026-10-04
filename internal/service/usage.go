@@ -25,8 +25,9 @@ func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotenc
 // RecordUsageInput is one host-reported metered usage event (#797).
 //
 // Key is REQUIRED and is the idempotency coordinate within
-// (merchant, payer, currency) — structurally, via uq_usage_events_idem and the
-// ledger's operation coordinate, not by convention. Build it with
+// (merchant, payer, currency): claimed under the payer's spend lock by a lookup
+// over the ingest window, and for a priced event by the ledger's operation
+// coordinate for good. Build it with
 // NewUsageIdempotencyKey(EventType, source, sourceID); its operation must match
 // EventType, so two different event types at one
 // (source, source_id) are two charges rather than one collision (or#894). Both

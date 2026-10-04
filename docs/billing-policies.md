@@ -106,6 +106,10 @@ policy the API would have refused. Each kind accepts only its own limit: putting
 `spend_windows` on an `outstanding_cap` policy is an error, not a silently
 ignored field.
 
+A `spend_windows` entry (and a spend delegation's window) is at most 31 days
+(`window_seconds` ≤ 2678400): admitted requests are kept for the longest window
+plus 30 days, and a longer window would count requests already dropped.
+
 Customer assignments use a separate runtime resource in both manifest and API
 mode. They are not part of the merchant settings; changing the settings
 preserves them. Removing a policy that is still assigned to a

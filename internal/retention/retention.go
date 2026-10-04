@@ -4,7 +4,10 @@
 // each table's class.
 package retention
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Day is the unit row periods are counted in. The baseline's delete guards
 // carry the same number of days, so a month is never 28 days in one place and
@@ -48,8 +51,8 @@ const (
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
 	PaymentAttempts = 761 * Day
-	// ExpiredCheckoutAttempts keeps an expired checkout attempt 90 days past
-	// its expiry.
+	// ExpiredCheckoutAttempts keeps a checkout attempt that expired without
+	// reaching a provider 90 days past its expiry.
 	ExpiredCheckoutAttempts = 90 * Day
 	// CostObservations keeps a provider cost observation 90 days past the
 	// qualification it was read for.
@@ -68,7 +71,16 @@ const (
 )
 
 // Days is a period as the whole days the sweep statements take.
-func Days(period time.Duration) int32 { return int32(period / Day) }
+func Days(period time.Duration) int32 {
+	days := period / Day
+	if days < 0 {
+		return 0
+	}
+	if days > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(days)
+}
 
 // MonthlyPartitions is a table partitioned by month on Key. A partition is
 // dropped once its whole range is at or before DropBefore(now). Partitions are

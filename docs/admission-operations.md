@@ -8,6 +8,8 @@ Every request binds one immutable `(merchant_id, request_id)` operation to its p
 
 Replayed admission returns the original allowed decision and capacity receipt, plus `replayed=true` and current `state` (`open`, `expired`, `released`, `captured`). `allowed` alone is not permission to start new work after a terminal replay; state identifies a currently live reservation. Expiry is derived from the declared deadline, without a worker.
 
+An admitted request is kept 61 days: the longest spend window (31 days) plus 30. A hold's deadline, as admitted or as extended, is at most 30 days past its admission, and a spend window is at most 31 days, so nothing a kept request still counts toward outlives it. `admission_operations` is partitioned by month on `admitted_at` and whole months are dropped; after 61 days a request id reads as never admitted, and a late capture of it answers `admission_not_found`. A request id is unique per merchant among kept requests: admission serializes on it.
+
 Request reservations and hard spend windows use PostgreSQL under the existing payer money lock. Redis remains available for rate limits and abuse signals; loss of Redis cannot erase monetary reservations, alter request ownership or reset a hard spend window. There is no compatibility fallback from missing request state to caller-supplied capture coordinates.
 
 | Record | Capacity reserved | Original admission-window usage |

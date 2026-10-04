@@ -71,7 +71,10 @@ FROM (
     (SELECT DISTINCT ca.merchant_id AS mid
        FROM billing.checkout_attempts ca
       WHERE (sqlc.narg(after)::uuid IS NULL OR ca.merchant_id > sqlc.narg(after)::uuid)
-        AND ca.status = 'expired' AND ca.expires_at < sqlc.arg(checkout_attempt_cutoff)::timestamptz
+        AND ca.status = 'expired' AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
+        AND ca.expires_at < sqlc.arg(checkout_attempt_cutoff)::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
@@ -172,15 +175,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- Its checkout session, if one still exists, goes with it.
--- name: DeleteExpiredCheckoutAttemptsBefore :execrows
+-- An attempt that expired without reaching a provider: no payment,
+-- subscription or provider transaction, and no Solana Pay reference or receipt
+-- names it. Its checkout session, if one still exists, goes with it.
+-- name: DeleteAbandonedCheckoutAttemptsBefore :execrows
 DELETE FROM billing.checkout_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id IN (
     SELECT ca.id FROM billing.checkout_attempts ca
     WHERE ca.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND ca.status = 'expired'
+      AND ca.status = 'expired' AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
       AND ca.expires_at < sqlc.arg(cutoff)::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
     ORDER BY ca.expires_at
     LIMIT sqlc.arg(row_limit)::int
 );

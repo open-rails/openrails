@@ -478,9 +478,9 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			})
 		}))
 
-	// 9. Checkout attempts that expired unpaid.
-	sweep("delete expired checkout attempts", &result.CheckoutAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
-		return q.DeleteExpiredCheckoutAttemptsBefore(ctx, gen.DeleteExpiredCheckoutAttemptsBeforeParams{
+	// 9. Checkout attempts that expired without reaching a provider.
+	sweep("delete abandoned checkout attempts", &result.CheckoutAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteAbandonedCheckoutAttemptsBefore(ctx, gen.DeleteAbandonedCheckoutAttemptsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ExpiredCheckoutAttempts), RowLimit: limit,
 		})
 	})

@@ -43,7 +43,7 @@ type AdmitParams struct {
 	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty,string"`
 	Source                  string `json:"source,omitempty"`
 	// ExpiresAt is the admitted work's deadline, required when EstimatedAmount
-	// places a hold.
+	// places a hold. A hold lives at most 30 days past its admission.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Roles are the invoker's role UUIDs; role-scoped spend delegations gate
 	// on them.
@@ -172,7 +172,8 @@ type CaptureReceipt struct {
 	Replayed            bool                 `json:"replayed"`
 }
 
-// ExtendAdmissionParams moves an open hold's deadline later.
+// ExtendAdmissionParams moves an open hold's deadline later, to at most 30
+// days past its admission.
 type ExtendAdmissionParams struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }

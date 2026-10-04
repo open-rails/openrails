@@ -147,7 +147,7 @@ type BillingCatalogRateCard struct {
 	CustomerID *uuid.UUID
 }
 
-// One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: expired attempts are deleted 90 days after expires_at; every other attempt is permanent.
+// One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
 type BillingCheckoutAttempt struct {
 	ID             uuid.UUID
 	PriceID        *uuid.UUID

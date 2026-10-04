@@ -63,7 +63,7 @@ var Tables = map[string]Table{
 	"provider_billing_observations":   {Rows, "rows are deleted 90 days after their qualification was decided, by the cleanup job only."},
 	"reconciliation_findings":         {Rows, "resolved findings are deleted 12 months (366 days) after they were resolved and last seen."},
 	"maintenance_runs":                {Rows, "reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent."},
-	"checkout_attempts":               {Rows, "expired attempts are deleted 90 days after expires_at; every other attempt is permanent."},
+	"checkout_attempts":               {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
 	"checkout_sessions":               {Rows, "rows are deleted at purge_at, 24 hours after the session expired."},
 	"notifications":                   {Rows, "rows are deleted 90 days after created_at once read, 180 days if never read."},
 	"webhook_events":                  {Rows, "completed events are deleted 90 days after completed_at."},

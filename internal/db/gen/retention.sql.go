@@ -28,28 +28,32 @@ func (q *Queries) DeclareRetentionSweep(ctx context.Context, tableName string) e
 	return err
 }
 
-const deleteExpiredCheckoutAttemptsBefore = `-- name: DeleteExpiredCheckoutAttemptsBefore :execrows
+const deleteAbandonedCheckoutAttemptsBefore = `-- name: DeleteAbandonedCheckoutAttemptsBefore :execrows
 DELETE FROM billing.checkout_attempts
 WHERE merchant_id = $1::uuid
   AND id IN (
     SELECT ca.id FROM billing.checkout_attempts ca
     WHERE ca.merchant_id = $1::uuid
-      AND ca.status = 'expired'
+      AND ca.status = 'expired' AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
       AND ca.expires_at < $2::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
     ORDER BY ca.expires_at
     LIMIT $3::int
 )
 `
 
-type DeleteExpiredCheckoutAttemptsBeforeParams struct {
+type DeleteAbandonedCheckoutAttemptsBeforeParams struct {
 	MerchantID uuid.UUID
 	Cutoff     time.Time
 	RowLimit   int32
 }
 
-// Its checkout session, if one still exists, goes with it.
-func (q *Queries) DeleteExpiredCheckoutAttemptsBefore(ctx context.Context, arg DeleteExpiredCheckoutAttemptsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteExpiredCheckoutAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+// An attempt that expired without reaching a provider: no payment,
+// subscription or provider transaction, and no Solana Pay reference or receipt
+// names it. Its checkout session, if one still exists, goes with it.
+func (q *Queries) DeleteAbandonedCheckoutAttemptsBefore(ctx context.Context, arg DeleteAbandonedCheckoutAttemptsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAbandonedCheckoutAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -290,7 +294,10 @@ FROM (
     (SELECT DISTINCT ca.merchant_id AS mid
        FROM billing.checkout_attempts ca
       WHERE ($1::uuid IS NULL OR ca.merchant_id > $1::uuid)
-        AND ca.status = 'expired' AND ca.expires_at < $11::timestamptz
+        AND ca.status = 'expired' AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
+        AND ca.expires_at < $11::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
       ORDER BY 1 LIMIT $3::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid

@@ -204,7 +204,7 @@ type TrustLevelParams struct {
 }
 
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the
-// request's currency when empty).
+// request's currency when empty). A spend window is at most 31 days.
 type BudgetWindow struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`

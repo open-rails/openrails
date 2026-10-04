@@ -2140,7 +2140,7 @@ CREATE TABLE billing.checkout_attempts (
       OR (mode <> 'payment_method' AND price_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL)
     )
 );
-COMMENT ON TABLE billing.checkout_attempts IS 'One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: expired attempts are deleted 90 days after expires_at; every other attempt is permanent.';
+COMMENT ON TABLE billing.checkout_attempts IS 'One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.';
 COMMENT ON COLUMN billing.checkout_attempts.psp_id IS 'PSP selected for this attempt. Required.';
 COMMENT ON COLUMN billing.checkout_attempts.deleted_at IS 'Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.';
 COMMENT ON COLUMN billing.checkout_attempts.routing_reason IS 'Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.';
@@ -2155,7 +2155,8 @@ CREATE INDEX idx_checkout_attempts_payment_id ON billing.checkout_attempts USING
 CREATE INDEX idx_checkout_attempts_psp ON billing.checkout_attempts USING btree (merchant_id, psp_id);
 CREATE INDEX idx_checkout_attempts_subscription_id ON billing.checkout_attempts USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE INDEX ix_checkout_attempts_expirable ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((expires_at IS NOT NULL) AND (deleted_at IS NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text])));
-CREATE INDEX ix_checkout_attempts_expired ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE (status = 'expired'::text);
+-- An expired attempt that reached no provider: what retention deletes.
+CREATE INDEX ix_checkout_attempts_abandoned ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((status = 'expired'::text) AND (payment_id IS NULL) AND (subscription_id IS NULL) AND (transaction_id IS NULL));
 CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_reference ON billing.checkout_attempts USING btree (merchant_id, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_transaction ON billing.checkout_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
 CREATE INDEX checkout_attempts_price_id_idx ON billing.checkout_attempts USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL);
@@ -2266,6 +2267,7 @@ CREATE TABLE billing.solana_pay_receipts (
 COMMENT ON TABLE billing.solana_pay_receipts IS 'Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.';
 
 CREATE UNIQUE INDEX uq_solana_pay_receipts_transfer ON billing.solana_pay_receipts USING btree (signature, recipient, token_mint) WHERE disposition IN ('credited', 'review');
+CREATE INDEX idx_solana_pay_receipts_attempt ON billing.solana_pay_receipts USING btree (merchant_id, checkout_attempt_id);
 CREATE INDEX idx_solana_pay_receipts_review ON billing.solana_pay_receipts USING btree (merchant_id, created_at) WHERE review_reason IS NOT NULL AND resolved_at IS NULL;
 
 CREATE TABLE billing.rebill_cycles (
