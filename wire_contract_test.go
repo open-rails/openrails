@@ -19,8 +19,10 @@ func TestCreditTransactionWireContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	balance, zero := int64(math.MinInt64), int64(0)
-	value := billing.CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: "22222222-2222-2222-2222-222222222222", Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
+	invoker, grant := "host", billing.CreditGrantID(uuid.MustParse("44444444-4444-4444-8444-444444444444"))
+	value := billing.CreditTransaction{ID: billing.CreditTransactionID(uuid.MustParse("11111111-1111-1111-1111-111111111111")),
+		CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Currency: "USD", Type: billing.CreditDeposit,
+		Amount: math.MaxInt64, CreditGrantID: &grant, Invoker: &invoker, Source: "bank", SourceID: "deposit-1", CreatedAt: when}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
@@ -30,14 +32,14 @@ func TestCreditTransactionWireContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(raw) != strings.TrimSpace(string(fixture)) {
-		t.Fatalf("receipt wire changed:\n%s", raw)
+		t.Fatalf("credit transaction wire changed:\n%s", raw)
 	}
 	var got billing.CreditTransaction
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(value, got) {
-		t.Fatalf("receipt lost precision or null/time semantics: %#v", got)
+		t.Fatalf("credit transaction lost precision or null/time semantics: %#v", got)
 	}
 	// The ordinary JSON/JavaScript representation is a string, so consumers do
 	// not need a custom JSON parser to avoid the IEEE-754 integer boundary.
@@ -45,32 +47,32 @@ func TestCreditTransactionWireContract(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded["amount"] != "9223372036854775807" || decoded["balance_after"] != "-9223372036854775808" {
+	if decoded["amount"] != "9223372036854775807" || decoded["resource"] != nil {
 		t.Fatal(decoded)
 	}
 }
 
-func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
+func TestCreditGrantAndBalanceInt64RoundTrip(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, -1, 0, 1, 9007199254740993, math.MaxInt64} {
-		customer := uuid.NewString()
-		request := billing.DepositCreditsRequest{CustomerID: &customer, Invoker: "host", Currency: "USD", Amount: amount, Source: "bank", SourceID: "payment"}
+		customer := billing.CustomerID(uuid.New())
+		request := billing.CreditGrantParams{Invoker: "host", Currency: "USD", Amount: amount, Source: "bank", SourceID: "payment"}
 		raw, err := json.Marshal(request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got billing.DepositCreditsRequest
+		var got billing.CreditGrantParams
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(request, got) {
-			t.Fatalf("deposit changed: %s", raw)
+			t.Fatalf("credit grant changed: %s", raw)
 		}
-		balance := billing.CreditAccount{CustomerID: customer, Currency: "USD", BalanceAmount: amount, HeldAmount: amount, AvailableAmount: amount, OutstandingOwedAmount: amount}
+		balance := billing.Balance{CustomerID: customer, Currency: "USD", BalanceAmount: amount, HeldAmount: amount, AvailableAmount: amount, OwedAmount: amount}
 		raw, err = json.Marshal(balance)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var gotBalance billing.CreditAccount
+		var gotBalance billing.Balance
 		if err := json.Unmarshal(raw, &gotBalance); err != nil {
 			t.Fatal(err)
 		}
@@ -78,8 +80,8 @@ func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 			t.Fatalf("balance changed: %s", raw)
 		}
 	}
-	var request billing.DepositCreditsRequest
-	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"customer_id":123}`} {
+	var request billing.CreditGrantParams
+	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"currency":123}`} {
 		if err := json.Unmarshal([]byte(raw), &request); err == nil {
 			t.Fatalf("accepted invalid wire value %s", raw)
 		}
@@ -87,12 +89,14 @@ func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 }
 
 func TestAdmissionAndUsageMoneyWire(t *testing.T) {
+	max := int64(math.MaxInt64)
 	for _, value := range []any{
-		billing.AdmitRequest{EstimatedAmount: 9007199254740993, AccrualRateDeltaPerHour: math.MaxInt64},
-		billing.AdmitResponse{Allowed: true, EstimatedAmount: 9007199254740993, StartCapacityAmount: math.MaxInt64},
-		billing.UsageReport{Amount: math.MaxInt64},
-		billing.WastedSpendReport{Amount: math.MaxInt64},
-		billing.WastedSpendResponse{RecordedAmount: math.MaxInt64, ChargedAmount: 9007199254740993},
+		billing.AdmitParams{EstimatedAmount: 9007199254740993, AccrualRateDeltaPerHour: math.MaxInt64},
+		billing.Admission{Allowed: true, EstimatedAmount: 9007199254740993, StartCapacityAmount: math.MaxInt64, CapturedAmount: &max},
+		billing.UsageEventParams{Amount: math.MaxInt64},
+		billing.WastedSpendParams{Amount: math.MaxInt64},
+		billing.WastedSpendReport{RecordedAmount: math.MaxInt64, ChargedAmount: 9007199254740993, PolicyChargedAmount: &max},
+		billing.CaptureParams{Amount: math.MaxInt64},
 	} {
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -110,25 +114,30 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 			t.Fatal(err)
 		}
 		for name, field := range fields {
-			if strings.Contains(name, "amount") || name == "accrual_rate_delta_per_hour" {
+			if (strings.Contains(name, "amount") || name == "accrual_rate_delta_per_hour") && field != nil {
 				if _, ok := field.(string); !ok {
 					t.Fatalf("unsafe monetary number %s: %s", name, raw)
 				}
 			}
 		}
 	}
+	// A capture that names no amount is refused, never read as free.
+	var capture billing.CaptureParams
+	if err := json.Unmarshal([]byte(`{"usage":{"event_type":"inference"}}`), &capture); err == nil {
+		t.Fatal("capture without an amount decoded")
+	}
 }
 
 func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
 	max := int64(math.MaxInt64)
 	for _, value := range []any{
-		billing.BudgetWindowInput{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"},
-		billing.SpendDelegationInput{Scope: "invoker", ScopeKey: "worker", Windows: []billing.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
+		billing.BudgetWindow{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"},
+		billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
 		billing.BillingPolicyInput{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
 		billing.MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
-		billing.CreditLimitRequest{CustomerID: (billing.CustomerID(uuid.New())).String(), Currency: "USD", CreditLimitAmount: max},
-		billing.UsageRollupRow{Key: "api", EventCount: 1, TotalAmount: max, Currency: "USD"},
-		billing.ResourceRevenueResponse{Currency: "USD", RevenueAmount: max, Daily: []billing.ResourceRevenueDailyRow{{Date: "2026-09-16", Currency: "USD", Amount: max}}},
+		billing.CreditLimit{CustomerID: billing.CustomerID(uuid.New()), Currency: "USD", Amount: max},
+		billing.UsageRow{Key: "api", EventCount: 1, Amount: max},
+		billing.CreditGrant{ID: billing.CreditGrantID(uuid.New()), Amount: max, RemainingAmount: max, State: billing.CreditGrantActive},
 	} {
 		raw, err := json.Marshal(value)
 		if err != nil {

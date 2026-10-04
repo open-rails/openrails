@@ -6,13 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	auth "github.com/open-rails/helpers/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -20,7 +18,7 @@ import (
 )
 
 // Framework-neutral delegated-identity middleware for the self-service
-// (/v1/me/*) and customer-treasury (/v1/customers/:customer_id/*) surfaces.
+// (/v1/me/*) surface.
 // Ported from the retired gin middleware (#670); the context payload contract
 // (request keys below) is unchanged, so handlers work identically.
 
@@ -236,8 +234,8 @@ func principalFromDelegated(resolved *credential.ResolvedDelegated, typ Credenti
 
 // PayerScopedRequired refuses an INVOKER-SCOPED principal (or#930): a credential
 // that spends a payer's money without being the payer. Its bound subject names
-// an account it does not own, so everything the self-service and treasury
-// surfaces answer — balance, transactions, invoices, subscriptions, payment
+// an account it does not own, so everything the self-service surface
+// answers — balance, transactions, invoices, subscriptions, payment
 // methods, checkout, the payer's own delegation policy — is somebody else's.
 //
 // This is the guard that makes the narrow credential class SAFE to mint: a host
@@ -257,161 +255,6 @@ func PayerScopedRequired() router.Middleware {
 				r.AbortCode(billing.CodeInvokerScopedPrincipal, "")
 				return
 			}
-			next(r)
-		}
-	}
-}
-
-// RequirePermission gates a route on a permission held by the resolved bearer
-// principal. Must run after the group's authentication middleware.
-func RequirePermission(perm string) router.Middleware {
-	perm = strings.TrimSpace(perm)
-	return func(next router.Handler) router.Handler {
-		return func(r *request.Request) {
-			principal, ok := PrincipalFromRequest(r)
-			if !ok {
-				r.AbortCode(billing.CodeAuthenticationRequired, "bearer principal required")
-				return
-			}
-			if authority, native := nativeTreasuryFromRequest(r); native {
-				if requireNativeTreasuryPermission(r, authority, perm) {
-					next(r)
-				}
-				return
-			}
-			if !principal.Can(r.Request.Context(), perm) {
-				r.AbortCode(billing.CodePermissionRequired, "")
-				return
-			}
-			next(r)
-		}
-	}
-}
-
-// TreasuryPayerContextKey holds the *TreasuryPayer bound by
-// CustomerScopeRequired.
-const TreasuryPayerContextKey = "openrails.treasury_payer"
-
-// TreasuryPayer is the payer identity the customer-treasury surface
-// (/v1/customers/:customer_id/*) operates on, resolved and bound by
-// CustomerScopeRequired (or#916). Handlers consume this binding instead of
-// re-deriving a payer from merchant coordinates.
-type TreasuryPayer struct {
-	// Subject is the acting subject (delegated_sub), recorded for audit.
-	Subject string
-	// CustomerID is the payable subject every treasury read/write is keyed on.
-	CustomerID identity.CustomerID
-	// MerchantPayer marks the merchant-as-payer binding: the merchant's own
-	// treasury account, granted only to merchant-admin principals.
-	MerchantPayer bool
-}
-
-// TreasuryPayerFromRequest returns the payer bound by CustomerScopeRequired.
-func TreasuryPayerFromRequest(r *request.Request) (*TreasuryPayer, bool) {
-	if r == nil {
-		return nil, false
-	}
-	v, ok := r.Get(TreasuryPayerContextKey)
-	if !ok {
-		return nil, false
-	}
-	p, ok := v.(*TreasuryPayer)
-	return p, ok && p != nil
-}
-
-// ResolveTreasuryPayer matches the :customer_id path scope against the
-// resolved principal and returns the typed payer binding (or#916):
-//
-//   - SUBJECT payer: :customer_id names the principal's OWN payable subject
-//     (its delegated_sub or durable customer id). This is exactly the /v1/me
-//     binding — strictly more gated, since the treasury routes' customer:*
-//     RequirePermission rides on top.
-//   - MERCHANT payer: :customer_id names the pinned merchant's own
-//     coordinates (slug / id) — the merchant org's treasury account. Only a
-//     merchant-admin principal (one granted the full `merchant:*` authority)
-//     may bind it: every delegated principal of a merchant carries those
-//     coordinates, so matching them alone let ANY subject holding customer:*
-//     grants act on the merchant's balance (the pre-or#916 hazard).
-//
-// No match — including merchant coordinates presented without merchant-admin
-// authority — fails closed.
-func ResolveTreasuryPayer(customerID string, resolved *credential.ResolvedDelegated) (*TreasuryPayer, bool) {
-	customerID = strings.TrimSpace(customerID)
-	if customerID == "" || resolved == nil || resolved.MerchantID.IsZero() {
-		return nil, false
-	}
-	subject := strings.TrimSpace(resolved.DelegatedSubject)
-	if (subject != "" && customerID == subject) ||
-		(resolved.CustomerID != uuid.Nil && customerID == resolved.CustomerID.String()) {
-		payer := identity.CustomerID(resolved.CustomerID)
-		if payer.IsZero() {
-			// Host principals carry the subject verbatim; a resolver that did
-			// not materialize a durable customer id still keys on the subject
-			// when it is a payable (uuid) subject.
-			payer = identity.CustomerIDFromString(subject)
-		}
-		if payer.IsZero() {
-			return nil, false
-		}
-		return &TreasuryPayer{Subject: subject, CustomerID: payer}, true
-	}
-	for _, coordinate := range []string{resolved.Merchant, resolved.MerchantSlug, resolved.MerchantID.String()} {
-		if strings.TrimSpace(coordinate) != customerID {
-			continue
-		}
-		if !resolved.HasPermission(billing.MerchantAll) {
-			return nil, false
-		}
-		return &TreasuryPayer{
-			Subject:       subject,
-			CustomerID:    identity.CustomerID(resolved.MerchantID.UUID()),
-			MerchantPayer: true,
-		}, true
-	}
-	return nil, false
-}
-
-// CustomerScopeRequired gates the customer-as-payer treasury surface
-// (/v1/customers/:customer_id/*, #567). Runs AFTER the delegated auth
-// middleware: resolves the typed treasury payer from the :customer_id scope
-// (or#916) and REBINDS the acting payer subject to that payable subject so
-// the shared /v1/me money handlers operate on the bound balance. Never
-// touches permissions; the pinned merchant is unchanged.
-func CustomerScopeRequired() router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *request.Request) {
-			resolved, ok := DelegatedFromRequest(r)
-			if !ok {
-				r.AbortCode(billing.CodeAuthenticationRequired, "delegated principal required")
-				return
-			}
-			if resolved.MerchantID.IsZero() {
-				r.AbortCode(billing.CodeDelegatedPrincipalInvalid, "")
-				return
-			}
-			var payer *TreasuryPayer
-			if authority, native := nativeTreasuryFromRequest(r); native {
-				payer, ok = bindNativeTreasuryPayer(r, authority)
-			} else {
-				payer, ok = ResolveTreasuryPayer(r.Param("customer_id"), resolved)
-			}
-			if !ok {
-				r.AbortCode(billing.CodeCustomerScopeMismatch, "")
-				return
-			}
-			user := billingauth.UserContext{
-				UserID:   payer.CustomerID.UUID().String(),
-				Merchant: resolved.Merchant,
-			}
-			if payer.MerchantPayer {
-				user.Username = resolved.Merchant
-			} else {
-				user.Email = resolved.Email
-				user.EmailVerified = resolved.EmailVerified
-				user.Username = resolved.Username
-			}
-			r.Set(TreasuryPayerContextKey, payer)
-			r.SetUserContext(user)
 			next(r)
 		}
 	}

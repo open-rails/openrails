@@ -1,4 +1,4 @@
-package pagination
+package pagination_test
 
 import (
 	"encoding/json"
@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -59,7 +60,7 @@ func (t *table) handler(r *request.Request) {
 	if !ok {
 		return
 	}
-	at, id, err := After(page.Cursor)
+	at, id, err := pagination.After(page.Cursor)
 	if err != nil {
 		var refusal *apperr.Error
 		if !errors.As(err, &refusal) {
@@ -69,8 +70,8 @@ func (t *table) handler(r *request.Request) {
 		r.APIError(api.Coded(refusal.Code, refusal.Message).WithParam(refusal.Param))
 		return
 	}
-	rows := t.query(at, id, Fetch(page.Limit))
-	r.SuccessJSON(Cut(rows, page.Limit, func(r row) any { return TimeID{At: r.CreatedAt, ID: r.ID} }))
+	rows := t.query(at, id, pagination.Fetch(page.Limit))
+	r.SuccessJSON(pagination.Cut(rows, page.Limit, func(r row) any { return pagination.TimeID{At: r.CreatedAt, ID: r.ID} }))
 }
 
 // A keyset list served over HTTP: every row exactly once across pages, in
@@ -144,8 +145,8 @@ func TestKeysetListOverHTTP(t *testing.T) {
 		"limit zero":            {url.Values{"limit": {"0"}}, "invalid_query", "limit"},
 		"limit over the max":    {url.Values{"limit": {strconv.Itoa(billing.MaxPageLimit + 1)}}, "invalid_query", "limit"},
 		"cursor not base64":     {url.Values{"cursor": {"***"}}, "invalid_cursor", "cursor"},
-		"cursor not a position": {url.Values{"cursor": {Encode(map[string]string{"x": "y"})}}, "invalid_cursor", "cursor"},
-		"cursor without a key":  {url.Values{"cursor": {Encode(TimeID{})}}, "invalid_cursor", "cursor"},
+		"cursor not a position": {url.Values{"cursor": {pagination.Encode(map[string]string{"x": "y"})}}, "invalid_cursor", "cursor"},
+		"cursor without a key":  {url.Values{"cursor": {pagination.Encode(pagination.TimeID{})}}, "invalid_cursor", "cursor"},
 	} {
 		status, body := get(tc.query)
 		require.Equal(t, http.StatusBadRequest, status, name)
@@ -158,33 +159,33 @@ func TestKeysetListOverHTTP(t *testing.T) {
 }
 
 func TestLimitAndCut(t *testing.T) {
-	limit, err := Limit(billing.PageRequest{})
+	limit, err := pagination.Limit(billing.PageRequest{})
 	require.NoError(t, err)
 	require.Equal(t, billing.DefaultPageLimit, limit)
-	limit, err = Limit(billing.PageRequest{Limit: billing.MaxPageLimit})
+	limit, err = pagination.Limit(billing.PageRequest{Limit: billing.MaxPageLimit})
 	require.NoError(t, err)
 	require.Equal(t, billing.MaxPageLimit, limit)
 	for _, bad := range []int{-1, billing.MaxPageLimit + 1} {
-		_, err = Limit(billing.PageRequest{Limit: bad})
-		require.ErrorIs(t, err, ErrInvalidLimit)
+		_, err = pagination.Limit(billing.PageRequest{Limit: bad})
+		require.ErrorIs(t, err, pagination.ErrInvalidLimit)
 		require.ErrorIs(t, err, billing.ErrInvalid)
 	}
-	require.EqualValues(t, 6, Fetch(5))
+	require.EqualValues(t, 6, pagination.Fetch(5))
 
 	position := func(n int) any { return n }
-	require.Equal(t, billing.ListPage[int]{Items: []int{1, 2}}, Cut([]int{1, 2}, 2, position), "no extra row, no next page")
-	page := Cut([]int{1, 2, 3}, 2, position)
+	require.Equal(t, billing.ListPage[int]{Items: []int{1, 2}}, pagination.Cut([]int{1, 2}, 2, position), "no extra row, no next page")
+	page := pagination.Cut([]int{1, 2, 3}, 2, position)
 	require.Equal(t, []int{1, 2}, page.Items)
 	var last int
-	present, err := Decode(page.Next, &last)
+	present, err := pagination.Decode(page.Next, &last)
 	require.NoError(t, err)
 	require.True(t, present)
 	require.Equal(t, 2, last, "the cursor is the last kept row's position")
 
-	strings := Map(page, strconv.Itoa)
+	strings := pagination.Map(page, strconv.Itoa)
 	require.Equal(t, billing.ListPage[string]{Items: []string{"1", "2"}, Next: page.Next}, strings)
 
-	present, err = Decode("", &last)
+	present, err = pagination.Decode("", &last)
 	require.NoError(t, err)
 	require.False(t, present)
 }

@@ -12,32 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const countSearchCustomers = `-- name: CountSearchCustomers :one
-SELECT count(*) FROM billing.customers c
-WHERE c.merchant_id = $1
-  AND ($2::text = ''
-   OR c.id::text ILIKE $2 || '%'
-   OR EXISTS (
-        SELECT 1 FROM billing.subscriptions se
-        WHERE se.customer_id = c.id
-          AND se.merchant_id = c.merchant_id
-          AND se.merchant_id = $1
-          AND se.deleted_at IS NULL
-          AND se.user_email ILIKE '%' || $2 || '%'))
-`
-
-type CountSearchCustomersParams struct {
-	MerchantID uuid.UUID
-	Q          string
-}
-
-func (q *Queries) CountSearchCustomers(ctx context.Context, arg CountSearchCustomersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSearchCustomers, arg.MerchantID, arg.Q)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const ensureCustomer = `-- name: EnsureCustomer :one
 
 INSERT INTO billing.customers (id, merchant_id, issuer)
@@ -45,7 +19,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, created_at, last_seen_at
+RETURNING id, merchant_id, issuer, email, created_at, last_seen_at
 `
 
 type EnsureCustomerParams struct {
@@ -65,6 +39,7 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 		&i.ID,
 		&i.MerchantID,
 		&i.Issuer,
+		&i.Email,
 		&i.CreatedAt,
 		&i.LastSeenAt,
 	)
@@ -89,32 +64,82 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return err
 }
 
-const getLatestCustomerEmail = `-- name: GetLatestCustomerEmail :one
-SELECT COALESCE((
-  SELECT BTRIM(s.user_email)
-  FROM billing.subscriptions s
-  WHERE s.customer_id = $1
-    AND s.merchant_id = $2
-    AND s.deleted_at IS NULL
-    AND NULLIF(BTRIM(s.user_email), '') IS NOT NULL
-  ORDER BY s.created_at DESC, s.id DESC
-  LIMIT 1
-), '')::text AS email
+const getCustomer = `-- name: GetCustomer :one
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at FROM billing.customers
+WHERE merchant_id = $1 AND id = $2
 `
 
-type GetLatestCustomerEmailParams struct {
-	CustomerID uuid.UUID
+type GetCustomerParams struct {
 	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
-// Customers do not own an email column. Project the latest non-empty email from
-// all subscription history so an inactive customer remains identifiable on the
-// detail page. The explicit merchant predicate is the merchant scope.
-func (q *Queries) GetLatestCustomerEmail(ctx context.Context, arg GetLatestCustomerEmailParams) (string, error) {
-	row := q.db.QueryRow(ctx, getLatestCustomerEmail, arg.CustomerID, arg.MerchantID)
-	var email string
-	err := row.Scan(&email)
-	return email, err
+func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (BillingCustomer, error) {
+	row := q.db.QueryRow(ctx, getCustomer, arg.MerchantID, arg.ID)
+	var i BillingCustomer
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Issuer,
+		&i.Email,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+	)
+	return i, err
+}
+
+const listCustomers = `-- name: ListCustomers :many
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at FROM billing.customers c
+WHERE c.merchant_id = $1
+  AND ($2::text = ''
+   OR c.id::text ILIKE $2 || '%'
+   OR c.email ILIKE '%' || $2 || '%')
+  AND ($3::timestamptz IS NULL
+   OR (c.created_at, c.id) < ($3::timestamptz, $4::uuid))
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $5::int
+`
+
+type ListCustomersParams struct {
+	MerchantID uuid.UUID
+	Q          string
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+// Newest first. q matches an id prefix or an email substring.
+func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([]BillingCustomer, error) {
+	rows, err := q.db.Query(ctx, listCustomers,
+		arg.MerchantID,
+		arg.Q,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomer
+	for rows.Next() {
+		var i BillingCustomer
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Issuer,
+			&i.Email,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
@@ -154,75 +179,49 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject u
 	return items, nil
 }
 
-const searchCustomers = `-- name: SearchCustomers :many
-SELECT c.id, c.id::text AS subject, c.created_at, c.last_seen_at,
-  (SELECT s.user_email FROM billing.subscriptions s
-     WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
-       AND s.deleted_at IS NULL
-       AND s.user_email IS NOT NULL
-     ORDER BY s.created_at DESC LIMIT 1) AS email
-FROM billing.customers c
-WHERE c.merchant_id = $1
-  AND ($2::text = ''
-   OR c.id::text ILIKE $2 || '%'
-   OR EXISTS (
-        SELECT 1 FROM billing.subscriptions se
-        WHERE se.customer_id = c.id
-          AND se.merchant_id = c.merchant_id
-          AND se.merchant_id = $1
-          AND se.deleted_at IS NULL
-          AND se.user_email ILIKE '%' || $2 || '%'))
-ORDER BY c.last_seen_at DESC
-LIMIT $4 OFFSET $3
+const putCustomer = `-- name: PutCustomer :one
+INSERT INTO billing.customers (id, merchant_id, email)
+VALUES ($1, $2, $3)
+ON CONFLICT (merchant_id, id) DO UPDATE SET
+  email = EXCLUDED.email,
+  last_seen_at = now()
+RETURNING id, merchant_id, issuer, email, created_at, last_seen_at
 `
 
-type SearchCustomersParams struct {
-	MerchantID uuid.UUID
-	Q          string
-	PageOffset int64
-	PageLimit  int64
-}
-
-type SearchCustomersRow struct {
+type PutCustomerParams struct {
 	ID         uuid.UUID
-	Subject    string
-	CreatedAt  time.Time
-	LastSeenAt time.Time
+	MerchantID uuid.UUID
 	Email      *string
 }
 
-// Merchant-scoped customer list/search (#740). merchant_id is an EXPLICIT
-// predicate (#227), the list's only merchant scope. q matches the subject UUID
-// prefix or a subscription email substring; empty q lists
-// newest-touched first. email is the latest subscription email on file
-// (customers carry none themselves).
-func (q *Queries) SearchCustomers(ctx context.Context, arg SearchCustomersParams) ([]SearchCustomersRow, error) {
-	rows, err := q.db.Query(ctx, searchCustomers,
-		arg.MerchantID,
-		arg.Q,
-		arg.PageOffset,
-		arg.PageLimit,
+// The merchant's declaration of a customer: materialize it, or replace its
+// declared fields.
+func (q *Queries) PutCustomer(ctx context.Context, arg PutCustomerParams) (BillingCustomer, error) {
+	row := q.db.QueryRow(ctx, putCustomer, arg.ID, arg.MerchantID, arg.Email)
+	var i BillingCustomer
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Issuer,
+		&i.Email,
+		&i.CreatedAt,
+		&i.LastSeenAt,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SearchCustomersRow
-	for rows.Next() {
-		var i SearchCustomersRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Subject,
-			&i.CreatedAt,
-			&i.LastSeenAt,
-			&i.Email,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return i, err
+}
+
+const setCustomerEmail = `-- name: SetCustomerEmail :exec
+UPDATE billing.customers SET email = $1
+WHERE merchant_id = $2 AND id = $3
+`
+
+type SetCustomerEmailParams struct {
+	Email      *string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) SetCustomerEmail(ctx context.Context, arg SetCustomerEmailParams) error {
+	_, err := q.db.Exec(ctx, setCustomerEmail, arg.Email, arg.MerchantID, arg.ID)
+	return err
 }

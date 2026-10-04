@@ -16,7 +16,7 @@ func TestPublicInternalTypeMutationsDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ name, before, after string }{
-		{"internal/config/embedding.go", "Treasury bool", "Treasury string"},
+		{"internal/config/embedding.go", "Delegated bool", "Delegated string"},
 		{"internal/config/merchant_declaration.go", "LogoURL     string", "LogoURL     bool"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

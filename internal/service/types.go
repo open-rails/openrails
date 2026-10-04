@@ -59,19 +59,3 @@ type ConfirmPayment = billing.ConfirmPayment
 // policy documents and token claims on Entitlement; DisplayName is mutable
 // and for display only.
 type EffectiveTier = billing.EffectiveTier
-
-// -------------------------------- Credits --------------------------------
-
-// CreditBalance represents a user's balance for a currency.
-type CreditBalance struct {
-	Currency      string
-	DisplayName   string
-	Unit          string
-	DecimalPlaces int
-	Balance       int64
-	HeldBalance   int64
-}
-
-// NOTE: HoldCreditsRequest, CreditHold, CaptureHoldRequest, CreditTransaction,
-// WithdrawCreditsRequest, and EntitlementRecord are defined in service.go
-// as they are part of the existing API.

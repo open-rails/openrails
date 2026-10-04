@@ -1,10 +1,7 @@
 # Refusals that answer a status generic code (ErrorJSON/AbortJSON), per file.
 # A count only goes down: new refusals name a registered code.
-internal/http/embedhttp/native_treasury.go 1
 internal/http/handlers/admin_catalog.go 17
 internal/http/handlers/admin_change_tier.go 11
-internal/http/handlers/admin_credit_grants.go 13
-internal/http/handlers/admin_customers.go 5
 internal/http/handlers/admin_findings.go 14
 internal/http/handlers/admin_invoices.go 21
 internal/http/handlers/admin_metering.go 3
@@ -13,10 +10,9 @@ internal/http/handlers/admin_payments.go 19
 internal/http/handlers/admin_plan_migration.go 10
 internal/http/handlers/admin_rate_overrides.go 12
 internal/http/handlers/admin_reprice.go 18
-internal/http/handlers/admin_users.go 25
+internal/http/handlers/admin_users.go 17
 internal/http/handlers/admin_worker_health.go 1
 internal/http/handlers/billing_import.go 2
-internal/http/handlers/billing_status.go 2
 internal/http/handlers/card_attempts.go 1
 internal/http/handlers/card_entry.go 4
 internal/http/handlers/catalog_application.go 3
@@ -25,9 +21,7 @@ internal/http/handlers/catalogs.go 7
 internal/http/handlers/change_tier.go 18
 internal/http/handlers/checkout_config.go 5
 internal/http/handlers/checkout_session.go 17
-internal/http/handlers/customer_billing_policy.go 2
 internal/http/handlers/customer_payment.go 3
-internal/http/handlers/customer_spend_delegations.go 14
 internal/http/handlers/entitlement_features.go 8
 internal/http/handlers/entitlements.go 31
 internal/http/handlers/hosted_checkout.go 1
@@ -46,14 +40,10 @@ internal/http/handlers/portal.go 3
 internal/http/handlers/product_access.go 38
 internal/http/handlers/product_archive.go 10
 internal/http/handlers/provider_refresh.go 3
-internal/http/handlers/self_account.go 10
-internal/http/handlers/self_spend_limits.go 5
-internal/http/handlers/self_usage_invoices.go 9
-internal/http/handlers/service_admission.go 16
+internal/http/handlers/self_account.go 7
+internal/http/handlers/self_usage_invoices.go 5
+internal/http/handlers/service_admission.go 4
 internal/http/handlers/service_commerce.go 10
-internal/http/handlers/service_credits.go 53
-internal/http/handlers/service_customers.go 3
-internal/http/handlers/service_delinquency.go 8
 internal/http/handlers/service_host_events.go 5
 internal/http/handlers/service_payment_settlement.go 4
 internal/http/handlers/solana_pay.go 13

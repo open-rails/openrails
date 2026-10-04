@@ -39,7 +39,6 @@ type Scope string
 
 const (
 	MerchantScope Scope = "merchant"
-	CustomerScope Scope = "customer"
 	PlatformScope Scope = "platform"
 )
 
@@ -51,7 +50,6 @@ type Target struct {
 	// MerchantSlug is empty when an ID-selected, group-bound directory has no
 	// canonical name authority. Authorize by immutable IDs, never a stale name.
 	MerchantSlug     string
-	CustomerID       string
 	AuthorityGroupID string
 }
 

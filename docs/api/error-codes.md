@@ -6,6 +6,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 
 | Code | Status | Type | Meaning |
 |---|---|---|---|
+| `admission_captured` | 409 | `invalid_request_error` | The admission was captured; it can no longer be released. |
+| `admission_not_found` | 404 | `invalid_request_error` | No admission was made under this request id. |
 | `allowance_meter_not_found` | 404 | `invalid_request_error` | The rate card's allowance meter does not exist. |
 | `allowance_source_in_use` | 409 | `invalid_request_error` | The allowance source is in use. |
 | `allowance_source_invalid` | 409 | `invalid_request_error` | The allowance source cannot back this rate card. |
@@ -67,7 +69,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `customer_action_required` | 403 | `authorization_error` | Only the verified customer may perform this payment action. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
-| `customer_scope_mismatch` | 403 | `authorization_error` | The credential may not act on the addressed customer. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
 | `dashboard_invalid` | 400 | `invalid_request_error` | The dashboard is invalid; metadata.errors lists why. |
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |
@@ -79,7 +80,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `delegated_token_invalid` | 401 | `authentication_error` | The delegated access token is invalid. |
 | `delegated_token_revoked` | 401 | `authentication_error` | The delegated access token was revoked. |
 | `delegated_verification_unavailable` | 503 | `api_error` | Delegated tokens cannot be verified right now; retry. |
-| `deposit_not_found` | 404 | `invalid_request_error` | No deposit was made under this source id. |
 | `email_unverified` | 403 | `authorization_error` | Creating a merchant needs a verified email. |
 | `engine_takeover_boundary_too_close` | 409 | `invalid_request_error` | The provider bills the next period too soon to take over before it. |
 | `engine_takeover_committed` | 409 | `invalid_request_error` | The provider schedule delete was already submitted; the takeover can only complete. |
@@ -90,7 +90,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `engine_takeover_not_found` | 404 | `invalid_request_error` | The subscription has no engine takeover. |
 | `engine_takeover_rate_limited` | 429 | `rate_limit_error` | The takeover batch reached its rate limit. |
 | `engine_takeover_unavailable` | 503 | `api_error` | Engine takeover is not available in this deployment. |
-| `hold_not_found` | 404 | `invalid_request_error` | The hold does not exist. |
+| `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_merchant_mismatch` | 403 | `authorization_error` | The credential's merchant is not the one this host serves. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |

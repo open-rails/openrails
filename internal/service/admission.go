@@ -4,16 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -32,7 +34,7 @@ import (
 type AdmitInput struct {
 	CustomerID  identity.CustomerID
 	Invoker     string
-	InvokerType string
+	InvokerType billing.InvokerType
 	TrustLevel  string // payer trust level
 	Resource    string
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
@@ -67,11 +69,8 @@ var ErrHoldDeadlinePassed = admission.ErrHoldDeadlinePassed
 // The caller must re-admit; a lapsed hold is never resurrected.
 var ErrHoldNotFound = errors.New("hold not found for request_id")
 
-// AdmitResult is the unified admission decision returned to the host.
-type AdmitResult = billing.AdmitResponse
-
 // Admit evaluates policy and reserves a durable request operation in one payer transaction.
-func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
+func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -89,8 +88,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		if err := spendgate.ValidateRequest(in.SourceID, in.EstimatedAmount, in.AccrualRateDeltaPerHour); err != nil {
 			return nil, err
 		}
-		in.InvokerType = strings.TrimSpace(in.InvokerType)
-		if in.InvokerType != string(identity.InvokerTypePayer) && in.InvokerType != string(identity.InvokerTypeDelegated) {
+		if in.InvokerType != billing.InvokerTypePayer && in.InvokerType != billing.InvokerTypeDelegated {
 			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be payer or delegated"}
 		}
 	}
@@ -129,7 +127,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	dec, err := adm.Admit(ctx, admission.AdmitRequest{
 		CustomerID:      in.CustomerID,
 		Invoker:         in.Invoker,
-		InvokerType:     in.InvokerType,
+		InvokerType:     string(in.InvokerType),
 		TrustLevel:      in.TrustLevel,
 		Resource:        in.Resource,
 		Roles:           in.Roles,
@@ -145,21 +143,40 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		return nil, err
 	}
 
-	res := &AdmitResult{
+	res := &billing.Admission{
+		RequestID:           in.SourceID,
+		CustomerID:          billing.CustomerID(in.CustomerID),
 		Allowed:             dec.Allowed,
 		Currency:            currency,
 		EstimatedAmount:     in.EstimatedAmount,
 		StartCapacityAmount: startCapacity(dec.AvailableAmount, dec.HeldAmount),
-		BlockedBy:           dec.BlockedBy,
-		DenyCode:            dec.DenyCode,
-		RetryAfterSeconds:   dec.RetryAfterSeconds,
-		Replayed:            dec.Replayed, State: dec.State,
+		Replayed:            dec.Replayed,
 	}
 	if dec.Allowed {
-		res.HoldExpiresAt = dec.HoldExpiresAt
+		state := billing.AdmissionState(dec.State)
+		res.State, res.ExpiresAt = &state, dec.HoldExpiresAt
+	} else {
+		blocked, code := billing.AdmissionBlock(dec.BlockedBy), dec.DenyCode
+		res.BlockedBy, res.DenyCode = &blocked, &code
+		if dec.RetryAfterSeconds > 0 {
+			retry := dec.RetryAfterSeconds
+			res.RetryAfterSeconds = &retry
+		}
 	}
-	res.Currency = currency
 	return res, nil
+}
+
+// admissionFromOperation is the stored state of an allowed admission.
+func admissionFromOperation(row gen.BillingAdmissionOperation, now time.Time) *billing.Admission {
+	state := billing.AdmissionState(row.State)
+	if state == billing.AdmissionOpen && row.ExpiresAt != nil && !row.ExpiresAt.After(now) {
+		state = billing.AdmissionExpired
+	}
+	return &billing.Admission{
+		RequestID: row.RequestID, CustomerID: billing.CustomerID(row.CustomerID), Allowed: true,
+		Currency: row.Currency, EstimatedAmount: row.EstimatedAmount, StartCapacityAmount: row.AvailableAmount,
+		State: &state, ExpiresAt: row.ExpiresAt, CapturedAmount: row.CapturedAmount,
+	}
 }
 
 func startCapacity(accountCapacity, activeHeld int64) int64 {
@@ -171,18 +188,6 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 	}
 	return accountCapacity - activeHeld
 }
-
-// SpendLimitWindowInput is one fixed money-budget window: at most Limit of
-// spend per WindowSeconds. The single window shape in this package — used by
-// budget-scope policies (#473) and by billing-policy spend/bad-spend windows
-// (or#897).
-type SpendLimitWindowInput = billing.BudgetWindowInput
-
-// InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
-// Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
-// role uuid, invoker string, or invoker-tier key, empty for scope=subject. It is
-// the shared Client/HTTP delegation wire type.
-type InvokerSpendLimitInput = billing.SpendDelegationInput
 
 // ErrInvalidInvokerSpendLimit identifies caller-owned spend-delegation input
 // errors so HTTP and embedded transports can map the shared service result to
@@ -198,7 +203,7 @@ func invalidInvokerSpendLimit(message string) error {
 	return &invokerSpendLimitValidationError{message: message}
 }
 
-func budgetScopeWindowModels(ws []SpendLimitWindowInput) []models.BudgetWindowPolicy {
+func budgetScopeWindowModels(ws []billing.BudgetWindow) []models.BudgetWindowPolicy {
 	out := make([]models.BudgetWindowPolicy, 0, len(ws))
 	for _, w := range ws {
 		out = append(out, models.BudgetWindowPolicy{Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency})
@@ -206,10 +211,10 @@ func budgetScopeWindowModels(ws []SpendLimitWindowInput) []models.BudgetWindowPo
 	return out
 }
 
-func spendLimitWindowInputs(ws []models.BudgetWindowPolicy) []SpendLimitWindowInput {
-	out := make([]SpendLimitWindowInput, 0, len(ws))
+func spendLimitWindowInputs(ws []models.BudgetWindowPolicy) []billing.BudgetWindow {
+	out := make([]billing.BudgetWindow, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, SpendLimitWindowInput{
+		out = append(out, billing.BudgetWindow{
 			Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit, Currency: w.Currency,
 		})
 	}
@@ -220,16 +225,16 @@ func invokerSpendLimitKey(scope, scopeKey string) string {
 	return budgets.NormalizeScope(scope) + "\x00" + strings.TrimSpace(scopeKey)
 }
 
-// ValidateInvokerSpendLimitInputs validates and canonicalizes a complete
+// ValidateSpendDelegations validates and canonicalizes a complete
 // payer-owned spend-delegation document. Duplicate detection happens after
 // scope and scope_key are normalized, so every transport has identical
 // replacement semantics. or#893 deleted the role_id alias: a role delegation is
 // {scope:"role", scope_key:"<role uuid>"} and nothing else.
-func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpendLimitInput, error) {
-	out := make([]InvokerSpendLimitInput, 0, len(in))
+func ValidateSpendDelegations(in []billing.SpendDelegation) ([]billing.SpendDelegation, error) {
+	out := make([]billing.SpendDelegation, 0, len(in))
 	seen := make(map[string]struct{}, len(in))
 	for i, item := range in {
-		scope := budgets.NormalizeScope(item.Scope)
+		scope := budgets.NormalizeScope(string(item.Scope))
 		scopeKey := strings.TrimSpace(item.ScopeKey)
 		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
 			Scope: scope, ScopeKey: scopeKey, Windows: budgetScopeWindowModels(item.Windows),
@@ -243,45 +248,47 @@ func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpen
 			return nil, invalidInvokerSpendLimit(fmt.Sprintf("duplicate delegation for %s", key))
 		}
 		seen[key] = struct{}{}
-		out = append(out, InvokerSpendLimitInput{
-			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
+		out = append(out, billing.SpendDelegation{
+			Scope: billing.SpendDelegationScope(row.Scope), ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
 			Provenance: row.Provenance,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return invokerSpendLimitKey(out[i].Scope, out[i].ScopeKey) < invokerSpendLimitKey(out[j].Scope, out[j].ScopeKey)
+		return invokerSpendLimitKey(string(out[i].Scope), out[i].ScopeKey) < invokerSpendLimitKey(string(out[j].Scope), out[j].ScopeKey)
 	})
 	return out, nil
 }
 
-func invokerSpendLimitRow(in InvokerSpendLimitInput) admission.InvokerSpendLimit {
+func invokerSpendLimitRow(in billing.SpendDelegation) admission.InvokerSpendLimit {
 	return admission.InvokerSpendLimit{
-		Scope: in.Scope, ScopeKey: in.ScopeKey, Windows: budgetScopeWindowModels(in.Windows),
+		Scope: string(in.Scope), ScopeKey: in.ScopeKey, Windows: budgetScopeWindowModels(in.Windows),
 		Provenance: in.Provenance,
 	}
 }
 
-// SetInvokerSpendLimits upserts a SUBJECT-owned budget-scope policy (#473): the
-// subject's self cap, a role pool, an invoker grant, or an invoker-tier grant.
-// Payer-set: the payer caps how much its delegated invokers/roles may spend.
-func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, in InvokerSpendLimitInput) error {
+// SetInvokerSpendLimit sets one customer-owned spend delegation, leaving the
+// others untouched.
+func (s *Service) SetInvokerSpendLimit(ctx context.Context, payer identity.CustomerID, in billing.SpendDelegation) (*billing.SpendDelegation, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return pinErr
+		return nil, pinErr
 	}
 	defer release()
 
 	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
+		return nil, fmt.Errorf("service not initialized")
 	}
 	if payer.IsZero() {
-		return fmt.Errorf("payer required")
+		return nil, fmt.Errorf("payer required")
 	}
-	next, err := ValidateInvokerSpendLimitInputs([]InvokerSpendLimitInput{in})
+	next, err := ValidateSpendDelegations([]billing.SpendDelegation{in})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, invokerSpendLimitRow(next[0]))
+	if err := admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, invokerSpendLimitRow(next[0])); err != nil {
+		return nil, err
+	}
+	return &next[0], nil
 }
 
 // InvokerSpendWindowsInput names the invoker whose live spend windows to read.
@@ -302,22 +309,6 @@ type InvokerSpendWindowsInput struct {
 	TrustLevel string
 }
 
-// InvokerSpendWindow is one delegated spend window with its live metering.
-// Used is the window's current total; because windows are estimate-based it
-// already includes in-flight reservations, and Reserved names that part.
-// Remaining is what the gate would still admit.
-type InvokerSpendWindow struct {
-	Scope         string    `json:"scope"`
-	Key           string    `json:"key"`
-	WindowSeconds int64     `json:"window_seconds"`
-	Limit         int64     `json:"limit,string"`
-	Currency      string    `json:"currency"`
-	Used          int64     `json:"used,string"`
-	Reserved      int64     `json:"reserved,string"`
-	Remaining     int64     `json:"remaining,string"`
-	ResetsAt      time.Time `json:"resets_at"`
-}
-
 // InvokerSpendWindows returns the spend windows a delegated invoker is enforced
 // against on payer's account, with their live metering (or#930).
 //
@@ -329,7 +320,7 @@ type InvokerSpendWindow struct {
 // usage limits gate the whole account, not this invoker; showing them to one
 // delegated user would report a budget it neither owns nor can act on, and would
 // leak the account's aggregate posture. The payer reads those as the payer.
-func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.CustomerID, in InvokerSpendWindowsInput) ([]InvokerSpendWindow, error) {
+func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.CustomerID, in InvokerSpendWindowsInput) ([]billing.SpendWindow, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -388,14 +379,14 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 
-	out := make([]InvokerSpendWindow, 0, len(usage))
+	out := make([]billing.SpendWindow, 0, len(usage))
 	for _, u := range usage {
 		remaining := u.Limit - u.Used
 		if remaining < 0 {
 			remaining = 0
 		}
-		out = append(out, InvokerSpendWindow{
-			Scope:         string(u.Scope),
+		out = append(out, billing.SpendWindow{
+			Scope:         spendWindowScope(u.Scope),
 			Key:           u.Key,
 			WindowSeconds: int64(u.Duration / time.Second),
 			Limit:         u.Limit,
@@ -415,8 +406,17 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 	return out, nil
 }
 
+// spendWindowScope names a metered window by the delegation scope that
+// declared it.
+func spendWindowScope(scope spendgate.Scope) billing.SpendDelegationScope {
+	if scope == spendgate.ScopeTrustLevel {
+		return billing.SpendDelegationInvokerTier
+	}
+	return billing.SpendDelegationScope(scope)
+}
+
 // InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
-func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.CustomerID) ([]InvokerSpendLimitInput, error) {
+func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.CustomerID) ([]billing.SpendDelegation, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -433,10 +433,13 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 	if err != nil {
 		return nil, err
 	}
-	out := make([]InvokerSpendLimitInput, 0, len(rows))
+	out := make([]billing.SpendDelegation, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: spendLimitWindowInputs(r.Windows), Provenance: r.Provenance})
+		out = append(out, billing.SpendDelegation{Scope: billing.SpendDelegationScope(budgets.NormalizeScope(r.Scope)), ScopeKey: r.ScopeKey, Windows: spendLimitWindowInputs(r.Windows), Provenance: r.Provenance})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return invokerSpendLimitKey(string(out[i].Scope), out[i].ScopeKey) < invokerSpendLimitKey(string(out[j].Scope), out[j].ScopeKey)
+	})
 	return out, nil
 }
 
@@ -474,7 +477,7 @@ func (s *Service) DeleteInvokerSpendLimit(ctx context.Context, payer identity.Cu
 
 // ReplaceInvokerSpendLimits fully replaces the payer-owned delegated-spend
 // policy document.
-func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, next []InvokerSpendLimitInput) error {
+func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, next []billing.SpendDelegation) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -487,7 +490,7 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	normalized, err := ValidateInvokerSpendLimitInputs(next)
+	normalized, err := ValidateSpendDelegations(next)
 	if err != nil {
 		return err
 	}
@@ -500,7 +503,7 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 
 // BillingPolicyInput declares one named billing policy (or#897). Window entries
 // carry the same {key, window_seconds, limit, currency} shape everywhere in this
-// package — SpendLimitWindowInput.
+// package — billing.BudgetWindow.
 type BillingPolicyInput = billing.BillingPolicyInput
 
 // BillingPolicyBindingInput points one rung at a policy name (or#897). Set
@@ -805,7 +808,7 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 type WastedSpendInput struct {
 	CustomerID  identity.CustomerID
 	Invoker     string
-	InvokerType string
+	InvokerType billing.InvokerType
 	Currency    string
 	Amount      int64
 	Source      string
@@ -815,9 +818,6 @@ type WastedSpendInput struct {
 
 // wastedSpendEventType is the metered event kind a charged overage posts under.
 const wastedSpendEventType = "wasted_spend"
-
-// WastedSpendResult describes how OpenRails handled one wasted-spend report.
-type WastedSpendResult = billing.WastedSpendResponse
 
 // ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 // accrue against their flat Redis cutoff, while direct payer credentials accrue
@@ -851,7 +851,7 @@ type WastedSpendResult = billing.WastedSpendResponse
 //     deliberate reversal of "no event table for free reports": a report the
 //     platform cannot recognise as already-seen is not free, it is just
 //     unaccounted somewhere else.
-func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*WastedSpendResult, error) {
+func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*billing.WastedSpendReport, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -883,7 +883,7 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 		return nil, fmt.Errorf("source and source_id required")
 	}
 	if in.Amount == 0 {
-		return &WastedSpendResult{Currency: cur, Action: "ignored"}, nil
+		return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendIgnored}, nil
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -948,16 +948,16 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 			chargeable = in.Amount
 		}
 		policyForgiven := policyAmount - chargeablePolicy
-		res := &WastedSpendResult{
+		res := &billing.WastedSpendReport{
 			Currency:             cur,
-			PolicyCurrency:       payerPolicyCurrency,
+			PolicyCurrency:       &payerPolicyCurrency,
 			RecordedAmount:       in.Amount,
-			PolicyRecordedAmount: policyAmount,
+			PolicyRecordedAmount: &policyAmount,
 			ForgivenAmount:       in.Amount - chargeable,
-			PolicyForgivenAmount: policyForgiven,
+			PolicyForgivenAmount: &policyForgiven,
 			ChargedAmount:        chargeable,
-			PolicyChargedAmount:  chargeablePolicy,
-			Action:               "forgiven",
+			PolicyChargedAmount:  &chargeablePolicy,
+			Action:               billing.WastedSpendForgiven,
 		}
 		// The durable claim. Amount is the overage (often 0) and the ledger is
 		// debited only when it is positive, but the ROW is written either way:
@@ -985,13 +985,13 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 			return s.wasteWriteRaceLost(ctx, in, cur, wasteKey, err)
 		}
 		if ev.Replayed {
-			return &WastedSpendResult{Currency: cur, Action: "duplicate", Duplicate: true}, nil
+			return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendDuplicate}, nil
 		}
 		if err := guard.ConsumePayerGrace(ctx, merchantID, payerID, payerPolicyCurrency, policyAmount, payerWindows); err != nil {
 			return nil, err
 		}
 		if chargeable > 0 {
-			res.Action = "charged"
+			res.Action = billing.WastedSpendCharged
 		}
 		return res, nil
 	}
@@ -1016,19 +1016,19 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 			"reported_amount": strconv.FormatInt(in.Amount, 10),
 			"policy_currency": invokerPolicyCurrency,
 			"policy_amount":   strconv.FormatInt(policyAmount, 10),
-			"invoker_type":    strings.TrimSpace(in.InvokerType),
+			"invoker_type":    string(in.InvokerType),
 		},
 	})
 	if err != nil {
 		return s.wasteWriteRaceLost(ctx, in, cur, wasteKey, err)
 	}
 	if ev.Replayed {
-		return &WastedSpendResult{Currency: cur, Action: "duplicate", Duplicate: true}, nil
+		return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendDuplicate}, nil
 	}
 	if err := guard.RecordInvokerCutoff(ctx, merchantID, payerID, in.Invoker, invokerPolicyCurrency, policyAmount, invokerWindows); err != nil {
 		return nil, err
 	}
-	return &WastedSpendResult{Currency: cur, PolicyCurrency: invokerPolicyCurrency, RecordedAmount: in.Amount, PolicyRecordedAmount: policyAmount, Action: "invoker_cutoff_tracked"}, nil
+	return &billing.WastedSpendReport{Currency: cur, PolicyCurrency: &invokerPolicyCurrency, RecordedAmount: in.Amount, PolicyRecordedAmount: &policyAmount, Action: billing.WastedSpendInvokerCutoffTracked}, nil
 }
 
 // wastedReportedDimension carries the REPORTED wasted amount on the durable
@@ -1047,7 +1047,7 @@ const wastedReportedDimension = "reported_amount"
 // different reports can both be fully forgiven, and answering the second with
 // "duplicate" would silently drop a real number. This is the refusal a host
 // used to have to build itself out of a body fingerprint.
-func (s *Service) claimedWasteReport(ctx context.Context, in WastedSpendInput, cur string, key money.IdempotencyKey) (*WastedSpendResult, error) {
+func (s *Service) claimedWasteReport(ctx context.Context, in WastedSpendInput, cur string, key money.IdempotencyKey) (*billing.WastedSpendReport, error) {
 	ev, err := s.moneyService().FindUsageEvent(ctx, in.CustomerID, cur, wastedSpendEventType, key)
 	if err != nil || ev == nil {
 		return nil, err
@@ -1058,7 +1058,7 @@ func (s *Service) claimedWasteReport(ctx context.Context, in WastedSpendInput, c
 			Field: wastedReportedDimension, Committed: committed, Retried: in.Amount,
 		}
 	}
-	return &WastedSpendResult{Currency: cur, Action: "duplicate", Duplicate: true}, nil
+	return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendDuplicate}, nil
 }
 
 // wasteWriteRaceLost interprets a refusal from the durable write. Two identical
@@ -1067,7 +1067,7 @@ func (s *Service) claimedWasteReport(ctx context.Context, in WastedSpendInput, c
 // lands between the loser's grading and its write, the loser computes a larger
 // overage and is refused for an amount that is not actually a changed body. Only
 // the durable row can tell those apart, so ask it.
-func (s *Service) wasteWriteRaceLost(ctx context.Context, in WastedSpendInput, cur string, key money.IdempotencyKey, cause error) (*WastedSpendResult, error) {
+func (s *Service) wasteWriteRaceLost(ctx context.Context, in WastedSpendInput, cur string, key money.IdempotencyKey, cause error) (*billing.WastedSpendReport, error) {
 	if !errors.Is(cause, money.ErrIdempotencyKeyReused) {
 		return nil, cause
 	}

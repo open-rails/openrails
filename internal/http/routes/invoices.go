@@ -34,8 +34,4 @@ var invoicesRoutes = []Route{
 		Responses: []Reply{{200, service.InvoiceDTO{}}}, Errors: codes("authentication_required", "invalid_param", "resource_not_found"), Handler: h(handlers.GetMyInvoice)},
 	{Method: POST, Path: "/v1/me/invoices/{id}/pay-now", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
 		Request: billing.PayInvoiceNowRequest{}, Responses: []Reply{{200, billing.InvoicePayNowResult{}}, {202, billing.InvoicePayNowResult{}}}, Errors: codes("authentication_required", "card_declined", "customer_action_required", "customer_payment_unsupported", "invalid_param", "invalid_payment_method", "payment_idempotency_conflict", "payment_in_progress", "payment_method_required", "payment_not_retryable", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "subscription_not_found"), Handler: h(handlers.PayMyInvoiceNow)},
-	{Method: GET, Path: "/v1/customers/{customer_id}/invoices", Group: Treasury, Auth: AuthCustomerGrant, Perm: billing.CustomerBalanceRead,
-		Query: params(integer("limit"), integer("offset")), Responses: []Reply{{200, Untyped{}}}, Errors: codes("authentication_required", "invalid_param"), Handler: h(handlers.GetMyInvoices)},
-	{Method: GET, Path: "/v1/customers/{customer_id}/invoices/{id}", Group: Treasury, Auth: AuthCustomerGrant, Perm: billing.CustomerBalanceRead,
-		Responses: []Reply{{200, service.InvoiceDTO{}}}, Errors: codes("authentication_required", "invalid_param", "resource_not_found"), Handler: h(handlers.GetMyInvoice)},
 }

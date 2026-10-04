@@ -25,8 +25,7 @@ import (
 // NewSelfHandler assembles the embedded browser-direct SELF-SERVICE surface
 // (#339/#467) as a gin-free net/http handler:
 //
-//	/billing/v1/me/*                      (RegisterSelfServiceRoutes)
-//	/billing/v1/customers/:customer_id/*  (RegisterCustomerTreasuryRoutes)
+//	/billing/v1/me/*  (RegisterSelfServiceRoutes)
 //
 // authenticated by the host-supplied billingauth.DelegatedAuthenticator. The
 // same neutral base middleware stack wraps it (recovery, security headers,
@@ -37,9 +36,9 @@ import (
 // hostResolve is the #734 Host->merchant mechanism (nil for hosts with no
 // control plane attached — HostMerchantResolverFrom derives it, and
 // mount.go's selfHandler is the sole caller). This handler's ENTIRE mounted
-// surface (self-service + customer-treasury) is browser tier, so it always
-// gets the #765 static permissive CORS policy unconditionally — no
-// control-plane/source dependency, unlike hostResolve.
+// surface is browser tier, so it always gets the #765 static permissive CORS
+// policy unconditionally — no control-plane/source dependency, unlike
+// hostResolve.
 func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) http.Handler {
 	return NewSelfRoutes(rt, authn, providerRouteOverride, hostResolve).Handler()
 }
@@ -49,7 +48,6 @@ func NewSelfRoutes(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, pr
 	delegatedMW := middleware.DelegatedPrincipalRequired(authn)
 	providerRoutes := ProviderRoutesForRuntime(rt, providerRouteOverride)
 	httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.SelfRoutePrefix, rt), rt, delegatedMW, providerRoutes)
-	httproutes.RegisterCustomerTreasuryRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.CustomerRoutePrefix, rt), rt, delegatedMW, providerRoutes)
 
 	return wrapCustomerRoutes(rt, mux, hostResolve, "")
 }

@@ -37,7 +37,7 @@ SELECT
     COALESCE(SUM(CASE WHEN state = 'open' AND (expires_at IS NULL OR expires_at > $1::timestamptz)
         THEN estimated_amount ELSE 0 END), 0)::bigint AS reserved
 FROM billing.admission_operations
-WHERE merchant_id = $2::uuid AND payer_id = $3::uuid
+WHERE merchant_id = $2::uuid AND customer_id = $3::uuid
   AND currency = $4::text AND state <> 'released'
   AND admitted_at >= $5::timestamptz AND admitted_at < $6::timestamptz
   AND window_keys @> ARRAY[$7::text]
@@ -46,7 +46,7 @@ WHERE merchant_id = $2::uuid AND payer_id = $3::uuid
 type AdmissionWindowUsageParams struct {
 	AsOf        time.Time
 	MerchantID  uuid.UUID
-	PayerID     uuid.UUID
+	CustomerID  uuid.UUID
 	Currency    string
 	WindowStart time.Time
 	WindowEnd   time.Time
@@ -62,7 +62,7 @@ func (q *Queries) AdmissionWindowUsage(ctx context.Context, arg AdmissionWindowU
 	row := q.db.QueryRow(ctx, admissionWindowUsage,
 		arg.AsOf,
 		arg.MerchantID,
-		arg.PayerID,
+		arg.CustomerID,
 		arg.Currency,
 		arg.WindowStart,
 		arg.WindowEnd,
@@ -78,7 +78,7 @@ UPDATE billing.admission_operations
 SET state = 'captured', capture_terms = $1::jsonb, captured_amount = $2::bigint, captured_at = $3::timestamptz
 WHERE merchant_id = $4::uuid AND request_id = $5::text
   AND state <> 'captured'
-RETURNING merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
+RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
 `
 
 type CaptureAdmissionOperationParams struct {
@@ -101,7 +101,7 @@ func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmi
 	err := row.Scan(
 		&i.MerchantID,
 		&i.RequestID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.Currency,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -147,7 +147,7 @@ func (q *Queries) ExtendAdmissionOperation(ctx context.Context, arg ExtendAdmiss
 }
 
 const getAdmissionOperation = `-- name: GetAdmissionOperation :one
-SELECT merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
+SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
 `
 
@@ -162,7 +162,7 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 	err := row.Scan(
 		&i.MerchantID,
 		&i.RequestID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.Currency,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -181,19 +181,18 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 }
 
 const getFinancialHeldAmount = `-- name: GetFinancialHeldAmount :one
-SELECT (COALESCE((SELECT SUM(oa.authorized_usd_micros)
+SELECT (COALESCE((SELECT SUM(oa.amount)
               FROM billing.operation_authorizations oa
-              JOIN billing.ledger_accounts la ON la.merchant_id = oa.merchant_id AND la.id = oa.ledger_account_id
-             WHERE oa.merchant_id = $1::uuid AND la.customer_id = $2::uuid AND la.currency = $3::text AND oa.state = 'open'), 0)
+             WHERE oa.merchant_id = $1::uuid AND oa.customer_id = $2::uuid AND oa.currency = $3::text AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
-             WHERE ao.merchant_id = $1::uuid AND ao.payer_id = $2::uuid AND ao.currency = $3::text AND ao.state = 'open'
+             WHERE ao.merchant_id = $1::uuid AND ao.customer_id = $2::uuid AND ao.currency = $3::text AND ao.state = 'open'
                AND (ao.expires_at IS NULL OR ao.expires_at > $4::timestamptz)), 0))::bigint AS held
 `
 
 type GetFinancialHeldAmountParams struct {
 	MerchantID uuid.UUID
-	PayerID    uuid.UUID
+	CustomerID uuid.UUID
 	Currency   string
 	AsOf       time.Time
 }
@@ -203,7 +202,7 @@ type GetFinancialHeldAmountParams struct {
 func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHeldAmountParams) (int64, error) {
 	row := q.db.QueryRow(ctx, getFinancialHeldAmount,
 		arg.MerchantID,
-		arg.PayerID,
+		arg.CustomerID,
 		arg.Currency,
 		arg.AsOf,
 	)
@@ -214,7 +213,7 @@ func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHe
 
 const insertAdmissionOperation = `-- name: InsertAdmissionOperation :one
 INSERT INTO billing.admission_operations (
-    merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms,
+    merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms,
     requested_expires_at, expires_at, admitted_at, window_keys
 ) VALUES (
     $1::uuid, $2::text, $3::uuid,
@@ -223,13 +222,13 @@ INSERT INTO billing.admission_operations (
     $9::timestamptz, $10::text[]
 )
 ON CONFLICT (merchant_id, request_id) DO NOTHING
-RETURNING merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
+RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
 `
 
 type InsertAdmissionOperationParams struct {
 	MerchantID         uuid.UUID
 	RequestID          string
-	PayerID            uuid.UUID
+	CustomerID         uuid.UUID
 	Currency           string
 	EstimatedAmount    int64
 	AvailableAmount    int64
@@ -243,7 +242,7 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 	row := q.db.QueryRow(ctx, insertAdmissionOperation,
 		arg.MerchantID,
 		arg.RequestID,
-		arg.PayerID,
+		arg.CustomerID,
 		arg.Currency,
 		arg.EstimatedAmount,
 		arg.AvailableAmount,
@@ -256,7 +255,7 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 	err := row.Scan(
 		&i.MerchantID,
 		&i.RequestID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.Currency,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,
@@ -275,7 +274,7 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 }
 
 const lockAdmissionOperation = `-- name: LockAdmissionOperation :one
-SELECT merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
+SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
 FOR UPDATE
 `
@@ -291,7 +290,7 @@ func (q *Queries) LockAdmissionOperation(ctx context.Context, arg LockAdmissionO
 	err := row.Scan(
 		&i.MerchantID,
 		&i.RequestID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.Currency,
 		&i.EstimatedAmount,
 		&i.AvailableAmount,

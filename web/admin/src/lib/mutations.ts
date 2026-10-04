@@ -75,8 +75,8 @@ import {
   putDashboard,
   type Widget,
 } from "@/lib/api/metrics"
+import type { Customer } from "@/lib/api/generated/wire"
 import type {
-  CustomerSummary,
   MerchantSettings,
   MerchantNotification,
   PaymentObject,
@@ -103,6 +103,21 @@ const collectAllPages = async <T>(
     rows.push(...page.data)
     if (rows.length >= page.total || page.data.length === 0) return rows
     offset += EXPORT_PAGE
+  }
+}
+
+const collectAllCursorPages = async <T>(
+  listPage: (
+    limit: number,
+    cursor: string
+  ) => Promise<{ data: T[]; next_cursor: string | null }>
+) => {
+  const rows: T[] = []
+  for (let cursor = ""; ; ) {
+    const page = await listPage(EXPORT_PAGE, cursor)
+    rows.push(...page.data)
+    if (!page.next_cursor) return rows
+    cursor = page.next_cursor
   }
 }
 
@@ -227,7 +242,7 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...customersKey, "find"],
       mutationFn: async (term: string) => {
-        const result = await listCustomers(term, 1, 0)
+        const result = await listCustomers(term, 1, "")
         return result.data[0]
       },
     })
@@ -238,8 +253,8 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...customersKey, "export"],
       mutationFn: (q: string) =>
-        collectAllPages<CustomerSummary>((limit, offset) =>
-          listCustomers(q, limit, offset)
+        collectAllCursorPages<Customer>((limit, cursor) =>
+          listCustomers(q, limit, cursor)
         ),
     })
   },

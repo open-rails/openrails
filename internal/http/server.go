@@ -76,8 +76,8 @@ type Server struct {
 	merchants *merchants.Service
 
 	// browserTierRoutes tracks which registered patterns belong to the
-	// permissive-CORS browser tier (#765: checkout + self-service +
-	// customer-treasury) — populated as registerUserRoutesAt/
+	// permissive-CORS browser tier (#765: checkout + self-service)
+	// — populated as registerUserRoutesAt/
 	// registerSelfServiceRoutes mount their routes, consulted by
 	// wrapPublicHandler's PermissiveCORSHTTP. Never nil once New() has run.
 	browserTierRoutes *middleware.BrowserTierRoutes
@@ -103,7 +103,7 @@ func (s *Server) recordRoute(pattern string) {
 }
 
 // recordBrowserRoute is recordRoute plus browser-tier CORS registration
-// (#765): used ONLY by the checkout + self-service + customer-treasury
+// (#765): used ONLY by the checkout + self-service
 // registration call sites, so PermissiveCORSHTTP grants the static `*` policy
 // on exactly those routes and nothing else. Lazily initializes
 // browserTierRoutes so hand-built *Server{} unit tests that skip New() still
@@ -361,7 +361,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		// (never an ambient cookie), an origin allow-list protects nothing —
 		// a stolen token is replayed from curl, where CORS doesn't exist — so
 		// the policy is a static, non-configurable `*` grant on exactly the
-		// browser-tier routes (checkout + self-service + customer-treasury,
+		// browser-tier routes (checkout + self-service,
 		// tracked in browserTierRoutes as they register) and NO CORS headers
 		// anywhere else (admin/platform/merchant-API/webhooks/auth), so a
 		// browser refuses cross-origin script access to those by default.

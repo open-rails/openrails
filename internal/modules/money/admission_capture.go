@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -77,9 +78,10 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 				return err
 			}
 		}
-		receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: (billing.CustomerID(row.PayerID)).String(), Currency: row.Currency, Amount: amount, Replayed: replayed}
+		receipt := &billing.CaptureReceipt{RequestID: requestID, CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency, Amount: amount, Replayed: replayed}
+		var ledgerTransferID *uuid.UUID
 		if amount > 0 {
-			payer := identity.CustomerID(row.PayerID)
+			payer := identity.CustomerID(row.CustomerID)
 			transaction, err := NewMoneyService(d, s.clock).CaptureAuthorized(ctx, SpendParams{
 				Payer: &payer, Invoker: terms.Invoker, Currency: row.Currency, Amount: amount,
 				Key: MustIdempotencyKey(OpCapture, "admit", requestID),
@@ -87,7 +89,9 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 			if err != nil {
 				return err
 			}
-			receipt.LedgerTransferID = &transaction.ID
+			ledgerTransferID = &transaction.ID
+			txn := billing.CreditTransactionID(transaction.ID)
+			receipt.CreditTransactionID = &txn
 		}
 		if !replayed && u.EventType != "" {
 			dimensions, err := toJSONBC(u.Dimensions)
@@ -100,10 +104,10 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 			}
 			now := s.now()
 			err = d.Gen(ctx).InsertUsageEvent(ctx, gen.InsertUsageEventParams{
-				ID: uuidutil.NewV7(), MerchantID: row.MerchantID, CustomerID: row.PayerID,
+				ID: uuidutil.NewV7(), MerchantID: row.MerchantID, CustomerID: row.CustomerID,
 				InvokerID: terms.Invoker, Currency: row.Currency, Resource: nilIfEmpty(u.Resource),
 				EventType: u.EventType, Dimensions: dimensions, Metadata: metadata, Amount: amount, PricingAuthority: "host",
-				Source: u.Source, SourceID: u.SourceID, LedgerTransferID: receipt.LedgerTransferID,
+				Source: u.Source, SourceID: u.SourceID, LedgerTransferID: ledgerTransferID,
 				OccurredAt: now, CreatedAt: now,
 			})
 			if err != nil {

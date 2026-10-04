@@ -151,10 +151,10 @@ describe("money submitted by console forms", () => {
     description: " support ", sourceID: "stable",
   }
   const amount = (over: Partial<typeof credit>) =>
-    creditGrantInput({ ...credit, ...over }, true).amount
+    creditGrantInput({ ...credit, ...over }).amount
 
   it("grants credit at the server unit scale, keeping the caller's key", () => {
-    expect(creditGrantInput(credit, true)).toEqual({
+    expect(creditGrantInput(credit)).toEqual({
       amount: "1000001", currency: "USD", source: "admin", source_id: "stable",
       description: "support", expires_at: undefined,
     })
@@ -172,22 +172,21 @@ describe("money submitted by console forms", () => {
     }
   )
 
-  it("requires granting authority and a real future expiry", () => {
-    expect(() => creditGrantInput(credit, false)).toThrow("cannot grant")
-    expect(creditGrantInput({ ...credit, expires: "2099-01-02T03:04" }, true).expires_at).toBe(
+  it("requires a real future expiry", () => {
+    expect(creditGrantInput({ ...credit, expires: "2099-01-02T03:04" }).expires_at).toBe(
       new Date("2099-01-02T03:04").toISOString()
     )
     for (const expires of ["bad", "2020-01-01T12:00"])
-      expect(() => creditGrantInput({ ...credit, expires }, true)).toThrow("future date")
+      expect(() => creditGrantInput({ ...credit, expires })).toThrow("future date")
   })
 
-  it("revokes only a grant that still holds value, with authority", () => {
+  it("revokes only a grant that still holds value", () => {
     const grant = { id: "grant-a", state: "active", remaining_amount: "70" } as CreditGrant
-    expect(canRevokeCredit(grant, false)).toBe(false)
+    expect(canRevokeCredit(grant)).toBe(true)
     for (const state of ["expired", "revoked", "spent", "terminated"] as const)
-      expect(canRevokeCredit({ ...grant, state }, true)).toBe(false)
-    expect(canRevokeCredit({ ...grant, remaining_amount: "0" }, true)).toBe(false)
-    expect(canRevokeCredit({ ...grant, state: "scheduled" }, true)).toBe(true)
+      expect(canRevokeCredit({ ...grant, state })).toBe(false)
+    expect(canRevokeCredit({ ...grant, remaining_amount: "0" })).toBe(false)
+    expect(canRevokeCredit({ ...grant, state: "scheduled" })).toBe(true)
   })
 
   it("remits invoices at the invoice's own scale, never beyond the balance", () => {
@@ -229,7 +228,7 @@ describe("canonical wire fixtures in the browser", () => {
 
   it("round-trips int64 boundary money through the console's own parsing", () => {
     const page = fixture("page_credit_transactions.json")
-    expect([page.data[0].amount, page.data[1].balance_after]).toEqual([MAX, MIN])
+    expect([page.data[0].amount, page.data[1].amount]).toEqual([MAX, MIN])
     expect(amountFromInput("9223372036854.775807", 6)).toBe(page.data[0].amount)
     expect(digits(formatUnits(page.data[1].amount, "JPY", 0))).toBe(MIN.slice(1))
     expect(page.data[0].created_at).toBe("2026-09-16T00:00:00.123456789Z")

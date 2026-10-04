@@ -10,7 +10,6 @@ import type {
   CheckoutRoutingDecision,
   CustomerBillingProfile,
   CustomerUsageRateOverride,
-  CustomerSummary,
   Finding,
   FindingsListResponse,
   MerchantAPIKey,
@@ -45,22 +44,31 @@ import type {
   WebhookFormat,
   WorkerHealth,
 } from "./types"
+import type {
+  CreditLimit,
+  Customer,
+  ListPage,
+  TrustLevel,
+} from "./generated/wire"
 
 // --- Customers ---
 
 export const listCustomers = (
   q: string,
   limit: number,
-  offset: number,
+  cursor: string,
   signal?: AbortSignal
 ) =>
-  api<ListEnvelope<CustomerSummary>>("/merchant/customers", {
-    query: { q, limit, offset },
+  api<ListPage<Customer>>("/merchant/customers", {
+    query: { q, limit, cursor },
     signal,
   })
 
 export const getCustomerProfile = (customerId: string, signal?: AbortSignal) =>
-  api<CustomerBillingProfile>(`/merchant/customers/${customerId}`, { signal })
+  api<CustomerBillingProfile>(
+    `/merchant/customers/${customerId}/billing-profile`,
+    { signal }
+  )
 
 export const getCustomerPaymentMethods = (
   customerId: string,
@@ -777,11 +785,9 @@ export const removeTeamMember = (userId: string) =>
   })
 
 export const getCreditLimit = (customerId: string, currency: string) =>
-  api<{ currency: string; credit_limit_amount: string }>(
-    "/merchant/credit-limit",
-    {
-      query: { customer_id: customerId, currency },
-    }
+  api<CreditLimit>(
+    `/merchant/customers/${encodeURIComponent(customerId)}/credit-limit`,
+    { query: { currency } }
   )
 
 export const setCreditLimit = (
@@ -789,15 +795,16 @@ export const setCreditLimit = (
   currency: string,
   amount: string
 ) =>
-  api<{ message: string }>("/merchant/credit-limit", {
-    method: "PUT",
-    body: { customer_id: customerId, currency, credit_limit_amount: amount },
-  })
+  api<CreditLimit>(
+    `/merchant/customers/${encodeURIComponent(customerId)}/credit-limit`,
+    { method: "PUT", body: { currency, amount } }
+  )
 
 export const getTrustLevel = (customerId: string, currency: string) =>
-  api<{ currency: string; trust_level: string }>("/merchant/trust-level", {
-    query: { customer_id: customerId, currency },
-  })
+  api<TrustLevel>(
+    `/merchant/customers/${encodeURIComponent(customerId)}/trust-level`,
+    { query: { currency } }
+  )
 
 // --- Alerting: webhooks (#736) ---
 

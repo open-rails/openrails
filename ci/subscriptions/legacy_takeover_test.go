@@ -322,7 +322,7 @@ func importLegacyBook(t *testing.T, w *world, n int) []*legacy {
 			InitialTransactionID: tx, RecurringTransactionID: tx, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"})
 		book.Subscriptions = append(book.Subscriptions, billing.DeclaredSubscription{SourceID: fmt.Sprintf("book-%d-%s", i, railSub), Customer: customerID, Price: priceID,
 			Rail: "nmi", RailSubscriptionID: railSub, StartedAt: start, PaidThrough: &end, PaymentMethod: &ref})
-		book.Transactions = append(book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: tx, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start})
+		book.Transactions = append(book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: tx, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start})
 		out = append(out, &legacy{w: w, rail: "nmi", tp: embedded, c: c, railSub: railSub, railCust: vault, ent: ent})
 	}
 	result, err := client.ImportBilling(t.Context(), book)

@@ -148,7 +148,7 @@ func newProductAccessCheck(productID uuid.UUID, userID string, has bool) billing
 // server-to-server (API-key) caller. Optional ?product_id=... narrows to a single
 // has-access check.
 func ServiceGetUserProductAccess(r *httprequest.Request) {
-	user, err := billing.ParseCustomerID(r.Param("user_id"))
+	user, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || user.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
@@ -334,7 +334,7 @@ func listAccessibleProductsPage(r *httprequest.Request, svc *productaccess.Servi
 }
 
 func ServiceCheckUserProductAccess(r *httprequest.Request) {
-	user, err := billing.ParseCustomerID(r.Param("user_id"))
+	user, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || user.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return

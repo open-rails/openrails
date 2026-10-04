@@ -6,6 +6,16 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
+export type Balance = {
+  customer_id: string
+  currency: string
+  billing_mode: "arrears" | "prepaid"
+  balance_amount: string
+  held_amount: string
+  available_amount: string
+  owed_amount: string
+}
+
 export type BillingAddress = {
   line1?: string
   line2?: string
@@ -20,21 +30,6 @@ export type BillingDetails = {
   email?: string
   phone?: string
   address?: BillingAddress
-}
-
-export type BillingStatus = {
-  has_active_subscription: boolean
-  subscription?: Subscription
-  access?: SubscriptionAccess
-  next_renewal_at?: string
-  entitlements?: EntitlementRecord[]
-}
-
-export type BudgetWindowInput = {
-  key: string
-  window_seconds: number
-  limit: string
-  currency?: string
 }
 
 export type CancelSubscriptionRequest = {
@@ -215,6 +210,20 @@ export type CreatePaymentMethodRequest = {
   verification_value?: unknown
 }
 
+export type CreditTransaction = {
+  id: string
+  customer_id: string
+  currency: string
+  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
+  amount: string
+  credit_grant_id: string | null
+  invoker: string | null
+  resource: string | null
+  source: string
+  source_id: string
+  created_at: string
+}
+
 export type CurrencyRegistry = {
   object: string
   currencies: CurrencyUnits[] | null
@@ -244,18 +253,6 @@ export type CustodianCaptureReference = {
   token?: string
 }
 
-export type CustomerSpendDelegation = {
-  scope: string
-  scope_key?: string
-  windows: BudgetWindowInput[] | null
-  provenance?: string
-}
-
-export type CustomerSpendDelegationsDocument = {
-  customer_id?: string
-  delegations: CustomerSpendDelegation[] | null
-}
-
 export type EffectiveTierBody = {
   entitlement: string
   display_name: string
@@ -271,20 +268,6 @@ export type EffectiveTierRef = {
 export type EffectiveTierResponse = {
   group: string
   tier: EffectiveTierBody | null
-}
-
-export type EntitlementRecord = {
-  id: string
-  customer_id?: string
-  entitlement: string
-  start_at: string
-  end_at?: string
-  source_id?: string
-  source_type: string
-  revoked_at?: string
-  revoke_reason?: string
-  created_at: string
-  updated_at: string
 }
 
 export type HostedCheckoutLineItem = {
@@ -456,18 +439,6 @@ export type InvoicePaymentAttemptDTO = {
   failure_reason?: string
   attempted_at: string
   settled_at?: string
-}
-
-export type InvokerSpendWindow = {
-  scope: string
-  key: string
-  window_seconds: number
-  limit: string
-  currency: string
-  used: string
-  reserved: string
-  remaining: string
-  resets_at: string
 }
 
 export type Message = {
@@ -776,17 +747,6 @@ export type RetrySubscriptionNowRequest = {
   payment_method_id?: string
 }
 
-export type SelfBalanceResponse = {
-  currency: string
-  balance_amount: string
-}
-
-export type SelfSpendLimitsDocument = {
-  currency: string
-  invoker: string
-  windows: InvokerSpendWindow[] | null
-}
-
 export type SolanaCheckoutConfig = {
   network: string
   chain: string
@@ -840,6 +800,24 @@ export type SolanaTierChangeConfirmRequest = {
 
 export type SolanaTierChangeRequest = {
   new_price_id?: string
+}
+
+export type SpendLimits = {
+  currency: string
+  invoker: string
+  windows: SpendWindow[] | null
+}
+
+export type SpendWindow = {
+  scope: "invoker" | "invoker_tier" | "role"
+  key: string
+  window_seconds: number
+  limit: string
+  currency: string
+  used: string
+  reserved: string
+  remaining: string
+  resets_at: string
 }
 
 export type StripeEngineAuthentication = {
@@ -1028,6 +1006,22 @@ export type UpdatePaymentMethodRequest = {
 
 export type UpdateSubscriptionPaymentMethodRequest = {
   payment_method_id?: string
+}
+
+export type Usage = {
+  customer_id: string
+  currency: string
+  from: string
+  to: string
+  group_by: "event_type" | "function" | "invoker" | "resource" | "tier"
+  rows: UsageRow[] | null
+}
+
+export type UsageRow = {
+  key: string
+  event_count: number
+  amount: string
+  dimensions: Record<string, number> | null
 }
 
 export type UserPaymentObject = {

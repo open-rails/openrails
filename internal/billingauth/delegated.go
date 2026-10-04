@@ -72,7 +72,7 @@ type DelegatedPrincipal struct {
 	// the payer: a platform's end user drawing on the platform org's balance
 	// under a spend delegation. A principal that carries an Invoker is
 	// INVOKER-SCOPED and OpenRails narrows it to exactly one thing — reading
-	// its own spend windows. Every other self-service and treasury route
+	// its own spend windows. Every other self-service route
 	// refuses it (middleware.PayerScopedRequired), because SubjectID there
 	// names an account the invoker does not own.
 	//

@@ -44,6 +44,4 @@ var paymentsRoutes = []Route{
 		Responses: []Reply{{200, billing.PaymentOperation{}}}, Errors: codes("card_attempts_blocked", "card_declined", "card_not_saved", "custodian_capture_unavailable", "customer_session_required", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_not_found", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmStripePaymentAuthentication)},
 	{Method: GET, Path: "/v1/me/payments", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
 		Query: params(integer("limit"), integer("offset"), text("type")), Responses: []Reply{{200, PathPage[handlers.UserPaymentObject]{}}}, Errors: codes("authentication_required"), Handler: h(handlers.GetUserPayments)},
-	{Method: GET, Path: "/v1/customers/{customer_id}/payments", Group: Treasury, Auth: AuthCustomerGrant, Perm: billing.CustomerBalanceRead,
-		Query: params(integer("limit"), integer("offset"), text("type")), Responses: []Reply{{200, PathPage[handlers.UserPaymentObject]{}}}, Errors: codes("authentication_required"), Handler: h(handlers.GetUserPayments)},
 }

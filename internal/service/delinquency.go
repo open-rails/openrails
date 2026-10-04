@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
+	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // DelinquencyState is the arrears delinquency level for one payer in one
@@ -16,9 +19,6 @@ type DelinquencyState = delinquency.State
 // and when that state began.
 type DelinquencySnapshot = delinquency.Snapshot
 
-// DelinquencyPolicy is the merchant's declared grace window and amount floor.
-type DelinquencyPolicy = delinquency.Policy
-
 func (s *Service) delinquencyService() *delinquency.Service {
 	if s == nil || s.rt == nil || s.rt.DB == nil {
 		return nil
@@ -26,54 +26,79 @@ func (s *Service) delinquencyService() *delinquency.Service {
 	return delinquency.NewService(s.rt.DB, s.rt.Clock)
 }
 
-// GetDelinquency returns one payer's delinquency state in every currency it
-// owes in. A payer with no row has never been overdue: absence IS `current`,
-// and the caller reads an empty slice rather than a fabricated state.
-func (s *Service) GetDelinquency(ctx context.Context, payer identity.CustomerID) ([]DelinquencySnapshot, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
+func delinquencyFromSnapshot(r DelinquencySnapshot) billing.Delinquency {
+	out := billing.Delinquency{
+		CustomerID: billing.CustomerID(r.CustomerID), Currency: r.Currency, State: billing.DelinquencyState(r.State),
+		OverdueAmount: r.OverdueAmount, OverdueInvoices: r.OverdueInvoices, EnteredAt: r.EnteredAt.UTC(), EvaluatedAt: r.EvaluatedAt.UTC(),
 	}
-	defer release()
-
-	svc := s.delinquencyService()
-	if svc == nil {
-		return nil, fmt.Errorf("service not initialized")
+	if r.OverdueSince != nil {
+		since := r.OverdueSince.UTC()
+		out.OverdueSince = &since
 	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	return svc.ListForCustomer(ctx, payer)
+	return out
 }
 
-// ListDelinquency returns the merchant's overdue roster — payers in grace or
-// delinquent, oldest debt first. `state` filters to one level ("" = both).
-func (s *Service) ListDelinquency(ctx context.Context, state DelinquencyState, limit int) ([]DelinquencySnapshot, error) {
+// ListCustomerDelinquency returns a customer's delinquency in every currency
+// it has owed in. An empty list means it was never overdue.
+func (s *Service) ListCustomerDelinquency(ctx context.Context, customer identity.CustomerID) (billing.ListPage[billing.Delinquency], error) {
+	var page billing.ListPage[billing.Delinquency]
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return nil, pinErr
+		return page, pinErr
 	}
 	defer release()
-
 	svc := s.delinquencyService()
 	if svc == nil {
-		return nil, fmt.Errorf("service not initialized")
+		return page, fmt.Errorf("service not initialized")
 	}
-	return svc.List(ctx, state, limit)
+	rows, err := svc.ListForCustomer(ctx, customer)
+	if err != nil {
+		return page, err
+	}
+	page.Items = make([]billing.Delinquency, 0, len(rows))
+	for _, r := range rows {
+		page.Items = append(page.Items, delinquencyFromSnapshot(r))
+	}
+	return page, nil
 }
 
-// GetDelinquencyPolicy returns the merchant's effective delinquency policy —
-// the declared values, or the defaults/derivations that stand in for them.
-func (s *Service) GetDelinquencyPolicy(ctx context.Context) (DelinquencyPolicy, error) {
+// ListDelinquency returns the merchant's overdue roster, oldest debt first.
+func (s *Service) ListDelinquency(ctx context.Context, params billing.DelinquencyListParams) (billing.ListPage[billing.Delinquency], error) {
+	var page billing.ListPage[billing.Delinquency]
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
-		return DelinquencyPolicy{}, pinErr
+		return page, pinErr
 	}
 	defer release()
-
 	svc := s.delinquencyService()
 	if svc == nil {
-		return DelinquencyPolicy{}, fmt.Errorf("service not initialized")
+		return page, fmt.Errorf("service not initialized")
 	}
-	return svc.Policy(ctx)
+	if params.State != "" && params.State != billing.DelinquencyGrace && params.State != billing.DelinquencyDelinquent {
+		return page, apperr.Invalidf("state must be grace or delinquent").WithParam("state")
+	}
+	limit, err := pagination.Limit(params.PageRequest)
+	if err != nil {
+		return page, err
+	}
+	var after delinquency.RosterPosition
+	present, err := pagination.Decode(params.Cursor, &after)
+	if err != nil {
+		return page, err
+	}
+	var from *delinquency.RosterPosition
+	if present {
+		from = &after
+	}
+	rows, err := svc.List(ctx, delinquency.State(params.State), from, int(pagination.Fetch(limit)))
+	if err != nil {
+		return page, err
+	}
+	items := make([]billing.Delinquency, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, delinquencyFromSnapshot(r))
+	}
+	return pagination.Cut(items, limit, func(d billing.Delinquency) any {
+		return delinquency.RosterPosition{Since: *d.OverdueSince, Customer: d.CustomerID.UUID(), Currency: d.Currency}
+	}), nil
 }

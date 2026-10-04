@@ -33,15 +33,15 @@ afterEach(() => vi.unstubAllGlobals())
 describe("credit support requests", () => {
   it("addresses the selected customer, page and currency", async () => {
     const queries = client()
-    await queries.fetchQuery(creditQueries.grants("alpha", "cus_a", "EUR", 20, 20))
-    await queries.fetchQuery(creditQueries.transactions("alpha", "cus_a", "USD", 20, 40))
+    await queries.fetchQuery(creditQueries.grants("alpha", "cus_a", "EUR", 20, "c2"))
+    await queries.fetchQuery(creditQueries.transactions("alpha", "cus_a", "USD", 20, ""))
     expect(calls(requests)).toEqual([
-      "GET /merchant/customers/cus_a/credits",
-      "GET /merchant/customers/cus_a/credit-transactions",
+      "GET /merchant/customers/cus_a/credit-grants",
+      "GET /merchant/customers/cus_a/transactions",
     ])
     expect(requests.map((request) => request.query)).toEqual([
-      "currency=EUR&limit=20&offset=20",
-      "currency=USD&limit=20&offset=40",
+      "currency=EUR&limit=20&cursor=c2",
+      "currency=USD&limit=20",
     ])
     queries.clear()
   })
@@ -50,10 +50,10 @@ describe("credit support requests", () => {
     const queries = client()
     const options = creditMutations.grant(queries, "alpha", "cus_a")
     let attempt = 0
-    routes["POST /merchant/customers/cus_a/credits"] = () =>
+    routes["POST /merchant/customers/cus_a/credit-grants"] = () =>
       attempt++ === 0
         ? Response.json({ error: { message: "network failed" } }, { status: 503 })
-        : { ID: "grant-a", Replayed: true }
+        : { id: "cgr_a", replayed: true }
     await expect(exec(queries, options, grantInput)).rejects.toThrow("network failed")
     await exec(queries, options, grantInput)
     expect(requests.map((r) => (r.body as typeof grantInput).source_id)).toEqual([
@@ -74,8 +74,8 @@ describe("credit support requests", () => {
     const queries = client()
     const key = creditCustomerKey("alpha", "cus_a")
     queries.setQueryData(key, { balance: 100 })
-    const revocation = { grant: { id: "grant-a", revoked_amount: "70" }, replayed: false }
-    routes["DELETE /merchant/customers/cus_a/credits/grant-a"] = revocation
+    const revocation = { id: "grant-a", revoked_amount: "70", replayed: false }
+    routes["POST /merchant/customers/cus_a/credit-grants/grant-a/revoke"] = revocation
     const revoke = (reason: string) =>
       exec(queries, creditMutations.revoke(queries, "alpha", "cus_a"), { grant: "grant-a", reason })
 
@@ -85,46 +85,51 @@ describe("credit support requests", () => {
     expect(queries.getQueryData(key)).toEqual({ balance: 100 })
     expect(queries.getQueryState(key)?.isInvalidated).toBe(true)
 
-    routes["DELETE /merchant/customers/cus_a/credits/grant-a"] = () =>
+    routes["POST /merchant/customers/cus_a/credit-grants/grant-a/revoke"] = () =>
       Response.json({ error: { message: "The remaining credit is needed by active holds" } }, { status: 409 })
     await expect(revoke("support")).rejects.toThrow("needed by active holds")
   })
 })
 
 describe("credit support rendering", () => {
-  const seed = (queries: QueryClient, allowed: boolean) => {
-    queries.setQueryData(creditQueries.grants("alpha", "cus_a", "USD", 20, 0).queryKey, {
-      grants: [{
+  const seed = (queries: QueryClient, remaining = MAX_INT64) => {
+    queries.setQueryData(creditQueries.grants("alpha", "cus_a", "USD", 20, "").queryKey, {
+      data: [{
         id: "grant-private-alpha", customer_id: "cus_a", currency: "USD",
-        amount: "1000000", remaining_amount: MAX_INT64, spent_amount: "300000",
+        amount: "1000000", remaining_amount: remaining, spent_amount: "300000",
         expired_amount: "0", revoked_amount: "0", state: "active",
-        source_type: "admin", source_id: "test",
-        starts_at: "2026-01-01T00:00:00Z", created_at: "2026-01-01T00:00:00Z",
+        source_type: "admin", source_id: "test", description: null,
+        starts_at: "2026-01-01T00:00:00Z", expires_at: null, created_at: "2026-01-01T00:00:00Z",
+        terminated_at: null, termination_reason: null, replayed: false,
       }],
-      total: 21, limit: 20, offset: 0, unit_decimals: 6,
-      can_grant: allowed, can_revoke: allowed,
+      next_cursor: "next",
     })
-    queries.setQueryData(creditQueries.transactions("alpha", "cus_a", "USD", 20, 0).queryKey, {
-      unit_decimals: 6, transactions: [], total: 0, limit: 20, offset: 0,
+    queries.setQueryData(creditQueries.transactions("alpha", "cus_a", "USD", 20, "").queryKey, {
+      data: [], next_cursor: null,
     })
   }
   const section = (queries: QueryClient, customerId = "cus_a") =>
     render(<CustomerCreditSupportSection customerId={customerId} currencies={["USD"]} />, queries)
 
-  it("shows the exact balance and takes write permission from the server", () => {
+  it("shows the exact balance and offers revoke only while credit remains", () => {
     const queries = client()
-    seed(queries, false)
+    seed(queries)
     const html = section(queries)
-    expect(html).toContain("read-only credit access")
     expect(html.replace(/\D/g, "")).toContain(MAX_INT64)
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Grant credit<\/button>/)
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Revoke<\/button>/)
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Grant credit<\/button>/)
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Revoke<\/button>/)
+    expect(html).toMatch(/<button[^>]*aria-label="Next page"[^>]*>/)
     queries.clear()
+
+    const spent = client()
+    seed(spent, "0")
+    expect(section(spent)).toMatch(/<button[^>]*disabled=""[^>]*>Revoke<\/button>/)
+    spent.clear()
   })
 
   it("never carries another merchant's or customer's rows across a change", () => {
     const queries = client()
-    seed(queries, true)
+    seed(queries)
     expect(section(queries, "cus_b")).not.toContain("grant-private-alpha")
     state.merchant = "beta"
     const html = section(queries)
@@ -135,8 +140,8 @@ describe("credit support rendering", () => {
 
   it("surfaces the load failure instead of an empty ledger", () => {
     const queries = client()
-    seed(queries, true)
-    const key = creditQueries.grants("alpha", "cus_a", "USD", 20, 0).queryKey
+    seed(queries)
+    const key = creditQueries.grants("alpha", "cus_a", "USD", 20, "").queryKey
     queries.getQueryCache().find({ queryKey: key })!.setState({
       data: undefined, status: "error", fetchStatus: "idle",
       error: new Error("Credit service unavailable"),
@@ -164,9 +169,10 @@ describe("collection defaults", () => {
       created_at: "2026-09-16T00:00:00Z", collection_default_currencies: ["USD"],
     }
     let methods = [method]
-    routes["/merchant/customers/cus_a"] = () => ({
-      customer_id: "cus_a", subscriptions: [], entitlements: [], payments: [],
-      payment_methods: methods, credit_balance: [], product_access: [],
+    routes["/merchant/customers/cus_a/billing-profile"] = () => ({
+      customer: { id: "cus_a", email: null, created_at: "2026-09-16T00:00:00Z", last_seen_at: "2026-09-16T00:00:00Z" },
+      balances: [], subscriptions: [], entitlements: [], payments: [],
+      payment_methods: methods, product_access: [],
     })
     routes["/merchant/customers/cus_a/payment-methods"] = () => ({ object: "list", data: methods })
     const queries = client()

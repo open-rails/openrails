@@ -20,7 +20,7 @@ var (
 )
 
 // GetCustomerBillingPolicy returns only the customer's explicit runtime assignment.
-func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID billing.CustomerID) (*billing.CustomerBillingPolicyAssignment, error) {
+func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID billing.CustomerID) (*billing.CustomerBillingPolicy, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -40,12 +40,12 @@ func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID billi
 	if err != nil {
 		return nil, err
 	}
-	return &billing.CustomerBillingPolicyAssignment{CustomerID: billing.CustomerID(row.CustomerID).String(), PolicyName: row.PolicyName}, nil
+	return &billing.CustomerBillingPolicy{CustomerID: billing.CustomerID(row.CustomerID), PolicyName: row.PolicyName}, nil
 }
 
 // SetCustomerBillingPolicy sets or clears one assignment, preserving every
 // declaration and other customer. Unknown customers are never materialized.
-func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID billing.CustomerID, policyName *string) (*billing.CustomerBillingPolicyAssignment, error) {
+func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID billing.CustomerID, policyName *string) (*billing.CustomerBillingPolicy, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -96,5 +96,5 @@ func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID billi
 	if err != nil {
 		return nil, err
 	}
-	return &billing.CustomerBillingPolicyAssignment{CustomerID: customerID.String(), PolicyName: normalized}, nil
+	return &billing.CustomerBillingPolicy{CustomerID: customerID, PolicyName: normalized}, nil
 }

@@ -190,20 +190,32 @@ SELECT merchant_id, customer_id, currency, state, overdue_since, entered_at, ove
 WHERE merchant_id = $1
   AND state <> 'current'
   AND ($2::text IS NULL OR state = $2::text)
+  AND ($3::timestamptz IS NULL
+   OR (overdue_since, customer_id, currency) > ($3::timestamptz, $4::uuid, $5::text))
 ORDER BY overdue_since, customer_id, currency
-LIMIT $3
+LIMIT $6
 `
 
 type ListDelinquentCustomersParams struct {
-	MerchantID uuid.UUID
-	State      *string
-	RowLimit   int64
+	MerchantID    uuid.UUID
+	State         *string
+	AfterSince    *time.Time
+	AfterCustomer *uuid.UUID
+	AfterCurrency *string
+	RowLimit      int64
 }
 
 // The operator's roster: who is overdue, worst first. `current` rows are never
 // returned — a settled payer is not a row anyone needs to look at.
 func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquentCustomersParams) ([]BillingCustomerDelinquency, error) {
-	rows, err := q.db.Query(ctx, listDelinquentCustomers, arg.MerchantID, arg.State, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listDelinquentCustomers,
+		arg.MerchantID,
+		arg.State,
+		arg.AfterSince,
+		arg.AfterCustomer,
+		arg.AfterCurrency,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

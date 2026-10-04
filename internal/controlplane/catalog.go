@@ -8,10 +8,9 @@
 // through in-process AuthKit Client calls — never raw SQL or a private HTTP
 // route.
 //
-// HARDCUT (#567): merchant-local authority is evaluated in the caller's merchant
-// permission group using OpenRails' app permissions (`merchant:*` seller,
-// `customer:*` buyer/treasury). Cross-merchant directory authority belongs to
-// root/platform control, not merchant groups.
+// Merchant-local authority is evaluated in the caller's merchant permission
+// group using OpenRails' `merchant:` permissions. Cross-merchant directory
+// authority belongs to root/platform control, not merchant groups.
 package controlplane
 
 import (
@@ -36,7 +35,7 @@ var (
 	MerchantType = merchantPersona.Persona
 	CustomerType = customerPersona.Persona
 
-	// Owners hold their whole namespace (`merchant:*`, `customer:*`).
+	// Owners hold their whole namespace.
 	MerchantOwner = merchantPersona.Owner
 	CustomerOwner = customerPersona.Owner
 
@@ -56,10 +55,6 @@ var (
 		billing.MerchantPaymentsRead, billing.MerchantInvoicesRead, billing.MerchantSubscriptionsRead,
 		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantRepairAlertsRead,
 		billing.MerchantMetricsRead)
-
-	// CustomerMember is a delegated spender: read-only on the balance surface.
-	CustomerMember = customerPersona.Role("member",
-		declared(billing.CustomerBalanceRead), declared(billing.CustomerSpendDelegationsRead))
 
 	// Bounded platform-operator roles (#721) for the cross-merchant directory.
 	// The root owner holds root:* and covers both.
@@ -94,9 +89,6 @@ var catalogPerms = func() map[string]iam.Perm {
 		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate, billing.MerchantFindingsResolve,
 		billing.MerchantBillingImport, billing.MerchantBillingExport,
 		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantAccessGrantPermanent)
-	declare(customerPersona,
-		billing.CustomerBalanceRead, billing.CustomerBillingUpdate, billing.CustomerPaymentMethodsUpdate,
-		billing.CustomerCheckoutCreate, billing.CustomerSpendDelegationsRead, billing.CustomerSpendDelegationsUpdate)
 	declare(Roles.Root.PersonaDef,
 		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
 		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock)

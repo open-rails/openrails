@@ -167,12 +167,12 @@ func TestSelfServiceAuthentication(t *testing.T) {
 	ts := httptest.NewServer(s.wrapPublicHandler(mux))
 	t.Cleanup(ts.Close)
 
-	preflight := corsPreflight(t, ts, "/v1/me/status", "https://evil.example")
+	preflight := corsPreflight(t, ts, "/v1/me/balance", "https://evil.example")
 	require.Equal(t, http.StatusNoContent, preflight.StatusCode)
 	require.Equal(t, "*", preflight.Header.Get("Access-Control-Allow-Origin"))
 	require.Empty(t, preflight.Header.Get("Access-Control-Allow-Credentials"))
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me/status", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me/balance?currency=USD", nil)
 	require.NoError(t, err)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Authorization", "Bearer delegated.jwt.token")

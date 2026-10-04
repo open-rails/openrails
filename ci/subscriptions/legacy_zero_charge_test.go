@@ -62,7 +62,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 			InitialTransactionID: paid.TransactionID, LastFour: visa.Last4, CardType: visa.Brand, ExpiryDate: "12/35"}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub,
 			StartedAt: start, PaidThrough: &end, PaymentMethod: method}},
-		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}},
+		Transactions: []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: paid.TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)

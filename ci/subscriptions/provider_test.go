@@ -62,7 +62,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
 		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "stripe", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
 			PaymentMethod: &billing.PaymentMethodRef{Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method}}}
-		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.latestCharge(l.railSub), Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
+		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.latestCharge(l.railSub), Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
 	case "nmi":
 		vault := w.nmi.AddVault(visa)
 		l.railCust = vault
@@ -70,7 +70,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID, LastFour: "4242", CardType: "visa", ExpiryDate: "12/35"}}
 		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
 			PaymentMethod: &billing.PaymentMethodRef{Rail: "nmi", RailCustomerRef: vault, RailMethodRef: w.nmi.Vault(vault).BillingID}}}
-		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: start}}
+		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.nmi.AddSale(nmimock.Sale{OrderID: "legacy-order", Vault: vault, Amount: "9.99", At: start}).TransactionID, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
 	}
 	for _, apply := range configure {
 		apply(&book)

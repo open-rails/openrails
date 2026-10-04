@@ -66,10 +66,9 @@ session identity embedded). There is **no `:user_id` anywhere** — a browser cr
 can only ever act on itself. In embedded mode, prepend the mount prefix to every path.
 
 ```
-GET  /v1/me/status                        premium status: active subscription, next renewal, entitlements
 GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
-GET  /v1/me/transactions                  ledger transactions, newest first
-GET  /v1/me/usage                         metered usage rolled up by event type
+GET  /v1/me/transactions?currency=USD     credit ledger, newest first
+GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
@@ -245,7 +244,7 @@ The response's `next_action` tells the frontend what to do next:
    touch you or OpenRails) and is redirected back to your site.
 3. A provider webhook finalizes the payment server-side. Poll
    `GET /v1/me/checkout/:id` until `status: "succeeded"` (then `payment_id` /
-   `subscription_id` are set), and refresh `/v1/me/status`.
+   `subscription_id` are set), and refresh `/v1/me/entitlements/active`.
 
 **Saved-card flow** (`flow: "elements"` — Stripe; also any saved NMI card):
 1. POST the session with `payment_method_id`. The card is charged in place (customer
@@ -326,27 +325,6 @@ removal are confirmed, or `202 Accepted` with no body while the durable delete i
 still converging. Keep the method visible after `202` and refresh the list later.
 Stripe cards remain provider-owned and must be managed through Stripe Billing Portal.
 
-### Shared-customer treasury: `/v1/customers/:customer_id/*`
-
-`/v1/me/*` needs no grants. Acting on a *shared* customer balance (an org/team wallet
-the user co-manages) uses `/v1/customers/:customer_id/...` — same handlers, but each
-route requires an explicit `customer:*` permission carried by the delegated token.
-`:customer_id` must name the caller's own payable subject (or#916); the merchant's
-own slug/id addresses the merchant's treasury and additionally requires `merchant:*`:
-
-| Permission | Allows |
-|---|---|
-| none | `/v1/me/*` as the token's own subject |
-| `customer:balance:read` | read balance, transactions, usage, payments, invoices |
-| `customer:billing:update` | choose the invoice collection method (`PUT .../collection-payment-method`) |
-| `customer:payment-methods:update` | manage payment methods + billing portal |
-| `customer:checkout:create` | pre-pay / load credits (`POST .../checkout`) |
-| `customer:spend-delegations:read` | read the spend-delegation policy |
-| `customer:spend-delegations:update` | replace/upsert/revoke the spend-delegation policy |
-
-Over-claimed tokens are rejected: your issuer's registered authority bounds what
-permissions a delegated JWT may carry.
-
 ### Errors and rate limits
 
 Errors use a Stripe-style envelope:
@@ -360,7 +338,7 @@ Handle in the frontend:
 - **401** — delegated token expired/invalid. Re-fetch from your exchange endpoint and
   retry once (the helper above does this). Embedded: your normal session-expiry flow.
 - **403** — acting on a resource that isn't yours (foreign checkout session, someone
-  else's `payment_method_id`, missing `customer:*` grant).
+  else's `payment_method_id`).
 - **409** — `idempotency_key_reuse` (same key, different body) or
   `idempotency_in_progress` (retry landed while the original is still running).
 - **410** — checkout session expired; create a new one.

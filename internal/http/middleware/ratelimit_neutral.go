@@ -720,7 +720,7 @@ func ClassifyBucket(path, method string) string {
 		return "captcha"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
-	case strings.HasPrefix(path, "/v1/me/payment-methods") || isCustomerSubpath(path, "/payment-methods"):
+	case strings.HasPrefix(path, "/v1/me/payment-methods"):
 		return "payment-methods"
 	case strings.HasPrefix(path, "/v1/me/subscriptions") && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete):
 		return "subscriptions"
@@ -732,23 +732,9 @@ func ClassifyBucket(path, method string) string {
 }
 
 func isCheckoutPath(path string) bool {
-	if path == "/v1/checkout" || strings.HasPrefix(path, "/v1/checkout/") ||
+	return path == "/v1/checkout" || strings.HasPrefix(path, "/v1/checkout/") ||
 		path == "/v1/me/checkout" || strings.HasPrefix(path, "/v1/me/checkout/") ||
-		strings.HasPrefix(path, "/v1/checkout-sessions/") {
-		return true
-	}
-
-	const customerPrefix = "/v1/customers/"
-	if !strings.HasPrefix(path, customerPrefix) {
-		return false
-	}
-	rest := strings.TrimPrefix(path, customerPrefix)
-	idEnd := strings.IndexByte(rest, '/')
-	if idEnd <= 0 {
-		return false
-	}
-	checkoutPath := rest[idEnd:]
-	return checkoutPath == "/checkout" || strings.HasPrefix(checkoutPath, "/checkout/")
+		strings.HasPrefix(path, "/v1/checkout-sessions/")
 }
 
 // cardAttackMode reports whether the request's merchant is under a card-testing
@@ -771,20 +757,6 @@ func effectiveLimit(limit *config.RateLimit) int {
 		return 60 // Default to 60 requests per minute
 	}
 	return limit.RequestsPerMinute
-}
-
-// isCustomerSubpath reports /v1/customers/:customer_id<suffix>[/...].
-func isCustomerSubpath(path, suffix string) bool {
-	rest, ok := strings.CutPrefix(path, "/v1/customers/")
-	if !ok {
-		return false
-	}
-	idEnd := strings.IndexByte(rest, '/')
-	if idEnd <= 0 {
-		return false
-	}
-	tail := rest[idEnd:]
-	return tail == suffix || strings.HasPrefix(tail, suffix+"/")
 }
 
 // Hosted checkout session limits (#1124), per session id per minute: the id is

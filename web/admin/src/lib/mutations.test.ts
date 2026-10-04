@@ -104,7 +104,7 @@ const cases: Case[] = [
   ["archives one provider account by id", (c, g) => g(M.archivePaymentProvider(c), { rail: "nmi", id: "psp_1", allowLast: true }),
     "POST /merchant/payment-providers/nmi/accounts/psp_1/archive", ["providers"], { allow_last: true }],
   ["sets a customer credit limit at the int64 boundary", (_c, g) => g(M.setCreditLimit(), creditLimit),
-    "PUT /merchant/credit-limit", [], { customer_id: "cus_1", currency: "USD", credit_limit_amount: MAX_INT64 }],
+    "PUT /merchant/customers/cus_1/credit-limit", [], { currency: "USD", amount: MAX_INT64 }],
 ]
 
 let requests: Recorded[]
@@ -210,17 +210,17 @@ it("walks every export page, stops on an empty one, and looks one customer up", 
   const queryClient = client()
   selectMerchant("merchant-a")
   const page = (rows: unknown[], total: number) => ({ data: rows, total })
-  const customers = [page([{ id: "cus_1" }], 2), page([{ id: "cus_2" }], 2)]
+  const customers = [{ data: [{ id: "cus_1" }], next_cursor: "c1" }, { data: [{ id: "cus_2" }], next_cursor: null }]
   const subscriptions = [page([{ id: "sub_1" }], 2), page([], 2)]
-  routes["/merchant/customers"] = () => customers.shift() ?? { data: [{ id: "cus_9" }], total: 1 }
+  routes["/merchant/customers"] = () => customers.shift() ?? { data: [{ id: "cus_9" }], next_cursor: "more" }
   routes["/merchant/subscriptions"] = () => subscriptions.shift()
   expect(await exec(queryClient, M.exportCustomers(), "alice")).toEqual([{ id: "cus_1" }, { id: "cus_2" }])
   expect(await exec(queryClient, M.exportSubscriptions(), { status: "past_due" })).toEqual([{ id: "sub_1" }])
   expect(await exec(queryClient, M.findCustomer(), "a@example.test")).toEqual({ id: "cus_9" })
   expect(requests.map((request) => request.query)).toEqual([
-    "q=alice&limit=200&offset=0", "q=alice&limit=200&offset=200",
+    "q=alice&limit=200", "q=alice&limit=200&cursor=c1",
     "status=past_due&limit=200&offset=0", "status=past_due&limit=200&offset=200",
-    "q=a%40example.test&limit=1&offset=0",
+    "q=a%40example.test&limit=1",
   ])
 })
 

@@ -58,7 +58,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	}{
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/entitlements", timed},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/product-access", map[string]any{"product_id": price.ProductID}},
-		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/credits", map[string]any{}},
+		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/payments/off-channel", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/payments/" + none + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/subscriptions/" + none + "/cancel", map[string]any{}},
@@ -66,8 +66,8 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		{http.MethodPost, "/v1/merchant/catalog/prices", map[string]any{}},
 		{http.MethodPatch, "/v1/merchant/catalog/prices/" + price.ID, map[string]any{}},
 		{http.MethodPost, "/v1/merchant/catalog/products", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/credits/deposit", map[string]any{}},
-		{http.MethodPut, "/v1/merchant/credit-limit", map[string]any{}},
+		{http.MethodPut, "/v1/merchant/customers/" + member.id + "/credit-limit", map[string]any{}},
+		{http.MethodPut, "/v1/merchant/customers/" + member.id + "/trust-level", map[string]any{}},
 	} {
 		status, body := call(stale, op.method, op.path, op.body)
 		require.Equal(t, http.StatusForbidden, status, "%s %s: %v", op.method, op.path, body)

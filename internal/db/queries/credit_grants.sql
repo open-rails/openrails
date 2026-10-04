@@ -1,21 +1,17 @@
 -- Customer support reads over the existing append-only grant and money ledgers.
 
--- name: CountCustomerCreditGrants :one
-SELECT count(*) FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.currency = sqlc.arg(currency)::text
-  AND g.kind = 'credit' AND g.event = 'grant';
-
 -- name: ListCustomerCreditGrants :many
 WITH page AS (
   SELECT g.* FROM billing.grants g
   WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
     AND g.customer_id = sqlc.arg(customer_id)::uuid
-    AND g.currency = sqlc.arg(currency)::text
+    AND (sqlc.narg(currency)::text IS NULL OR g.currency = sqlc.narg(currency)::text)
+    AND (sqlc.narg(source_id)::text IS NULL OR g.source_id = sqlc.narg(source_id)::text)
     AND g.kind = 'credit' AND g.event = 'grant'
+    AND (sqlc.narg(after_at)::timestamptz IS NULL
+     OR (g.created_at, g.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
   ORDER BY g.created_at DESC, g.id DESC
-  LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int
+  LIMIT sqlc.arg(row_limit)::int
 )
 SELECT g.id, g.customer_id, COALESCE(g.currency, '')::text AS currency,
        COALESCE(g.amount, 0)::bigint AS amount,

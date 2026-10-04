@@ -19,7 +19,6 @@ var groupTitles = []struct {
 	{routes.Meta, "Process", "Health, metrics and capability discovery. Only the standalone server serves the root paths."},
 	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, hosted checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
-	{routes.Treasury, "Customer treasury (`/v1/customers/{customer_id}`)", "A customer acting on an account it co-manages; each route needs a `customer:` grant."},
 	{routes.Merchant, "Merchant", "The merchant API: staff, machines and the Go client alike, each route gated by its merchant permission."},
 	{routes.CatalogOwned, "Owned catalog (`/v1/catalog`)", "A creator managing its own catalog."},
 	{routes.ControlPlane, "Control plane (standalone)", "Merchant accounts, API keys and the team."},
@@ -47,7 +46,7 @@ func (m *model) routesMD() []byte {
 	fmt.Fprintf(&b, "Every route of the HTTP API (%d), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). ", len(m.routes))
 	b.WriteString("Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. ")
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
-	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `customer_grant` (a customer holding the permission), `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.\n\n")
+	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.\n\n")
 	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `catalog write` a route mounted only where the deployment allows catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
 	for _, g := range groupTitles {
 		var list []routes.Route

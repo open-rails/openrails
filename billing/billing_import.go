@@ -34,7 +34,8 @@ type DeclaredBilling struct {
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
 }
 
-// DeclaredCustomer ensures a customer row for a host subject.
+// DeclaredCustomer ensures a customer row for a host subject; a nonempty
+// Email becomes its billing email.
 type DeclaredCustomer struct {
 	Customer CustomerID `json:"customer"`
 	Email    string     `json:"email,omitempty"`
@@ -106,13 +107,14 @@ type DunningEvidence struct {
 }
 
 // DeclaredTransaction is one charge-level fact, successes and declines alike.
-// AmountCents is the provider's minor unit.
+// Amount is in the currency's native units (micros for fiat), and must be a
+// whole number of the provider's minor unit.
 type DeclaredTransaction struct {
 	RailSubscriptionID string    `json:"rail_subscription_id"`
 	TransactionID      string    `json:"transaction_id"`
 	Type               string    `json:"type,omitempty"` // sale | refund | chargeback | decline; "" = sale
 	Success            bool      `json:"success"`
-	AmountCents        int64     `json:"amount_cents,string"`
+	Amount             int64     `json:"amount,string"`
 	Currency           string    `json:"currency"`
 	OccurredAt         time.Time `json:"occurred_at"`
 }

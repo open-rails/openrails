@@ -65,7 +65,7 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		{controlplane.MerchantViewer, support, false},
 		{controlplane.MerchantSupport, viewer, false},
 		{controlplane.MerchantViewer, viewer, true},
-		{controlplane.MerchantOwner, []string{"customer:*", "root:*"}, false},
+		{controlplane.MerchantOwner, []string{"root:*"}, false},
 		{controlplane.MerchantViewer, nil, false},
 	} {
 		covered, err := cp.RoleCoveredBy(tc.role, tc.grants)

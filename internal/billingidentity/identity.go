@@ -16,32 +16,18 @@ import (
 // rejects passing the wrong one.
 type CustomerID = billing.CustomerID
 
-// InvokerType classifies whether an invoker is the payer acting directly or a
-// delegated principal using the payer's billing authority.
-type InvokerType string
+// InvokerType is the wire vocabulary billing.InvokerType.
+type InvokerType = billing.InvokerType
 
 const (
-	// InvokerTypeDelegated means the invoker is a third-party/member/federated
-	// user under the payer; flat per-invoker abuse cutoffs apply.
-	InvokerTypeDelegated InvokerType = "delegated"
-	// InvokerTypePayer means the invoker is a direct payer-controlled credential;
-	// wasted-spend reports use payer grace then charge overage.
-	InvokerTypePayer InvokerType = "payer"
+	InvokerTypeDelegated = billing.InvokerTypeDelegated
+	InvokerTypePayer     = billing.InvokerTypePayer
 )
 
-// NormalizeInvokerType treats empty/unknown values as delegated. That fails
-// closed into the stricter abuse cutoff unless the host explicitly marks the
-// request as a direct payer credential.
-func NormalizeInvokerType(s string) InvokerType {
-	if strings.TrimSpace(s) == string(InvokerTypePayer) {
-		return InvokerTypePayer
-	}
-	return InvokerTypeDelegated
-}
-
-// IsDirectPayerInvoker reports whether s is the direct-payer credential type.
-func IsDirectPayerInvoker(s string) bool {
-	return NormalizeInvokerType(s) == InvokerTypePayer
+// IsDirectPayerInvoker reports whether t is the direct-payer credential type.
+// Anything else is delegated: the stricter abuse cutoff.
+func IsDirectPayerInvoker[T ~string](t T) bool {
+	return strings.TrimSpace(string(t)) == string(InvokerTypePayer)
 }
 
 // CustomerIDFromString parses s as a customer id. Empty or non-UUID

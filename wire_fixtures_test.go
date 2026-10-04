@@ -28,10 +28,6 @@ type errorEnvelope struct {
 	Error billing.ErrorDetails `json:"error"`
 }
 
-type spendDelegationsDocument struct {
-	Delegations []billing.SpendDelegationInput `json:"delegations"`
-}
-
 // canonicalWireFixtures pins success, error, null, omitted, empty-list, list,
 // time and int64-boundary money shapes. web/admin reads the same files.
 func canonicalWireFixtures() map[string]any {
@@ -45,22 +41,22 @@ func canonicalWireFixtures() map[string]any {
 			RequestID: "req_fixture", Param: &param,
 			Metadata: map[string]any{"committed_amount": "9223372036854775807", "attempt": json.Number("2"), "detail": nil},
 		}},
-		"page_empty.json": billing.Page[billing.CreditTransaction]{Object: "list", Data: []billing.CreditTransaction{}, Limit: 20},
-		"page_credit_transactions.json": billing.Page[billing.CreditTransaction]{Object: "list", Total: 2, Limit: 2, HasMore: false, Data: []billing.CreditTransaction{
-			{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: "22222222-2222-2222-2222-222222222222", Invoker: "host", Currency: "USD", Amount: maxMoney, BalanceAfter: &maxMoney, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", SourceID: &sourceID, ExpiresAt: &when, CreatedAt: when, UpdatedAt: when},
-			{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), CustomerID: "22222222-2222-2222-2222-222222222222", Invoker: "host", Currency: "JPY", Amount: minMoney, BalanceAfter: &minMoney, TransactionType: "withdrawal", Status: "completed", Source: "operator", CreatedAt: when, UpdatedAt: when, Replayed: true},
+		"page_empty.json": billing.ListPage[billing.CreditTransaction]{Items: []billing.CreditTransaction{}},
+		"page_credit_transactions.json": billing.ListPage[billing.CreditTransaction]{Next: "next-page", Items: []billing.CreditTransaction{
+			{ID: billing.CreditTransactionID(uuid.MustParse("11111111-1111-1111-1111-111111111111")), CustomerID: customerFixture, Currency: "USD", Type: billing.CreditDeposit, Amount: maxMoney, CreditGrantID: &grantFixture, Invoker: &invokerFixture, Source: "grant", SourceID: sourceID, CreatedAt: when},
+			{ID: billing.CreditTransactionID(uuid.MustParse("33333333-3333-3333-3333-333333333333")), CustomerID: customerFixture, Currency: "JPY", Type: billing.CreditSpend, Amount: minMoney, Source: "operator", SourceID: "spend-1", CreatedAt: when},
 		}},
 		"merchant_settings.json": billing.MerchantSettings{
 			InvoiceCollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,
 			BillingPolicies: []billing.BillingPolicyInput{
 				{Name: "credit_line", Kind: "outstanding_cap", OutstandingCapAmount: maxMoney, CollectionThresholdAmount: &minMoney},
-				{Name: "monthly", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindowInput{{Key: "month", WindowSeconds: 2592000, Limit: maxMoney, Currency: "USD"}}},
+				{Name: "monthly", Kind: "window_spend_cap", SpendWindows: []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: maxMoney, Currency: "USD"}}},
 			},
 			BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "credit_line"}, {PolicyName: "monthly", Tier: "cloud"}},
 		},
-		"spend_delegations.json": spendDelegationsDocument{Delegations: []billing.SpendDelegationInput{
-			{Scope: "invoker", ScopeKey: "worker-1", Windows: []billing.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: "sha256:fixture"},
-			{Scope: "subject", Windows: []billing.SpendLimitWindow{}},
+		"spend_delegations.json": billing.ListPage[billing.SpendDelegation]{Items: []billing.SpendDelegation{
+			{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker-1", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: "sha256:fixture"},
+			{Scope: billing.SpendDelegationInvokerTier, ScopeKey: "free", Windows: []billing.BudgetWindow{}},
 		}},
 		"hosted_checkout_session.json": billing.HostedCheckoutSession{
 			ID: "ocs_fixture", Status: "created", Merchant: billing.HostedCheckoutMerchant{DisplayName: "Acme Demo"},
@@ -78,11 +74,6 @@ func canonicalWireFixtures() map[string]any {
 			ExpiresAt:  when,
 		},
 		"subscription.json": subscriptionFixtureValue(when, maxMoney, expMonth, expYear),
-		"billing_status.json": billing.BillingStatus{
-			HasActiveSubscription: true, Subscription: ptr(subscriptionFixtureValue(when, maxMoney, expMonth, expYear)), NextRenewalAt: &when,
-			Access:       &billing.SubscriptionAccess{Kind: "subscription", Entitlement: "premium", SubscriptionID: subscriptionFixture, Rail: "nmi", StartAt: when, EndAt: &when},
-			Entitlements: []billing.EntitlementRecord{{ID: "66666666-6666-4666-8666-666666666666", CustomerID: customerFixture.String(), Entitlement: "premium", StartAt: when, EndAt: &when, SourceID: &subscriptionSource, SourceType: "subscription", CreatedAt: when, UpdatedAt: when}},
-		},
 		"notification.json": billing.Notification{
 			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: (customerFixture).String(), EventType: "subscription_reprice_scheduled", CreatedAt: when,
 			Data: billing.NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: (priceFixture).String(), ToPriceID: (scheduledPriceFixture).String(), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
@@ -122,7 +113,8 @@ func subscriptionFixtureValue(when time.Time, maxMoney int64, expMonth, expYear 
 }
 
 var (
-	subscriptionSource    = "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	grantFixture          = billing.CreditGrantID(uuid.MustParse("99999999-9999-4999-8999-999999999999"))
+	invokerFixture        = "host"
 	customerFixture       = billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222"))
 	productFixture        = billing.ProductID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
 	priceFixture          = billing.PriceID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))

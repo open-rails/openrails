@@ -4,17 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
 var (
@@ -23,103 +24,91 @@ var (
 	ErrCreditGrantHeld        = errors.New("credit_grant_held")
 )
 
-// CreditGrant is a derived support view, never another balance authority.
-type CreditGrant struct {
-	ID                uuid.UUID  `json:"id"`
-	CustomerID        uuid.UUID  `json:"customer_id"`
-	Currency          string     `json:"currency"`
-	Amount            int64      `json:"amount,string"`
-	SpentAmount       int64      `json:"spent_amount,string"`
-	RemainingAmount   int64      `json:"remaining_amount,string"`
-	RevokedAmount     int64      `json:"revoked_amount,string"`
-	ExpiredAmount     int64      `json:"expired_amount,string"`
-	State             string     `json:"state"`
-	SourceType        string     `json:"source_type"`
-	SourceID          string     `json:"source_id"`
-	Reason            *string    `json:"reason,omitempty"`
-	StartsAt          time.Time  `json:"starts_at"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	TerminatedAt      *time.Time `json:"terminated_at,omitempty"`
-	TerminationReason *string    `json:"termination_reason,omitempty"`
-}
-
-type CreditGrantPage struct {
-	UnitDecimals int           `json:"unit_decimals"`
-	Grants       []CreditGrant `json:"grants"`
-	Total        int64         `json:"total"`
-	Limit        int           `json:"limit"`
-	Offset       int           `json:"offset"`
-}
-
-type CreditGrantRevocation struct {
-	Grant    CreditGrant `json:"grant"`
-	Replayed bool        `json:"replayed"`
-}
-
-func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) CreditGrant {
-	state := "active"
+func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) billing.CreditGrant {
+	state := billing.CreditGrantActive
 	switch {
 	case row.Termination == "revoke":
-		state = "revoked"
+		state = billing.CreditGrantRevoked
 	case row.Termination == "expire":
-		state = "expired"
+		state = billing.CreditGrantExpired
 	case row.Termination != "":
-		state = "terminated"
+		state = billing.CreditGrantTerminated
 	case row.EndsAt != nil && !row.EndsAt.After(now):
-		state = "expired"
+		state = billing.CreditGrantExpired
 	case row.RemainingAmount <= 0:
-		state = "spent"
+		state = billing.CreditGrantSpent
 	case row.StartsAt.After(now):
-		state = "scheduled"
+		state = billing.CreditGrantScheduled
 	}
-	return CreditGrant{ID: row.ID, CustomerID: row.CustomerID, Currency: row.Currency, Amount: row.Amount,
-		SpentAmount: row.SpentAmount, RemainingAmount: row.RemainingAmount, RevokedAmount: row.RevokedAmount, ExpiredAmount: row.ExpiredAmount,
-		State: state, SourceType: row.SourceType, SourceID: row.SourceID, Reason: row.Reason, StartsAt: row.StartsAt, ExpiresAt: row.EndsAt,
-		CreatedAt: row.CreatedAt, TerminatedAt: row.TerminatedAt, TerminationReason: row.TerminationReason}
+	return billing.CreditGrant{ID: billing.CreditGrantID(row.ID), CustomerID: billing.CustomerID(row.CustomerID), Currency: row.Currency,
+		Amount: row.Amount, SpentAmount: row.SpentAmount, RemainingAmount: row.RemainingAmount, RevokedAmount: row.RevokedAmount,
+		ExpiredAmount: row.ExpiredAmount, State: state, SourceType: row.SourceType, SourceID: billing.SourceRef(row.SourceType, row.SourceID),
+		Description: row.Reason, StartsAt: row.StartsAt, ExpiresAt: row.EndsAt, CreatedAt: row.CreatedAt,
+		TerminatedAt: row.TerminatedAt, TerminationReason: row.TerminationReason}
 }
 
-func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) (*CreditGrantPage, error) {
+// ListCreditGrants lists a customer's credit grants, newest first.
+func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.CustomerID, params billing.CreditGrantListParams) (billing.ListPage[billing.CreditGrant], error) {
 	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
+		return billing.ListPage[billing.CreditGrant]{}, fmt.Errorf("money service not initialized")
 	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return billing.ListPage[billing.CreditGrant]{}, err
 	}
+	limit, err := pagination.Limit(params.PageRequest)
+	if err != nil {
+		return billing.ListPage[billing.CreditGrant]{}, err
+	}
+	afterAt, afterID, err := pagination.After(params.Cursor)
+	if err != nil {
+		return billing.ListPage[billing.CreditGrant]{}, err
+	}
+	var currency, sourceID *string
+	if params.Currency != "" {
+		code := normalizeCurrency(params.Currency)
+		currency = &code
+	}
+	if params.SourceID != "" {
+		sourceID = &params.SourceID
+	}
+	rows, err := s.db.Gen(ctx).ListCustomerCreditGrants(ctx, gen.ListCustomerCreditGrantsParams{
+		MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency, SourceID: sourceID,
+		AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
+	})
+	if err != nil {
+		return billing.ListPage[billing.CreditGrant]{}, err
+	}
+	now := s.now()
+	grants := make([]billing.CreditGrant, 0, len(rows))
+	for _, row := range rows {
+		grants = append(grants, creditGrantFromRow(gen.GetCustomerCreditGrantRow(row), now))
+	}
+	return pagination.Cut(grants, limit, func(g billing.CreditGrant) any {
+		return pagination.TimeID{At: g.CreatedAt, ID: g.ID.UUID()}
+	}), nil
+}
+
+// GetCreditGrant reads one of a customer's credit grants.
+func (s *MoneyService) GetCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID) (*billing.CreditGrant, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	currency = normalizeCurrency(currency)
-	decimals, err := CurrencyDecimals(currency)
+	row, err := s.db.Gen(ctx).GetCustomerCreditGrant(ctx, gen.GetCustomerCreditGrantParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), GrantID: grantID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCreditGrantNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 || offset > math.MaxInt32 {
-		return nil, fmt.Errorf("invalid offset")
-	}
-	q := s.db.Gen(ctx)
-	total, err := q.CountCustomerCreditGrants(ctx, gen.CountCustomerCreditGrantsParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency})
-	if err != nil {
-		return nil, err
-	}
-	rows, err := q.ListCustomerCreditGrants(ctx, gen.ListCustomerCreditGrantsParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency, PageLimit: int32(limit), PageOffset: int32(offset)})
-	if err != nil {
-		return nil, err
-	}
-	page := &CreditGrantPage{UnitDecimals: decimals, Grants: make([]CreditGrant, 0, len(rows)), Total: total, Limit: limit, Offset: offset}
-	for _, row := range rows {
-		page.Grants = append(page.Grants, creditGrantFromRow(gen.GetCustomerCreditGrantRow(row), s.now()))
-	}
-	return page, nil
+	grant := creditGrantFromRow(row, s.now())
+	return &grant, nil
 }
 
 // RevokeCreditGrant removes the unspent remainder under the payer money lock,
 // respecting the same durable reservation total as admission and spending.
-func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string) (*CreditGrantRevocation, error) {
+func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string) (*billing.CreditGrant, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -134,7 +123,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 	if err != nil {
 		return nil, err
 	}
-	var result *CreditGrantRevocation
+	var result *billing.CreditGrant
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		// Lock only an existing customer. A failed grant address must not create one.
@@ -153,11 +142,12 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 			return err
 		}
 		current := creditGrantFromRow(row, s.now())
-		if current.State == "revoked" {
-			result = &CreditGrantRevocation{Grant: current, Replayed: true}
+		if current.State == billing.CreditGrantRevoked {
+			current.Replayed = true
+			result = &current
 			return nil
 		}
-		if row.Termination != "" || current.State == "expired" || current.RemainingAmount <= 0 {
+		if row.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 			return ErrCreditGrantUnavailable
 		}
 		bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer.UUID(), row.Currency)
@@ -190,7 +180,8 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		if err != nil {
 			return err
 		}
-		result = &CreditGrantRevocation{Grant: creditGrantFromRow(updated, s.now())}
+		revoked := creditGrantFromRow(updated, s.now())
+		result = &revoked
 		return nil
 	})
 	return result, err

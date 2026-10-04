@@ -218,23 +218,6 @@ export const invoicePageSchema = z.object({
   offset: z.number().nullish(),
 })
 
-export const billingStatusSchema = z.object({
-  has_active_subscription: z.boolean(),
-  subscription: subscriptionSchema.nullish(),
-  next_renewal_at: time.nullish(),
-  entitlements: z
-    .array(
-      z.object({
-        entitlement: z.string(),
-        start_at: time.nullish(),
-        end_at: time.nullish(),
-        revoked_at: time.nullish(),
-      })
-    )
-    .nullish(),
-})
-export type BillingStatus = z.infer<typeof billingStatusSchema>
-
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>
 

@@ -2,9 +2,9 @@
 
 # Routes
 
-Every route of the HTTP API (309), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (290), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `customer_grant` (a customer holding the permission), `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
 **Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `catalog write` a route mounted only where the deployment allows catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
@@ -73,11 +73,10 @@ A customer acting on its own account.
 | GET | `/v1/me/entitlements/active` | customer | — | — | 200 untyped | scope `billing_management` |
 | GET | `/v1/me/products` | customer | — | — | 200 `ProductAccessList` | scope `billing_management` |
 | GET | `/v1/me/products/{product_id}/access` | customer | — | — | 200 `ProductAccessCheck` | scope `billing_management` |
-| GET | `/v1/me/status` | customer | — | — | 200 `BillingStatus` | scope `billing_management` |
-| GET | `/v1/me/spend-limits` | customer | — | — | 200 `SelfSpendLimitsDocument` | scope `billing_management` |
-| GET | `/v1/me/balance` | customer | — | — | 200 `SelfBalanceResponse` | scope `billing_management` |
-| GET | `/v1/me/transactions` | customer | — | — | 200 untyped | scope `billing_management` |
-| GET | `/v1/me/usage` | customer | — | — | 200 untyped | scope `billing_management` |
+| GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` | scope `billing_management` |
+| GET | `/v1/me/balance` | customer | — | — | 200 `Balance` | scope `billing_management` |
+| GET | `/v1/me/transactions` | customer | — | — | 200 `ListPage<CreditTransaction>` | scope `billing_management` |
+| GET | `/v1/me/usage` | customer | — | — | 200 `Usage` | scope `billing_management` |
 | GET | `/v1/me/invoices` | customer | — | — | 200 untyped | scope `billing_management` |
 | GET | `/v1/me/invoices/{id}` | customer | — | — | 200 `InvoiceDTO` | scope `billing_management` |
 | POST | `/v1/me/invoices/{id}/pay-now` | customer | — | `PayInvoiceNowRequest` | 200 `InvoicePayNowResult`<br>202 `InvoicePayNowResult` | scope `billing_management` |
@@ -97,32 +96,6 @@ A customer acting on its own account.
 | GET | `/v1/me/notifications` | customer | — | — | 200 `PathPageOfNotification` | scope `billing_management` |
 | GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 untyped | scope `billing_management` |
 | POST | `/v1/me/notifications/{id}/read` | customer | — | — | 200 `Message` | scope `billing_management` |
-
-## Customer treasury (`/v1/customers/{customer_id}`)
-
-A customer acting on an account it co-manages; each route needs a `customer:` grant.
-
-| Method | Path | Tier | Permission | Request | Response | Notes |
-|---|---|---|---|---|---|---|
-| POST | `/v1/customers/{customer_id}/checkout` | customer_grant | `customer:checkout:create` | `CheckoutSessionCreateRequest` | 200 `CheckoutSessionResponse` | `Idempotency-Key` |
-| GET | `/v1/customers/{customer_id}/checkout/{id}` | customer_grant | `customer:checkout:create` | — | 200 `CheckoutSessionResponse` |  |
-| POST | `/v1/customers/{customer_id}/checkout/{id}/confirm` | customer_grant | `customer:checkout:create` | `CheckoutSessionConfirmRequest` | 200 `CheckoutSessionResponse`<br>202 `CheckoutSessionResponse` |  |
-| GET | `/v1/customers/{customer_id}/spend-delegations` | customer_grant | `customer:spend-delegations:read` | — | 200 `CustomerSpendDelegationsDocument` |  |
-| PUT | `/v1/customers/{customer_id}/spend-delegations` | customer_grant | `customer:spend-delegations:update` | `CustomerSpendDelegationsDocument` | 200 `CustomerSpendDelegationsDocument` |  |
-| PUT | `/v1/customers/{customer_id}/spend-delegations:upsert` | customer_grant | `customer:spend-delegations:update` | `CustomerSpendDelegation` | 200 `CustomerSpendDelegation` |  |
-| DELETE | `/v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | customer_grant | `customer:spend-delegations:update` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/balance` | customer_grant | `customer:balance:read` | — | 200 `SelfBalanceResponse` |  |
-| GET | `/v1/customers/{customer_id}/transactions` | customer_grant | `customer:balance:read` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/usage` | customer_grant | `customer:balance:read` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/invoices` | customer_grant | `customer:balance:read` | — | 200 untyped |  |
-| GET | `/v1/customers/{customer_id}/invoices/{id}` | customer_grant | `customer:balance:read` | — | 200 `InvoiceDTO` |  |
-| GET | `/v1/customers/{customer_id}/payments` | customer_grant | `customer:balance:read` | — | 200 `PathPageOfUserPaymentObject` |  |
-| PUT | `/v1/customers/{customer_id}/collection-payment-method` | customer_grant | `customer:billing:update` | `CollectionPaymentMethodRequest` | 200 `CollectionPaymentMethodResponse` |  |
-| GET | `/v1/customers/{customer_id}/payment-methods` | customer_grant | `customer:payment-methods:update` | — | 200 `PageOfPaymentMethod` |  |
-| POST | `/v1/customers/{customer_id}/payment-methods` | customer_grant | `customer:payment-methods:update` | `CreatePaymentMethodRequest` | 200 `PaymentMethod` |  |
-| PUT | `/v1/customers/{customer_id}/payment-methods/{id}` | customer_grant | `customer:payment-methods:update` | `UpdatePaymentMethodRequest` | 200 `PaymentMethod`<br>202 — | `Idempotency-Key` |
-| DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | customer_grant | `customer:payment-methods:update` | — | 202 —<br>204 — |  |
-| POST | `/v1/customers/{customer_id}/billing-portal` | customer_grant | `customer:payment-methods:update` | — | 200 `PortalResponse` | when `stripe_portal` |
 
 ## Merchant
 
@@ -211,47 +184,48 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/customers/entitlements:batch` | merchant | `merchant:customer-settings:read` | `ServiceExternalSubjectEntitlementsRequest` | 200 untyped |  |
 | GET | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:read` | — | 200 `EntitlementRecord[]` |  |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/users/{user_id}/entitlements/check` | merchant | `merchant:customer-settings:read` | untyped | 200 untyped |  |
-| POST | `/v1/merchant/users/{user_id}/product-access/check` | merchant | `merchant:customer-settings:read` | untyped | 200 untyped |  |
-| GET | `/v1/merchant/users/{user_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ProductAccessCheck`<br>200 `ProductAccessList` |  |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `merchant:customer-settings:read` | untyped | 200 untyped |  |
+| POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `merchant:customer-settings:read` | untyped | 200 untyped |  |
+| GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ProductAccessCheck`<br>200 `ProductAccessList` |  |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:update` | `GrantEntitlementRequest` | 201 `EntitlementRecord` | limit `grant` |
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | merchant | `merchant:customer-settings:update` | — | 200 `Message` | limit `destructive` |
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:update` | `GrantProductAccessRequest` | 201 `ProductAccessGrant` | limit `grant` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `merchant:customer-settings:update` | — | 200 `Message` | limit `destructive` |
-| PUT | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:update` | — | 200 `Customer` |  |
-| GET | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingPolicyAssignment` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:update` | `CustomerBillingPolicyWrite` | 200 `CustomerBillingPolicyAssignment` |  |
-| GET | `/v1/merchant/customers/{customer_id}/delinquency` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/delinquency` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/customers` | merchant | `merchant:customer-settings:read` | — | 200 `PathPageOfAdminCustomerSummary` |  |
-| GET | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:read` | — | 200 `AdminUserBillingProfile` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `merchant:customer-settings:update` | `CustomerSpendDelegationsDocument` | 200 `CustomerSpendDelegationsDocument` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | merchant | `merchant:customer-settings:update` | `CustomerSpendDelegation` | 200 `CustomerSpendDelegation` |  |
-| DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `merchant:customer-settings:update` | — | 200 untyped |  |
-| GET | `/v1/merchant/invokers/{invoker}/credits` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/trust-level` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| PUT | `/v1/merchant/credit-limit` | merchant | `merchant:credits:grant` | `CreditLimitRequest` | 200 `Message` |  |
-| GET | `/v1/merchant/credit-limit` | merchant | `merchant:customer-settings:read` | — | 200 `CreditLimitRequest` |  |
-| GET | `/v1/merchant/credits/balance` | merchant | `merchant:customer-settings:read` | — | 200 `CreditAccount` |  |
-| POST | `/v1/merchant/credits/deposit` | merchant | `merchant:credits:grant` | `DepositCreditsRequest` | 200 `CreditTransaction` |  |
-| GET | `/v1/merchant/credits/deposit` | merchant | `merchant:customer-settings:read` | — | 200 `CreditTransaction` |  |
-| POST | `/v1/merchant/customers/{customer_id}/credits` | merchant | `merchant:credits:grant` | `AdminGrantCreditsRequest` | 200 `CreditTransaction` | limit `grant` |
-| GET | `/v1/merchant/customers/{customer_id}/credits` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| DELETE | `/v1/merchant/customers/{customer_id}/credits/{grant_id}` | merchant | `merchant:credits:revoke` | — | 200 `CreditGrantRevocation` | limit `destructive` |
-| GET | `/v1/merchant/customers/{customer_id}/credit-transactions` | merchant | `merchant:customer-settings:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/admissions` | merchant | `merchant:admissions:create` | `ServiceAdmitBatchRequest` | 200 untyped |  |
-| POST | `/v1/merchant/wasted-spend` | merchant | `merchant:admissions:create` | `WastedSpendReport` | 200 `WastedSpendResponse` |  |
-| POST | `/v1/merchant/admissions/{id}/capture` | merchant | `merchant:admissions:create` | `CaptureRequest` | 200 `CaptureReceipt` |  |
-| POST | `/v1/merchant/admissions/{id}/release` | merchant | `merchant:admissions:create` | — | 200 untyped |  |
-| POST | `/v1/merchant/admissions/{id}/extend` | merchant | `merchant:admissions:create` | `ServiceExtendHoldRequest` | 200 untyped |  |
-| POST | `/v1/merchant/provider-operations` | merchant | `merchant:admissions:create` | untyped | 200 untyped |  |
-| GET | `/v1/merchant/provider-operations/{operation_id}` | merchant | `merchant:usage:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/provider-operations/{operation_id}/release` | merchant | `merchant:admissions:create` | untyped | 200 untyped |  |
-| POST | `/v1/merchant/provider-operations/{operation_id}/observations` | merchant | `merchant:admissions:create` | untyped | 200 untyped |  |
-| GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | merchant | `merchant:usage:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/usage/report` | merchant | `merchant:admissions:create` | `UsageReport` | 200 untyped |  |
-| POST | `/v1/merchant/usage/rollup` | merchant | `merchant:usage:read` | `ServiceUsageRollupRequest` | 200 untyped |  |
-| POST | `/v1/merchant/usage/resource-revenue` | merchant | `merchant:usage:read` | `ServiceEndpointRevenueRequest` | 200 `ResourceRevenueResponse` |  |
+| GET | `/v1/merchant/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Customer>` |  |
+| GET | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:read` | — | 200 `Customer` |  |
+| PUT | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:update` | `CustomerParams` | 200 `Customer` |  |
+| GET | `/v1/merchant/customers/{customer_id}/billing-profile` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingProfile` |  |
+| GET | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingPolicy` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:update` | `CustomerBillingPolicyParams` | 200 `CustomerBillingPolicy` |  |
+| GET | `/v1/merchant/customers/{customer_id}/delinquency` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Delinquency>` |  |
+| GET | `/v1/merchant/delinquency` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Delinquency>` |  |
+| POST | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `merchant:credits:grant` | `CreditGrantParams` | 201 `CreditGrant`<br>200 `CreditGrant` | limit `grant` |
+| GET | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<CreditGrant>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}` | merchant | `merchant:customer-settings:read` | — | 200 `CreditGrant` |  |
+| POST | `/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}/revoke` | merchant | `merchant:credits:revoke` | `RevokeCreditGrantParams` | 200 `CreditGrant` | limit `destructive` |
+| GET | `/v1/merchant/customers/{customer_id}/transactions` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<CreditTransaction>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/balance` | merchant | `merchant:customer-settings:read` | — | 200 `Balance` |  |
+| GET | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `merchant:customer-settings:read` | — | 200 `CreditLimit` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `merchant:credits:grant` | `CreditLimitParams` | 200 `CreditLimit` |  |
+| GET | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `merchant:customer-settings:read` | — | 200 `TrustLevel` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `merchant:customer-settings:update` | `TrustLevelParams` | 200 `TrustLevel` |  |
+| GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<SpendDelegation>` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `merchant:customer-settings:update` | `SpendDelegationsParams` | 200 `ListPage<SpendDelegation>` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `merchant:customer-settings:update` | `SpendDelegationParams` | 200 `SpendDelegation` |  |
+| DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `merchant:customer-settings:update` | — | 204 — |  |
+| POST | `/v1/merchant/admissions` | merchant | `merchant:admissions:create` | `AdmitBatchParams` | 200 `AdmitBatchResult` |  |
+| GET | `/v1/merchant/admissions/{request_id}` | merchant | `merchant:usage:read` | — | 200 `Admission` |  |
+| POST | `/v1/merchant/admissions/{request_id}/capture` | merchant | `merchant:admissions:create` | `CaptureParams` | 200 `CaptureReceipt` |  |
+| POST | `/v1/merchant/admissions/{request_id}/release` | merchant | `merchant:admissions:create` | — | 200 `Admission` |  |
+| POST | `/v1/merchant/admissions/{request_id}/extend` | merchant | `merchant:admissions:create` | `ExtendAdmissionParams` | 200 `Admission` |  |
+| POST | `/v1/merchant/wasted-spend` | merchant | `merchant:admissions:create` | `WastedSpendParams` | 200 `WastedSpendReport` |  |
+| POST | `/v1/merchant/usage-events` | merchant | `merchant:admissions:create` | `UsageEventParams` | 201 `UsageEvent`<br>200 `UsageEvent` |  |
+| GET | `/v1/merchant/customers/{customer_id}/usage` | merchant | `merchant:usage:read` | — | 200 `Usage` |  |
+| POST | `/v1/merchant/provider-operations` | merchant | `merchant:admissions:create` | `OperationAuthorizationParams` | 200 `OperationAuthorization` |  |
+| GET | `/v1/merchant/provider-operations/{operation_id}` | merchant | `merchant:usage:read` | — | 200 `OperationAuthorization` |  |
+| POST | `/v1/merchant/provider-operations/{operation_id}/release` | merchant | `merchant:admissions:create` | `ReleaseOperationAuthorizationParams` | 200 `OperationAuthorization` |  |
+| POST | `/v1/merchant/provider-operations/{operation_id}/observations` | merchant | `merchant:admissions:create` | `ProviderBillingObservationParams` | 200 `ProviderBillingQualification` |  |
+| GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | merchant | `merchant:usage:read` | — | 200 `ProviderBillingQualification` |  |
 | GET | `/v1/merchant/invoices` | merchant | `merchant:invoices:read` | — | 200 `PaginatedResponseOfMerchantInvoiceDTO` |  |
 | GET | `/v1/merchant/invoices/{id}` | merchant | `merchant:invoices:read` | — | 200 untyped |  |
 | GET | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:read` | — | 200 untyped |  |

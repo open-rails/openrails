@@ -75,17 +75,6 @@ type Subscription struct {
 	UpdatedAt time.Time           `json:"updated_at"`
 }
 
-// BillingStatus is GET /v1/me/status: the customer's active subscription (the
-// shared Subscription shape) or the standing access they hold without one,
-// plus their entitlement windows.
-type BillingStatus struct {
-	HasActiveSubscription bool                `json:"has_active_subscription"`
-	Subscription          *Subscription       `json:"subscription,omitempty"`
-	Access                *SubscriptionAccess `json:"access,omitempty"`
-	NextRenewalAt         *time.Time          `json:"next_renewal_at,omitempty"`
-	Entitlements          []EntitlementRecord `json:"entitlements,omitempty"`
-}
-
 // SubscriptionCard is the stored card's display data: no PAN, no token.
 type SubscriptionCard struct {
 	Brand    string `json:"brand,omitempty"`

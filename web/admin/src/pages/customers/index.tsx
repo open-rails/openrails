@@ -5,10 +5,12 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
+import { CursorPager } from "@/components/cursor-pager"
+import { useCursorPages } from "@/lib/cursor-pages"
 import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { CustomerSummary } from "@/lib/api/types"
+import type { Customer } from "@/lib/api/generated/wire"
 import { formatDate, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
@@ -16,23 +18,12 @@ import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
 
-const columns: ColumnDef<CustomerSummary, unknown>[] = [
+const columns: ColumnDef<Customer, unknown>[] = [
   {
     header: "Email",
     cell: ({ row }) =>
       row.original.email ? (
         <span className="font-medium">{row.original.email}</span>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      ),
-  },
-  {
-    header: "External ref",
-    cell: ({ row }) =>
-      row.original.subject ? (
-        <span className="block max-w-64 truncate" title={row.original.subject}>
-          {row.original.subject}
-        </span>
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
@@ -71,25 +62,25 @@ function csvEscape(v: unknown): string {
 export function CustomersPage() {
   const [params, setParams] = useSearchParams()
   const q = params.get("q") ?? ""
-  const offset = Number(params.get("offset") ?? 0)
+  const pages = useCursorPages(q)
   const [input, setInput] = React.useState(q)
   const navigate = useNavigate()
   const exportCustomers = useMutation(adminMutations.exportCustomers())
 
-  const { data, isPending: loading } = useQuery(
-    adminQueries.customers(q, PAGE, offset)
-  )
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+  } = useQuery(adminQueries.customers(q, PAGE, pages.cursor))
 
   // Export walks every page of the current filter, not just the visible one.
   const exportCsv = async () => {
     try {
       const rows = await exportCustomers.mutateAsync(q)
       const csv = [
-        ["id", "external_ref", "email", "created_at", "last_seen_at"].join(","),
+        ["id", "email", "created_at", "last_seen_at"].join(","),
         ...rows.map((r) =>
-          [r.id, r.subject, r.email, r.created_at, r.last_seen_at]
-            .map(csvEscape)
-            .join(",")
+          [r.id, r.email, r.created_at, r.last_seen_at].map(csvEscape).join(",")
         ),
       ].join("\n")
       const url = URL.createObjectURL(
@@ -123,7 +114,7 @@ export function CustomersPage() {
             />
             <Input
               className="w-64 pl-8"
-              placeholder="Search email, ref, or id…"
+              placeholder="Search email or id…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
@@ -132,7 +123,7 @@ export function CustomersPage() {
             size="sm"
             onClick={exportCsv}
             disabled={
-              exportCustomers.isPending || loading || (data?.total ?? 0) === 0
+              exportCustomers.isPending || loading || !data?.data.length
             }
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
@@ -144,16 +135,13 @@ export function CustomersPage() {
         columns={columns}
         data={data?.data ?? []}
         loading={loading}
-        total={data?.total}
-        limit={data?.limit ?? PAGE}
-        offset={data?.offset ?? offset}
-        onPageChange={(next) => {
-          const p = new URLSearchParams(params)
-          p.set("offset", String(next))
-          setParams(p)
-        }}
         onRowClick={(row) => navigate(`/customers/${row.id}`)}
         emptyMessage={q ? "No customers match." : "No customers yet."}
+      />
+      <CursorPager
+        pages={pages}
+        nextCursor={data?.next_cursor}
+        busy={isFetching}
       />
     </div>
   )

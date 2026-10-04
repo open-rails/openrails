@@ -18,59 +18,35 @@ INSERT INTO billing.customers (id, merchant_id)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id))
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
--- name: SearchCustomers :many
--- Merchant-scoped customer list/search (#740). merchant_id is an EXPLICIT
--- predicate (#227), the list's only merchant scope. q matches the subject UUID
--- prefix or a subscription email substring; empty q lists
--- newest-touched first. email is the latest subscription email on file
--- (customers carry none themselves).
-SELECT c.id, c.id::text AS subject, c.created_at, c.last_seen_at,
-  (SELECT s.user_email FROM billing.subscriptions s
-     WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
-       AND s.deleted_at IS NULL
-       AND s.user_email IS NOT NULL
-     ORDER BY s.created_at DESC LIMIT 1) AS email
-FROM billing.customers c
+-- name: PutCustomer :one
+-- The merchant's declaration of a customer: materialize it, or replace its
+-- declared fields.
+INSERT INTO billing.customers (id, merchant_id, email)
+VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(email))
+ON CONFLICT (merchant_id, id) DO UPDATE SET
+  email = EXCLUDED.email,
+  last_seen_at = now()
+RETURNING *;
+
+-- name: SetCustomerEmail :exec
+UPDATE billing.customers SET email = sqlc.arg(email)
+WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
+
+-- name: GetCustomer :one
+SELECT * FROM billing.customers
+WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
+
+-- name: ListCustomers :many
+-- Newest first. q matches an id prefix or an email substring.
+SELECT * FROM billing.customers c
 WHERE c.merchant_id = sqlc.arg(merchant_id)
   AND (sqlc.arg(q)::text = ''
    OR c.id::text ILIKE sqlc.arg(q) || '%'
-   OR EXISTS (
-        SELECT 1 FROM billing.subscriptions se
-        WHERE se.customer_id = c.id
-          AND se.merchant_id = c.merchant_id
-          AND se.merchant_id = sqlc.arg(merchant_id)
-          AND se.deleted_at IS NULL
-          AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'))
-ORDER BY c.last_seen_at DESC
-LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
-
--- name: CountSearchCustomers :one
-SELECT count(*) FROM billing.customers c
-WHERE c.merchant_id = sqlc.arg(merchant_id)
-  AND (sqlc.arg(q)::text = ''
-   OR c.id::text ILIKE sqlc.arg(q) || '%'
-   OR EXISTS (
-        SELECT 1 FROM billing.subscriptions se
-        WHERE se.customer_id = c.id
-          AND se.merchant_id = c.merchant_id
-          AND se.merchant_id = sqlc.arg(merchant_id)
-          AND se.deleted_at IS NULL
-          AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'));
-
--- name: GetLatestCustomerEmail :one
--- Customers do not own an email column. Project the latest non-empty email from
--- all subscription history so an inactive customer remains identifiable on the
--- detail page. The explicit merchant predicate is the merchant scope.
-SELECT COALESCE((
-  SELECT BTRIM(s.user_email)
-  FROM billing.subscriptions s
-  WHERE s.customer_id = sqlc.arg(customer_id)
-    AND s.merchant_id = sqlc.arg(merchant_id)
-    AND s.deleted_at IS NULL
-    AND NULLIF(BTRIM(s.user_email), '') IS NOT NULL
-  ORDER BY s.created_at DESC, s.id DESC
-  LIMIT 1
-), '')::text AS email;
+   OR c.email ILIKE '%' || sqlc.arg(q) || '%')
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+   OR (c.created_at, c.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT sqlc.arg(row_limit)::int;
 
 -- The hosted portal's "which merchants am I a customer of" directory, read
 -- before any merchant is chosen.

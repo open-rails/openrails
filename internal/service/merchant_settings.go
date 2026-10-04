@@ -173,7 +173,7 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out billing.Merchant
 			out.Profile = &billing.MerchantProfileInput{DisplayName: cfg.Profile.DisplayName, LogoURL: cfg.Profile.LogoURL, FromEmail: cfg.Profile.FromEmail, SupportURL: cfg.Profile.SupportURL, SignupURL: cfg.Profile.SignupURL}
 		}
 		for _, w := range cfg.DelegatedInvokerWastedSpendWindows {
-			out.DelegatedInvokerWastedSpendLimits = append(out.DelegatedInvokerWastedSpendLimits, billing.BudgetWindowInput{Key: w.Key, WindowSeconds: int64(w.Window / time.Second), Limit: w.Limit, Currency: w.Currency})
+			out.DelegatedInvokerWastedSpendLimits = append(out.DelegatedInvokerWastedSpendLimits, billing.BudgetWindow{Key: w.Key, WindowSeconds: int64(w.Window / time.Second), Limit: w.Limit, Currency: w.Currency})
 		}
 		out.BillingPolicies, err = view.ListBillingPolicies(ctx)
 		if err != nil {

@@ -14,7 +14,7 @@ import (
 
 // RecordProviderBillingObservation records exact provider/lifecycle facts in an
 // OpenRails-owned transaction. OpenRails alone qualifies, rates, and settles.
-func (s *Service) RecordProviderBillingObservation(ctx context.Context, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
+func (s *Service) RecordProviderBillingObservation(ctx context.Context, req billing.ProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (s *Service) RecordProviderBillingObservation(ctx context.Context, req bill
 
 // RecordProviderBillingObservationTx is the host-transaction form. It never
 // calls a provider and accepts no caller-rated amount.
-func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationRequest) (*billing.ProviderBillingQualification, error) {
+func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.ProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.
 func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *billing.ProviderBillingQualification {
 	return &billing.ProviderBillingQualification{
 		OperationID: result.OperationID,
-		MerchantID:  result.MerchantID,
+		MerchantID:  billing.MerchantID(result.MerchantID),
 		Lifecycle: billing.ProviderBillingLifecycleEvidence{
 			Provider:                 result.Provider,
 			ProviderResourceID:       result.ProviderResourceID,
@@ -105,17 +105,17 @@ func providerBillingQualificationFromMoney(result *money.ProviderBillingQualific
 			WindowsClosedReference:   result.WindowsClosedReference,
 			LifecycleEvidenceBody:    result.LifecycleEvidenceBody,
 		},
-		LifecycleEvidenceSHA256:        result.LifecycleEvidenceSHA256,
-		QuiescenceSeconds:              int64(result.Quiescence.Seconds()),
-		State:                          billing.ProviderBillingQualificationState(result.State),
-		Reason:                         billing.ProviderBillingQualificationReason(result.Reason),
-		BaselineObservationID:          result.BaselineObservationID,
-		QualifiedObservationID:         result.QualifiedObservationID,
-		QualifiedProviderCostUSDMicros: result.QualifiedProviderCostUSDMicros,
-		QualifiedAt:                    result.QualifiedAt,
-		Authorization:                  *operationAuthorizationFromMoney(result.Authorization),
-		CreatedAt:                      result.CreatedAt,
-		UpdatedAt:                      result.UpdatedAt,
-		Replayed:                       result.Replayed,
+		LifecycleEvidenceSHA256: result.LifecycleEvidenceSHA256,
+		QuiescenceSeconds:       int64(result.Quiescence.Seconds()),
+		State:                   billing.ProviderBillingQualificationState(result.State),
+		Reason:                  billing.ProviderBillingQualificationReason(result.Reason),
+		BaselineObservationID:   result.BaselineObservationID,
+		QualifiedObservationID:  result.QualifiedObservationID,
+		QualifiedCostAmount:     result.QualifiedCostAmount,
+		QualifiedAt:             result.QualifiedAt,
+		Authorization:           *operationAuthorizationFromMoney(result.Authorization),
+		CreatedAt:               result.CreatedAt,
+		UpdatedAt:               result.UpdatedAt,
+		Replayed:                result.Replayed,
 	}
 }

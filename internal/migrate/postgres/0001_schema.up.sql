@@ -748,11 +748,14 @@ CREATE TABLE billing.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     issuer text,
+    email text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_seen_at timestamp with time zone DEFAULT now() NOT NULL
+    last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT customers_email_check CHECK (((email IS NULL) OR ((email = btrim(email)) AND (email <> ''::text) AND (octet_length(email) <= 320))))
 );
 COMMENT ON TABLE billing.customers IS 'OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.';
 COMMENT ON COLUMN billing.customers.issuer IS 'Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.';
+COMMENT ON COLUMN billing.customers.email IS 'The customer''s billing contact email, as the merchant last declared it. NULL when none was declared.';
 
 ALTER TABLE ONLY billing.customers
     ADD CONSTRAINT customers_pkey PRIMARY KEY (merchant_id, id);
@@ -2472,7 +2475,7 @@ COMMENT ON COLUMN billing.ledger_accounts.credits_posted IS 'Maintained counter:
 COMMENT ON COLUMN billing.ledger_accounts.debits_posted IS 'Maintained counter: posted debits, for O(1) balance reads.';
 
 ALTER TABLE ONLY billing.ledger_accounts
-    ADD CONSTRAINT ledger_accounts_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+    ADD CONSTRAINT ledger_accounts_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
 ALTER TABLE ONLY billing.ledger_accounts
     ADD CONSTRAINT ledger_accounts_pkey PRIMARY KEY (merchant_id, id);
 
@@ -2906,7 +2909,7 @@ ALTER TABLE ONLY billing.metered_rating_watermarks
 CREATE TABLE billing.admission_operations (
     merchant_id uuid NOT NULL,
     request_id text NOT NULL CHECK (octet_length(request_id) BETWEEN 1 AND 255),
-    payer_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
     currency text NOT NULL CONSTRAINT admission_operations_currency_shape CHECK (currency ~ '^[A-Z]{3,12}$'),
     estimated_amount bigint NOT NULL CHECK (estimated_amount >= 0),
     available_amount bigint NOT NULL CHECK (available_amount >= 0),
@@ -2921,7 +2924,7 @@ CREATE TABLE billing.admission_operations (
     captured_at timestamptz,
     released_at timestamptz,
     PRIMARY KEY (merchant_id, request_id),
-    FOREIGN KEY (merchant_id, payer_id) REFERENCES billing.customers (merchant_id, id),
+    FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers (merchant_id, id),
     CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
     CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
     CHECK (
@@ -2932,9 +2935,9 @@ CREATE TABLE billing.admission_operations (
 );
 COMMENT ON TABLE billing.admission_operations IS 'One row per admitted spend request: its estimated hold until the request is captured or released.';
 
-CREATE INDEX admission_operations_held ON billing.admission_operations (merchant_id, payer_id, currency, expires_at)
+CREATE INDEX admission_operations_held ON billing.admission_operations (merchant_id, customer_id, currency, expires_at)
     WHERE state = 'open';
-CREATE INDEX admission_operations_windows ON billing.admission_operations (merchant_id, payer_id, currency, admitted_at)
+CREATE INDEX admission_operations_windows ON billing.admission_operations (merchant_id, customer_id, currency, admitted_at)
     WHERE state <> 'released';
 CREATE INDEX admission_operations_window_keys ON billing.admission_operations USING gin (window_keys)
     WHERE state <> 'released';
@@ -2965,10 +2968,11 @@ ALTER TABLE ONLY billing.admission_denials_hourly
 CREATE TABLE billing.operation_authorizations (
     operation_id text NOT NULL,
     merchant_id uuid NOT NULL,
-    payer_id uuid NOT NULL,
+    customer_id uuid NOT NULL,
     record_owner text NOT NULL,
     ledger_account_id uuid NOT NULL,
-    authorized_usd_micros bigint NOT NULL,
+    currency text NOT NULL,
+    amount bigint NOT NULL,
     claim_reference text NOT NULL,
     authorization_body_bytes bytea NOT NULL,
     authorization_body_digest bytea NOT NULL,
@@ -2977,11 +2981,12 @@ CREATE TABLE billing.operation_authorizations (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     released_at timestamp with time zone,
     settled_at timestamp with time zone,
-    settlement_provider_cost_usd_micros bigint,
-    settlement_rated_usd_micros bigint,
+    settlement_cost_amount bigint,
+    settlement_amount bigint,
     settlement_body_bytes bytea,
     settlement_body_digest bytea,
-    CONSTRAINT operation_authorizations_amount_positive CHECK ((authorized_usd_micros > 0)),
+    CONSTRAINT operation_authorizations_amount_positive CHECK ((amount > 0)),
+    CONSTRAINT operation_authorizations_currency_check CHECK ((currency = 'USD'::text)),
     CONSTRAINT operation_authorizations_body_present CHECK ((octet_length(authorization_body_bytes) > 0)),
     CONSTRAINT operation_authorizations_body_size CHECK ((octet_length(authorization_body_bytes) <= 65536)),
     CONSTRAINT operation_authorizations_claim_reference_present CHECK (((claim_reference <> ''::text) AND (claim_reference = btrim(claim_reference)))),
@@ -2992,34 +2997,34 @@ CREATE TABLE billing.operation_authorizations (
     CONSTRAINT operation_authorizations_operation_id_size CHECK ((octet_length(operation_id) <= 255)),
     CONSTRAINT operation_authorizations_record_owner_present CHECK (((record_owner <> ''::text) AND (record_owner = btrim(record_owner)))),
     CONSTRAINT operation_authorizations_record_owner_size CHECK ((octet_length(record_owner) <= 255)),
-    CONSTRAINT operation_authorizations_settlement_shape CHECK ((((state <> 'settled'::text) AND (settlement_provider_cost_usd_micros IS NULL) AND (settlement_rated_usd_micros IS NULL) AND (settlement_body_bytes IS NULL) AND (settlement_body_digest IS NULL)) OR ((state = 'settled'::text) AND (settlement_provider_cost_usd_micros IS NOT NULL) AND (settlement_provider_cost_usd_micros >= 0) AND (settlement_rated_usd_micros IS NOT NULL) AND (settlement_rated_usd_micros >= 0) AND (settlement_rated_usd_micros = settlement_provider_cost_usd_micros) AND (settlement_body_bytes IS NOT NULL) AND ((octet_length(settlement_body_bytes) >= 1) AND (octet_length(settlement_body_bytes) <= 65536)) AND (settlement_body_digest IS NOT NULL) AND (octet_length(settlement_body_digest) = 32) AND (settlement_body_digest = sha256(settlement_body_bytes)) AND (terminal_reference = ('sha256:'::text || encode(settlement_body_digest, 'hex'::text)))))),
+    CONSTRAINT operation_authorizations_settlement_shape CHECK ((((state <> 'settled'::text) AND (settlement_cost_amount IS NULL) AND (settlement_amount IS NULL) AND (settlement_body_bytes IS NULL) AND (settlement_body_digest IS NULL)) OR ((state = 'settled'::text) AND (settlement_cost_amount IS NOT NULL) AND (settlement_cost_amount >= 0) AND (settlement_amount IS NOT NULL) AND (settlement_amount >= 0) AND (settlement_amount = settlement_cost_amount) AND (settlement_body_bytes IS NOT NULL) AND ((octet_length(settlement_body_bytes) >= 1) AND (octet_length(settlement_body_bytes) <= 65536)) AND (settlement_body_digest IS NOT NULL) AND (octet_length(settlement_body_digest) = 32) AND (settlement_body_digest = sha256(settlement_body_bytes)) AND (terminal_reference = ('sha256:'::text || encode(settlement_body_digest, 'hex'::text)))))),
     CONSTRAINT operation_authorizations_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'settled'::text]))),
     CONSTRAINT operation_authorizations_terminal_reference_size CHECK (((terminal_reference IS NULL) OR (octet_length(terminal_reference) <= 1024))),
     CONSTRAINT operation_authorizations_terminal_shape CHECK ((((state = 'open'::text) AND (terminal_reference IS NULL) AND (released_at IS NULL) AND (settled_at IS NULL)) OR ((state = 'released'::text) AND (terminal_reference <> ''::text) AND (released_at IS NOT NULL) AND (settled_at IS NULL)) OR ((state = 'settled'::text) AND (terminal_reference <> ''::text) AND (released_at IS NULL) AND (settled_at IS NOT NULL))))
 );
-COMMENT ON TABLE billing.operation_authorizations IS 'Merchant-scoped durable financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.';
+COMMENT ON TABLE billing.operation_authorizations IS 'Durable financial reservations for exact provider-operation bodies. Open rows reserve amount (in currency, USD for now) against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.';
 COMMENT ON COLUMN billing.operation_authorizations.authorization_body_bytes IS 'Exact canonical bytes authored by the embedding host. OpenRails binds them byte-for-byte but does not interpret their format.';
 COMMENT ON COLUMN billing.operation_authorizations.authorization_body_digest IS 'Caller-bound SHA-256 of authorization_body_bytes, also rechecked by the database.';
-COMMENT ON COLUMN billing.operation_authorizations.settlement_provider_cost_usd_micros IS 'Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.';
-COMMENT ON COLUMN billing.operation_authorizations.settlement_rated_usd_micros IS 'OpenRails-owned final customer settlement. The permanent pass-through contract maps qualified provider cost directly, so this equals settlement_provider_cost_usd_micros; it may exceed authorization and is never clamped.';
+COMMENT ON COLUMN billing.operation_authorizations.settlement_cost_amount IS 'Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.';
+COMMENT ON COLUMN billing.operation_authorizations.settlement_amount IS 'OpenRails-owned final customer settlement. The pass-through contract maps qualified provider cost directly, so this equals settlement_cost_amount; it may exceed the authorized amount and is never clamped.';
 COMMENT ON COLUMN billing.operation_authorizations.settlement_body_bytes IS 'Exact canonical bytes authored by the OpenRails evidence qualifier from provider observations and lifecycle evidence.';
 COMMENT ON COLUMN billing.operation_authorizations.settlement_body_digest IS 'OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.';
 
 ALTER TABLE ONLY billing.operation_authorizations
     ADD CONSTRAINT operation_authorizations_pkey PRIMARY KEY (merchant_id, operation_id);
 
-CREATE INDEX idx_operation_authorizations_open_capacity ON billing.operation_authorizations USING btree (merchant_id, ledger_account_id) WHERE (state = 'open'::text);
-CREATE INDEX idx_operation_authorizations_payer ON billing.operation_authorizations USING btree (merchant_id, payer_id, created_at DESC);
+CREATE INDEX idx_operation_authorizations_open_capacity ON billing.operation_authorizations USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text);
+CREATE INDEX idx_operation_authorizations_customer ON billing.operation_authorizations USING btree (merchant_id, customer_id, created_at DESC);
 
 ALTER TABLE ONLY billing.operation_authorizations
-    ADD CONSTRAINT operation_authorizations_ledger_account_fk FOREIGN KEY (merchant_id, payer_id, ledger_account_id) REFERENCES billing.ledger_accounts(merchant_id, customer_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT operation_authorizations_ledger_account_fk FOREIGN KEY (merchant_id, customer_id, currency, ledger_account_id) REFERENCES billing.ledger_accounts(merchant_id, customer_id, currency, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.operation_authorizations
     ADD CONSTRAINT operation_authorizations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.operation_authorizations
-    ADD CONSTRAINT operation_authorizations_payer_fk FOREIGN KEY (merchant_id, payer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT operation_authorizations_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TRIGGER immutable_operation_authorization_facts BEFORE UPDATE OR DELETE ON billing.operation_authorizations
-FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','terminal_reference','released_at','settled_at','settlement_provider_cost_usd_micros','settlement_rated_usd_micros','settlement_body_bytes','settlement_body_digest');
+FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','terminal_reference','released_at','settled_at','settlement_cost_amount','settlement_amount','settlement_body_bytes','settlement_body_digest');
 
 CREATE TABLE billing.provider_billing_qualifications (
     merchant_id uuid NOT NULL,
@@ -3040,7 +3045,7 @@ CREATE TABLE billing.provider_billing_qualifications (
     reason text DEFAULT 'awaiting_equal_observation'::text NOT NULL,
     baseline_observation_id text,
     qualified_observation_id text,
-    qualified_provider_cost_usd_micros bigint,
+    qualified_cost_amount bigint,
     qualified_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -3049,7 +3054,7 @@ CREATE TABLE billing.provider_billing_qualifications (
     CONSTRAINT provider_billing_qualification_policy_shape CHECK ((quiescence_seconds > 0)),
     CONSTRAINT provider_billing_qualification_provider_shape CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (octet_length(provider) <= 255) AND (provider_resource_id <> ''::text) AND (provider_resource_id = btrim(provider_resource_id)) AND (octet_length(provider_resource_id) <= 255))),
     CONSTRAINT provider_billing_qualification_reference_shape CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024))),
-    CONSTRAINT provider_billing_qualification_state_shape CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_provider_cost_usd_micros IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_provider_cost_usd_micros IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_provider_cost_usd_micros IS NOT NULL) AND (qualified_provider_cost_usd_micros >= 0) AND (qualified_at IS NOT NULL)))))
+    CONSTRAINT provider_billing_qualification_state_shape CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_cost_amount IS NOT NULL) AND (qualified_cost_amount >= 0) AND (qualified_at IS NOT NULL)))))
 );
 COMMENT ON TABLE billing.provider_billing_qualifications IS 'OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.';
 
@@ -3060,7 +3065,7 @@ ALTER TABLE ONLY billing.provider_billing_qualifications
     ADD CONSTRAINT provider_billing_qualification_operation_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT;
 
 CREATE TRIGGER immutable_provider_qualification_facts BEFORE UPDATE OR DELETE ON billing.provider_billing_qualifications
-FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','reason','baseline_observation_id','qualified_observation_id','qualified_provider_cost_usd_micros','qualified_at','updated_at');
+FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state','reason','baseline_observation_id','qualified_observation_id','qualified_cost_amount','qualified_at','updated_at');
 
 CREATE TABLE billing.provider_billing_observations (
     merchant_id uuid NOT NULL,
@@ -3074,14 +3079,14 @@ CREATE TABLE billing.provider_billing_observations (
     raw_body_digest bytea NOT NULL,
     normalized_records_bytes bytea,
     normalized_records_digest bytea,
-    provider_cost_usd_micros bigint,
+    cost_amount bigint,
     has_negative_record boolean DEFAULT false NOT NULL,
     refusal_kind text,
     covers_lifetime boolean NOT NULL,
     qualification_reason text NOT NULL,
     observed_at timestamp with time zone NOT NULL,
     CONSTRAINT provider_billing_observation_id_shape CHECK (((observation_id <> ''::text) AND (observation_id = btrim(observation_id)) AND (octet_length(observation_id) <= 255))),
-    CONSTRAINT provider_billing_observation_normalized_shape CHECK ((((refusal_kind IS NULL) AND raw_body_available AND (octet_length(raw_body_bytes) > 0) AND (normalized_records_bytes IS NOT NULL) AND (octet_length(normalized_records_bytes) > 0) AND (octet_length(normalized_records_bytes) <= 786432) AND (normalized_records_digest IS NOT NULL) AND (octet_length(normalized_records_digest) = 32) AND (normalized_records_digest = sha256(normalized_records_bytes)) AND (provider_cost_usd_micros IS NOT NULL)) OR ((refusal_kind IS NOT NULL) AND (refusal_kind <> ''::text) AND (refusal_kind = btrim(refusal_kind)) AND (octet_length(refusal_kind) <= 255) AND (normalized_records_bytes IS NULL) AND (normalized_records_digest IS NULL) AND (provider_cost_usd_micros IS NULL) AND (NOT has_negative_record) AND (NOT covers_lifetime) AND (qualification_reason = 'provider_evidence_refused'::text) AND (((refusal_kind = ANY (ARRAY['schema_ambiguity'::text, 'submicro_amount'::text, 'amount_overflow'::text])) AND raw_body_available AND (octet_length(raw_body_bytes) > 0)) OR ((refusal_kind = 'response_too_large'::text) AND (NOT raw_body_available) AND (octet_length(raw_body_bytes) = 0)))))),
+    CONSTRAINT provider_billing_observation_normalized_shape CHECK ((((refusal_kind IS NULL) AND raw_body_available AND (octet_length(raw_body_bytes) > 0) AND (normalized_records_bytes IS NOT NULL) AND (octet_length(normalized_records_bytes) > 0) AND (octet_length(normalized_records_bytes) <= 786432) AND (normalized_records_digest IS NOT NULL) AND (octet_length(normalized_records_digest) = 32) AND (normalized_records_digest = sha256(normalized_records_bytes)) AND (cost_amount IS NOT NULL)) OR ((refusal_kind IS NOT NULL) AND (refusal_kind <> ''::text) AND (refusal_kind = btrim(refusal_kind)) AND (octet_length(refusal_kind) <= 255) AND (normalized_records_bytes IS NULL) AND (normalized_records_digest IS NULL) AND (cost_amount IS NULL) AND (NOT has_negative_record) AND (NOT covers_lifetime) AND (qualification_reason = 'provider_evidence_refused'::text) AND (((refusal_kind = ANY (ARRAY['schema_ambiguity'::text, 'submicro_amount'::text, 'amount_overflow'::text])) AND raw_body_available AND (octet_length(raw_body_bytes) > 0)) OR ((refusal_kind = 'response_too_large'::text) AND (NOT raw_body_available) AND (octet_length(raw_body_bytes) = 0)))))),
     CONSTRAINT provider_billing_observation_query_shape CHECK (((normalized_query <> ''::text) AND (normalized_query = btrim(normalized_query)) AND (octet_length(normalized_query) <= 8192) AND (query_end > query_start))),
     CONSTRAINT provider_billing_observation_raw_shape CHECK (((octet_length(raw_body_bytes) <= 786432) AND (octet_length(raw_body_digest) = 32) AND (raw_body_digest = sha256(raw_body_bytes)) AND (raw_body_available OR (octet_length(raw_body_bytes) = 0)))),
     CONSTRAINT provider_billing_observation_reason_shape CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))

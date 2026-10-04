@@ -141,7 +141,7 @@ export function PaymentsPage() {
       }
       const p = new URLSearchParams(params)
       p.set("customer_id", c.id)
-      p.set("customer", c.email || c.subject || shortId(c.id, 13))
+      p.set("customer", c.email || shortId(c.id, 13))
       p.delete("offset")
       setParams(p)
       setInput("")

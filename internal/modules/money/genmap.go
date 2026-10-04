@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -77,6 +79,37 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.CreatedAt,
 	}
+}
+
+// creditTransactionFromTransfer is a customer's view of one ledger transfer:
+// its type, and its amount signed as the change to the balance (to what is
+// owed, for owed_ types).
+func creditTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.CreditTransaction {
+	txType, amount := billing.CreditTransactionType(r.TransferType), r.Amount
+	switch r.TransferType {
+	case "credit_spend":
+		txType, amount = billing.CreditSpend, -amount
+	case "credit_expire":
+		txType, amount = billing.CreditExpire, -amount
+	case "credit_revoke":
+		txType, amount = billing.CreditRevoke, -amount
+	case "credit_reinstate":
+		txType = billing.CreditReinstate
+	case "owed_payment", "owed_writeoff":
+		amount = -amount
+	}
+	out := billing.CreditTransaction{
+		ID: billing.CreditTransactionID(r.ID), Currency: r.Currency, Type: txType, Amount: amount,
+		Invoker: r.InvokerID, Resource: r.Resource, Source: r.Source, SourceID: r.SourceID, CreatedAt: r.CreatedAt,
+	}
+	if r.CustomerID != nil {
+		out.CustomerID = billing.CustomerID(*r.CustomerID)
+	}
+	if r.GrantID != nil {
+		grant := billing.CreditGrantID(*r.GrantID)
+		out.CreditGrantID = &grant
+	}
+	return out
 }
 
 func settingsFromGen(r gen.BillingMoneySetting) *models.MoneyAccount {

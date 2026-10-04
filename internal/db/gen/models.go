@@ -43,7 +43,7 @@ type BillingAdmissionDenialsHourly struct {
 type BillingAdmissionOperation struct {
 	MerchantID         uuid.UUID
 	RequestID          string
-	PayerID            uuid.UUID
+	CustomerID         uuid.UUID
 	Currency           string
 	EstimatedAmount    int64
 	AvailableAmount    int64
@@ -246,7 +246,9 @@ type BillingCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
-	Issuer     *string
+	Issuer *string
+	// The customer's billing contact email, as the merchant last declared it. NULL when none was declared.
+	Email      *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 }
@@ -768,15 +770,16 @@ type BillingNotification struct {
 	EmailedAt *time.Time
 }
 
-// Merchant-scoped durable financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
+// Durable financial reservations for exact provider-operation bodies. Open rows reserve amount (in currency, USD for now) against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
 type BillingOperationAuthorization struct {
-	OperationID         string
-	MerchantID          uuid.UUID
-	PayerID             uuid.UUID
-	RecordOwner         string
-	LedgerAccountID     uuid.UUID
-	AuthorizedUsdMicros int64
-	ClaimReference      string
+	OperationID     string
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	RecordOwner     string
+	LedgerAccountID uuid.UUID
+	Currency        string
+	Amount          int64
+	ClaimReference  string
 	// Exact canonical bytes authored by the embedding host. OpenRails binds them byte-for-byte but does not interpret their format.
 	AuthorizationBodyBytes []byte
 	// Caller-bound SHA-256 of authorization_body_bytes, also rechecked by the database.
@@ -787,9 +790,9 @@ type BillingOperationAuthorization struct {
 	ReleasedAt              *time.Time
 	SettledAt               *time.Time
 	// Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.
-	SettlementProviderCostUsdMicros *int64
-	// OpenRails-owned final customer settlement. The permanent pass-through contract maps qualified provider cost directly, so this equals settlement_provider_cost_usd_micros; it may exceed authorization and is never clamped.
-	SettlementRatedUsdMicros *int64
+	SettlementCostAmount *int64
+	// OpenRails-owned final customer settlement. The pass-through contract maps qualified provider cost directly, so this equals settlement_cost_amount; it may exceed the authorized amount and is never clamped.
+	SettlementAmount *int64
 	// Exact canonical bytes authored by the OpenRails evidence qualifier from provider observations and lifecycle evidence.
 	SettlementBodyBytes []byte
 	// OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.
@@ -1035,7 +1038,7 @@ type BillingProviderBillingObservation struct {
 	RawBodyDigest           []byte
 	NormalizedRecordsBytes  []byte
 	NormalizedRecordsDigest []byte
-	ProviderCostUsdMicros   *int64
+	CostAmount              *int64
 	HasNegativeRecord       bool
 	RefusalKind             *string
 	CoversLifetime          bool
@@ -1045,28 +1048,28 @@ type BillingProviderBillingObservation struct {
 
 // OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
 type BillingProviderBillingQualification struct {
-	MerchantID                     uuid.UUID
-	OperationID                    string
-	Provider                       string
-	ProviderResourceID             string
-	ProviderLifetimeStart          time.Time
-	ProviderLifetimeEnd            time.Time
-	ProviderAbsentAt               time.Time
-	ProviderAbsenceReference       string
-	BillingStopReference           string
-	WindowsClosedAt                time.Time
-	WindowsClosedReference         string
-	LifecycleEvidenceBytes         []byte
-	LifecycleEvidenceDigest        []byte
-	QuiescenceSeconds              int64
-	State                          string
-	Reason                         string
-	BaselineObservationID          *string
-	QualifiedObservationID         *string
-	QualifiedProviderCostUsdMicros *int64
-	QualifiedAt                    *time.Time
-	CreatedAt                      time.Time
-	UpdatedAt                      time.Time
+	MerchantID               uuid.UUID
+	OperationID              string
+	Provider                 string
+	ProviderResourceID       string
+	ProviderLifetimeStart    time.Time
+	ProviderLifetimeEnd      time.Time
+	ProviderAbsentAt         time.Time
+	ProviderAbsenceReference string
+	BillingStopReference     string
+	WindowsClosedAt          time.Time
+	WindowsClosedReference   string
+	LifecycleEvidenceBytes   []byte
+	LifecycleEvidenceDigest  []byte
+	QuiescenceSeconds        int64
+	State                    string
+	Reason                   string
+	BaselineObservationID    *string
+	QualifiedObservationID   *string
+	QualifiedCostAmount      *int64
+	QualifiedAt              *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.

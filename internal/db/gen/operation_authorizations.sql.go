@@ -13,7 +13,7 @@ import (
 )
 
 const getOperationAuthorization = `-- name: GetOperationAuthorization :one
-SELECT operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
+SELECT operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
 FROM billing.operation_authorizations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
@@ -30,10 +30,11 @@ func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperatio
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.RecordOwner,
 		&i.LedgerAccountID,
-		&i.AuthorizedUsdMicros,
+		&i.Currency,
+		&i.Amount,
 		&i.ClaimReference,
 		&i.AuthorizationBodyBytes,
 		&i.AuthorizationBodyDigest,
@@ -42,8 +43,8 @@ func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperatio
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
-		&i.SettlementProviderCostUsdMicros,
-		&i.SettlementRatedUsdMicros,
+		&i.SettlementCostAmount,
+		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
 	)
@@ -55,10 +56,11 @@ const insertOperationAuthorization = `-- name: InsertOperationAuthorization :one
 INSERT INTO billing.operation_authorizations (
     operation_id,
     merchant_id,
-    payer_id,
+    customer_id,
     record_owner,
     ledger_account_id,
-    authorized_usd_micros,
+    currency,
+    amount,
     claim_reference,
     authorization_body_bytes,
     authorization_body_digest
@@ -68,38 +70,41 @@ INSERT INTO billing.operation_authorizations (
     $3::uuid,
     $4::text,
     $5::uuid,
-    $6::bigint,
-    $7::text,
-    $8::bytea,
-    $9::bytea
+    $6::text,
+    $7::bigint,
+    $8::text,
+    $9::bytea,
+    $10::bytea
 )
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
-RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
 `
 
 type InsertOperationAuthorizationParams struct {
 	OperationID             string
 	MerchantID              uuid.UUID
-	PayerID                 uuid.UUID
+	CustomerID              uuid.UUID
 	RecordOwner             string
 	LedgerAccountID         uuid.UUID
-	AuthorizedUsdMicros     int64
+	Currency                string
+	Amount                  int64
 	ClaimReference          string
 	AuthorizationBodyBytes  []byte
 	AuthorizationBodyDigest []byte
 }
 
-// th-005 durable operation-level financial reservations. The immutable body
+// Durable operation-level financial reservations. The immutable body
 // and principals make the operation id a safe replay coordinate; only the
 // three-state terminal transition may update a row.
 func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, insertOperationAuthorization,
 		arg.OperationID,
 		arg.MerchantID,
-		arg.PayerID,
+		arg.CustomerID,
 		arg.RecordOwner,
 		arg.LedgerAccountID,
-		arg.AuthorizedUsdMicros,
+		arg.Currency,
+		arg.Amount,
 		arg.ClaimReference,
 		arg.AuthorizationBodyBytes,
 		arg.AuthorizationBodyDigest,
@@ -108,10 +113,11 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.RecordOwner,
 		&i.LedgerAccountID,
-		&i.AuthorizedUsdMicros,
+		&i.Currency,
+		&i.Amount,
 		&i.ClaimReference,
 		&i.AuthorizationBodyBytes,
 		&i.AuthorizationBodyDigest,
@@ -120,8 +126,8 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
-		&i.SettlementProviderCostUsdMicros,
-		&i.SettlementRatedUsdMicros,
+		&i.SettlementCostAmount,
+		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
 	)
@@ -142,7 +148,7 @@ WHERE merchant_id = $3::uuid
       WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
         AND qualification.operation_id = billing.operation_authorizations.operation_id
   )
-RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
 `
 
 type ReleaseOperationAuthorizationParams struct {
@@ -163,10 +169,11 @@ func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg Release
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.RecordOwner,
 		&i.LedgerAccountID,
-		&i.AuthorizedUsdMicros,
+		&i.Currency,
+		&i.Amount,
 		&i.ClaimReference,
 		&i.AuthorizationBodyBytes,
 		&i.AuthorizationBodyDigest,
@@ -175,8 +182,8 @@ func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg Release
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
-		&i.SettlementProviderCostUsdMicros,
-		&i.SettlementRatedUsdMicros,
+		&i.SettlementCostAmount,
+		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
 	)
@@ -186,8 +193,8 @@ func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg Release
 const settleOperationAuthorizationPassThroughProviderCost = `-- name: SettleOperationAuthorizationPassThroughProviderCost :one
 UPDATE billing.operation_authorizations
 SET state = 'settled',
-    settlement_provider_cost_usd_micros = $1::bigint,
-    settlement_rated_usd_micros = $2::bigint,
+    settlement_cost_amount = $1::bigint,
+    settlement_amount = $2::bigint,
     settlement_body_bytes = $3::bytea,
     settlement_body_digest = $4::bytea,
     terminal_reference = $5::text,
@@ -195,24 +202,24 @@ SET state = 'settled',
 WHERE merchant_id = $7::uuid
   AND operation_id = $8::text
   AND state = 'open'
-RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
 `
 
 type SettleOperationAuthorizationPassThroughProviderCostParams struct {
-	SettlementProviderCostUsdMicros int64
-	SettlementRatedUsdMicros        int64
-	SettlementBodyBytes             []byte
-	SettlementBodyDigest            []byte
-	TerminalReference               string
-	SettledAt                       time.Time
-	MerchantID                      uuid.UUID
-	OperationID                     string
+	SettlementCostAmount int64
+	SettlementAmount     int64
+	SettlementBodyBytes  []byte
+	SettlementBodyDigest []byte
+	TerminalReference    string
+	SettledAt            time.Time
+	MerchantID           uuid.UUID
+	OperationID          string
 }
 
 func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx context.Context, arg SettleOperationAuthorizationPassThroughProviderCostParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, settleOperationAuthorizationPassThroughProviderCost,
-		arg.SettlementProviderCostUsdMicros,
-		arg.SettlementRatedUsdMicros,
+		arg.SettlementCostAmount,
+		arg.SettlementAmount,
 		arg.SettlementBodyBytes,
 		arg.SettlementBodyDigest,
 		arg.TerminalReference,
@@ -224,10 +231,11 @@ func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx contex
 	err := row.Scan(
 		&i.OperationID,
 		&i.MerchantID,
-		&i.PayerID,
+		&i.CustomerID,
 		&i.RecordOwner,
 		&i.LedgerAccountID,
-		&i.AuthorizedUsdMicros,
+		&i.Currency,
+		&i.Amount,
 		&i.ClaimReference,
 		&i.AuthorizationBodyBytes,
 		&i.AuthorizationBodyDigest,
@@ -236,8 +244,8 @@ func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx contex
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
-		&i.SettlementProviderCostUsdMicros,
-		&i.SettlementRatedUsdMicros,
+		&i.SettlementCostAmount,
+		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
 	)

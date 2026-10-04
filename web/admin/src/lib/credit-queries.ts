@@ -28,20 +28,20 @@ export const creditQueries = {
     customer: string,
     currency: string,
     limit: number,
-    offset: number
+    cursor: string
   ) =>
     queryOptions({
       queryKey: [
         ...creditCustomerKey(merchant, customer),
-        "credits",
+        "credit-grants",
         currency,
         limit,
-        offset,
+        cursor,
       ],
       enabled: Boolean(merchant && customer && currency),
       queryFn: ({ signal }) => {
         assertMerchant(merchant)
-        return listCreditGrants(customer, currency, limit, offset, signal)
+        return listCreditGrants(customer, currency, limit, cursor, signal)
       },
     }),
   transactions: (
@@ -49,20 +49,20 @@ export const creditQueries = {
     customer: string,
     currency: string,
     limit: number,
-    offset: number
+    cursor: string
   ) =>
     queryOptions({
       queryKey: [
         ...creditCustomerKey(merchant, customer),
-        "credit-transactions",
+        "transactions",
         currency,
         limit,
-        offset,
+        cursor,
       ],
       enabled: Boolean(merchant && customer && currency),
       queryFn: ({ signal }) => {
         assertMerchant(merchant)
-        return listCreditTransactions(customer, currency, limit, offset, signal)
+        return listCreditTransactions(customer, currency, limit, cursor, signal)
       },
     }),
 }

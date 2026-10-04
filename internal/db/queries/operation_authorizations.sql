@@ -1,4 +1,4 @@
--- th-005 durable operation-level financial reservations. The immutable body
+-- Durable operation-level financial reservations. The immutable body
 -- and principals make the operation id a safe replay coordinate; only the
 -- three-state terminal transition may update a row.
 
@@ -6,20 +6,22 @@
 INSERT INTO billing.operation_authorizations (
     operation_id,
     merchant_id,
-    payer_id,
+    customer_id,
     record_owner,
     ledger_account_id,
-    authorized_usd_micros,
+    currency,
+    amount,
     claim_reference,
     authorization_body_bytes,
     authorization_body_digest
 ) VALUES (
     sqlc.arg(operation_id)::text,
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(payer_id)::uuid,
+    sqlc.arg(customer_id)::uuid,
     sqlc.arg(record_owner)::text,
     sqlc.arg(ledger_account_id)::uuid,
-    sqlc.arg(authorized_usd_micros)::bigint,
+    sqlc.arg(currency)::text,
+    sqlc.arg(amount)::bigint,
     sqlc.arg(claim_reference)::text,
     sqlc.arg(authorization_body_bytes)::bytea,
     sqlc.arg(authorization_body_digest)::bytea
@@ -36,8 +38,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: SettleOperationAuthorizationPassThroughProviderCost :one
 UPDATE billing.operation_authorizations
 SET state = 'settled',
-    settlement_provider_cost_usd_micros = sqlc.arg(settlement_provider_cost_usd_micros)::bigint,
-    settlement_rated_usd_micros = sqlc.arg(settlement_rated_usd_micros)::bigint,
+    settlement_cost_amount = sqlc.arg(settlement_cost_amount)::bigint,
+    settlement_amount = sqlc.arg(settlement_amount)::bigint,
     settlement_body_bytes = sqlc.arg(settlement_body_bytes)::bytea,
     settlement_body_digest = sqlc.arg(settlement_body_digest)::bytea,
     terminal_reference = sqlc.arg(terminal_reference)::text,

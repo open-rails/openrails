@@ -125,8 +125,8 @@ access; null `access_duration_hours` gives indefinite access:
 ```
 
 Prepaid balances are not catalog products: fund them with
-`POST /v1/merchant/credits/deposit` (`Client.DepositCredits`), whose grants carry
-their own expiry.
+`POST /v1/merchant/customers/{id}/credit-grants` (`Client.CreateCreditGrant`),
+whose grants carry their own expiry.
 
 **Charge models** (for metered rate cards):
 
@@ -236,7 +236,7 @@ reference: `docs/api/endpoints.md`.
 
 | Task | Route | Console page |
 |---|---|---|
-| Look up a customer (profile, balances, entitlements, history) | `GET /v1/merchant/customers/{id}` | Customers → search |
+| Look up a customer (profile, balances, entitlements, history) | `GET /v1/merchant/customers/{id}/billing-profile` | Customers → search |
 | Grant / revoke an entitlement manually | `POST` / `DELETE /v1/merchant/customers/{id}/entitlements[/{grant_id}]` | Customers → profile |
 | Grant / revoke product access manually | `POST` / `DELETE /v1/merchant/customers/{id}/product-access[/{grant_id}]` | Customers → profile |
 | Record an off-channel/manual purchase | `POST /v1/merchant/customers/{id}/payments/off-channel` | Customers → profile |
@@ -245,11 +245,10 @@ reference: `docs/api/endpoints.md`.
 | List / inspect subscriptions | `GET /v1/merchant/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
 | Cancel / resume a subscription | `POST /v1/merchant/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/merchant/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Deposit credits (machine/rails) | `POST /v1/merchant/credits/deposit` | — |
-| Grant credits to a customer (human admin) | `POST /v1/merchant/customers/{id}/credits` | Customers → profile |
-| Ask what a deposit key did | `GET /v1/merchant/credits/deposit?customer_id=&source_id=` | — |
-| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[:upsert]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
-| Credit limit / trust level | `PUT /v1/merchant/credit-limit`, `GET /v1/merchant/trust-level` | Settings |
+| Grant / revoke credit | `POST /v1/merchant/customers/{id}/credit-grants`, `POST .../credit-grants/{grant_id}/revoke` | Customers → profile |
+| Ask what a grant key did | `GET /v1/merchant/customers/{id}/credit-grants?source_id=` | — |
+| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[/{scope}/{scope_key}]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
+| Credit limit / trust level | `PUT /v1/merchant/customers/{id}/credit-limit`, `PUT /v1/merchant/customers/{id}/trust-level` | Settings |
 | Catalog CRUD over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` | Catalog |
 | Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
 | Repair alerts / drift findings | `GET /v1/merchant/repair-alerts` | Ops |

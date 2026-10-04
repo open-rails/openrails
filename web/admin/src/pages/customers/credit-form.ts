@@ -10,10 +10,8 @@ export function creditGrantInput(
     description: string
     sourceID: string
   },
-  allowed: boolean,
   now = Date.now()
 ): CreditGrantInput {
-  if (!allowed) throw new Error("Your role cannot grant credit.")
   const amount = amountFromInput(input.amount, input.decimals)
   if (amount === null || BigInt(amount) <= 0n)
     throw new Error(
@@ -38,22 +36,17 @@ export function creditGrantInput(
   }
 }
 
-export function canRevokeCredit(grant: CreditGrant, allowed: boolean): boolean {
+export function canRevokeCredit(grant: CreditGrant): boolean {
   return (
-    allowed &&
     (grant.state === "active" || grant.state === "scheduled") &&
     /^\d+$/.test(grant.remaining_amount) &&
     BigInt(grant.remaining_amount) > 0n
   )
 }
 
-export function creditRevokeInput(
-  grant: CreditGrant,
-  allowed: boolean,
-  reason: string
-) {
-  if (!canRevokeCredit(grant, allowed))
-    throw new Error("This grant cannot be revoked with your current access.")
+export function creditRevokeInput(grant: CreditGrant, reason: string) {
+  if (!canRevokeCredit(grant))
+    throw new Error("This grant has no remaining credit to revoke.")
   reason = reason.trim()
   if (!reason || reason.length > 500)
     throw new Error("Enter a reason of up to 500 characters.")

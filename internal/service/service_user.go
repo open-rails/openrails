@@ -11,10 +11,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/money"
 )
 
 // -------------------------------- Checkout Sessions --------------------------------
@@ -346,47 +344,6 @@ func (s *Service) ResolveEffectiveTier(ctx context.Context, userID, group string
 		TierRank:    tier.TierRank,
 		ProductID:   billing.ProductID(tier.ProductID).String(),
 		ProductKey:  tier.ProductKey,
-	}, nil
-}
-
-// -------------------------------- Credits (User-facing) --------------------------------
-
-// GetCreditsByType returns the user's money balance for the requested currency.
-func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string) (*CreditBalance, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil, fmt.Errorf("user_id required")
-	}
-	currency, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-
-	payer := identity.CustomerIDFromString(userID)
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer could not be resolved from subject")
-	}
-	bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
-	if err != nil {
-		return nil, fmt.Errorf("get credit balance: %w", err)
-	}
-	decimals, err := money.CurrencyDecimals(bal.Currency)
-	if err != nil {
-		return nil, err
-	}
-	return &CreditBalance{
-		Currency:      bal.Currency,
-		DisplayName:   bal.Currency,
-		Unit:          bal.Currency,
-		DecimalPlaces: decimals,
-		Balance:       bal.Balance,
-		HeldBalance:   bal.HeldBalance,
 	}, nil
 }
 

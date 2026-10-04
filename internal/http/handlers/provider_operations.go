@@ -15,7 +15,7 @@ import (
 // caller-rated settlement amount is refused, never ignored.
 
 func ServiceOpenOperationAuthorization(r *httprequest.Request) {
-	var req billing.OperationAuthorizationRequest
+	var req billing.OperationAuthorizationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
@@ -34,7 +34,7 @@ func ServiceGetOperationAuthorization(r *httprequest.Request) {
 }
 
 func ServiceReleaseOperationAuthorization(r *httprequest.Request) {
-	var req billing.ReleaseOperationAuthorizationRequest
+	var req billing.ReleaseOperationAuthorizationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
@@ -45,7 +45,7 @@ func ServiceReleaseOperationAuthorization(r *httprequest.Request) {
 }
 
 func ServiceRecordProviderBillingObservation(r *httprequest.Request) {
-	var req billing.ProviderBillingObservationRequest
+	var req billing.ProviderBillingObservationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return

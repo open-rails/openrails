@@ -53,10 +53,9 @@ const KindInvoice = "openrails.invoice"
 // InvoiceArgs lets one invoice-domain worker serve the recurring invoice
 // lifecycle without splitting each phase into a separate River worker type.
 type InvoiceArgs struct {
-	Collect                   bool  `json:"collect,omitempty"`
-	CollectionThresholdAmount int64 `json:"collection_threshold_amount,omitempty"`
-	UseMonthlyFloor           bool  `json:"use_monthly_floor,omitempty"`
-	FinalizePreviousMonth     bool  `json:"finalize_previous_month,omitempty"`
+	Collect               bool `json:"collect,omitempty"`
+	UseMonthlyFloor       bool `json:"use_monthly_floor,omitempty"`
+	FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
 }
 
 func (InvoiceArgs) Kind() string { return KindInvoice }
@@ -138,9 +137,6 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 		threshold := settings.CollectionThresholdAmount
 		if job.Args.UseMonthlyFloor {
 			threshold = settings.MonthlyFloorAmount
-		}
-		if job.Args.CollectionThresholdAmount > 0 {
-			threshold = job.Args.CollectionThresholdAmount
 		}
 		n, err := w.Money.ChargeOutstanding(ctx, w.Intents, threshold)
 		if err != nil {

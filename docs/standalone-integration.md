@@ -170,15 +170,19 @@ if err := client.Verify(ctx); err != nil { // authenticated boot probe
     log.Fatal(err)                         // unreachable, bad key — fail fast
 }
 
-verdicts, err := client.AdmitBatch(ctx, []billing.AdmitRequest{{
+verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
+    RequestID:       requestID, // idempotency key
     CustomerID:      billing.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
+    InvokerType:     billing.InvokerTypeDelegated,
+    Currency:        "USD",
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
-    RequestID:       requestID, // idempotency key
 }})
-receipt, err := client.Capture(ctx, requestID, 43_000, &billing.CaptureUsage{EventType: "chat.completion"})
-// or client.Release(ctx, requestID) if the work failed
+receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
+    Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
+})
+// or client.ReleaseAdmission(ctx, requestID) if the work failed
 ```
 
 Options: `WithAPIKey`, `WithTokenProvider` (per-call minted bearer),
@@ -268,7 +272,7 @@ merchant-scoped route: a token minted for merchant A is rejected on merchant
 B's host even though it verifies.
 
 **CORS (#765)** is a fixed, engine-wide policy — not configurable, no origin
-registration: browser-facing tiers (checkout, `/v1/me/*`, `/v1/customers/*`)
+registration: browser-facing tiers (checkout, `/v1/me/*`)
 answer `Access-Control-Allow-Origin: *` (never with credentials — OpenRails
 issues no cookies; every browser call is an explicit bearer token), and every
 other surface (merchant API, webhooks, admin) emits no CORS headers at all.

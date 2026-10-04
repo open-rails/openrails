@@ -1,5 +1,5 @@
 {
-  "delegations": [
+  "data": [
     {
       "scope": "invoker",
       "scope_key": "worker-1",
@@ -14,8 +14,11 @@
       "provenance": "sha256:fixture"
     },
     {
-      "scope": "subject",
-      "windows": []
+      "scope": "invoker_tier",
+      "scope_key": "free",
+      "windows": [],
+      "provenance": ""
     }
-  ]
+  ],
+  "next_cursor": null
 }

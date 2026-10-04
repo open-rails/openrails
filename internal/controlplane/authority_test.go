@@ -83,5 +83,4 @@ func TestMerchantRoleCatalog(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, []iam.Role{MerchantViewer, MerchantSupport, MerchantOwner}, MerchantAPIKeyRoles(), "machine keys cannot resolve a creator subject")
 	require.Equal(t, []string{"creator", "viewer", "support", "owner"}, RoleNames(MerchantRoles()), "the wire shows bare role names")
-	require.Equal(t, CustomerType, CustomerMember.Persona())
 }

@@ -91,7 +91,7 @@ func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 }
 
 // BrowserTierRoutes tracks which route patterns belong to the permissive-CORS
-// browser tier (#765): checkout, self-service, and customer-treasury routes
+// browser tier (#765): checkout and self-service routes
 // register their pattern here as they mount; PermissiveCORSHTTP consults it to
 // decide whether an inbound request qualifies for the static `*` policy.
 //

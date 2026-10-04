@@ -27,7 +27,7 @@ const (
 
 // browserGroups are the routes a browser SDK calls: billing-ui's wire types
 // cover these, the console's cover every group.
-var browserGroups = map[routes.Group]bool{routes.Checkout: true, routes.Customer: true, routes.Treasury: true, routes.Meta: true}
+var browserGroups = map[routes.Group]bool{routes.Checkout: true, routes.Customer: true, routes.Meta: true}
 
 // Files renders every generated file from the route catalog and the
 // error-code registry, by repository path. fsys is the repository: enum

@@ -48,7 +48,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	price, err := client.Prices.Create(t.Context(), &billing.PriceCreateParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	_, err = client.EnsureCustomer(t.Context(), userID)
+	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CustomerParams{})
 	require.NoError(t, err)
 	_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
 		Customer: billing.CheckoutCustomerIdentity{ID: userID, VerifiedEmail: "refund@example.test"}, PriceID: price.ID,

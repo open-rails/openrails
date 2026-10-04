@@ -1,5 +1,11 @@
 # Changelog
 
+## v1 credits, usage and customers (openrails#1130)
+
+- `client.getStatus()` and `BillingStatus` are removed with `/v1/me/status`.
+  Read access from `/v1/me/entitlements/active` and the subscription from
+  `listSubscriptions()`.
+
 ## Hosted checkout sessions (openrails#1124)
 
 - OpenRails serves the checkout session; hosts no longer write

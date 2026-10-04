@@ -31,7 +31,7 @@ func (g *Gate) WindowUsage(ctx context.Context, payer uuid.UUID, currency string
 			return nil, err
 		}
 		usage, err := g.db.Gen(ctx).AdmissionWindowUsage(ctx, gen.AdmissionWindowUsageParams{
-			MerchantID: mid.UUID(), PayerID: payer, Currency: currency, WindowKey: key, WindowStart: start, WindowEnd: end, AsOf: now,
+			MerchantID: mid.UUID(), CustomerID: payer, Currency: currency, WindowKey: key, WindowStart: start, WindowEnd: end, AsOf: now,
 		})
 		if err != nil {
 			return nil, err

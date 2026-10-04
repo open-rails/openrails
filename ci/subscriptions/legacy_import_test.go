@@ -100,7 +100,7 @@ func (b *legacyBook) add(r *bookRow) *bookRow {
 	paid := r.paid
 	b.book.Subscriptions = append(b.book.Subscriptions, billing.DeclaredSubscription{SourceID: r.source, Customer: customerID, Price: priceID, Rail: "nmi", RailSubscriptionID: r.schedule,
 		StartedAt: start.AddDate(-1, 0, 0), PaidThrough: &paid, Cancel: r.cancel, Dunning: r.dunning, PaymentMethod: method})
-	b.book.Transactions = append(b.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: r.schedule, TransactionID: sale.TransactionID, Success: true, AmountCents: r.tier.cents, Currency: "USD", OccurredAt: start})
+	b.book.Transactions = append(b.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: r.schedule, TransactionID: sale.TransactionID, Success: true, Amount: r.tier.cents * 10_000, Currency: "USD", OccurredAt: start})
 	b.rows = append(b.rows, r)
 	return r
 }
@@ -211,7 +211,7 @@ func TestLegacyNMIBookImport(t *testing.T) {
 			// The legacy ledger also holds a partial refund of the active
 			// member's charge, under its own transaction id.
 			refund := "legacy-refund-" + uuid.NewString()[:8]
-			b.book.Transactions = append(b.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: active.schedule, TransactionID: refund, Type: "refund", Success: true, AmountCents: 500, Currency: "USD", OccurredAt: now.Add(-2 * day)})
+			b.book.Transactions = append(b.book.Transactions, billing.DeclaredTransaction{RailSubscriptionID: active.schedule, TransactionID: refund, Type: "refund", Success: true, Amount: 5_000_000, Currency: "USD", OccurredAt: now.Add(-2 * day)})
 
 			result, err := w.client[tp].ImportBilling(t.Context(), b.book)
 			require.NoError(t, err)

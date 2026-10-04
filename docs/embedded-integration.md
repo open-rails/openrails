@@ -355,7 +355,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 |---|---|
 | (always) | Capability discovery and signature-checked provider callbacks |
 | `Checkout` | Products, prices, checkout config and [hosted checkout](api/commerce.md#hosted-checkout) sessions; requires `Authenticate`. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page |
-| `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`); `Treasury` adds `/v1/customers` |
+| `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`) |
 | `Merchant` | The merchant API (`/v1/merchant/*`, `/v1/import/*`) and creator catalogs (`/v1/catalog/*`), each route gated by its merchant permission; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
@@ -388,11 +388,11 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `AdmitBatch`, `Capture`, `Release`, `ExtendHold`, `GetTrustLevel`, `ReportWastedSpend` |
-| Usage | `RecordUsage` (metered events outside the hold/capture cycle) |
-| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` |
-| Funding / reporting | `DepositCredits`, `GetDeposit`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
-| Customers / entitlements | `EnsureCustomer`, `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmission`, `ExtendAdmission`, `ReportWastedSpend` |
+| Usage | `RecordUsage` (metered events outside the hold/capture cycle), `GetUsage` |
+| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
+| Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
+| Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
 | Catalog (API hosts) | `Products.Create`, `Products.Update`, `Products.Retrieve`, `Products.RetrieveByKey`, `Products.List`, `Products.Ensure`, `Prices.Create`, `Prices.Update`, `Prices.Retrieve`, `Prices.RetrieveByKey`, `Prices.List`, `Prices.SetKey`, `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` |
 | Checkout | `CreateCheckoutSession`, `GetCheckoutSession`, `ConfirmCheckoutSession`, `ListCheckoutRailOptions`, `GetCheckoutConfig`, `ResolveEffectiveTier` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CancelPlanMigration` |
@@ -402,14 +402,18 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
 
 ```go
-verdicts, err := client.AdmitBatch(ctx, []billing.AdmitRequest{{
+verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
+    RequestID:       requestID, // idempotency key
     CustomerID:      billing.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
+    InvokerType:     billing.InvokerTypeDelegated,
+    Currency:        "USD",
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
-    RequestID:       requestID, // idempotency key
 }})
-receipt, err := client.Capture(ctx, requestID, 43_000, &billing.CaptureUsage{EventType: "chat.completion"})
+receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureParams{
+    Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
+})
 ents, err := client.ListActiveEntitlements(ctx, []string{userID}, time.Now())
 ```
 
@@ -418,7 +422,6 @@ Entitlement lookups address subjects by the ids your auth system already holds
 billing is an empty slice, never an error. Deny verdicts are `(Allowed=false, nil
 error)`.
 
-`Admit` is the batch-of-one convenience on the same client in every mode.
 `openrails.WithTimeout` configures the same call behavior as the remote
 constructor; the credential and transport options (`WithAPIKey`,
 `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient`) belong to

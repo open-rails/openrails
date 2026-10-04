@@ -37,7 +37,7 @@ null on the last page and is passed back as `?cursor=`.
 | Caller class | Credential |
 |---|---|
 | Public (catalog, health, capabilities, solana pricing) | none |
-| Self-service `/v1/me/*`, customer treasury `/v1/customers/*` | `Authorization: DPoP <delegated JWT>` plus per-request `DPoP` proof (native: Bearer plus matching TLS client certificate) — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
+| Self-service `/v1/me/*` | `Authorization: DPoP <delegated JWT>` plus per-request `DPoP` proof (native: Bearer plus matching TLS client certificate) — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
 | Checkout `/v1/checkout` | any authenticated user bearer |
 | Merchant `/v1/merchant/*`, `/v1/import/*` | `Authorization: Bearer <API key (openrails_st_…) | service JWT | user access token>` — every route is gated on a `merchant:*` permission, not on credential type |
 | Platform `/v1/platform/*` | human operator session checked against root-group grants (standalone only) |
@@ -85,8 +85,8 @@ There is no `/health` route — probes are `/health/live` and `/health/ready`.
 ## 2. Checkout + rail-specific public routes
 
 Top-level checkout requires an authenticated user bearer. The same three
-handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
-`/v1/customers/{customer_id}/checkout/*` (customer grant) — see section 3.
+handlers are also mounted under `/v1/me/checkout/*` (delegated token) — see
+section 3.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -116,19 +116,18 @@ changes are NOT supported here — if the user already has an active subscriptio
 in the price's tier group the response is `{ "status": "blocked" }` pointing at
 `POST /v1/me/subscriptions/{id}/change-tier`.
 
-## 3. Self-service (`/v1/me/*`) and customer treasury (`/v1/customers/*`)
+## 3. Self-service (`/v1/me/*`)
 
 All `/v1/me/*` routes require a delegated customer principal; every operation is
 scoped to the token's subject — no `:user_id` appears in any path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (decimal string, native units). Query: `currency` |
-| GET | `/v1/me/transactions` | Ledger transactions, newest first. Query: `currency`, `limit`, `offset` |
+| GET | `/v1/me/balance` | The caller's `Balance` in one currency: `balance_amount`, `held_amount`, `available_amount`, `owed_amount` (decimal strings, native units). Query: `currency` |
+| GET | `/v1/me/transactions` | The caller's credit ledger, newest first (`ListPage<CreditTransaction>`). Query: `currency`, `limit`, `cursor` |
 | PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
-| GET | `/v1/me/status` | Aggregated premium status (`billing.BillingStatus`): `has_active_subscription`, `subscription` (the shared `Subscription` shape), `access` (the standing grant, from the subscription or a one-off entitlement), `next_renewal_at`, `entitlements` (`EntitlementRecord[]`) |
-| GET | `/v1/me/usage` | Usage breakdown for the token's subject |
-| GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
+| GET | `/v1/me/usage` | The caller's usage (`Usage`), one row per `group_by` key (`event_type` default, `invoker`, `resource`, `function`, `tier`). Query: `currency`, `from`, `to` (default: the last month) |
+| GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 invalid_query`. The delegations a customer granted are the merchant's `GET /v1/merchant/customers/{customer_id}/spend-delegations` |
 | GET | `/v1/me/invoices` | List the subject's invoices |
 | GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
 | POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
@@ -266,41 +265,6 @@ buyer.
 | POST | `/v1/me/checkout/{id}/confirm` | Confirm the caller's Solana checkout session |
 | POST | `/v1/me/checkout/sessions` | Mint a [hosted checkout](commerce.md#hosted-checkout) session: `{price_key \| price_id, success_url?}` → `201 {id, url?, expires_at}` |
 
-### Customer treasury (`/v1/customers/{customer_id}/*`)
-
-The customer-as-payer surface: a customer (any payer, possibly a shared/company
-balance) acting on its OWN treasury, addressed by customer id. Handlers are
-shared with `/v1/me/*`; the delegated principal must additionally hold the
-listed `customer:*` grant for that customer (balances can be shared resources).
-
-Scope (or#916): `{customer_id}` must name the caller's OWN payable subject —
-its subject id or durable customer id. The merchant's own coordinates (slug or
-merchant id) address the MERCHANT's treasury account and bind only for a
-merchant-admin principal (`merchant:*`) on top of the `customer:*` grants.
-
-| Method | Path | Permission |
-|---|---|---|
-| GET | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:read` |
-| PUT | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:update` — replace the full payer-owned delegation policy |
-| PUT | `/v1/customers/{customer_id}/spend-delegations:upsert` | `customer:spend-delegations:update` — upsert one delegation |
-| DELETE | `/v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `customer:spend-delegations:update` — revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
-| GET | `/v1/customers/{customer_id}/balance` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/transactions` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/usage` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/payments` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/invoices` | `customer:balance:read` |
-| GET | `/v1/customers/{customer_id}/invoices/{id}` | `customer:balance:read` |
-| PUT | `/v1/customers/{customer_id}/collection-payment-method` | `customer:billing:update` — invoice collection method per currency |
-| GET/POST | `/v1/customers/{customer_id}/payment-methods` | `customer:payment-methods:update` |
-| PUT/DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | `customer:payment-methods:update` |
-| POST | `/v1/customers/{customer_id}/billing-portal` | `customer:payment-methods:update` (Stripe rail only) |
-| POST | `/v1/customers/{customer_id}/checkout` | `customer:checkout:create` — pre-pay / load credits |
-| GET | `/v1/customers/{customer_id}/checkout/{id}` | `customer:checkout:create` |
-| POST | `/v1/customers/{customer_id}/checkout/{id}/confirm` | `customer:checkout:create` |
-
-`/status` is deliberately not mounted here — it reports consumer concepts a
-payer does not own.
-
 ## 4. Merchant machine surface (`/v1/merchant/*`, `/v1/import/*`)
 
 Server-to-server billing operations. Every route is gated on the listed
@@ -309,16 +273,16 @@ Server-to-server billing operations. Every route is gated on the listed
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | POST | `/v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` | Batch entitlement lookup by external subject |
-| PUT | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:update` | Materialize or touch the customer record (`Client.EnsureCustomer`); returns `{id, created_at, last_seen_at}` |
+| PUT | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:update` | Create the customer or replace its declared fields (`Client.EnsureCustomer`): `{ email? }`; returns `Customer` `{ id, email, created_at, last_seen_at }` |
 | GET | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:read` | Active entitlements for a customer. Query: `at` (RFC3339) for point-in-time |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
+| GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:read` | The customer's spend delegations (`ListPage<SpendDelegation>`) |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy: `{ delegations }` |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Set one delegation: `{ windows, provenance? }`; siblings untouched |
 | DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
-| GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
-| POST | `/v1/merchant/users/{user_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 opaque entitlement keys; optional `at` instant |
-| POST | `/v1/merchant/users/{user_id}/product-access/check` | `merchant:customer-settings:read` | Check access for exactly one bounded product_ids or product_keys list without loading purchase history |
-| GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
+| GET | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:read` | A customer's product access |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 opaque entitlement keys; optional `at` instant |
+| POST | `/v1/merchant/customers/{customer_id}/product-access/check` | `merchant:customer-settings:read` | Check access for exactly one bounded product_ids or product_keys list without loading purchase history |
 | GET | `/v1/merchant/checkout-sessions/by-key` | `merchant:customer-settings:read` | Read-only customer receipt lookup by Idempotency-Key and required accepted entitlement; no payment token or provider call |
 | POST | `/v1/merchant/checkout-sessions/lookup` | `merchant:checkout:create` | Read-only original-request lookup by customer and Idempotency-Key; changed payload returns idempotency_key_reused, absent attempt returns 404 |
 | POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Create a checkout for the supplied customer identity; exactly one price_id or price_key, optional entitlement and offer_kind assertions, required Idempotency-Key header |
@@ -331,19 +295,19 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for exactly one query price_id or price_key; no provider request |
 | GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
-| POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (RFC3339): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
-| POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }`. Idempotent on the path `{id}` unconditionally (or#907); an identical retry answers `Replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |
-| POST | `/v1/merchant/admissions/{id}/release` | `merchant:admissions:create` | Release a hold without spending |
-| POST | `/v1/merchant/admissions/{id}/extend` | `merchant:admissions:create` | Re-declare a live hold's deadline: `{ expires_at }` (RFC3339). A hold lives exactly as long as its admit declared (`expires_at` is required with `estimated_amount`); a still-running job extends before that or loses it. 404 `hold_not_found` when nothing live exists — re-admit, a lapsed hold is never resurrected |
+| POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Admit requests and place their holds: `{ items: [AdmitParams] }` → `{ items: [{ status, admission, error }] }`, one verdict per item. Each item's caller-chosen `request_id` identifies the admission: a retry with the same terms answers the same `Admission` (`replayed`), changed terms are `idempotency_key_reused`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (RFC3339): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
+| GET | `/v1/merchant/admissions/{request_id}` | `merchant:usage:read` | One `Admission` and its hold state (`open`, `captured`, `released`, `expired`); 404 `admission_not_found` |
+| POST | `/v1/merchant/admissions/{request_id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount, usage? }` (`amount` required; `"0"` completes at no cost; `usage.event_type` also records a usage event). Idempotent on the request id; an identical retry answers `replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |
+| POST | `/v1/merchant/admissions/{request_id}/release` | `merchant:admissions:create` | Release a hold without spending; 409 `admission_captured` once captured |
+| POST | `/v1/merchant/admissions/{request_id}/extend` | `merchant:admissions:create` | Re-declare a live hold's deadline: `{ expires_at }` (RFC3339). A hold lives exactly as long as its admit declared (`expires_at` is required with `estimated_amount`); a still-running job extends before that or loses it. 404 `hold_not_found` when nothing live exists — re-admit, a lapsed hold is never resurrected |
 | POST | `/v1/merchant/wasted-spend` | `merchant:admissions:create` | Report wasted spend against admissions |
-| POST | `/v1/merchant/usage/report` | `merchant:admissions:create` | Record usage events |
-| POST | `/v1/merchant/provider-operations` | `merchant:admissions:create` | Open a durable provider-operation authorization (#1004): `{ operation_id, payer, record_owner, authorized_usd_micros, claim_reference, authorization_body, authorization_body_sha256 }`. Exact replay → `replayed=true`; a changed field → 409 `operation_authorization_conflict` with `param`; 402 `insufficient_credits` |
+| POST | `/v1/merchant/usage-events` | `merchant:admissions:create` | Record one usage event (`UsageEventParams`): idempotent on `(source, source_id)`; 201 created, 200 replayed, a changed event is 409 `idempotency_key_reused`. A non-zero `amount` debits the customer's balance; zero records a metered-only event the rate cards price |
+| GET | `/v1/merchant/customers/{customer_id}/usage` | `merchant:usage:read` | A customer's usage (`Usage`); same query as `/v1/me/usage` |
+| POST | `/v1/merchant/provider-operations` | `merchant:admissions:create` | Open a durable provider-operation authorization (#1004): `{ operation_id, customer_id, record_owner, currency, amount, claim_reference, authorization_body, authorization_body_sha256 }` (`currency` is `USD`). Exact replay → `replayed=true`; a changed field → 409 `operation_authorization_conflict` with `param`; 402 `insufficient_credits` |
 | GET | `/v1/merchant/provider-operations/{operation_id}` | `merchant:usage:read` | Read one authorization; 404 `operation_authorization_not_found`. Path-escape the id |
 | POST | `/v1/merchant/provider-operations/{operation_id}/release` | `merchant:admissions:create` | Release after proven provider non-creation: `{ release_reference }`. 409 `operation_authorization_has_billing_evidence` once any evidence exists |
 | POST | `/v1/merchant/provider-operations/{operation_id}/observations` | `merchant:admissions:create` | Append immutable provider billing evidence (lifecycle facts, raw body, typed records or refusal); unknown fields are refused. OpenRails qualifies, rates and settles; there is no caller-rated amount. Spend authority because an eligible observation settles the payer's reservation. Encoded body ≤ 768 KiB (`ProviderBillingObservationMaxBytes`, checked on the shared service path and mirrored by the remote Client, so over-cap is `400 invalid_param` in every deployment) |
 | GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | `merchant:usage:read` | Qualification state with its authorization; 404 `provider_billing_qualification_not_found` |
-| POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
-| POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
 | GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
 | GET | `/v1/merchant/configuration` | `merchant:settings:read` | Read the merchant configuration and its current revision |
 | POST | `/v1/merchant/configuration/applications` | `merchant:settings:update` | Apply a configuration document with an application ID and expected revision; returns a durable receipt ([configuration applications](../merchant-configuration-applications.md)) |
@@ -351,16 +315,20 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's proven API host (#734 Host routing; `api_host` null when unset) and its open `claim`, if any |
 | PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Claim an API host: `{ api_host }` (bare lowercase domain). 202 with `claim.dns_record`: publish its `value` as a TXT record at its `name` (`_openrails-challenge.<host>`), then verify. A claim routes nothing. `""` releases the host and any claim at once. 400 `api_host_reserved` for the deployment's own hosts (public billing URL, console, issuer); 409 `api_host_taken` when another merchant holds it |
 | POST | `/v1/merchant/api-host/verify` | `merchant:settings:update` | Prove the open claim through DNS (5s bound) and bind its host; 409 `api_host_unproven` until the TXT record carries the token, `api_host_taken` when another merchant proved it first |
-| GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |
-| GET | `/v1/merchant/credit-limit` | `merchant:customer-settings:read` | Read a customer's credit limit |
-| PUT | `/v1/merchant/credit-limit` | `merchant:credits:grant` | Set a customer's credit limit |
-| GET | `/v1/merchant/delinquency` | `merchant:customer-settings:read` | Arrears delinquency roster (grace + delinquent, oldest debt first) plus the effective policy. `?state=grace\|delinquent`, `?limit=`. See [arrears-delinquency.md](../arrears-delinquency.md) |
+| GET | `/v1/merchant/delinquency` | `merchant:customer-settings:read` | Arrears delinquency roster (`ListPage<Delinquency>`, grace + delinquent, oldest debt first). `?state=grace\|delinquent`, `?limit=`, `?cursor=`. See [arrears-delinquency.md](../arrears-delinquency.md) |
 | GET | `/v1/merchant/customers/{customer_id}/billing-policy` | `merchant:customer-settings:read` | Read the explicit assignment; `policy_name: null` means inherit tier/default |
 | PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | `merchant:customer-settings:update` | Assign an existing policy or clear with `{ "policy_name": null }`; customer must exist; unknown fields/missing policy_name refuse. See [billing policies](../billing-policies.md#assigning-a-customer) |
-| GET | `/v1/merchant/customers/{customer_id}/delinquency` | `merchant:customer-settings:read` | One payer's delinquency state per currency; empty = never overdue |
-| GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
-| POST | `/v1/merchant/credits/deposit` | `merchant:credits:grant` | Deposit/grant credits: `{ customer_id, invoker, currency, amount, source, source_id, expires_at?, description? }`. `source_id` (any non-empty string) is REQUIRED and is the caller's reproducible idempotency key: once-only per `(customer_id, source_id)` is a database fact; `source` is a label, NOT part of the key. Identical replay → same grant with `Replayed=true`; replay with a different `amount` → 409 `idempotency_key_reused` |
-| GET | `/v1/merchant/credits/deposit` | `merchant:customer-settings:read` | What did this deposit key do (or#906): `?customer_id=&source_id=` → the committed grant (id, amount, created_at, `Replayed=true`); 404 `deposit_not_found` when the key never committed |
+| GET | `/v1/merchant/customers/{customer_id}/delinquency` | `merchant:customer-settings:read` | One payer's delinquency state per currency (`ListPage<Delinquency>`); empty = never overdue |
+| GET | `/v1/merchant/customers/{customer_id}/balance` | `merchant:customer-settings:read` | The customer's `Balance` in one currency. Query: `currency` |
+| GET | `/v1/merchant/customers/{customer_id}/credit-limit` | `merchant:customer-settings:read` | How much the customer may owe in arrears (`CreditLimit`). Query: `currency` |
+| PUT | `/v1/merchant/customers/{customer_id}/credit-limit` | `merchant:credits:grant` | Set it: `{ currency, amount }` |
+| GET | `/v1/merchant/customers/{customer_id}/trust-level` | `merchant:customer-settings:read` | The stored trust level admissions use when a request names none. Query: `currency` |
+| PUT | `/v1/merchant/customers/{customer_id}/trust-level` | `merchant:customer-settings:update` | Set it: `{ currency, trust_level }`; empty clears |
+| POST | `/v1/merchant/customers/{customer_id}/credit-grants` | `merchant:credits:grant` | Grant prepaid credit: `{ currency, amount, source, source_id, invoker?, expires_at?, description? }` → `CreditGrant` (201). `source_id` (any non-empty string) is the caller's reproducible idempotency key, once-only per `(customer_id, source_id)`: an identical retry answers the same grant with `replayed: true` (200); a different amount, currency or expiry is 409 `idempotency_key_reused`. Owner-level permission (NOT held by the fixed support role); rate-limited as an admin grant operation |
+| GET | `/v1/merchant/customers/{customer_id}/credit-grants` | `merchant:customer-settings:read` | The customer's credit grants, newest first (`ListPage<CreditGrant>`, with spent, remaining, expired and revoked amounts). Query: `currency`, `source_id` (what did this key do), `limit`, `cursor` |
+| GET | `/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}` | `merchant:customer-settings:read` | One `CreditGrant`; 404 `credit_grant_not_found` |
+| POST | `/v1/merchant/customers/{customer_id}/credit-grants/{grant_id}/revoke` | `merchant:credits:revoke` | Revoke the grant's unspent remainder: `{ reason }` → `CreditGrant`; revoking a revoked grant answers it with `replayed: true`; 409 `credit_grant_held` while holds need the credit |
+| GET | `/v1/merchant/customers/{customer_id}/transactions` | `merchant:customer-settings:read` | The customer's credit ledger in one currency, newest first (`ListPage<CreditTransaction>`). Query: `currency`, `limit`, `cursor` |
 | POST | `/v1/import/billing` | `merchant:billing:import` | Declared billing facts (`Client.ImportBilling`): customers, payment methods, subscriptions, transactions and admin comps (`admin_grants`), idempotent by source id — a distinct owner-level grant |
 | GET | `/v1/merchant/billing-archive` | `merchant:billing:export` | Export supported merchant billing state as a bounded JSONL archive with a verified footer (`Client.ExportMerchantBilling`); source writers must be stopped for cutover. See [merchant portability](../merchant-portability.md) |
 | POST | `/v1/merchant/billing-archive` | `merchant:billing:import` | Atomically restore into an explicitly provisioned empty destination with the same merchant UUID (`Client.ImportMerchantBilling`); identical artifact retries return the committed receipt. Secrets and identity authority are configured separately |
@@ -377,20 +345,17 @@ for those routes.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/customers` | `merchant:customer-settings:read` | Customer list/search |
-| GET | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:read` | Full billing profile: trust, balances, entitlements, subscriptions of every status (newest 100, with `status`), history, redacted payment-method metadata. Sections degrade independently: a failed collection-defaults read logs and returns the methods without `collection_default_currencies` instead of failing the profile |
+| GET | `/v1/merchant/customers` | `merchant:customer-settings:read` | Customers, newest first (`ListPage<Customer>`). Query: `q` (id prefix or email substring), `limit`, `cursor` |
+| GET | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:read` | One `Customer`; 404 `customer_not_found` |
+| GET | `/v1/merchant/customers/{customer_id}/billing-profile` | `merchant:customer-settings:read` | Billing at a glance: `customer`, `balances`, entitlements, subscriptions of every status (newest 100, with `status`), history, redacted payment-method metadata. Sections degrade independently: a failed collection-defaults read logs and returns the methods without `collection_default_currencies` instead of failing the profile |
 | GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | Redacted saved-method metadata (admins can never create/update/delete customer methods) |
 | DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | `merchant:customer-settings:update` | Shared customer ownership and provider deletion; 204 completed or 202 pending reconciliation |
 | GET | `/v1/merchant/customers/{customer_id}/payments` | `merchant:payments:read` | One customer's payment history |
-| GET | `/v1/merchant/customers/{customer_id}/credits` | `merchant:customer-settings:read` | Credit-grant lots, including remaining and expired amounts |
-| DELETE | `/v1/merchant/customers/{customer_id}/credits/{grant_id}` | `merchant:credits:revoke` | Revoke the unspent remainder of one credit grant |
-| GET | `/v1/merchant/customers/{customer_id}/credit-transactions` | `merchant:customer-settings:read` | Paginated credit ledger. Query: `currency`, `limit`, `offset` |
 | POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger): `hours` (at most 2562047) or `end_at`; neither (no end) also needs `merchant:access:grant-permanent` |
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access; without `ends_at` (no end) also needs `merchant:access:grant-permanent` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
-| POST | `/v1/merchant/customers/{customer_id}/credits` | `merchant:credits:grant` | Grant credits (or#906): `{ currency, amount, source_id, invoker?, source?, expires_at?, description? }` — the human-admin deposit. `source_id` is the reproducible idempotency key (same semantics as the machine deposit above); `source` defaults to `admin`, `invoker` to the customer id. Owner-level permission (NOT held by the fixed support role); rate-limited as an admin grant operation |
 | GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo |
 | PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:update` | Replace the profile used for future invoice snapshots |
 | GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | `merchant:customer-settings:read` | List the payer's negotiated meter rate cards |

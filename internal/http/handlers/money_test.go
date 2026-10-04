@@ -9,9 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
-	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -162,23 +160,4 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 	}
 	failed := PaymentToAPI(charge("failed"), []*models.Payment{refund(-1000, "completed")})
 	require.Equal(t, "failed", failed.Status, "a failed charge never reads as refunded")
-}
-
-// The delinquency roster spells instants at full RFC3339 precision, money as
-// a decimal string (exact past 2^53) and the customer as a plain UUID.
-func TestServiceDelinquencyRowsWire(t *testing.T) {
-	customer := uuid.New()
-	entered := time.Date(2026, 9, 16, 12, 0, 0, 123456789, time.FixedZone("x", 3600))
-	since := entered.Add(-time.Hour)
-	raw, err := json.Marshal(serviceDelinquencyRows([]billingservice.DelinquencySnapshot{{
-		CustomerID: customer, Currency: "USD", State: delinquency.StateDelinquent, OverdueSince: &since,
-		OverdueAmount: 9007199254740993, OverdueInvoices: 2, EnteredAt: entered, EvaluatedAt: entered,
-	}}))
-	require.NoError(t, err)
-	var wire []map[string]any
-	require.NoError(t, json.Unmarshal(raw, &wire))
-	require.Equal(t, customer.String(), wire[0]["customer_id"])
-	require.Equal(t, "9007199254740993", wire[0]["overdue_amount"])
-	require.Equal(t, "2026-09-16T11:00:00.123456789Z", wire[0]["entered_at"])
-	require.Equal(t, "2026-09-16T10:00:00.123456789Z", wire[0]["overdue_since"])
 }

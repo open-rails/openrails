@@ -968,8 +968,8 @@ CORS doesn't exist. So a per-merchant origin allowlist protected nothing —
 cut in #765. The engine answers a **static, non-configurable** policy, by
 route tier:
 
-- **Checkout + self-service + customer-treasury** (buyer-facing
-  catalog/checkout, `/v1/me/*`, `/v1/customers/*`, and their embedded
+- **Checkout + self-service** (buyer-facing
+  catalog/checkout, `/v1/me/*`, and their embedded
   equivalents) answer every preflight and response with
   `Access-Control-Allow-Origin: *`, the methods/headers those routes need,
   and a 12h `Access-Control-Max-Age` — from ANY origin, zero configuration;

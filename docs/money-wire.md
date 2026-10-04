@@ -1,10 +1,9 @@
 # Money on the HTTP wire
 
-Go uses signed int64 native currency units. Deposit, ledger receipt, balance,
-checkout-session, capture, admission, usage-report, wasted-spend, invoice,
-merchant settings/billing policy, spend delegation and self spend-window,
-credit-limit, usage-rollup and resource-revenue, credit grant and credit
-transaction, self balance and usage, invoker credit balance, delinquency,
+Go uses signed int64 native currency units. Balance, checkout-session,
+capture, admission, usage-event and usage, wasted-spend, invoice, merchant
+settings/billing policy, spend delegation and self spend-window,
+credit-limit, credit grant and credit transaction, delinquency,
 Solana token base-unit, control-plane fleet analytics/timeseries, catalog
 price and copilot price draft, public price, payment and refund,
 subscription price/payment, tier-change and rate-card DTOs, and the hosted
@@ -32,8 +31,8 @@ The catalog `by-key` routes, checkout `price_id` on the public (browser)
 checkout route and `plan-migrations` price references still accept a price
 key; the shared Client's typed fields do not. The same spelling holds
 wherever a typed kind appears inside another document: the customer's own
-`/v1/me/subscriptions`, `/v1/me/status` and `/v1/me/notifications` (the
-shared `Subscription`, `BillingStatus` and `Notification` shapes, so the ids
+`/v1/me/subscriptions` and `/v1/me/notifications` (the shared
+`Subscription` and `Notification` shapes, so the ids
 they list are the ids their action routes take), metrics `product_id` /
 `price_id` dimensions and filters, findings evidence and recommendation
 params, the hosted checkout document's `payment_id` / `subscription_id` /

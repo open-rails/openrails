@@ -107,7 +107,7 @@ creates a portal account. The group's id is the customer's user id:
 `CustomerGroup(customerID)` addresses it and `CustomerType` is its persona.
 
 Customer groups do not issue API keys or register signing applications: those
-credentials have no supported customer-treasury authentication path. Their
+credentials have no supported customer authentication path. Their
 seven generated credential routes are absent. Merchant API keys and registered
 merchant applications remain supported. Existing generated customer member,
 role, invite and descriptor routes require an explicitly created group.

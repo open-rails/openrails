@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -313,64 +314,43 @@ func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity
 	}
 }
 
-func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
+// ListCreditTransactions lists a customer's ledger movements in one currency,
+// newest first.
+func (s *MoneyService) ListCreditTransactions(ctx context.Context, payer identity.CustomerID, params billing.CreditTransactionListParams) (billing.ListPage[billing.CreditTransaction], error) {
+	var page billing.ListPage[billing.CreditTransaction]
 	if s == nil || s.db == nil {
-		return nil, 0, fmt.Errorf("money service not initialized")
+		return page, fmt.Errorf("money service not initialized")
 	}
-	payer, err := resolveCustomer(nil, invokerID)
-	if err != nil {
-		return nil, 0, err
-	}
-	return s.GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
-}
-
-// GetTransactionsByCustomer lists money transactions for an EXPLICIT merchant subject
-// (the payer), newest first, paginated. Unlike GetTransactions it does not derive
-// the payer from a invoker id — it filters customer_id directly, which is what the
-// customer-level billing-account usage view (issue #242) needs. Scoped to the
-// request merchant.
-func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
-	if s == nil || s.db == nil {
-		return nil, 0, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, 0, fmt.Errorf("payer required")
-	}
-	cur := normalizeCurrency(currency)
+	cur := normalizeCurrency(params.Currency)
 	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return nil, 0, err
+		return page, err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-	tenantID := tid.UUID()
-	payerID := payer.UUID()
-	q := s.db.Gen(ctx)
-	total, err := q.CountLedgerTransfersByCustomer(ctx, gen.CountLedgerTransfersByCustomerParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
+	limit, err := pagination.Limit(params.PageRequest)
+	if err != nil {
+		return page, err
+	}
+	afterAt, afterID, err := pagination.After(params.Cursor)
+	if err != nil {
+		return page, err
+	}
+	rows, err := s.db.Gen(ctx).ListLedgerTransfersByCustomer(ctx, gen.ListLedgerTransfersByCustomerParams{
+		MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: cur,
+		AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	rows, err := q.ListLedgerTransfersByCustomer(ctx, gen.ListLedgerTransfersByCustomerParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-		Lim: int32(limit), Off: int32(offset),
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	items := make([]models.MoneyTransaction, 0, len(rows))
+	items := make([]billing.CreditTransaction, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, *moneyTransactionFromTransfer(r))
+		items = append(items, creditTransactionFromTransfer(r))
 	}
-	return items, int(total), nil
+	return pagination.Cut(items, limit, func(t billing.CreditTransaction) any {
+		return pagination.TimeID{At: t.CreatedAt, ID: t.ID.UUID()}
+	}), nil
 }
 
 // GetAccountSettingsForCustomer returns the stored money-account settings for an
@@ -752,7 +732,7 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 	var held int64
 	if found {
 		held, err = q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
-			MerchantID: tenantID, PayerID: payerID, Currency: cur, AsOf: s.now(),
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: s.now(),
 		})
 		if err != nil {
 			return nil, err

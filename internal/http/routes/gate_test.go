@@ -131,7 +131,7 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 
 		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
 		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(billing.CustomerAll)}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
+		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential("root:*")}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
 		{name: "api key resolved to nothing", opts: GateOptions{ServiceCredentialResolver: credResolver{}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
 		{name: "api key scope denied", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialScopeDenied}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},
 		{name: "api key merchant unresolved", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialMerchantUnresolved}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_merchant_unresolved"}},
@@ -146,14 +146,14 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "wrong-typ service jwt reaches delegated resolver", opts: GateOptions{ServiceCredentialResolver: credResolver{}, DelegatedResolver: delegatedOK}, header: bearer("a.b.c"), want: want{merchant: merchantA, subject: userA, userID: userA, userSlug: "a"}},
 
 		{name: "delegated token", opts: GateOptions{DelegatedResolver: delegatedOK}, header: map[string]string{"Authorization": "DPoP a.b.c"}, want: want{merchant: merchantA, subject: userA, userID: userA, userSlug: "a"}},
-		{name: "delegated token lacking permission", opts: GateOptions{DelegatedResolver: delegatedResolver{resolved: &credential.ResolvedDelegated{MerchantID: merchantA, DelegatedSubject: userA, Permissions: []string{billing.CustomerSpendDelegationsRead}}}}, header: bearer("a.b.c"), want: want{status: 403, message: "permission_required"}},
+		{name: "delegated token lacking permission", opts: GateOptions{DelegatedResolver: delegatedResolver{resolved: &credential.ResolvedDelegated{MerchantID: merchantA, DelegatedSubject: userA, Permissions: []string{billing.MerchantUsageRead}}}}, header: bearer("a.b.c"), want: want{status: 403, message: "permission_required"}},
 		{name: "delegated verification unavailable", opts: GateOptions{DelegatedResolver: delegatedResolver{err: credential.ErrDelegatedUnavailable}}, header: bearer("a.b.c"), want: want{status: 503, message: "delegated_verification_unavailable"}},
 		{name: "delegated token missing sender proof", opts: GateOptions{DelegatedResolver: delegatedResolver{err: auth.ErrSenderProofRequired}}, header: bearer("a.b.c"), want: want{status: 401, message: "sender_proof_required"}},
 		{name: "invalid delegated token", opts: GateOptions{DelegatedResolver: delegatedResolver{err: credential.ErrDelegatedInvalid}}, header: bearer("a.b.c"), want: want{status: 401, message: "delegated_token_invalid"}},
 		{name: "opaque token skips delegated resolver", opts: GateOptions{DelegatedResolver: delegatedOK}, header: bearer("opaque"), want: want{status: 401, message: "bearer principal required"}},
 
 		{name: "host delegated principal", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{read}}, nil)}, want: want{merchant: merchantA, subject: userA, userID: userA}},
-		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{billing.CustomerSpendDelegationsRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
+		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: userA, Permissions: []string{billing.MerchantUsageRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
 		{name: "host delegated principal with opaque subject", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: merchantA.String(), SubjectID: "user-1", Permissions: []string{read}}, nil)}, want: want{status: 401, message: "delegated_principal_invalid"}},
 		{name: "host delegated rejection", opts: GateOptions{DelegatedAuthenticator: hostDelegated(nil, billingauth.ErrUnauthenticated)}, want: want{status: 401, message: "authentication required"}},
 

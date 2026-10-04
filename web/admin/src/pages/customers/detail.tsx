@@ -45,7 +45,6 @@ import {
 import {
   formatDate,
   formatNativeAmount,
-  formatUnits,
   nativeAmountFromInput,
   shortId,
 } from "@/lib/format"
@@ -83,15 +82,12 @@ export function CustomerDetailPage() {
         </Button>
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">
-            {profile.email ?? "Customer"}
+            {profile.customer.email ?? "Customer"}
           </h2>
           <p className="truncate text-xs text-muted-foreground">
-            {profile.customer_id}
+            {profile.customer.id}
           </p>
         </div>
-        {profile.trust_level && profile.trust_level !== "default" ? (
-          <Badge variant="secondary">{profile.trust_level}</Badge>
-        ) : null}
         <div className="ml-auto flex gap-2">
           <GrantEntitlementDialog customerId={customerId} />
           <GrantProductAccessDialog customerId={customerId} />
@@ -99,28 +95,22 @@ export function CustomerDetailPage() {
         </div>
       </div>
 
-      {profile.credit_balance.length > 0 && (
+      {profile.balances.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {profile.credit_balance.map((b) => (
+          {profile.balances.map((b) => (
             <Card key={b.currency}>
               <CardHeader className="pb-1">
                 <CardTitle className="text-xs font-normal text-muted-foreground uppercase">
-                  {b.display_name} balance
+                  {b.currency} balance
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-lg font-semibold">
-                  {formatUnits(b.balance, b.currency, b.decimal_places)}
+                  {formatNativeAmount(b.balance_amount, b.currency)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  held{" "}
-                  {formatUnits(b.held_balance, b.currency, b.decimal_places)} ·
-                  owed{" "}
-                  {formatUnits(
-                    b.outstanding_owed_amount,
-                    b.currency,
-                    b.decimal_places
-                  )}
+                  held {formatNativeAmount(b.held_amount, b.currency)} · owed{" "}
+                  {formatNativeAmount(b.owed_amount, b.currency)}
                 </p>
               </CardContent>
             </Card>
@@ -130,7 +120,7 @@ export function CustomerDetailPage() {
 
       <CustomerCreditSupportSection
         customerId={customerId}
-        currencies={profile.credit_balance.map((balance) => balance.currency)}
+        currencies={profile.balances.map((balance) => balance.currency)}
       />
       <CustomerUsageRatesSection customerId={customerId} />
       <CustomerInvoiceProfileSection customerId={customerId} />
