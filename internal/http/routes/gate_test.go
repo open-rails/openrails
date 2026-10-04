@@ -217,7 +217,7 @@ func TestGateUserSessionMerchantSelection(t *testing.T) {
 			gate := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA, Merchant: tc.tokenMerchant}, nil), AdminPermissionChecker: &checker})
 			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/settings", nil)
 			if tc.selector != "" {
-				r.Header.Set(billingauth.MerchantSelectorHeader, tc.selector)
+				r.Header.Set(merchant.SelectorHeader, tc.selector)
 			}
 			ctx := r.Context()
 			if tc.ctx != nil {
@@ -325,9 +325,9 @@ func TestMerchantPermissionMiddleware(t *testing.T) {
 		{"gate failure is not a refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
 			return billingauth.Principal{}, errors.New("db down")
 		}), nil, t.Context(), 500},
-		{"binding header for another merchant", allowGate, map[string]string{merchant.BindingHeader: merchantB.String()}, t.Context(), 409},
-		{"malformed binding header", allowGate, map[string]string{merchant.BindingHeader: "nope"}, t.Context(), 400},
-		{"slug selector without a resolved target", allowGate, map[string]string{merchant.SlugHeader: "a"}, t.Context(), 409},
+		{"id selector for another merchant", allowGate, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, t.Context(), 409},
+		{"malformed id selector", allowGate, map[string]string{merchant.SelectorHeader: "id:nope"}, t.Context(), 400},
+		{"slug selector without a resolved target", allowGate, map[string]string{merchant.SelectorHeader: "a"}, t.Context(), 409},
 		{"configured merchant differs", allowGate, nil, merchant.WithID(t.Context(), merchantB), 409},
 	} {
 		rec, got := run(tc.gate, tc.header, tc.ctx)

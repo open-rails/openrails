@@ -75,7 +75,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	anonymous := customerSurface(middleware.DelegatedPrincipalRequired(hostDelegated(nil, billingauth.ErrUnauthenticated)))
 	require.Equal(t, http.StatusUnauthorized, reach(anonymous, http.MethodGet, "/v1/me/balance", nil))
 	require.Equal(t, http.StatusUnauthorized, reach(anonymous, http.MethodGet, "/v1/me/spend-limits", nil))
-	require.Equal(t, http.StatusConflict, reach(payer, http.MethodGet, "/v1/me/balance", map[string]string{merchant.BindingHeader: merchantB.String()}),
+	require.Equal(t, http.StatusConflict, reach(payer, http.MethodGet, "/v1/me/balance", map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}),
 		"a browser cannot select a merchant other than its verified one")
 }
 

@@ -795,15 +795,6 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	if err != nil {
 		return err
 	}
-	if target.MerchantSlug != "" {
-		// A pre-selector server ignores the new slug header. A distinct route
-		// prevents it from executing the operation under the credential's
-		// merchant instead. Never retry this request on the v1 route.
-		if !strings.HasPrefix(path, "/v1/") {
-			return invalidErr("merchant operation path must start with /v1/")
-		}
-		path = "/v2/" + strings.TrimPrefix(path, "/v1/")
-	}
 	expectedMerchant := target.MerchantID
 	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
 		// A caller context may assert an ID, but never select a merchant. A
@@ -841,9 +832,9 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		return fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	for name, values := range headers {
-		// Extra metadata cannot provide another spelling of a target header.
+		// Extra metadata cannot provide another spelling of the target header.
 		// Canonicalize all remaining names before replacing Authorization below.
-		if strings.EqualFold(name, merchant.BindingHeader) || strings.EqualFold(name, merchant.SlugHeader) {
+		if strings.EqualFold(name, merchant.SelectorHeader) {
 			continue
 		}
 		for _, value := range values {
@@ -857,11 +848,9 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}
-	if !expectedMerchant.IsZero() {
-		req.Header.Set(merchant.BindingHeader, expectedMerchant.String())
-	} else {
-		req.Header.Set(merchant.SlugHeader, target.MerchantSlug)
-	}
+	// Exactly one selector: the server resolves it, authorizes the credential
+	// for that merchant, and refuses a credential bound to another.
+	req.Header.Set(merchant.SelectorHeader, merchant.Selector{Slug: target.MerchantSlug, ID: expectedMerchant}.String())
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %w", billing.ErrUnreachable, err)

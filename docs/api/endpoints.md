@@ -42,8 +42,8 @@ issuer) carry a self-asserted `permissions` claim scoped to the issuer's
 merchant; human sessions are checked against the user's merchant-group role.
 The required permission is listed per route below. A human session also needs a
 recent sign-in for every `merchant:` permission except reads, the dashboard
-layout and host-event acknowledgement, whichever route (`/v1`, `/v2`, import,
-catalog) serves the operation: otherwise 403 `step_up_required` with the auth
+layout and host-event acknowledgement, whichever route (import, catalog,
+merchant API) serves the operation: otherwise 403 `step_up_required` with the auth
 provider's step-up methods in `metadata`. Delegated merchant requests
 use the same DPoP or native certificate profile as self-service requests.
 

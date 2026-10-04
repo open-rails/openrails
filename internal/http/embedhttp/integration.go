@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
@@ -126,14 +125,12 @@ func nativeCustomer(auth *billingauth.Integration, target billingauth.Target) bi
 		}
 		requestTarget := target
 		if resolved, ok := merchanttarget.FromContext(r.Context()); ok {
-			// The v2 protocol resolved this request before authentication. A
+			// The selector resolved this request before authentication. A
 			// renamed slug may still name this fixed book; a reused slug may not.
 			if resolved.MerchantID != target.MerchantID {
 				return nil, billingauth.Refusal(billing.CodeMerchantBindingMismatch, "customer merchant binding mismatch")
 			}
 			requestTarget = resolved
-		} else if strings.TrimSpace(r.Header.Get(merchant.SlugHeader)) != "" {
-			return nil, billingauth.GateError{Status: 400, Message: "merchant slug selection requires v2"}
 		}
 		if err := merchanttarget.Assert(r, requestTarget); err != nil {
 			return nil, err

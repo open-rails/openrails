@@ -147,14 +147,15 @@ func TestDelegatedBinding(t *testing.T) {
 		bound  billing.MerchantID
 		want   int
 	}{
-		{testMerchant.String(), testMerchant, 200},
-		{uuid.NewString(), testMerchant, 409},
+		{"id:" + testMerchant.String(), testMerchant, 200},
+		{"id:" + uuid.NewString(), testMerchant, 409},
 		{"", billing.MerchantID(uuid.New()), 409},
-		{"invalid", testMerchant, 400},
+		{"id:invalid", testMerchant, 400},
+		{"unresolved-slug", testMerchant, 409},
 	} {
 		w, _ := serveNeutral(t, "/v1/customers/x", func(r *http.Request) {
 			if tc.header != "" {
-				r.Header.Set(merchant.BindingHeader, tc.header)
+				r.Header.Set(merchant.SelectorHeader, tc.header)
 			}
 			*r = *r.WithContext(merchant.WithID(r.Context(), tc.bound))
 		}, DelegatedSelfRequired(fakeResolver{resolved: delegated()}))

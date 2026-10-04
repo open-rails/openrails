@@ -55,7 +55,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	if authn != nil {
 		httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, "/v1/me", rt), rt, middleware.DelegatedPrincipalRequired(authn), embedhttp.ProviderRoutesForRuntime(rt, nil))
 	}
-	router.AddMerchantSelectorRoutes(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
 	})
 	// The same body cap the HTTP mounts apply: an oversized request gets the

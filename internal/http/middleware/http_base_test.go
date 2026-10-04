@@ -84,7 +84,8 @@ func TestArchiveBodyLimit(t *testing.T) {
 		want         int
 	}{
 		{http.MethodPost, "/v1/merchant/billing-archive", 204},
-		{http.MethodPost, "/host/v2/merchant/billing-archive", 204},
+		{http.MethodPost, "/host/v1/merchant/billing-archive", 204},
+		{http.MethodPost, "/v2/merchant/billing-archive", 413},
 		{http.MethodPost, "/v1/import/billing", 413},
 		{http.MethodPost, "/v1/merchant/billing-archive/other", 413},
 		{http.MethodPost, "/unrelated/../v1/merchant/billing-archive", 413},

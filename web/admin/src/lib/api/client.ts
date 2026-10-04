@@ -46,7 +46,7 @@ export function getBootstrap(): BootstrapConfig {
   return bootstrapConfig
 }
 
-// The merchant every request is made as (X-OpenRails-Merchant), kept for the
+// The merchant every request is made as (OpenRails-Merchant), kept for the
 // tab like the session.
 const MERCHANT_KEY = "openrails.admin.merchant"
 
@@ -148,7 +148,7 @@ async function send<T>(path: string, opts: RequestOptions): Promise<T> {
   const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers["Content-Type"] = "application/json"
   const merchant = selectedMerchant()
-  if (merchant) headers["X-OpenRails-Merchant"] = merchant
+  if (merchant) headers["OpenRails-Merchant"] = merchant
   const res = await session.authFetch(
     buildURL(getBootstrap().api_base_url, path, opts.query),
     {

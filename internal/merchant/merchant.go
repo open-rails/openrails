@@ -12,19 +12,62 @@ package merchant
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// BindingHeader asserts an expected immutable merchant UUID. It grants no
-// authority; merchant routes compare it with the authenticated principal before
-// acquiring a merchant database connection.
-const BindingHeader = "X-OpenRails-Merchant-ID"
+// SelectorHeader names the merchant a request targets: a public slug
+// (`OpenRails-Merchant: shop`) or an immutable id (`OpenRails-Merchant:
+// id:<uuid>`). It grants no authority: the server resolves it, the route
+// authorizes the credential for that merchant, and only then is it pinned.
+const SelectorHeader = "OpenRails-Merchant"
 
-// SlugHeader selects a merchant by public slug. Resolution and authorization
-// happen on the server; the selector grants no authority. It must not be
-// combined with BindingHeader on one request.
-const SlugHeader = "X-OpenRails-Merchant-Slug"
+// selectorIDPrefix marks the id form of a selector; a slug never contains ":".
+const selectorIDPrefix = "id:"
+
+// Selector is a parsed SelectorHeader: exactly one of Slug and ID is set.
+type Selector struct {
+	Slug string
+	ID   billing.MerchantID
+}
+
+// ErrSelector is a SelectorHeader that is repeated, blank or malformed.
+var ErrSelector = errors.New("merchant: invalid OpenRails-Merchant selector")
+
+// ParseSelector reads the request's selector. present is false when the
+// header is absent; a present header that is repeated, blank or malformed is
+// ErrSelector.
+func ParseSelector(h http.Header) (selector Selector, present bool, err error) {
+	values, present := h[http.CanonicalHeaderKey(SelectorHeader)]
+	if !present {
+		return Selector{}, false, nil
+	}
+	if len(values) != 1 {
+		return Selector{}, true, ErrSelector
+	}
+	raw := strings.TrimSpace(values[0])
+	if id, ok := strings.CutPrefix(raw, selectorIDPrefix); ok {
+		parsed, err := billing.ParseMerchantID(strings.TrimSpace(id))
+		if err != nil || parsed.IsZero() {
+			return Selector{}, true, ErrSelector
+		}
+		return Selector{ID: parsed}, true, nil
+	}
+	if raw == "" || billing.ValidateMerchantSlug(raw) != nil {
+		return Selector{}, true, ErrSelector
+	}
+	return Selector{Slug: billing.NormalizeMerchantSlug(raw)}, true, nil
+}
+
+// String is the selector's header value.
+func (s Selector) String() string {
+	if !s.ID.IsZero() {
+		return selectorIDPrefix + s.ID.String()
+	}
+	return s.Slug
+}
 
 // ErrNoMerchant is returned by Require when no merchant has been resolved onto
 // the context. It signals a programming/wiring error — every merchant-owned code

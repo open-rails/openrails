@@ -12,58 +12,65 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-// AddMerchantSelectorRoutes registers the explicit-selector protocol as actual
-// v2 operation routes. Older servers do not have these paths and therefore
-// cannot silently execute a slug-targeted write in a credential's old book.
-// The request URI is never rewritten: sender proof verification sees v2.
-// Only the SDK's customer recovery and payment-authentication operations are included;
-// browser-only /me routes are not duplicated as an extra surface.
-func AddMerchantSelectorRoutes(table *Table, prefix string, resolve func(context.Context, *http.Request) (billingauth.Target, error)) {
-	original := append([]Entry(nil), table.Entries...)
-	for _, entry := range original {
-		local := strings.TrimPrefix(entry.Path, prefix)
-		selected := false
-		for _, group := range []string{"/v1/merchant", "/v1/catalog", "/v1/import"} {
-			if local == group || strings.HasPrefix(local, group+"/") {
-				selected = true
-				break
-			}
-		}
-		switch entry.Method + " " + local {
-		case "GET /v1/me/invoices/{id}", "POST /v1/me/invoices/{id}/pay-now", "GET /v1/me/subscriptions/{id}", "POST /v1/me/subscriptions/{id}/retry-now",
-			"GET /v1/me/payment-operations/{id}/authentication", "POST /v1/me/payment-operations/{id}/authentication/confirm":
-			selected = true
-		}
-		if !selected {
+// merchantScoped are the route groups, beneath the API root, that act on one
+// merchant's books under a credential.
+var merchantScoped = []string{"/v1/merchant", "/v1/catalog", "/v1/import", "/v1/me", "/v1/customers"}
+
+// ResolveMerchantSelectors makes every merchant-scoped route in the table
+// honor the OpenRails-Merchant selector. A request that names a merchant has
+// it resolved and pinned before the route authorizes its credential, which
+// must be bound to that same merchant; a request that names none is served
+// as its credential and deployment resolve it. extra lists further prefixes
+// that serve merchant-scoped routes (customer routes at a host's own path).
+func ResolveMerchantSelectors(table *Table, prefix string, resolve func(context.Context, *http.Request) (billingauth.Target, error), extra ...string) {
+	groups := make([]string, 0, len(merchantScoped)+len(extra))
+	for _, group := range merchantScoped {
+		groups = append(groups, prefix+group)
+	}
+	groups = append(groups, extra...)
+	for i, entry := range table.Entries {
+		if entry.Method == http.MethodOptions || !under(entry.Path, groups) {
 			continue
 		}
 		next := entry.Handler
-		entry.Path = prefix + "/v2/" + strings.TrimPrefix(local, "/v1/")
-		entry.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodOptions && strings.TrimSpace(r.Header.Get(merchant.SlugHeader)) == "" && strings.TrimSpace(r.Header.Get(merchant.BindingHeader)) == "" {
-				billingauth.WriteJSONError(w, http.StatusBadRequest, billing.CodeMerchantSelectorInvalid, "explicit merchant selector required")
+		table.Entries[i].Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, present, err := merchant.ParseSelector(r.Header)
+			if err != nil {
+				refuse(w, billingauth.Refusal(billing.CodeMerchantSelectorInvalid))
 				return
 			}
-			if r.Method != http.MethodOptions {
-				if resolve == nil {
-					billingauth.WriteJSONError(w, 503, billing.CodeAuthorizationUnavailable, "merchant resolver unavailable")
-					return
-				}
-				target, err := resolve(r.Context(), r)
-				if err != nil {
-					var gate billingauth.GateError
-					if errors.As(err, &gate) {
-						refusal := billingauth.RefusalError(gate)
-						billingauth.WriteJSONError(w, refusal.HTTPStatus, refusal.Code, refusal.Message)
-					} else {
-						billingauth.WriteJSONError(w, 503, billing.CodeMerchantDirectoryUnavailable, "merchant directory unavailable")
-					}
-					return
-				}
-				r = r.WithContext(merchanttarget.WithResolved(merchant.WithID(r.Context(), target.MerchantID), target))
+			if !present {
+				next.ServeHTTP(w, r)
+				return
 			}
-			next.ServeHTTP(w, r)
+			if resolve == nil {
+				refuse(w, billingauth.Refusal(billing.CodeMerchantDirectoryUnavailable))
+				return
+			}
+			target, err := resolve(r.Context(), r)
+			if err != nil {
+				var refusal billingauth.GateError
+				if !errors.As(err, &refusal) {
+					refusal = billingauth.Refusal(billing.CodeMerchantDirectoryUnavailable)
+				}
+				refuse(w, refusal)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(merchanttarget.WithResolved(merchant.WithID(r.Context(), target.MerchantID), target)))
 		})
-		table.Entries = append(table.Entries, entry)
 	}
+}
+
+func under(path string, groups []string) bool {
+	for _, group := range groups {
+		if path == group || strings.HasPrefix(path, group+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func refuse(w http.ResponseWriter, refusal billingauth.GateError) {
+	answer := billingauth.RefusalError(refusal)
+	billingauth.WriteJSONError(w, answer.HTTPStatus, answer.Code, answer.Message)
 }

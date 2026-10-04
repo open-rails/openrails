@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	auth "github.com/open-rails/helpers/auth"
@@ -405,8 +406,8 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			if !middleware.EnforceMerchantBinding(r, principal.MerchantID) {
 				return
 			}
-			// Per operation, so every route serving it (v1, v2, import,
-			// catalog) asks for the same recent sign-in.
+			// Per operation, so every route serving it asks for the same
+			// recent sign-in.
 			if billing.RequiresRecentSignIn(perm) {
 				if err := opts.Gate.RequireRecentSignIn(r.Request.Context(), r.Request, principal); err != nil {
 					abortGate(r, err)
@@ -549,10 +550,15 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "authorization unavailable"}
 	}
 	if strings.TrimSpace(uc.Merchant) == "" {
-		if req != nil {
-			uc.Merchant = strings.TrimSpace(req.Header.Get(billingauth.MerchantSelectorHeader))
+		// The selector is an untrusted hint: membership is checked against the
+		// merchant it names, and the resolved merchant must agree below.
+		if target, ok := merchanttarget.FromContext(ctx); ok {
+			uc.Merchant = target.MerchantSlug
+		} else if req != nil {
+			if selector, _, err := merchant.ParseSelector(req.Header); err == nil {
+				uc.Merchant = selector.Slug
+			}
 		}
-
 	}
 	membershipMID, canonical, err := g.AdminPermissionChecker.ResolveAuthorizedMerchant(ctx, req, uc.Merchant, perm)
 	if err != nil {

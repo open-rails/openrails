@@ -284,7 +284,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/merchant/findings", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("X-OpenRails-Merchant-Slug", slug)
+		req.Header.Set("OpenRails-Merchant", slug)
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		res.Body.Close()

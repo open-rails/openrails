@@ -64,9 +64,13 @@ func (e *Engine) buildRoutes() ([]routebundle.Route, error) {
 			}
 			table.Entries = append(table.Entries, extra.Entries...)
 		}
-		router.AddMerchantSelectorRoutes(table, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+		var customerPrefixes []string
+		if e.http != nil {
+			customerPrefixes = embedhttp.CustomerPrefixes("", e.http.CustomerRoutes)
+		}
+		router.ResolveMerchantSelectors(table, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 			return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-		})
+		}, customerPrefixes...)
 		if err := embedhttp.ValidateRouteTable(table); err != nil {
 			return nil, err
 		}

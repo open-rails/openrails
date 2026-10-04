@@ -177,12 +177,16 @@ func TestNativeCustomerIdentity(t *testing.T) {
 	}
 
 	auth := identityAuth(billingauth.Identity{Kind: billingauth.User, SubjectID: "s", Issuer: "i", CustomerID: customer, CredentialClass: session}, nil)
-	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v2/me/invoices/x", nil))
+	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices/x", nil))
 	r = r.WithContext(merchanttarget.WithResolved(r.Context(), billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}))
 	_, err := nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
 	requireGate(t, err, http.StatusConflict)
 	r = requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices", nil))
-	r.Header.Set(merchant.SlugHeader, "store")
+	r.Header.Set(merchant.SelectorHeader, "elsewhere")
+	_, err = nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
+	requireGate(t, err, http.StatusConflict)
+	r = requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices", nil))
+	r.Header[http.CanonicalHeaderKey(merchant.SelectorHeader)] = []string{"store", "store"}
 	_, err = nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
 	requireGate(t, err, http.StatusBadRequest)
 }
@@ -211,7 +215,7 @@ func TestIntegrationGate(t *testing.T) {
 		return integrationGate{auth: auth, runtime: &app.Runtime{}}.Authorize(r.Context(), r, perm)
 	}
 
-	p, err := authorize(staff, allow, resolved("/v2/merchant/products"), billing.MerchantCatalogRead)
+	p, err := authorize(staff, allow, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
 	require.NoError(t, err)
 	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Kind: billingauth.User, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
 
@@ -229,7 +233,7 @@ func TestIntegrationGate(t *testing.T) {
 	require.Empty(t, p.Subject, "an explicit owner leaves the live administrator check to the route")
 
 	machine := billingauth.Identity{Kind: billingauth.Machine, Issuer: "i", Permissions: []string{billing.MerchantCatalogRead}}
-	p, err = authorize(machine, allow, resolved("/v2/merchant/products"), billing.MerchantCatalogRead)
+	p, err = authorize(machine, allow, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
 	require.NoError(t, err)
 	require.Equal(t, machine.Permissions, p.Permissions)
 	require.Empty(t, p.UserContext.UserID)
@@ -244,15 +248,15 @@ func TestIntegrationGate(t *testing.T) {
 	} {
 		_, err = authorize(staff, billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
 			return tc.authz
-		}), resolved("/v2/merchant/products"), billing.MerchantCatalogRead)
+		}), resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
 		requireGate(t, err, tc.status)
 	}
-	_, err = authorize(staff, nil, resolved("/v2/merchant/products"), billing.MerchantCatalogRead)
+	_, err = authorize(staff, nil, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
 	requireGate(t, err, http.StatusServiceUnavailable)
 	failing := &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
 		return billingauth.Identity{}, errors.New("bad token")
 	}), Authorization: allow}
-	r := resolved("/v2/merchant/products")
+	r := resolved("/v1/merchant/products")
 	_, err = integrationGate{auth: failing, runtime: &app.Runtime{}}.Authorize(r.Context(), r, billing.MerchantCatalogRead)
 	requireGate(t, err, http.StatusUnauthorized)
 
@@ -267,7 +271,7 @@ func TestIntegrationGate(t *testing.T) {
 		{requestauth.HostPrincipal{MerchantID: billing.MerchantID(uuid.New()), Permissions: []string{"merchant:*"}}, 409},
 	} {
 		host := tc.host
-		r := resolved("/v2/merchant/products")
+		r := resolved("/v1/merchant/products")
 		p, err := integrationGate{}.Authorize(requestauth.WithHostPrincipal(r.Context(), &host), r, billing.MerchantCatalogRead)
 		if tc.status == 0 {
 			require.NoError(t, err)

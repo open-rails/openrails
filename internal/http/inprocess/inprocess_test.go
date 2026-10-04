@@ -155,7 +155,7 @@ func TestTransportExplicitSelector(t *testing.T) {
 		return target, resolveErr
 	})
 
-	res, _ := roundTrip(t, transport, hostContext(t, billing.MerchantID(uuid.New())), http.MethodGet, "/v2/merchant/payments", "Bearer "+capability)
+	res, _ := roundTrip(t, transport, hostContext(t, billing.MerchantID(uuid.New())), http.MethodGet, "/v1/merchant/payments", "Bearer "+capability)
 	require.Equal(t, http.StatusOK, res.StatusCode, "the resolved target replaces the client's construction pin")
 	require.False(t, sawAmbient, "resolution never sees host context values")
 	require.Equal(t, target, selected)
@@ -173,7 +173,7 @@ func TestTransportExplicitSelector(t *testing.T) {
 		{nil, billing.MerchantID(uuid.New()), http.StatusConflict, ""},
 	} {
 		resolveErr, bound, selected = tc.err, tc.bound, billingauth.Target{}
-		res, body := roundTrip(t, transport, t.Context(), http.MethodGet, "/v2/merchant/payments", "Bearer "+capability)
+		res, body := roundTrip(t, transport, t.Context(), http.MethodGet, "/v1/merchant/payments", "Bearer "+capability)
 		require.Equal(t, tc.status, res.StatusCode)
 		require.Contains(t, body, tc.code)
 		require.Zero(t, selected, "refused selections never reach the handler")

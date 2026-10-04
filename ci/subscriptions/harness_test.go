@@ -594,7 +594,7 @@ func (w *world) merchantCall(token, method, path string) (int, string) {
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, nil)
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-OpenRails-Merchant-Slug", w.slug)
+	req.Header.Set("OpenRails-Merchant", w.slug)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
 	defer res.Body.Close()

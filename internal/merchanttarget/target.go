@@ -53,24 +53,11 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound bi
 	var id billing.MerchantID
 	var slug string
 	if r != nil {
-		rawID := strings.TrimSpace(r.Header.Get(merchant.BindingHeader))
-		if values, present := r.Header[http.CanonicalHeaderKey(merchant.BindingHeader)]; present && (len(values) != 1 || rawID == "") {
-			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant ID selector")
+		selector, _, err := merchant.ParseSelector(r.Header)
+		if err != nil {
+			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid)
 		}
-		slug = strings.TrimSpace(r.Header.Get(merchant.SlugHeader))
-		if values, present := r.Header[http.CanonicalHeaderKey(merchant.SlugHeader)]; present && (len(values) != 1 || slug == "") {
-			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant slug selector")
-		}
-		if rawID != "" && slug != "" {
-			return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "choose one merchant selector")
-		}
-		if rawID != "" {
-			var err error
-			id, err = billing.ParseMerchantID(rawID)
-			if err != nil || id.IsZero() {
-				return billingauth.Target{}, billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant ID")
-			}
-		}
+		id, slug = selector.ID, selector.Slug
 	}
 	if slug == "" && id.IsZero() {
 		slug = strings.TrimSpace(defaultSlug)
@@ -115,30 +102,30 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound bi
 	return target, nil
 }
 
-// Assert compares untrusted optional selectors to a previously resolved target.
+// Assert compares the request's untrusted selector, when it sends one, to a
+// previously resolved target.
 func Assert(r *http.Request, target billingauth.Target) error {
 	if r == nil {
 		return nil
 	}
-	rawID := strings.TrimSpace(r.Header.Get(merchant.BindingHeader))
-	rawSlug := strings.TrimSpace(r.Header.Get(merchant.SlugHeader))
-	if rawID != "" && rawSlug != "" {
-		return billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "choose one merchant selector")
+	selector, present, err := merchant.ParseSelector(r.Header)
+	if err != nil {
+		return billingauth.Refusal(billing.CodeMerchantSelectorInvalid)
 	}
-	if rawID != "" {
-		id, err := billing.ParseMerchantID(rawID)
-		if err != nil {
-			return billingauth.Refusal(billing.CodeMerchantSelectorInvalid, "invalid merchant ID")
-		}
-		if id != target.MerchantID {
+	if !present {
+		return nil
+	}
+	if !selector.ID.IsZero() {
+		if selector.ID != target.MerchantID {
 			return billingauth.Refusal(billing.CodeMerchantBindingMismatch, "merchant binding mismatch")
 		}
+		return nil
 	}
 	expectedSlug := target.MerchantSlug
 	if captured, ok := r.Context().Value(contextKey{}).(resolvedSelection); ok && captured.Target == target && captured.slug != "" {
 		expectedSlug = captured.slug
 	}
-	if rawSlug != "" && billing.NormalizeMerchantSlug(rawSlug) != expectedSlug {
+	if selector.Slug != expectedSlug {
 		return billingauth.Refusal(billing.CodeMerchantBindingMismatch, "merchant binding mismatch")
 	}
 	return nil
