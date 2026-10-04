@@ -1,28 +1,20 @@
 package billing
 
-import (
-	"github.com/open-rails/openrails/catalog"
-)
-
-type CatalogApplyParams = catalog.Application
-type CatalogApplyProduct = catalog.ApplyProduct
-type CatalogApplyPrice = catalog.ApplyPrice
-type CatalogApplyMeter = catalog.ApplyMeter
-type CatalogField[T any] = catalog.Field[T]
-
-func CatalogValue[T any](v T) CatalogField[T] { return catalog.Value(v) }
-func CatalogNull[T any]() CatalogField[T]     { return catalog.Null[T]() }
-
+// CatalogApplicationReceipt is the result of applying a catalog document:
+// the revisions before and after, and how many products and prices changed.
+// Replayed is true when the same document was already applied.
 type CatalogApplicationReceipt struct {
-	ApplicationID   string `json:"application_id"`
-	CatalogID       string `json:"catalog_id"`
-	BaseRevision    int64  `json:"base_revision"`
-	AppliedRevision int64  `json:"applied_revision"`
-	Replayed        bool   `json:"replayed"`
-	ProductsChanged int    `json:"products_changed"`
-	PricesChanged   int    `json:"prices_changed"`
+	ApplicationID   string    `json:"application_id"`
+	CatalogID       CatalogID `json:"catalog_id"`
+	BaseRevision    int64     `json:"base_revision"`
+	AppliedRevision int64     `json:"applied_revision"`
+	Replayed        bool      `json:"replayed"`
+	ProductsChanged int       `json:"products_changed"`
+	PricesChanged   int       `json:"prices_changed"`
 }
 
+// CatalogRevision is the merchant's catalog revision, which every catalog
+// write advances, and whether this deployment accepts catalog writes.
 type CatalogRevision struct {
 	Revision      int64 `json:"revision"`
 	WritesAllowed bool  `json:"writes_allowed"`
@@ -34,7 +26,3 @@ type CatalogRevision struct {
 const CodeCatalogDeclared = "catalog_declared"
 
 var ErrCatalogDeclared error = newCodedError(CodeCatalogDeclared, ErrInvalid)
-
-func ParseCatalogApplicationYAML(raw []byte) (*CatalogApplyParams, error) {
-	return catalog.ParseApplicationYAML(raw)
-}

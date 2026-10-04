@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -73,7 +73,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
     %[1]s-%[2]s: null
 `, p.key, sfx, p.amount, pda, id)
 	}
-	params, err := billing.ParseCatalogApplicationYAML([]byte(doc.String()))
+	params, err := catalog.ParseApplicationYAML([]byte(doc.String()))
 	require.NoError(t, err)
 	_, err = w.client[embedded].Catalog.Apply(t.Context(), params)
 	require.NoError(t, err)

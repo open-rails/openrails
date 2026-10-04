@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -104,7 +105,7 @@ type UsageMeterSpec struct {
 	Key           string
 	EventType     string
 	ValueProperty string
-	Aggregation   string // sum | count (rating supports these)
+	Aggregation   catalog.Aggregation
 	Unit          string
 	GroupBy       map[string]string
 }
@@ -115,7 +116,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meter := catalog.Meter{
+	meter := catalogrules.Meter{
 		Key:           spec.Key,
 		EventType:     spec.EventType,
 		ValueProperty: spec.ValueProperty,
@@ -123,10 +124,10 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 		Unit:          spec.Unit,
 		GroupBy:       spec.GroupBy,
 	}
-	if err := catalog.ValidateMeter("usage meter", &meter); err != nil {
+	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
 		return err
 	}
-	if !catalog.BillingSupported(meter.Aggregation) {
+	if !catalogrules.BillingSupported(meter.Aggregation) {
 		return fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation)
 	}
 	groupByJSON, err := json.Marshal(meter.GroupBy)
@@ -143,7 +144,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 			return fmt.Errorf("lock usage meter: %w", err)
 		}
 
-		var existing catalog.Meter
+		var existing catalogrules.Meter
 		row, err := queries.GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
 			MerchantID: tid.UUID(),
 			MeterKey:   meter.Key,
@@ -155,7 +156,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 				MeterKey:      meter.Key,
 				EventType:     meter.EventType,
 				ValueProperty: meter.ValueProperty,
-				Aggregation:   meter.Aggregation,
+				Aggregation:   string(meter.Aggregation),
 				Unit:          meter.Unit,
 				GroupBy:       groupByJSON,
 			}); err != nil {
@@ -166,11 +167,11 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 			return fmt.Errorf("load usage meter: %w", err)
 		}
 
-		existing = catalog.Meter{
+		existing = catalogrules.Meter{
 			Key:           row.Key,
 			EventType:     row.EventType,
 			ValueProperty: row.ValueProperty,
-			Aggregation:   row.Aggregation,
+			Aggregation:   catalog.Aggregation(row.Aggregation),
 			Unit:          row.Unit,
 		}
 		if err := json.Unmarshal(row.GroupBy, &existing.GroupBy); err != nil {
@@ -194,7 +195,7 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 			MeterKey:      meter.Key,
 			EventType:     meter.EventType,
 			ValueProperty: meter.ValueProperty,
-			Aggregation:   meter.Aggregation,
+			Aggregation:   string(meter.Aggregation),
 			Unit:          meter.Unit,
 			GroupBy:       groupByJSON,
 		}); err != nil {
@@ -223,7 +224,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meterKey := catalog.NormalizeKey(in.MeterKey)
+	meterKey := catalogrules.NormalizeKey(in.MeterKey)
 	if meterKey == "" {
 		return invalidUsageRateCard(fmt.Errorf("meter_key required"))
 	}
@@ -237,7 +238,7 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if payerScoped && len(in.Filter) > 0 {
 		return invalidUsageRateCard(fmt.Errorf("filter is inherited by a payer rate card"))
 	}
-	if err := catalog.ValidateUsagePrice("usage rate card", &in.Price); err != nil {
+	if err := catalogrules.ValidateUsagePrice("usage rate card", &in.Price); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	if in.Price.Currency == "" {
@@ -246,10 +247,10 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if err := RequireBillingCurrency(in.Price.Currency); err != nil {
 		return invalidUsageRateCard(err)
 	}
-	if err := catalog.ValidateAllowance("usage rate card", in.Allowance); err != nil {
+	if err := catalogrules.ValidateAllowance("usage rate card", in.Allowance); err != nil {
 		return invalidUsageRateCard(err)
 	}
-	if err := catalog.ValidateFilter("usage rate card", &in.Filter); err != nil {
+	if err := catalogrules.ValidateFilter("usage rate card", &in.Filter); err != nil {
 		return invalidUsageRateCard(err)
 	}
 	priceJSON, err := json.Marshal(in.Price)
@@ -272,10 +273,10 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		if err != nil {
 			return err
 		}
-		if !catalog.BillingSupported(meter.Aggregation) {
+		if !catalogrules.BillingSupported(meter.Aggregation) {
 			return invalidUsageRateCard(fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation))
 		}
-		if err := catalog.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
+		if err := catalogrules.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
 			return invalidUsageRateCard(err)
 		}
 		if err := ensureAllowanceSource(
@@ -361,7 +362,7 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	meterKey = catalog.NormalizeKey(meterKey)
+	meterKey = catalogrules.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return fmt.Errorf("meter_key required")
 	}
@@ -478,7 +479,7 @@ func (s *MoneyService) DeletePayerRateCard(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	meterKey = catalog.NormalizeKey(meterKey)
+	meterKey = catalogrules.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return fmt.Errorf("meter_key required")
 	}

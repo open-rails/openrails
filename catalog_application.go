@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // CatalogClient applies whole-catalog documents and reads the catalog
@@ -17,7 +18,7 @@ type CatalogClient struct{ client *Client }
 // while nothing has changed since. A guarded one replays by ID and applies only
 // at its expected revision; a new ID deliberately applies it again. While
 // Config.Catalog declares the catalog it is refused (billing.ErrCatalogDeclared).
-func (c *CatalogClient) Apply(ctx context.Context, params *billing.CatalogApplyParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
+func (c *CatalogClient) Apply(ctx context.Context, params *catalog.Application, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
 	if c.client.ownCatalog {
 		return nil, fmt.Errorf("catalog batch applications require merchant catalog authority")
 	}

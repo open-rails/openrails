@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
@@ -96,7 +97,7 @@ func ResolveMerchant(ctx context.Context, a *app.App, name string) (billing.Merc
 // ApplyCatalogAsOperator applies a catalog to one explicitly selected merchant
 // with operator authority; ordinary Client writes remain governed by
 // AllowCatalogUpdates.
-func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID billing.MerchantID, params *billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
+func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID billing.MerchantID, params *catalog.Application) (*billing.CatalogApplicationReceipt, error) {
 	if err := initialized(a); err != nil {
 		return nil, err
 	}

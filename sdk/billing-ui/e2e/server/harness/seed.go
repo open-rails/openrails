@@ -3,13 +3,15 @@ package harness
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/authkit/iam"
 	"time"
+
+	"github.com/open-rails/authkit/iam"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -58,7 +60,7 @@ func seedCards(ctx context.Context, c *openrails.Client) (string, string, error)
 	if err != nil {
 		return "", "", err
 	}
-	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: billing-ui-e2e-cards
 expected_revision: %d
 products:
@@ -108,7 +110,7 @@ func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node
 	if err != nil {
 		return "", "", err
 	}
-	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: billing-ui-e2e-crypto
 expected_revision: %d
 products:

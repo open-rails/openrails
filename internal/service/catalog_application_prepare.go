@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -42,7 +43,7 @@ type catalogApplicationPreparation struct {
 // replays by its ID and otherwise requires its expected revision. A declarative
 // one replays only while the catalog is still at the revision it produced;
 // after any other authored write it applies again, so the document wins.
-func (s *Service) catalogApplicationGate(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
+func (s *Service) catalogApplicationGate(ctx context.Context, params catalogwire.Application, digest [32]byte) (int64, *billing.CatalogApplicationReceipt, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, nil, err
@@ -80,7 +81,7 @@ func (s *Service) catalogApplicationGate(ctx context.Context, params billing.Cat
 // Prepare only observes remote references. Snapshot collection and the final
 // local commit each fence the merchant, but no transaction spans provider I/O.
 // A committed retry returns before resolving targets or contacting a provider.
-func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.CatalogApplyParams, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
+func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
 	prepared, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		revision, replay, err := scoped.catalogApplicationGate(ctx, params, digest)
 		if err != nil {
@@ -154,10 +155,10 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params billing.
 				for _, price := range declared.Prices {
 					named[price.Key] = true
 				}
-				references = append([]billing.CatalogApplyPrice(nil), declared.Prices...)
+				references = append([]catalogwire.ApplyPrice(nil), declared.Prices...)
 				for _, price := range prices {
 					if !price.Archived && !named[price.Key] && len(price.Providers) > 0 {
-						references = append(references, billing.CatalogApplyPrice{Key: price.Key, ID: price.ID.String()})
+						references = append(references, catalogwire.ApplyPrice{Key: price.Key, ID: price.ID.String()})
 					}
 				}
 			}

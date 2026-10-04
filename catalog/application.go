@@ -12,9 +12,12 @@ import (
 )
 
 const (
+	// ApplicationSchemaVersion is the document format version an Application
+	// declares in schema_version.
 	ApplicationSchemaVersion = 1
-	MaxApplicationBytes      = 1 << 20
-	MaxApplicationItems      = 2000
+	// MaxApplicationBytes and MaxApplicationItems bound one document.
+	MaxApplicationBytes = 1 << 20
+	MaxApplicationItems = 2000
 	// DeclarativeIDPrefix marks the derived identity of a declarative
 	// application; explicit application IDs cannot use it.
 	DeclarativeIDPrefix = "sha256:"
@@ -28,8 +31,13 @@ type Field[T any] struct {
 	Value T
 }
 
+// Value is a Field set to v.
 func Value[T any](v T) Field[T] { return Field[T]{Set: true, Value: v} }
-func Null[T any]() Field[T]     { return Field[T]{Set: true, Null: true} }
+
+// Null is a Field set to null: it clears the value.
+func Null[T any]() Field[T] { return Field[T]{Set: true, Null: true} }
+
+// IsZero reports an omitted field (json omitzero).
 func (f Field[T]) IsZero() bool { return !f.Set }
 func (f Field[T]) validateField() error {
 	if !f.Set && f.Null || (!f.Set || f.Null) && !reflect.ValueOf(&f.Value).Elem().IsZero() {
@@ -37,6 +45,9 @@ func (f Field[T]) validateField() error {
 	}
 	return nil
 }
+
+// MarshalJSON writes the value, or null for an omitted or null field. An int64
+// is money and travels as a decimal string.
 func (f Field[T]) MarshalJSON() ([]byte, error) {
 	if err := f.validateField(); err != nil {
 		return nil, err
@@ -50,6 +61,9 @@ func (f Field[T]) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(f.Value)
 }
+
+// UnmarshalJSON sets the field; null sets it to null. Unknown fields inside
+// the value are refused.
 func (f *Field[T]) UnmarshalJSON(raw []byte) error {
 	*f = Field[T]{Set: true}
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
@@ -89,15 +103,18 @@ type Application struct {
 	Meters           []ApplyMeter   `json:"meters,omitempty"`
 }
 
+// ApplyMeter declares one meter by key; omitted fields keep their values.
 type ApplyMeter struct {
 	Key           string                   `json:"key"`
 	EventType     Field[string]            `json:"event_type,omitzero"`
 	ValueProperty Field[string]            `json:"value_property,omitzero"`
-	Aggregation   Field[string]            `json:"aggregation,omitzero"`
+	Aggregation   Field[Aggregation]       `json:"aggregation,omitzero"`
 	Unit          Field[string]            `json:"unit,omitzero"`
 	GroupBy       Field[map[string]string] `json:"group_by,omitzero"`
 }
 
+// ApplyProduct declares one product by key, with its prices and rate cards;
+// omitted fields keep their values.
 type ApplyProduct struct {
 	Key              string                 `json:"key"`
 	DisplayName      Field[string]          `json:"display_name,omitzero"`
@@ -110,6 +127,10 @@ type ApplyProduct struct {
 	RateCards        Field[[]RateCard]      `json:"rate_cards,omitzero"`
 }
 
+// ApplyPrice declares one price by key. Its money terms are its identity: a
+// declaration with other terms under the same key is a new version of the
+// price, and the previous one is archived. ID pins the declaration to one
+// existing price.
 type ApplyPrice struct {
 	Key                 string                              `json:"key"`
 	ID                  string                              `json:"id,omitempty"`

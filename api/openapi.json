@@ -16151,7 +16151,15 @@
             "type": "string"
           },
           "aggregation": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "count",
+              "latest",
+              "max",
+              "min",
+              "sum",
+              "unique_count"
+            ]
           },
           "unit": {
             "type": "string"
@@ -16528,7 +16536,15 @@
           "aggregation": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "count",
+                  "latest",
+                  "max",
+                  "min",
+                  "sum",
+                  "unique_count"
+                ]
               },
               {
                 "type": "null"
@@ -23411,7 +23427,12 @@
             "type": "integer"
           },
           "round": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "down",
+              "half_up",
+              "up"
+            ]
           },
           "maximum_amount": {
             "type": "string",
@@ -24763,7 +24784,11 @@
             "$ref": "#/components/schemas/Allowance"
           },
           "payment_term": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "in_advance",
+              "in_arrears"
+            ]
           },
           "price": {
             "$ref": "#/components/schemas/RatePrice"
@@ -24774,7 +24799,13 @@
         "type": "object",
         "properties": {
           "model": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "flat",
+              "package",
+              "per_unit",
+              "tiered"
+            ]
           },
           "currency": {
             "type": "string"
@@ -26463,7 +26494,11 @@
         "type": "object",
         "properties": {
           "mode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "graduated",
+              "volume"
+            ]
           },
           "tiers": {
             "type": "array",
@@ -26970,7 +27005,15 @@
             "type": "string"
           },
           "aggregation": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "count",
+              "latest",
+              "max",
+              "min",
+              "sum",
+              "unique_count"
+            ]
           },
           "unit": {
             "type": "string"

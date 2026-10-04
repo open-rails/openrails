@@ -25,7 +25,7 @@ export type AdminUsageMeterResponse = {
   event_type?: string
   effective_event_type: string
   value_property?: string
-  aggregation: string
+  aggregation: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
   unit?: string
   group_by: Record<string, string> | null
   billing_supported: boolean
@@ -104,7 +104,7 @@ export type ApplyMeter = {
   key?: string
   event_type?: string | null
   value_property?: string | null
-  aggregation?: string | null
+  aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count" | null
   unit?: string | null
   group_by?: Record<string, string> | null
 }
@@ -1764,7 +1764,7 @@ export type PendingAction = {
 export type PerUnitPrice = {
   unit_amount?: string
   divide_by?: number
-  round?: string
+  round?: "down" | "half_up" | "up"
   maximum_amount?: string
   matrix?: Matrix
 }
@@ -2103,12 +2103,12 @@ export type RateCard = {
   meter?: string
   filter?: Record<string, string[]>
   allowance?: Allowance
-  payment_term?: string
+  payment_term?: "in_advance" | "in_arrears"
   price?: RatePrice
 }
 
 export type RatePrice = {
-  model: string
+  model: "flat" | "package" | "per_unit" | "tiered"
   currency?: string
   flat?: FlatPrice
   per_unit?: PerUnitPrice
@@ -2528,7 +2528,7 @@ export type TierChangeResponse = {
 }
 
 export type TieredPrice = {
-  mode?: string
+  mode?: "graduated" | "volume"
   tiers?: RateTier[]
 }
 
@@ -2659,7 +2659,7 @@ export type UsageMeterOverrideDTO = {
 export type UsageMeterRequest = {
   event_type?: string
   value_property?: string
-  aggregation?: string
+  aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
   unit?: string
   group_by?: Record<string, string>
 }

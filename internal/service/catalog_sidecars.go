@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -24,7 +25,7 @@ type CatalogMeterSpec struct {
 	Key           string            `json:"key"`
 	EventType     string            `json:"event_type,omitempty"`
 	ValueProperty string            `json:"value_property,omitempty"`
-	Aggregation   string            `json:"aggregation,omitempty"`
+	Aggregation   catalog.Aggregation `json:"aggregation,omitempty"`
 	Unit          string            `json:"unit,omitempty"`
 	GroupBy       map[string]string `json:"group_by,omitempty"`
 }
@@ -221,7 +222,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		if old, ok := currentMeters[m.Key]; ok && reflect.DeepEqual(old, m) {
 			continue
 		}
-		replacement := catalog.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
+		replacement := catalogrules.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
 		if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, &replacement); err != nil {
 			return err
 		}
@@ -265,7 +266,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		if err := json.Unmarshal(c.Price, &price); err != nil {
 			return err
 		}
-		effective := catalog.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
+		effective := catalogrules.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
 		if err := money.CheckCatalogRateCardContracts(ctx, tx, merchantID, effective, c.Filter, price); err != nil {
 			return err
 		}
@@ -281,7 +282,7 @@ func readCatalogBilling(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (S
 		return out, err
 	}
 	for _, m := range meters {
-		meter := CatalogMeterSpec{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit}
+		meter := CatalogMeterSpec{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: catalog.Aggregation(m.Aggregation), Unit: m.Unit}
 		if err := json.Unmarshal(m.GroupBy, &meter.GroupBy); err != nil {
 			return out, err
 		}
@@ -331,7 +332,7 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 		if err := json.Unmarshal(c.Price, &price); err != nil {
 			return fmt.Errorf("decode catalog rate card: %w", err)
 		}
-		if err := catalog.ValidateRatePrice("catalog rate card", &price); err != nil {
+		if err := catalogrules.ValidateRatePrice("catalog rate card", &price); err != nil {
 			return err
 		}
 		if price.PerUnit != nil {
@@ -350,11 +351,11 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 			if err := json.Unmarshal(c.Allowance, &allowance); err != nil {
 				return err
 			}
-			if err := catalog.ValidateAllowance("catalog allowance", &allowance); err != nil {
+			if err := catalogrules.ValidateAllowance("catalog allowance", &allowance); err != nil {
 				return err
 			}
 			if allowance.Cap != "" {
-				duration, err := catalog.ParseDurationSpec(allowance.Cap)
+				duration, err := catalogrules.ParseDurationSpec(allowance.Cap)
 				if err != nil {
 					return err
 				}
@@ -453,7 +454,7 @@ func syncMeter(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, meter 
 	}
 	return q.SyncCatalogMeter(ctx, gen.SyncCatalogMeterParams{
 		MerchantID: merchantID, MeterKey: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty,
-		Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: groupBy, Overwrite: overwrite,
+		Aggregation: string(meter.Aggregation), Unit: meter.Unit, GroupBy: groupBy, Overwrite: overwrite,
 	})
 }
 

@@ -36,7 +36,7 @@ pkg openrails, func WithMerchantID(billing.MerchantID) ClientOption
 pkg openrails, func WithOwnCatalog() ClientOption
 pkg openrails, func WithTimeout(time.Duration) ClientOption
 pkg openrails, func WithTokenProvider(func(context.Context) (string, error)) ClientOption
-pkg openrails, method (*CatalogClient) Apply(context.Context, *billing.CatalogApplyParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
+pkg openrails, method (*CatalogClient) Apply(context.Context, *catalog.Application, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*CatalogClient) Revision(context.Context, ...RequestOption) (*billing.CatalogRevision, error)
 pkg openrails, method (*Client) AcknowledgeHostEvent(context.Context, uuid.UUID, ...RequestOption) error
 pkg openrails, method (*Client) AdminConsole() http.Handler
@@ -311,7 +311,7 @@ pkg openrails, type Config struct, AlertSecretBackend string
 pkg openrails, type Config struct, AllowCatalogUpdates bool
 pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string
 pkg openrails, type Config struct, Captcha *config.CaptchaConfig
-pkg openrails, type Config struct, Catalog *billing.CatalogApplyParams
+pkg openrails, type Config struct, Catalog *catalog.Application
 pkg openrails, type Config struct, CatalogReconciliationInterval string
 pkg openrails, type Config struct, CloudflareProxies []string
 pkg openrails, type Config struct, ControlPlane *config.ControlPlaneConfig
@@ -942,8 +942,6 @@ pkg openrails/billing, const WastedSpendDuplicate WastedSpendAction = "duplicate
 pkg openrails/billing, const WastedSpendForgiven WastedSpendAction = "forgiven"
 pkg openrails/billing, const WastedSpendIgnored WastedSpendAction = "ignored"
 pkg openrails/billing, const WastedSpendInvokerCutoffTracked WastedSpendAction = "invoker_cutoff_tracked"
-pkg openrails/billing, func CatalogNull[T any]() CatalogField[T]
-pkg openrails/billing, func CatalogValue[T any](T) CatalogField[T]
 pkg openrails/billing, func Currencies() []CurrencyUnits
 pkg openrails/billing, func DeclineReasonFrom(error) (DeclineReason, bool)
 pkg openrails/billing, func DeclineReasons() []DeclineReason
@@ -954,7 +952,6 @@ pkg openrails/billing, func LookupErrorCode(string) (ErrorCode, bool)
 pkg openrails/billing, func NewCard(string, int, int, string) (*Card, error)
 pkg openrails/billing, func NewHostedCheckoutPlan(*Product, *Price) (HostedCheckoutPlan, error)
 pkg openrails/billing, func NormalizeMerchantSlug(string) string
-pkg openrails/billing, func ParseCatalogApplicationYAML([]byte) (*CatalogApplyParams, error)
 pkg openrails/billing, func ParseCatalogID(string) (CatalogID, error)
 pkg openrails/billing, func ParseCheckoutSessionID(string) (CheckoutSessionID, error)
 pkg openrails/billing, func ParseCreditGrantID(string) (CreditGrantID, error)
@@ -1246,15 +1243,10 @@ pkg openrails/billing, type CatalogApplicationReceipt struct
 pkg openrails/billing, type CatalogApplicationReceipt struct, ApplicationID string `json:"application_id"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, AppliedRevision int64 `json:"applied_revision"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, BaseRevision int64 `json:"base_revision"`
-pkg openrails/billing, type CatalogApplicationReceipt struct, CatalogID string `json:"catalog_id"`
+pkg openrails/billing, type CatalogApplicationReceipt struct, CatalogID CatalogID `json:"catalog_id"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, PricesChanged int `json:"prices_changed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, ProductsChanged int `json:"products_changed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, Replayed bool `json:"replayed"`
-pkg openrails/billing, type CatalogApplyMeter = catalog.ApplyMeter
-pkg openrails/billing, type CatalogApplyParams = catalog.Application
-pkg openrails/billing, type CatalogApplyPrice = catalog.ApplyPrice
-pkg openrails/billing, type CatalogApplyProduct = catalog.ApplyProduct
-pkg openrails/billing, type CatalogField[T any] = catalog.Field[T]
 pkg openrails/billing, type CatalogID [16]byte
 pkg openrails/billing, type CatalogOffer struct
 pkg openrails/billing, type CatalogOffer struct, AccessDurationHours *int `json:"access_duration_hours,omitempty"`
@@ -2866,7 +2858,7 @@ pkg openrails/billing, type UsageEventParams struct, Source string `json:"source
 pkg openrails/billing, type UsageEventParams struct, SourceID string `json:"source_id"`
 pkg openrails/billing, type UsageGroupBy string
 pkg openrails/billing, type UsageMeterDTO struct
-pkg openrails/billing, type UsageMeterDTO struct, Aggregation string `json:"aggregation"`
+pkg openrails/billing, type UsageMeterDTO struct, Aggregation catalog.Aggregation `json:"aggregation"`
 pkg openrails/billing, type UsageMeterDTO struct, BillingSupported bool `json:"billing_supported"`
 pkg openrails/billing, type UsageMeterDTO struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type UsageMeterDTO struct, DefaultRateCard *DefaultUsageRateCardDTO `json:"default_rate_card,omitempty"`
@@ -2889,13 +2881,13 @@ pkg openrails/billing, type UsageMeterOverrideDTO struct, Price catalog.RatePric
 pkg openrails/billing, type UsageMeterOverrideDTO struct, Subject string `json:"subject,omitempty"`
 pkg openrails/billing, type UsageMeterOverrideDTO struct, UpdatedAt time.Time `json:"updated_at"`
 pkg openrails/billing, type UsageMeterRequest struct
-pkg openrails/billing, type UsageMeterRequest struct, Aggregation string `json:"aggregation"`
+pkg openrails/billing, type UsageMeterRequest struct, Aggregation catalog.Aggregation `json:"aggregation"`
 pkg openrails/billing, type UsageMeterRequest struct, EventType string `json:"event_type"`
 pkg openrails/billing, type UsageMeterRequest struct, GroupBy map[string]string `json:"group_by,omitempty"`
 pkg openrails/billing, type UsageMeterRequest struct, Unit string `json:"unit,omitempty"`
 pkg openrails/billing, type UsageMeterRequest struct, ValueProperty string `json:"value_property"`
 pkg openrails/billing, type UsageMeterSpec struct
-pkg openrails/billing, type UsageMeterSpec struct, Aggregation string `json:"aggregation"`
+pkg openrails/billing, type UsageMeterSpec struct, Aggregation catalog.Aggregation `json:"aggregation"`
 pkg openrails/billing, type UsageMeterSpec struct, EventType string `json:"event_type"`
 pkg openrails/billing, type UsageMeterSpec struct, GroupBy map[string]string `json:"group_by,omitempty"`
 pkg openrails/billing, type UsageMeterSpec struct, Key string `json:"key"`
@@ -2978,58 +2970,42 @@ pkg openrails/billing, var ErrRequestBodyTooLarge error
 pkg openrails/billing, var ErrUnauthorized error
 pkg openrails/billing, var ErrUnreachable error
 pkg openrails/billing, var ReservedMerchantSlugs []string
-pkg openrails/catalog, const AggregationCount untyped string = "count"
-pkg openrails/catalog, const AggregationLatest untyped string = "latest"
-pkg openrails/catalog, const AggregationMax untyped string = "max"
-pkg openrails/catalog, const AggregationMin untyped string = "min"
-pkg openrails/catalog, const AggregationSum untyped string = "sum"
-pkg openrails/catalog, const AggregationUniqueCount untyped string = "unique_count"
+pkg openrails/catalog, const AggregationCount Aggregation = "count"
+pkg openrails/catalog, const AggregationLatest Aggregation = "latest"
+pkg openrails/catalog, const AggregationMax Aggregation = "max"
+pkg openrails/catalog, const AggregationMin Aggregation = "min"
+pkg openrails/catalog, const AggregationSum Aggregation = "sum"
+pkg openrails/catalog, const AggregationUniqueCount Aggregation = "unique_count"
 pkg openrails/catalog, const ApplicationSchemaVersion untyped int = 1
 pkg openrails/catalog, const DeclarativeIDPrefix untyped string = "sha256:"
 pkg openrails/catalog, const MaxApplicationBytes untyped int = 1048576
 pkg openrails/catalog, const MaxApplicationItems untyped int = 2000
-pkg openrails/catalog, const ModelFlat untyped string = "flat"
-pkg openrails/catalog, const ModelPackage untyped string = "package"
-pkg openrails/catalog, const ModelPerUnit untyped string = "per_unit"
-pkg openrails/catalog, const ModelTiered untyped string = "tiered"
-pkg openrails/catalog, const PaymentInAdvance untyped string = "in_advance"
-pkg openrails/catalog, const PaymentInArrears untyped string = "in_arrears"
-pkg openrails/catalog, const RoundDown untyped string = "down"
-pkg openrails/catalog, const RoundHalfUp untyped string = "half_up"
-pkg openrails/catalog, const RoundUp untyped string = "up"
-pkg openrails/catalog, const SupportedVersion untyped int = 1
-pkg openrails/catalog, const TierModeGraduated untyped string = "graduated"
-pkg openrails/catalog, const TierModeVolume untyped string = "volume"
-pkg openrails/catalog, func BillingSupported(string) bool
-pkg openrails/catalog, func Load(string) (*Manifest, error)
-pkg openrails/catalog, func NormalizeKey(string) string
+pkg openrails/catalog, const ModelFlat Model = "flat"
+pkg openrails/catalog, const ModelPackage Model = "package"
+pkg openrails/catalog, const ModelPerUnit Model = "per_unit"
+pkg openrails/catalog, const ModelTiered Model = "tiered"
+pkg openrails/catalog, const PaymentInAdvance PaymentTerm = "in_advance"
+pkg openrails/catalog, const PaymentInArrears PaymentTerm = "in_arrears"
+pkg openrails/catalog, const RoundDown Round = "down"
+pkg openrails/catalog, const RoundHalfUp Round = "half_up"
+pkg openrails/catalog, const RoundUp Round = "up"
+pkg openrails/catalog, const TierModeGraduated TierMode = "graduated"
+pkg openrails/catalog, const TierModeVolume TierMode = "volume"
 pkg openrails/catalog, func Null[T any]() Field[T]
-pkg openrails/catalog, func Parse([]byte) (*Manifest, error)
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
-pkg openrails/catalog, func ParseDurationSpec(string) (time.Duration, error)
-pkg openrails/catalog, func ValidateAllowance(string, *Allowance) error
-pkg openrails/catalog, func ValidateDimensions(string, map[string]string, map[string][]string, *RatePrice) error
-pkg openrails/catalog, func ValidateFilter(string, *map[string][]string) error
-pkg openrails/catalog, func ValidateMeter(string, *Meter) error
-pkg openrails/catalog, func ValidateRatePrice(string, *RatePrice) error
-pkg openrails/catalog, func ValidateUsagePrice(string, *RatePrice) error
 pkg openrails/catalog, func Value[T any](T) Field[T]
 pkg openrails/catalog, method (*Field[T]) UnmarshalJSON([]byte) error
-pkg openrails/catalog, method (*Manifest) Validate() error
 pkg openrails/catalog, method (Application) CanonicalDigest() ([32]byte, error)
 pkg openrails/catalog, method (Application) Declarative() bool
 pkg openrails/catalog, method (Application) Validate() error
-pkg openrails/catalog, method (ChargeModel) Rate(int64) (int64, error)
 pkg openrails/catalog, method (Field[T]) IsZero() bool
 pkg openrails/catalog, method (Field[T]) MarshalJSON() ([]byte, error)
-pkg openrails/catalog, method (RateCard) RateUsage(string, int64) (int64, error)
-pkg openrails/catalog, method (RatePrice) ChargeModelForCell(string) (ChargeModel, bool)
-pkg openrails/catalog, method (RatePrice) ToChargeModel() ChargeModel
+pkg openrails/catalog, type Aggregation string
 pkg openrails/catalog, type Allowance struct
-pkg openrails/catalog, type Allowance struct, AccrueFrom string `json:"accrue_from,omitempty" yaml:"accrue_from,omitempty"`
-pkg openrails/catalog, type Allowance struct, Cap string `json:"cap,omitempty" yaml:"cap,omitempty"`
-pkg openrails/catalog, type Allowance struct, Included int64 `json:"included,omitempty" yaml:"included,omitempty"`
+pkg openrails/catalog, type Allowance struct, AccrueFrom string `json:"accrue_from,omitempty"`
+pkg openrails/catalog, type Allowance struct, Cap string `json:"cap,omitempty"`
+pkg openrails/catalog, type Allowance struct, Included int64 `json:"included,omitempty"`
 pkg openrails/catalog, type Application struct
 pkg openrails/catalog, type Application struct, ApplicationID string `json:"application_id,omitempty"`
 pkg openrails/catalog, type Application struct, CatalogID string `json:"catalog_id,omitempty"`
@@ -3039,7 +3015,7 @@ pkg openrails/catalog, type Application struct, Products []ApplyProduct `json:"p
 pkg openrails/catalog, type Application struct, Prune bool `json:"prune,omitempty"`
 pkg openrails/catalog, type Application struct, SchemaVersion int `json:"schema_version"`
 pkg openrails/catalog, type ApplyMeter struct
-pkg openrails/catalog, type ApplyMeter struct, Aggregation Field[string] `json:"aggregation,omitzero"`
+pkg openrails/catalog, type ApplyMeter struct, Aggregation Field[Aggregation] `json:"aggregation,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, EventType Field[string] `json:"event_type,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, GroupBy Field[map[string]string] `json:"group_by,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, Key string `json:"key"`
@@ -3067,103 +3043,52 @@ pkg openrails/catalog, type ApplyProduct struct, Prices []ApplyPrice `json:"pric
 pkg openrails/catalog, type ApplyProduct struct, RateCards Field[[]RateCard] `json:"rate_cards,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierGroup Field[string] `json:"tier_group,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierRank Field[int] `json:"tier_rank,omitzero"`
-pkg openrails/catalog, type ChargeModel struct
-pkg openrails/catalog, type ChargeModel struct, DivideBy int64
-pkg openrails/catalog, type ChargeModel struct, FlatAmount int64
-pkg openrails/catalog, type ChargeModel struct, FreeUnits int64
-pkg openrails/catalog, type ChargeModel struct, Kind string
-pkg openrails/catalog, type ChargeModel struct, MaximumAmount int64
-pkg openrails/catalog, type ChargeModel struct, Mode string
-pkg openrails/catalog, type ChargeModel struct, PackageAmount int64
-pkg openrails/catalog, type ChargeModel struct, PackageSize int64
-pkg openrails/catalog, type ChargeModel struct, Round string
-pkg openrails/catalog, type ChargeModel struct, Tiers []ChargeTier
-pkg openrails/catalog, type ChargeModel struct, UnitAmount int64
-pkg openrails/catalog, type ChargeTier struct
-pkg openrails/catalog, type ChargeTier struct, FlatAmount int64
-pkg openrails/catalog, type ChargeTier struct, UnitAmount int64
-pkg openrails/catalog, type ChargeTier struct, UpTo *int64
 pkg openrails/catalog, type Field struct, Null bool
 pkg openrails/catalog, type Field struct, Set bool
 pkg openrails/catalog, type Field struct, Value T
 pkg openrails/catalog, type Field[T any] struct
 pkg openrails/catalog, type FlatPrice struct
-pkg openrails/catalog, type FlatPrice struct, Amount int64 `json:"amount,omitempty,string" yaml:"amount,omitempty"`
-pkg openrails/catalog, type Manifest struct
-pkg openrails/catalog, type Manifest struct, Meters []Meter `json:"meters,omitempty" yaml:"meters,omitempty"`
-pkg openrails/catalog, type Manifest struct, Products []Product `json:"products,omitempty" yaml:"products,omitempty"`
-pkg openrails/catalog, type Manifest struct, TierGroups []TierGroup `json:"-" yaml:"-"`
-pkg openrails/catalog, type Manifest struct, Version int `json:"version" yaml:"version"`
+pkg openrails/catalog, type FlatPrice struct, Amount int64 `json:"amount,omitempty,string"`
 pkg openrails/catalog, type Matrix struct
-pkg openrails/catalog, type Matrix struct, Cells map[string]MatrixCell `json:"cells" yaml:"cells"`
-pkg openrails/catalog, type Matrix struct, Dimension string `json:"dimension" yaml:"dimension"`
+pkg openrails/catalog, type Matrix struct, Cells map[string]MatrixCell `json:"cells"`
+pkg openrails/catalog, type Matrix struct, Dimension string `json:"dimension"`
 pkg openrails/catalog, type MatrixCell struct
-pkg openrails/catalog, type MatrixCell struct, Included int64 `json:"included,omitempty" yaml:"included,omitempty"`
-pkg openrails/catalog, type MatrixCell struct, MaximumAmount int64 `json:"maximum_amount,omitempty,string" yaml:"maximum_amount,omitempty"`
-pkg openrails/catalog, type MatrixCell struct, UnitAmount int64 `json:"unit_amount,string" yaml:"unit_amount"`
-pkg openrails/catalog, type Meter struct
-pkg openrails/catalog, type Meter struct, Aggregation string `json:"aggregation,omitempty" yaml:"aggregation,omitempty"`
-pkg openrails/catalog, type Meter struct, EventType string `json:"event_type,omitempty" yaml:"event_type,omitempty"`
-pkg openrails/catalog, type Meter struct, GroupBy map[string]string `json:"group_by,omitempty" yaml:"group_by,omitempty"`
-pkg openrails/catalog, type Meter struct, Key string `json:"key" yaml:"key"`
-pkg openrails/catalog, type Meter struct, Unit string `json:"unit,omitempty" yaml:"unit,omitempty"`
-pkg openrails/catalog, type Meter struct, ValueProperty string `json:"value_property,omitempty" yaml:"value_property,omitempty"`
+pkg openrails/catalog, type MatrixCell struct, Included int64 `json:"included,omitempty"`
+pkg openrails/catalog, type MatrixCell struct, MaximumAmount int64 `json:"maximum_amount,omitempty,string"`
+pkg openrails/catalog, type MatrixCell struct, UnitAmount int64 `json:"unit_amount,string"`
+pkg openrails/catalog, type Model string
 pkg openrails/catalog, type PackagePrice struct
-pkg openrails/catalog, type PackagePrice struct, Amount int64 `json:"amount,omitempty,string" yaml:"amount,omitempty"`
-pkg openrails/catalog, type PackagePrice struct, FreeUnits int64 `json:"free_units,omitempty" yaml:"free_units,omitempty"`
-pkg openrails/catalog, type PackagePrice struct, PackageSize int64 `json:"package_size,omitempty" yaml:"package_size,omitempty"`
+pkg openrails/catalog, type PackagePrice struct, Amount int64 `json:"amount,omitempty,string"`
+pkg openrails/catalog, type PackagePrice struct, FreeUnits int64 `json:"free_units,omitempty"`
+pkg openrails/catalog, type PackagePrice struct, PackageSize int64 `json:"package_size,omitempty"`
+pkg openrails/catalog, type PaymentTerm string
 pkg openrails/catalog, type PerUnitPrice struct
-pkg openrails/catalog, type PerUnitPrice struct, DivideBy int64 `json:"divide_by,omitempty" yaml:"divide_by,omitempty"`
-pkg openrails/catalog, type PerUnitPrice struct, Matrix *Matrix `json:"matrix,omitempty" yaml:"matrix,omitempty"`
-pkg openrails/catalog, type PerUnitPrice struct, MaximumAmount int64 `json:"maximum_amount,omitempty,string" yaml:"maximum_amount,omitempty"`
-pkg openrails/catalog, type PerUnitPrice struct, Round string `json:"round,omitempty" yaml:"round,omitempty"`
-pkg openrails/catalog, type PerUnitPrice struct, UnitAmount int64 `json:"unit_amount,omitempty,string" yaml:"unit_amount,omitempty"`
-pkg openrails/catalog, type Price struct
-pkg openrails/catalog, type Price struct, Archived bool `json:"archived,omitempty" yaml:"archived,omitempty"`
-pkg openrails/catalog, type Price struct, AutoRenew bool `json:"auto_renew,omitempty" yaml:"auto_renew,omitempty"`
-pkg openrails/catalog, type Price struct, Currency string `json:"currency,omitempty" yaml:"currency,omitempty"`
-pkg openrails/catalog, type Price struct, Duration string `json:"duration,omitempty" yaml:"duration,omitempty"`
-pkg openrails/catalog, type Price struct, Key string `json:"key,omitempty" yaml:"key,omitempty"`
-pkg openrails/catalog, type Price struct, PSPLinks map[string]map[string]string `json:"psp_links,omitempty" yaml:"psp_links,omitempty"`
-pkg openrails/catalog, type Price struct, PSPs []string `json:"psps,omitempty" yaml:"psps,omitempty"`
-pkg openrails/catalog, type Price struct, Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
-pkg openrails/catalog, type Price struct, UnitAmount int64 `json:"unit_amount,string" yaml:"unit_amount"`
-pkg openrails/catalog, type PriceTrial struct
-pkg openrails/catalog, type PriceTrial struct, Duration string `json:"duration" yaml:"duration"`
-pkg openrails/catalog, type PriceTrial struct, UnitAmount int64 `json:"unit_amount,string" yaml:"unit_amount"`
-pkg openrails/catalog, type Product struct
-pkg openrails/catalog, type Product struct, Archived bool `json:"archived,omitempty" yaml:"archived,omitempty"`
-pkg openrails/catalog, type Product struct, Description string `json:"description,omitempty" yaml:"description,omitempty"`
-pkg openrails/catalog, type Product struct, DisplayName string `json:"display_name" yaml:"display_name"`
-pkg openrails/catalog, type Product struct, Entitlements []string `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
-pkg openrails/catalog, type Product struct, Key string `json:"key" yaml:"key"`
-pkg openrails/catalog, type Product struct, Prices []Price `json:"prices,omitempty" yaml:"prices,omitempty"`
-pkg openrails/catalog, type Product struct, RateCards []RateCard `json:"rate_cards,omitempty" yaml:"rate_cards,omitempty"`
-pkg openrails/catalog, type Product struct, TierGroup string `json:"tier_group,omitempty" yaml:"tier_group,omitempty"`
-pkg openrails/catalog, type Product struct, TierRank *int `json:"tier_rank,omitempty" yaml:"tier_rank,omitempty"`
+pkg openrails/catalog, type PerUnitPrice struct, DivideBy int64 `json:"divide_by,omitempty"`
+pkg openrails/catalog, type PerUnitPrice struct, Matrix *Matrix `json:"matrix,omitempty"`
+pkg openrails/catalog, type PerUnitPrice struct, MaximumAmount int64 `json:"maximum_amount,omitempty,string"`
+pkg openrails/catalog, type PerUnitPrice struct, Round Round `json:"round,omitempty"`
+pkg openrails/catalog, type PerUnitPrice struct, UnitAmount int64 `json:"unit_amount,omitempty,string"`
 pkg openrails/catalog, type RateCard struct
-pkg openrails/catalog, type RateCard struct, Allowance *Allowance `json:"allowance,omitempty" yaml:"allowance,omitempty"`
-pkg openrails/catalog, type RateCard struct, Filter map[string][]string `json:"filter,omitempty" yaml:"filter,omitempty"`
-pkg openrails/catalog, type RateCard struct, Meter string `json:"meter,omitempty" yaml:"meter,omitempty"`
-pkg openrails/catalog, type RateCard struct, Ordinal int `json:"ordinal,omitempty" yaml:"ordinal,omitempty"`
-pkg openrails/catalog, type RateCard struct, PaymentTerm string `json:"payment_term,omitempty" yaml:"payment_term,omitempty"`
-pkg openrails/catalog, type RateCard struct, Price RatePrice `json:"price" yaml:"price"`
+pkg openrails/catalog, type RateCard struct, Allowance *Allowance `json:"allowance,omitempty"`
+pkg openrails/catalog, type RateCard struct, Filter map[string][]string `json:"filter,omitempty"`
+pkg openrails/catalog, type RateCard struct, Meter string `json:"meter,omitempty"`
+pkg openrails/catalog, type RateCard struct, Ordinal int `json:"ordinal,omitempty"`
+pkg openrails/catalog, type RateCard struct, PaymentTerm PaymentTerm `json:"payment_term,omitempty"`
+pkg openrails/catalog, type RateCard struct, Price RatePrice `json:"price"`
 pkg openrails/catalog, type RatePrice struct
-pkg openrails/catalog, type RatePrice struct, Currency string `json:"currency,omitempty" yaml:"currency,omitempty"`
-pkg openrails/catalog, type RatePrice struct, Flat *FlatPrice `json:"flat,omitempty" yaml:"flat,omitempty"`
-pkg openrails/catalog, type RatePrice struct, Model string `json:"model" yaml:"model"`
-pkg openrails/catalog, type RatePrice struct, Package *PackagePrice `json:"package,omitempty" yaml:"package,omitempty"`
-pkg openrails/catalog, type RatePrice struct, PerUnit *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
-pkg openrails/catalog, type RatePrice struct, Tiered *TieredPrice `json:"tiered,omitempty" yaml:"tiered,omitempty"`
+pkg openrails/catalog, type RatePrice struct, Currency string `json:"currency,omitempty"`
+pkg openrails/catalog, type RatePrice struct, Flat *FlatPrice `json:"flat,omitempty"`
+pkg openrails/catalog, type RatePrice struct, Model Model `json:"model"`
+pkg openrails/catalog, type RatePrice struct, Package *PackagePrice `json:"package,omitempty"`
+pkg openrails/catalog, type RatePrice struct, PerUnit *PerUnitPrice `json:"per_unit,omitempty"`
+pkg openrails/catalog, type RatePrice struct, Tiered *TieredPrice `json:"tiered,omitempty"`
 pkg openrails/catalog, type RateTier struct
-pkg openrails/catalog, type RateTier struct, FlatAmount int64 `json:"flat_amount,omitempty,string" yaml:"flat_amount,omitempty"`
-pkg openrails/catalog, type RateTier struct, UnitAmount int64 `json:"unit_amount,omitempty,string" yaml:"unit_amount,omitempty"`
-pkg openrails/catalog, type RateTier struct, UpTo *int64 `json:"up_to" yaml:"up_to"`
-pkg openrails/catalog, type TierGroup struct
-pkg openrails/catalog, type TierGroup struct, DisplayName string `json:"display_name" yaml:"display_name"`
-pkg openrails/catalog, type TierGroup struct, Key string `json:"key" yaml:"key"`
-pkg openrails/catalog, type TierGroup struct, Products []Product `json:"products" yaml:"products"`
+pkg openrails/catalog, type RateTier struct, FlatAmount int64 `json:"flat_amount,omitempty,string"`
+pkg openrails/catalog, type RateTier struct, UnitAmount int64 `json:"unit_amount,omitempty,string"`
+pkg openrails/catalog, type RateTier struct, UpTo *int64 `json:"up_to"`
+pkg openrails/catalog, type Round string
+pkg openrails/catalog, type TierMode string
 pkg openrails/catalog, type TieredPrice struct
-pkg openrails/catalog, type TieredPrice struct, Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
-pkg openrails/catalog, type TieredPrice struct, Tiers []RateTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
+pkg openrails/catalog, type TieredPrice struct, Mode TierMode `json:"mode,omitempty"`
+pkg openrails/catalog, type TieredPrice struct, Tiers []RateTier `json:"tiers,omitempty"`
 pkg openrails/web/admin, func FS() fs.FS

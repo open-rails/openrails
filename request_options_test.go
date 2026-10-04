@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
@@ -50,9 +51,9 @@ func targetCredential(_ context.Context, target CredentialTarget) (string, error
 	return "id:" + target.MerchantID.String(), nil
 }
 
-func catalogApplication() *billing.CatalogApplyParams {
-	return &billing.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
-		Products: []billing.CatalogApplyProduct{{Key: "post", DisplayName: billing.CatalogValue("Post")}}}
+func catalogApplication() *catalog.Application {
+	return &catalog.Application{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: new(int64),
+		Products: []catalog.ApplyProduct{{Key: "post", DisplayName: catalog.Value("Post")}}}
 }
 
 // Exactly one selector, a slug or an id, reaches both the OpenRails-Merchant

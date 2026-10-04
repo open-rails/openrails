@@ -21,6 +21,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 type fixture struct {
@@ -190,7 +191,7 @@ func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	apply := func(unitAmount string) {
 		revision, err := client.Catalog.Revision(t.Context())
 		require.NoError(t, err)
-		params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+		params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 application_id: gf-%[1]s-%[3]s
 expected_revision: %[2]d
 meters:

@@ -6,9 +6,9 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -68,7 +68,7 @@ func AdminGetUsageMeter(r *httprequest.Request) {
 }
 
 func AdminListUsageMeterOverrides(r *httprequest.Request) {
-	meterKey := catalog.NormalizeKey(r.Param("key"))
+	meterKey := catalogrules.NormalizeKey(r.Param("key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter key required")
 		return
@@ -154,7 +154,7 @@ func AdminPutDefaultUsageRateCard(r *httprequest.Request) {
 }
 
 func AdminDeleteDefaultUsageRateCard(r *httprequest.Request) {
-	meterKey := catalog.NormalizeKey(r.Param("key"))
+	meterKey := catalogrules.NormalizeKey(r.Param("key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter key required")
 		return
@@ -171,7 +171,7 @@ func AdminDeleteDefaultUsageRateCard(r *httprequest.Request) {
 }
 
 func usageMeterSpec(pathKey string, req AdminUsageMeterRequest) (billingservice.UsageMeterSpec, error) {
-	meter := catalog.Meter{
+	meter := catalogrules.Meter{
 		Key:           pathKey,
 		EventType:     req.EventType,
 		ValueProperty: req.ValueProperty,
@@ -179,10 +179,10 @@ func usageMeterSpec(pathKey string, req AdminUsageMeterRequest) (billingservice.
 		Unit:          req.Unit,
 		GroupBy:       req.GroupBy,
 	}
-	if err := catalog.ValidateMeter("usage meter", &meter); err != nil {
+	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
 		return billingservice.UsageMeterSpec{}, err
 	}
-	if !catalog.BillingSupported(meter.Aggregation) {
+	if !catalogrules.BillingSupported(meter.Aggregation) {
 		return billingservice.UsageMeterSpec{}, errors.New("usage meter aggregation must be sum or count")
 	}
 	return billingservice.UsageMeterSpec{
@@ -203,19 +203,19 @@ func defaultUsageRateCardInput(
 	if err != nil || typedProductID.IsZero() {
 		return billingservice.UsageRateCardInput{}, errors.New("product_id required")
 	}
-	if err := catalog.ValidateUsagePrice("usage rate card", &req.Price); err != nil {
+	if err := catalogrules.ValidateUsagePrice("usage rate card", &req.Price); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
 	if err := moneyutil.ValidateCurrency(req.Price.Currency); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
-	if err := catalog.ValidateFilter("usage rate card", &req.Filter); err != nil {
+	if err := catalogrules.ValidateFilter("usage rate card", &req.Filter); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
-	if err := catalog.ValidateAllowance("usage rate card", req.Allowance); err != nil {
+	if err := catalogrules.ValidateAllowance("usage rate card", req.Allowance); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
-	if err := catalog.ValidateDimensions("usage rate card", meter.GroupBy, req.Filter, &req.Price); err != nil {
+	if err := catalogrules.ValidateDimensions("usage rate card", meter.GroupBy, req.Filter, &req.Price); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
 	productID := typedProductID.UUID()
@@ -229,7 +229,7 @@ func defaultUsageRateCardInput(
 }
 
 func loadAdminUsageMeter(r *httprequest.Request, rawKey string) (*billingservice.UsageMeterDTO, bool) {
-	meterKey := catalog.NormalizeKey(rawKey)
+	meterKey := catalogrules.NormalizeKey(rawKey)
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter key required")
 		return nil, false

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
@@ -29,7 +30,7 @@ func PutAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	meterKey := catalog.NormalizeKey(r.Param("meter_key"))
+	meterKey := catalogrules.NormalizeKey(r.Param("meter_key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return
@@ -94,7 +95,7 @@ func DeleteAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	meterKey := catalog.NormalizeKey(r.Param("meter_key"))
+	meterKey := catalogrules.NormalizeKey(r.Param("meter_key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return

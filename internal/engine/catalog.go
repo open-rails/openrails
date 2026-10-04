@@ -27,7 +27,7 @@ const declaredCatalogProviderWait = 10 * time.Second
 
 // declaredCatalog validates Config.Catalog before anything opens and returns
 // a private copy, so the host's later edits cannot reach a background retry.
-func declaredCatalog(cfg config.Config) (*billing.CatalogApplyParams, error) {
+func declaredCatalog(cfg config.Config) (*catalog.Application, error) {
 	if cfg.Catalog == nil {
 		return nil, nil
 	}
@@ -57,7 +57,7 @@ func declaredCatalog(cfg config.Config) (*billing.CatalogApplyParams, error) {
 // fails New; a transient database error is retried within ctx. A provider
 // reference not confirmed in time leaves the application to the background,
 // and Ready fails until it commits.
-func (e *Engine) applyDeclaredCatalog(ctx context.Context, params billing.CatalogApplyParams) error {
+func (e *Engine) applyDeclaredCatalog(ctx context.Context, params catalog.Application) error {
 	rt := e.App.Runtime
 	mid := rt.ConfiguredMerchant()
 	for attempt := 0; ; attempt++ {
@@ -84,7 +84,7 @@ func (e *Engine) applyDeclaredCatalog(ctx context.Context, params billing.Catalo
 // finishDeclaredCatalog retries the application until it commits, with no
 // provider deadline. A provider that now refuses a reference keeps Ready
 // failing with that reason until the reference is fixed.
-func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, params billing.CatalogApplyParams) {
+func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, params catalog.Application) {
 	rt := e.App.Runtime
 	rt.Go("declared catalog", func(ctx context.Context) {
 		last := ""

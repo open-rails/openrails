@@ -1,4 +1,4 @@
-package catalog
+package catalogrules
 
 import (
 	"fmt"
@@ -6,34 +6,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/catalog"
 )
 
-// Meter aggregations. Union of OpenMeter and Lago minus AVG and weighted_sum:
-// counters use sum/count; point-in-time gauges use max/min/latest/unique_count;
-// time-weighted "gauge" usage (GiB-months) is modeled as sum of host-emitted
-// unit-seconds + a price-level divide_by (the OpenMeter heartbeat approach),
-// so no native weighted_sum is needed.
-const (
-	AggregationSum         = "sum"
-	AggregationCount       = "count"
-	AggregationMax         = "max"
-	AggregationMin         = "min"
-	AggregationUniqueCount = "unique_count"
-	AggregationLatest      = "latest"
-)
+// Meter is a meter's definition: what it counts and how it aggregates.
+type Meter struct {
+	Key           string
+	EventType     string
+	ValueProperty string
+	Aggregation   catalog.Aggregation
+	Unit          string
+	GroupBy       map[string]string
+}
 
 var (
 	invalidKeyChars   = regexp.MustCompile(`[^a-z0-9_-]+`)
-	validAggregations = map[string]struct{}{
-		AggregationSum:         {},
-		AggregationCount:       {},
-		AggregationMax:         {},
-		AggregationMin:         {},
-		AggregationUniqueCount: {},
-		AggregationLatest:      {},
+	validAggregations = map[catalog.Aggregation]struct{}{
+		catalog.AggregationSum:         {},
+		catalog.AggregationCount:       {},
+		catalog.AggregationMax:         {},
+		catalog.AggregationMin:         {},
+		catalog.AggregationUniqueCount: {},
+		catalog.AggregationLatest:      {},
 	}
-	validRoundModes = map[string]struct{}{
-		"": {}, RoundHalfUp: {}, RoundUp: {}, RoundDown: {},
+	validRoundModes = map[catalog.Round]struct{}{
+		"": {}, catalog.RoundHalfUp: {}, catalog.RoundUp: {}, catalog.RoundDown: {},
 	}
 )
 
@@ -56,7 +54,7 @@ func ValidateMeter(where string, meter *Meter) error {
 	}
 	meter.EventType = strings.TrimSpace(meter.EventType)
 	meter.ValueProperty = strings.TrimSpace(meter.ValueProperty)
-	meter.Aggregation = strings.ToLower(strings.TrimSpace(meter.Aggregation))
+	meter.Aggregation = catalog.Aggregation(strings.ToLower(strings.TrimSpace(string(meter.Aggregation))))
 	meter.Unit = strings.TrimSpace(meter.Unit)
 	if meter.Aggregation == "" {
 		return fmt.Errorf("%s: aggregation is required", where)
@@ -64,10 +62,10 @@ func ValidateMeter(where string, meter *Meter) error {
 	if _, ok := validAggregations[meter.Aggregation]; !ok {
 		return fmt.Errorf("%s: aggregation must be one of sum/count/max/min/unique_count/latest", where)
 	}
-	if meter.Aggregation == AggregationSum && meter.ValueProperty == "" {
+	if meter.Aggregation == catalog.AggregationSum && meter.ValueProperty == "" {
 		return fmt.Errorf("%s: aggregation sum requires value_property", where)
 	}
-	if meter.Aggregation == AggregationCount && meter.ValueProperty != "" {
+	if meter.Aggregation == catalog.AggregationCount && meter.ValueProperty != "" {
 		return fmt.Errorf("%s: aggregation count must not set value_property", where)
 	}
 	groupBy := make(map[string]string, len(meter.GroupBy))
@@ -87,9 +85,9 @@ func ValidateMeter(where string, meter *Meter) error {
 }
 
 // BillingSupported reports whether the rater supports a meter's aggregation.
-func BillingSupported(aggregation string) bool {
-	switch strings.ToLower(strings.TrimSpace(aggregation)) {
-	case AggregationSum, AggregationCount:
+func BillingSupported(aggregation catalog.Aggregation) bool {
+	switch catalog.Aggregation(strings.ToLower(strings.TrimSpace(string(aggregation)))) {
+	case catalog.AggregationSum, catalog.AggregationCount:
 		return true
 	default:
 		return false
@@ -97,11 +95,11 @@ func BillingSupported(aggregation string) bool {
 }
 
 // ValidateRatePrice normalizes and validates one charge-model price.
-func ValidateRatePrice(where string, price *RatePrice) error {
+func ValidateRatePrice(where string, price *catalog.RatePrice) error {
 	if price == nil {
 		return fmt.Errorf("%s: price is required", where)
 	}
-	price.Model = strings.ToLower(strings.TrimSpace(price.Model))
+	price.Model = catalog.Model(strings.ToLower(strings.TrimSpace(string(price.Model))))
 	if price.Currency != "" {
 		price.Currency = strings.ToUpper(strings.TrimSpace(price.Currency))
 		if !validRateCurrency(price.Currency) {
@@ -127,18 +125,18 @@ func ValidateRatePrice(where string, price *RatePrice) error {
 	}
 
 	switch price.Model {
-	case ModelFlat:
+	case catalog.ModelFlat:
 		if price.Flat == nil {
 			return fmt.Errorf("%s: model flat requires flat block", where)
 		}
 		if price.Flat.Amount <= 0 {
 			return fmt.Errorf("%s: flat price requires a positive amount", where)
 		}
-	case ModelPerUnit:
+	case catalog.ModelPerUnit:
 		if price.PerUnit == nil {
 			return fmt.Errorf("%s: model per_unit requires per_unit block", where)
 		}
-		price.PerUnit.Round = strings.ToLower(strings.TrimSpace(price.PerUnit.Round))
+		price.PerUnit.Round = catalog.Round(strings.ToLower(strings.TrimSpace(string(price.PerUnit.Round))))
 		if _, ok := validRoundModes[price.PerUnit.Round]; !ok {
 			return fmt.Errorf("%s: round must be up, down or half_up, got %q", where, price.PerUnit.Round)
 		}
@@ -156,24 +154,24 @@ func ValidateRatePrice(where string, price *RatePrice) error {
 				return err
 			}
 		}
-	case ModelTiered:
+	case catalog.ModelTiered:
 		if price.Tiered == nil {
 			return fmt.Errorf("%s: model tiered requires tiered block", where)
 		}
-		price.Tiered.Mode = strings.ToLower(strings.TrimSpace(price.Tiered.Mode))
-		if price.Tiered.Mode != TierModeVolume && price.Tiered.Mode != TierModeGraduated {
+		price.Tiered.Mode = catalog.TierMode(strings.ToLower(strings.TrimSpace(string(price.Tiered.Mode))))
+		if price.Tiered.Mode != catalog.TierModeVolume && price.Tiered.Mode != catalog.TierModeGraduated {
 			return fmt.Errorf(
 				"%s: tiered mode must be %q or %q, got %q",
 				where,
-				TierModeVolume,
-				TierModeGraduated,
+				catalog.TierModeVolume,
+				catalog.TierModeGraduated,
 				price.Tiered.Mode,
 			)
 		}
 		if err := validateTiers(where, price.Tiered.Tiers); err != nil {
 			return err
 		}
-	case ModelPackage:
+	case catalog.ModelPackage:
 		if price.Package == nil {
 			return fmt.Errorf("%s: model package requires package block", where)
 		}
@@ -194,18 +192,18 @@ func ValidateRatePrice(where string, price *RatePrice) error {
 
 // ValidateUsagePrice rejects flat prices, which are not meter-linked usage
 // prices, after applying the canonical charge-model validation.
-func ValidateUsagePrice(where string, price *RatePrice) error {
+func ValidateUsagePrice(where string, price *catalog.RatePrice) error {
 	if err := ValidateRatePrice(where, price); err != nil {
 		return err
 	}
-	if price.Model == ModelFlat {
+	if price.Model == catalog.ModelFlat {
 		return fmt.Errorf("%s: flat prices cannot be attached to a meter", where)
 	}
 	return nil
 }
 
 // ValidateAllowance normalizes and validates included usage.
-func ValidateAllowance(where string, allowance *Allowance) error {
+func ValidateAllowance(where string, allowance *catalog.Allowance) error {
 	if allowance == nil {
 		return nil
 	}
@@ -264,7 +262,7 @@ func ValidateDimensions(
 	where string,
 	groupBy map[string]string,
 	filter map[string][]string,
-	price *RatePrice,
+	price *catalog.RatePrice,
 ) error {
 	if price != nil && price.PerUnit != nil && price.PerUnit.Matrix != nil {
 		dimension := price.PerUnit.Matrix.Dimension
@@ -303,7 +301,7 @@ func ParseDurationSpec(value string) (time.Duration, error) {
 	}
 }
 
-func validateTiers(where string, tiers []RateTier) error {
+func validateTiers(where string, tiers []catalog.RateTier) error {
 	if len(tiers) == 0 {
 		return fmt.Errorf("%s: tiered price requires tiers", where)
 	}
@@ -334,7 +332,7 @@ func validateTiers(where string, tiers []RateTier) error {
 	return nil
 }
 
-func validateMatrix(where string, matrix *Matrix) error {
+func validateMatrix(where string, matrix *catalog.Matrix) error {
 	matrix.Dimension = strings.TrimSpace(matrix.Dimension)
 	if matrix.Dimension == "" {
 		return fmt.Errorf("%s: matrix requires a dimension", where)
@@ -361,4 +359,33 @@ func validRateCurrency(value string) bool {
 		}
 	}
 	return true
+}
+
+// ValidateRateCard normalizes and validates one rate card: a flat fee with no
+// meter, or a usage price on a meter. Meters are checked to exist by the
+// caller.
+func ValidateRateCard(where string, rc *catalog.RateCard) error {
+	rc.Meter = NormalizeKey(rc.Meter)
+	rc.PaymentTerm = catalog.PaymentTerm(strings.ToLower(strings.TrimSpace(string(rc.PaymentTerm))))
+	switch rc.PaymentTerm {
+	case "", catalog.PaymentInAdvance, catalog.PaymentInArrears:
+	default:
+		return fmt.Errorf("%s: payment_term must be %q or %q", where, catalog.PaymentInAdvance, catalog.PaymentInArrears)
+	}
+	if err := ValidateRatePrice(where, &rc.Price); err != nil {
+		return err
+	}
+	if rc.Price.Model == catalog.ModelFlat {
+		if rc.Meter != "" {
+			return fmt.Errorf("%s: a flat rate card must not reference a meter", where)
+		}
+		if rc.Allowance != nil {
+			return fmt.Errorf("%s: a flat rate card cannot have an allowance", where)
+		}
+		return nil
+	}
+	if rc.Meter == "" {
+		return fmt.Errorf("%s: a %s rate card requires a meter", where, rc.Price.Model)
+	}
+	return ValidateAllowance(where, rc.Allowance)
 }

@@ -18,14 +18,15 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
 )
 
 // declaredFile is a host's catalog.yaml: a monthly membership granting key,
 // and a usage meter priced per event.
-func declaredFile(t *testing.T, key, title string, amount int64) *billing.CatalogApplyParams {
+func declaredFile(t *testing.T, key, title string, amount int64) *catalog.Application {
 	t.Helper()
-	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 meters:
 - key: %[1]s-events
   event_type: %[1]s.event
@@ -62,7 +63,7 @@ func (w *world) catalogRevision() int64 {
 
 // bootDeclared constructs one more process for w's merchant, outside the
 // harness, so New's own outcome stays observable.
-func (w *world) bootDeclared(ctx context.Context, catalog *billing.CatalogApplyParams) (*openrails.Client, error) {
+func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Client, error) {
 	return openrails.New(ctx, openrails.Config{
 		Schema: w.schema, River: openrails.RiverHostOwned, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps},
@@ -153,7 +154,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	// A catalog the engine refuses fails New with the reason and changes nothing.
 	w.stop()
 	refused := declaredFile(t, key, "Platinum", 12_000_000)
-	refused.Products[0].Prices[0].PSPs = billing.CatalogValue([]string{"nowhere"})
+	refused.Products[0].Prices[0].PSPs = catalog.Value([]string{"nowhere"})
 	_, err = w.bootDeclared(t.Context(), refused)
 	require.ErrorContains(t, err, "Config.Catalog")
 	require.ErrorContains(t, err, `"nowhere"`)
@@ -192,7 +193,7 @@ func TestDeclaredCatalogAwaitsItsProvider(t *testing.T) {
 	w.start()
 	w.stop()
 	key := "legacy-" + uuid.NewString()[:8]
-	params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
 - key: %[1]s
   display_name: Legacy

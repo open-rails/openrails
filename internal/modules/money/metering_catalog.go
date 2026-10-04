@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -46,7 +47,7 @@ type UsageMeter struct {
 	EventType          string                `json:"event_type,omitempty"`
 	EffectiveEventType string                `json:"effective_event_type"`
 	ValueProperty      string                `json:"value_property,omitempty"`
-	Aggregation        string                `json:"aggregation"`
+	Aggregation        catalog.Aggregation   `json:"aggregation"`
 	Unit               string                `json:"unit,omitempty"`
 	GroupBy            map[string]string     `json:"group_by"`
 	BillingSupported   bool                  `json:"billing_supported"`
@@ -143,7 +144,7 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*Usa
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	meterKey = catalog.NormalizeKey(meterKey)
+	meterKey = catalogrules.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return nil, fmt.Errorf("meter key required")
 	}
@@ -184,7 +185,7 @@ func (s *MoneyService) ListUsageMeterOverrides(
 	if s == nil || s.db == nil {
 		return page, fmt.Errorf("money service not initialized")
 	}
-	meterKey = catalog.NormalizeKey(meterKey)
+	meterKey = catalogrules.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return page, fmt.Errorf("meter key required")
 	}
@@ -302,7 +303,7 @@ func usageMeterFromRecord(row usageMeterRecord) (UsageMeter, error) {
 	meter.EventType = row.eventType
 	meter.EffectiveEventType = row.effectiveEventType
 	meter.ValueProperty = row.valueProperty
-	meter.Aggregation = row.aggregation
+	meter.Aggregation = catalog.Aggregation(row.aggregation)
 	meter.Unit = row.unit
 	meter.CreatedAt = row.createdAt
 	meter.UpdatedAt = row.updatedAt
@@ -315,7 +316,7 @@ func usageMeterFromRecord(row usageMeterRecord) (UsageMeter, error) {
 	if meter.GroupBy == nil {
 		meter.GroupBy = map[string]string{}
 	}
-	meter.BillingSupported = catalog.BillingSupported(meter.Aggregation)
+	meter.BillingSupported = catalogrules.BillingSupported(meter.Aggregation)
 	if row.cardID == nil {
 		return meter, nil
 	}
@@ -388,7 +389,7 @@ func meteringPageInt32(value int) int32 {
 	return int32(value)
 }
 
-func usageMeterSemanticsEqual(left, right catalog.Meter) bool {
+func usageMeterSemanticsEqual(left, right catalogrules.Meter) bool {
 	return left.EventType == right.EventType &&
 		left.ValueProperty == right.ValueProperty &&
 		left.Aggregation == right.Aggregation &&
@@ -400,8 +401,8 @@ func usageMeterHasActivity(
 	ctx context.Context,
 	tx pgx.Tx,
 	merchantID uuid.UUID,
-	existing catalog.Meter,
-	replacement catalog.Meter,
+	existing catalogrules.Meter,
+	replacement catalogrules.Meter,
 ) (bool, error) {
 	eventTypes := []string{effectiveMeterEventType(existing)}
 	replacementEventType := effectiveMeterEventType(replacement)
@@ -425,7 +426,7 @@ func usageMeterHasActivity(
 	return hasActivity, nil
 }
 
-func effectiveMeterEventType(meter catalog.Meter) string {
+func effectiveMeterEventType(meter catalogrules.Meter) string {
 	if meter.EventType != "" {
 		return meter.EventType
 	}
@@ -437,8 +438,8 @@ func loadUsageMeterForRateCard(
 	tx pgx.Tx,
 	merchantID uuid.UUID,
 	meterKey string,
-) (catalog.Meter, error) {
-	var meter catalog.Meter
+) (catalogrules.Meter, error) {
+	var meter catalogrules.Meter
 	row, err := gen.New(tx).GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
 		MerchantID: merchantID,
 		MeterKey:   meterKey,
@@ -452,7 +453,7 @@ func loadUsageMeterForRateCard(
 	meter.Key = row.Key
 	meter.EventType = row.EventType
 	meter.ValueProperty = row.ValueProperty
-	meter.Aggregation = row.Aggregation
+	meter.Aggregation = catalog.Aggregation(row.Aggregation)
 	meter.Unit = row.Unit
 	if err := json.Unmarshal(row.GroupBy, &meter.GroupBy); err != nil {
 		return meter, fmt.Errorf("decode usage meter group_by: %w", err)
@@ -460,7 +461,7 @@ func loadUsageMeterForRateCard(
 	if meter.GroupBy == nil {
 		meter.GroupBy = map[string]string{}
 	}
-	if err := catalog.ValidateMeter("usage meter", &meter); err != nil {
+	if err := catalogrules.ValidateMeter("usage meter", &meter); err != nil {
 		return meter, err
 	}
 	return meter, nil
@@ -537,7 +538,7 @@ func validateUsageMeterRateCardContracts(
 	ctx context.Context,
 	queries *gen.Queries,
 	merchantID uuid.UUID,
-	replacement catalog.Meter,
+	replacement catalogrules.Meter,
 ) error {
 	state, err := queries.GetDefaultUsageRateCardStateForUpdate(
 		ctx,
@@ -571,7 +572,7 @@ func validateUsageMeterRateCardContracts(
 		if err := json.Unmarshal(row.Price, &price); err != nil {
 			return fmt.Errorf("decode usage meter rate card price: %w", err)
 		}
-		if err := catalog.ValidateDimensions("usage rate card", replacement.GroupBy, filter, &price); err != nil {
+		if err := catalogrules.ValidateDimensions("usage rate card", replacement.GroupBy, filter, &price); err != nil {
 			return meterRateCardConflict(err)
 		}
 	}
@@ -602,7 +603,7 @@ func validateRateCardAsAllowanceSource(
 	ctx context.Context,
 	queries *gen.Queries,
 	merchantID uuid.UUID,
-	meter catalog.Meter,
+	meter catalogrules.Meter,
 	price catalog.RatePrice,
 ) error {
 	dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
@@ -622,7 +623,7 @@ func validateRateCardAsAllowanceSource(
 }
 
 func validateAllowanceSourceDependencies(
-	meter catalog.Meter,
+	meter catalogrules.Meter,
 	price catalog.RatePrice,
 	dependencyCurrencies []string,
 ) error {
@@ -637,8 +638,8 @@ func validateAllowanceSourceDependencies(
 	return nil
 }
 
-func validateAllowanceSourcePrice(meter catalog.Meter, price catalog.RatePrice, currency string) error {
-	if !catalog.BillingSupported(meter.Aggregation) {
+func validateAllowanceSourcePrice(meter catalogrules.Meter, price catalog.RatePrice, currency string) error {
+	if !catalogrules.BillingSupported(meter.Aggregation) {
 		return allowanceSourceInvalid(fmt.Errorf(
 			"source meter %q aggregation %q is not supported for billing",
 			meter.Key,

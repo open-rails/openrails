@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // A host's catalog.yaml is the desired state (#1125): applied on every boot
@@ -22,8 +23,8 @@ func TestCatalogApplicationDeclarative(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.start()
 	key := "decl-" + uuid.NewString()[:8]
-	file := func(title string, amount int64) *billing.CatalogApplyParams {
-		params, err := billing.ParseCatalogApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+	file := func(title string, amount int64) *catalog.Application {
+		params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
 - key: %[1]s
   display_name: %[2]s
@@ -40,7 +41,7 @@ products:
 		require.True(t, params.Declarative())
 		return params
 	}
-	apply := func(tp topology, params *billing.CatalogApplyParams) *billing.CatalogApplicationReceipt {
+	apply := func(tp topology, params *catalog.Application) *billing.CatalogApplicationReceipt {
 		t.Helper()
 		receipt, err := w.client[tp].Catalog.Apply(t.Context(), params)
 		require.NoError(t, err)
@@ -104,12 +105,12 @@ products:
 	require.True(t, apply(remote, file("Gold", 12_000_000)).Replayed, "converged again, the file replays")
 
 	// Explicit identity keeps the guarded contract and both conflicts.
-	guarded := func(id string, expected int64, title string) *billing.CatalogApplyParams {
+	guarded := func(id string, expected int64, title string) *catalog.Application {
 		params := file(title, 12_000_000)
 		params.ApplicationID, params.ExpectedRevision = id, &expected
 		return params
 	}
-	conflict := func(params *billing.CatalogApplyParams, code string) {
+	conflict := func(params *catalog.Application, code string) {
 		t.Helper()
 		_, err := w.client[remote].Catalog.Apply(t.Context(), params)
 		var status *billing.StatusError

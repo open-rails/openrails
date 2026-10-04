@@ -11,7 +11,7 @@ type UsageMeterDTO struct {
 	EventType          string                   `json:"event_type,omitempty"`
 	EffectiveEventType string                   `json:"effective_event_type"`
 	ValueProperty      string                   `json:"value_property,omitempty"`
-	Aggregation        string                   `json:"aggregation"`
+	Aggregation        catalog.Aggregation      `json:"aggregation"`
 	Unit               string                   `json:"unit,omitempty"`
 	GroupBy            map[string]string        `json:"group_by"`
 	BillingSupported   bool                     `json:"billing_supported"`
@@ -45,20 +45,20 @@ type UsageMeterOverrideDTO struct {
 }
 
 type UsageMeterSpec struct {
-	Key           string            `json:"key"`
-	EventType     string            `json:"event_type"`
-	ValueProperty string            `json:"value_property"`
-	Aggregation   string            `json:"aggregation"` // sum | count
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
+	Key           string              `json:"key"`
+	EventType     string              `json:"event_type"`
+	ValueProperty string              `json:"value_property"`
+	Aggregation   catalog.Aggregation `json:"aggregation"`
+	Unit          string              `json:"unit,omitempty"`
+	GroupBy       map[string]string   `json:"group_by,omitempty"`
 }
 
 type UsageMeterRequest struct {
-	EventType     string            `json:"event_type"`
-	ValueProperty string            `json:"value_property"`
-	Aggregation   string            `json:"aggregation"`
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
+	EventType     string              `json:"event_type"`
+	ValueProperty string              `json:"value_property"`
+	Aggregation   catalog.Aggregation `json:"aggregation"`
+	Unit          string              `json:"unit,omitempty"`
+	GroupBy       map[string]string   `json:"group_by,omitempty"`
 }
 
 type DefaultUsageRateCardRequest struct {
