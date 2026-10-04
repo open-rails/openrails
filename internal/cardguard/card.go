@@ -235,10 +235,11 @@ func (c *Card) Expiry() string {
 	return ""
 }
 
-// Unseal hands the number and security code to use, for the one gateway call
+// Unseal hands c's number and security code to use, for the one gateway call
 // that vaults the card. The slices are the card's own: use must not keep them.
-// It reports false once the card was wiped.
-func (c *Card) Unseal(use func(number, cvc []byte, month, year int)) bool {
+// It reports false once the card was wiped. A function of this internal
+// package, not a method, so billing.Card offers no way to read a card.
+func Unseal(c *Card, use func(number, cvc []byte, month, year int)) bool {
 	s := c.secret()
 	if s == nil || len(s.number) == 0 {
 		return false

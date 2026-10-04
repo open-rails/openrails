@@ -262,10 +262,10 @@ func (t *CardVaultThrough) ExecuteCardVault(ctx context.Context, req paymentmeth
 }
 
 func intentEvidenceInt(raw []byte, key string) int {
-	var evidence map[string]any
+	var evidence map[string]json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
 		return 0
 	}
-	n, _ := evidence[key].(float64)
-	return int(n)
+	n, _ := strconv.Atoi(string(evidence[key]))
+	return n
 }

@@ -32,6 +32,8 @@ func testCard(t *testing.T) *Card {
 	return &card
 }
 
+type probeKey struct{}
+
 type cardHolder struct {
 	Card    *Card
 	Value   Card
@@ -61,7 +63,7 @@ func TestCardRedactsItself(t *testing.T) {
 	require.NoError(t, err)
 
 	rendered := []string{logs.String(), string(encoded), string(textual), card.String(), card.GoString(),
-		fmt.Sprint(context.WithValue(WithCard(context.Background(), card), struct{}{}, "x"))}
+		fmt.Sprint(context.WithValue(WithCard(context.Background(), card), probeKey{}, "x"))}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%d", "%x", "%X", "%T%v"} {
 		rendered = append(rendered, fmt.Sprintf(verb, card), fmt.Sprintf(verb, *card), fmt.Sprintf(verb, holder), fmt.Sprintf(verb, &holder),
 			fmt.Sprintf(verb, []*Card{card}), fmt.Sprintf(verb, map[string]Card{"k": *card}))
@@ -84,7 +86,7 @@ func TestCardDecodesAndWipes(t *testing.T) {
 	require.Equal(t, []string{"visa", "1111", "10/27"}, []string{card.Brand(), card.LastFour(), card.Expiry()})
 
 	var number, cvc []byte
-	require.True(t, card.Unseal(func(n, c []byte, month, year int) {
+	require.True(t, Unseal(card, func(n, c []byte, month, year int) {
 		number, cvc = n, c
 		require.Equal(t, []any{testNumber, testCVC, 10, 2027}, []any{string(n), string(c), month, year})
 	}))
@@ -92,12 +94,12 @@ func TestCardDecodesAndWipes(t *testing.T) {
 	card.Zero()
 	require.Equal(t, make([]byte, 16), number, "the number's own bytes are wiped")
 	require.Equal(t, make([]byte, 3), cvc)
-	require.False(t, card.Unseal(func([]byte, []byte, int, int) { t.Fatal("a wiped card is not read") }))
+	require.False(t, Unseal(card, func([]byte, []byte, int, int) { t.Fatal("a wiped card is not read") }))
 	require.Equal(t, []string{"visa", "1111", "10/27"}, []string{card.Brand(), card.LastFour(), card.Expiry()})
 
 	var none *Card
 	none.Zero()
-	require.False(t, none.Unseal(nil))
+	require.False(t, Unseal(none, nil))
 	require.Empty(t, none.LastFour()+none.Brand()+none.Expiry())
 	require.Nil(t, CardFrom(WithCard(context.Background(), nil)))
 	require.Same(t, card, CardFrom(WithCard(context.Background(), card)))
@@ -130,7 +132,7 @@ func TestCardRefusalsNeverEchoInput(t *testing.T) {
 		require.Equal(t, field, refused.Field, body)
 		require.NotContains(t, err.Error(), "4111")
 		require.NotContains(t, refused.ClientSafeBindMessage(), "999")
-		require.False(t, card.Unseal(func([]byte, []byte, int, int) {}), "a refused card holds nothing")
+		require.False(t, Unseal(&card, func([]byte, []byte, int, int) {}), "a refused card holds nothing")
 	}
 
 	// Years may be two digits; month and year may be numeric strings.

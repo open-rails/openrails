@@ -78,7 +78,7 @@ func (c *NMIClient) vaultCard(ctx context.Context, action, vaultID, billingID st
 	body := make([]byte, 0, len(encoded)+cardFieldsCap)
 	body = append(body, encoded...)
 	defer func() { clear(body[:cap(body)]) }()
-	if !card.Unseal(func(number, cvc []byte, month, year int) {
+	if !cardguard.Unseal(card, func(number, cvc []byte, month, year int) {
 		body = append(body, "&ccnumber="...)
 		body = append(body, number...)
 		body = append(body, "&ccexp="...)
