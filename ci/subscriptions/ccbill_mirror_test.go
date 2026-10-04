@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // #1094: every CCBill post applies one lifecycle event to the locked row.
@@ -121,7 +123,7 @@ func TestCCBillRenewalAfterRefundIsRefundReview(t *testing.T) {
 	require.False(t, m.c.entitled(m.ent))
 	charge := m.payment(txn)
 	require.NotNil(t, charge, "the charge is on the ledger, not dropped")
-	require.Equal(t, "succeeded", charge.Status)
+	require.Equal(t, billing.PaymentSucceeded, charge.Status)
 	var review string
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(metadata->>'refund_review', '') FROM billing.payments WHERE transaction_id = $1`), txn).Scan(&review))
 	require.NotEmpty(t, review, "the charge waits for refund review")
@@ -170,7 +172,7 @@ func TestCCBillExpiryRacingRenewal(t *testing.T) {
 			sub := w.subscription(embedded, m.sub)
 			require.Equal(t, "active", sub.Status, "the paid renewal wins")
 			require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "paid through %v", sub.CurrentPeriodEndsAt)
-			require.Equal(t, "succeeded", m.payment(txn).Status)
+			require.Equal(t, billing.PaymentSucceeded, m.payment(txn).Status)
 			require.True(t, m.c.entitled(m.ent))
 			require.Zero(t, w.engineCharges())
 		})

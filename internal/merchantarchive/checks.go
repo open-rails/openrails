@@ -183,7 +183,7 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 				return err
 			}
 			if c, ok := wanted[name]; ok {
-				expected := map[string]string{"bytea": "bytea", "uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz"}[c.Type]
+				expected := map[string]string{"bytea": "bytea", "uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "smallint": "int2", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz"}[c.Type]
 				if strings.HasPrefix(c.Type, "character varying(") {
 					expected = "varchar"
 					n, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(c.Type, "character varying("), ")"), 10, 32)

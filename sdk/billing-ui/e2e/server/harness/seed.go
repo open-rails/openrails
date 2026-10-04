@@ -213,7 +213,7 @@ func (r *Runtime) SeedBilling(ctx context.Context, userID string) (Seeded, error
 		Customers:  []billing.DeclaredCustomer{{Customer: customer}},
 		PaymentMethods: []billing.DeclaredPaymentMethod{{
 			Customer: customer, Rail: PSPRail, RailCustomerRef: railCustomer, RailMethodRef: railMethod,
-			LastFour: "4242", CardType: "visa", ExpiryDate: "1230", CreatedAt: started,
+			Card: &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("4242"), ExpMonth: ptr(12), ExpYear: ptr(2030)}, CreatedAt: started,
 		}},
 		Subscriptions: []billing.DeclaredSubscription{{
 			SourceID: railSub, Customer: customer, Price: price, Rail: PSPRail, RailSubscriptionID: railSub,
@@ -247,9 +247,15 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	methods, err := r.Client.ListPaymentMethods(ctx, customerID, billing.PageOptions{Limit: 100})
+	customer, err := billing.ParseCustomerID(customerID)
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	return CustomerBilling{Subscriptions: subs.Data, PaymentMethods: methods.Data, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
+	methods, err := r.Client.ListPaymentMethods(ctx, customer, billing.PageRequest{Limit: 100})
+	if err != nil {
+		return CustomerBilling{}, err
+	}
+	return CustomerBilling{Subscriptions: subs.Data, PaymentMethods: methods.Items, Sales: r.NMI.Sales(), Vaults: len(r.NMI.Vaults())}, nil
 }
+
+func ptr[T any](v T) *T { return &v }

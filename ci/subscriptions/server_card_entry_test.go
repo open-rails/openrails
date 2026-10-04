@@ -173,11 +173,14 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	_, message = errorOf(body)
 	require.Contains(t, message, refusal)
 
-	// The fields a card number used to be pasted into are refused as before.
+	// A field a card number used to be pasted into is an unknown field, named
+	// without its value.
 	status, body = c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "card_number": entryVisa})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	_, message = errorOf(body)
-	require.Equal(t, "card_number must be tokenized by the payment provider before calling OpenRails", message)
+	code, message := errorOf(body)
+	require.Equal(t, []string{"unknown_field", "unknown field card_number"}, []string{code, message})
+	raw, _ := json.Marshal(body)
+	require.NotContains(t, string(raw), "4111")
 
 	require.Len(t, w.nmi.Calls(), writes, "no refused card reached the gateway")
 	require.Empty(t, w.cardVaults("add_customer"))

@@ -232,7 +232,6 @@ export const invoiceSchema = z.object({
 })
 export type Invoice = z.infer<typeof invoiceSchema>
 
-
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>
 
