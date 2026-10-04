@@ -13,7 +13,7 @@ INSERT INTO billing.subscriptions (
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::billing.subscription_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending'),
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
     sqlc.arg(rail), sqlc.arg(rail_subscription_id),
@@ -34,7 +34,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
-    status = sqlc.arg(status)::billing.subscription_status,
+    status = sqlc.arg(status),
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
     current_period_starts_at = sqlc.narg(current_period_starts_at),
@@ -69,7 +69,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
-    status = sqlc.arg(status)::billing.subscription_status,
+    status = sqlc.arg(status),
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
     current_period_starts_at = sqlc.narg(current_period_starts_at),
@@ -386,7 +386,7 @@ LIMIT 1;
 -- name: ListMigratableSubscriptionsByPriceID :many
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = sqlc.arg(price_id)::uuid
-  AND sub.status IN ('active'::billing.subscription_status, 'past_due'::billing.subscription_status, 'awaiting_method'::billing.subscription_status)
+  AND sub.status IN ('active', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
 

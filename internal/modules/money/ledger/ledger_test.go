@@ -62,7 +62,7 @@ func TestLedgerVocabularyMatchesSchema(t *testing.T) {
 	require.Subset(t, sorted(ledger.AllTransferTypes), sorted(ledger.LotOnceTransferTypes))
 	require.Equal(t, sqlVocabulary(t, schema, `CONSTRAINT ledger_accounts_type_check CHECK`), sorted([]ledger.AccountType{
 		ledger.CustomerBalance, ledger.PlatformRevenue, ledger.RailClearing, ledger.ArrearsLiability,
-		ledger.ExpiredCredits, ledger.RevokedCredits, ledger.FXLiquidity, ledger.World,
+		ledger.ExpiredCredits, ledger.RevokedCredits,
 	}))
 }
 

@@ -5,104 +5,11 @@
 package gen
 
 import (
-	"database/sql/driver"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
-
-type BillingPaymentStatus string
-
-const (
-	BillingPaymentStatusPending   BillingPaymentStatus = "pending"
-	BillingPaymentStatusCompleted BillingPaymentStatus = "completed"
-	BillingPaymentStatusFailed    BillingPaymentStatus = "failed"
-	BillingPaymentStatusRefunded  BillingPaymentStatus = "refunded"
-)
-
-func (e *BillingPaymentStatus) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = BillingPaymentStatus(s)
-	case string:
-		*e = BillingPaymentStatus(s)
-	default:
-		return fmt.Errorf("unsupported scan type for BillingPaymentStatus: %T", src)
-	}
-	return nil
-}
-
-type NullBillingPaymentStatus struct {
-	BillingPaymentStatus BillingPaymentStatus
-	Valid                bool // Valid is true if BillingPaymentStatus is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullBillingPaymentStatus) Scan(value interface{}) error {
-	if value == nil {
-		ns.BillingPaymentStatus, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.BillingPaymentStatus.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullBillingPaymentStatus) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.BillingPaymentStatus), nil
-}
-
-// The canonical LOCAL subscription lifecycle. One question: will we attempt to rebill? pending = not started; active/past_due = yes; unknown = provider must tell us; cancelled = never again, with cancel_type carrying why (user|merchant|expired|chargeback). Provider vocabulary is mapped onto this set at the boundary — a remote "expired" becomes cancelled/cancel_type=expired, never a local status.
-type BillingSubscriptionStatus string
-
-const (
-	BillingSubscriptionStatusPending        BillingSubscriptionStatus = "pending"
-	BillingSubscriptionStatusActive         BillingSubscriptionStatus = "active"
-	BillingSubscriptionStatusPastDue        BillingSubscriptionStatus = "past_due"
-	BillingSubscriptionStatusAwaitingMethod BillingSubscriptionStatus = "awaiting_method"
-	BillingSubscriptionStatusCancelled      BillingSubscriptionStatus = "cancelled"
-	BillingSubscriptionStatusUnverified     BillingSubscriptionStatus = "unverified"
-)
-
-func (e *BillingSubscriptionStatus) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = BillingSubscriptionStatus(s)
-	case string:
-		*e = BillingSubscriptionStatus(s)
-	default:
-		return fmt.Errorf("unsupported scan type for BillingSubscriptionStatus: %T", src)
-	}
-	return nil
-}
-
-type NullBillingSubscriptionStatus struct {
-	BillingSubscriptionStatus BillingSubscriptionStatus
-	Valid                     bool // Valid is true if BillingSubscriptionStatus is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullBillingSubscriptionStatus) Scan(value interface{}) error {
-	if value == nil {
-		ns.BillingSubscriptionStatus, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.BillingSubscriptionStatus.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullBillingSubscriptionStatus) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.BillingSubscriptionStatus), nil
-}
 
 // One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
 type BillingAccountUpdaterBatch struct {
@@ -464,7 +371,7 @@ type BillingFreeloaderEpisode struct {
 	Days          float64
 }
 
-// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.
+// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.
 type BillingGrant struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -474,7 +381,7 @@ type BillingGrant struct {
 	SourceType string
 	SourceID   string
 	PaymentID  *uuid.UUID
-	// Grant roots a grant; revoke/expire/supersede/adjust are new rows referencing it via supersedes_id. The grant row is never updated.
+	// Grant roots a grant; revoke/expire/supersede are new rows referencing it via supersedes_id. The grant row is never updated.
 	Event        string
 	SupersedesID *uuid.UUID
 	// Product entitlements/credits spec captured at issuance so derive-2 (grant->projection) is a pure function and replay is exact + historical.
@@ -643,13 +550,13 @@ type BillingInvokerSpendLimit struct {
 	Provenance string
 }
 
-// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).
+// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits).
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.
 	CustomerID *uuid.UUID
-	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits / fx_liquidity / world are merchant-wide system accounts.
+	// Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer's outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits are merchant-wide system accounts.
 	AccountType string
 	Currency    string
 	// TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.
@@ -946,7 +853,7 @@ type BillingPayment struct {
 	Amount        int64
 	ListAmount    int64
 	Currency      string
-	Status        BillingPaymentStatus
+	Status        string
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
 	SubscriptionID           *uuid.UUID
 	RefundedPaymentID        *uuid.UUID
@@ -1506,8 +1413,9 @@ type BillingSubscription struct {
 	ID      uuid.UUID
 	PriceID *uuid.UUID
 	// Denormalized product ID for efficient user+product lookups without joining prices
-	ProductID             uuid.UUID
-	Status                BillingSubscriptionStatus
+	ProductID uuid.UUID
+	// Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; cancelled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.
+	Status                string
 	Rail                  string
 	CollectionPolicy      string
 	RailSubscriptionID    string
@@ -1573,8 +1481,8 @@ type BillingSubscriptionStatusTransition struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
 	SubscriptionID uuid.UUID
-	FromStatus     *BillingSubscriptionStatus
-	ToStatus       BillingSubscriptionStatus
+	FromStatus     *string
+	ToStatus       string
 	// The subscription's cancel_type at transition time (meaningful for to_status=cancelled).
 	CancelType      *string
 	OccurredAt      time.Time

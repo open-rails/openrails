@@ -14,27 +14,6 @@ SET client_min_messages = warning;
 CREATE SCHEMA IF NOT EXISTS billing;
 
 -- ---------------------------------------------------------------------------
--- Types
--- ---------------------------------------------------------------------------
-
-CREATE TYPE billing.payment_status AS ENUM (
-    'pending',
-    'completed',
-    'failed',
-    'refunded'
-);
-
-CREATE TYPE billing.subscription_status AS ENUM (
-    'pending',
-    'active',
-    'past_due',
-    'awaiting_method',
-    'cancelled',
-    'unverified'
-);
-COMMENT ON TYPE billing.subscription_status IS 'The canonical LOCAL subscription lifecycle. One question: will we attempt to rebill? pending = not started; active/past_due = yes; unknown = provider must tell us; cancelled = never again, with cancel_type carrying why (user|merchant|expired|chargeback). Provider vocabulary is mapped onto this set at the boundary — a remote "expired" becomes cancelled/cancel_type=expired, never a local status.';
-
--- ---------------------------------------------------------------------------
 -- Shared functions
 -- ---------------------------------------------------------------------------
 
@@ -1690,7 +1669,7 @@ CREATE FUNCTION billing.subscriptions_track_unverified() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
-    current_status billing.subscription_status;
+    current_status text;
     entered_at timestamp with time zone;
 BEGIN
     IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NULL; END IF;
@@ -1785,7 +1764,7 @@ CREATE TABLE billing.subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
     price_id uuid,
     product_id uuid NOT NULL,
-    status billing.subscription_status DEFAULT 'pending'::billing.subscription_status NOT NULL,
+    status text DEFAULT 'pending' NOT NULL,
     rail text NOT NULL,
     collection_policy text DEFAULT 'provider' NOT NULL,
     rail_subscription_id text DEFAULT ''::text NOT NULL,
@@ -1820,17 +1799,20 @@ CREATE TABLE billing.subscriptions (
     row_version bigint DEFAULT 0 NOT NULL,
     dunning_policy jsonb,
     CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id='') OR rail='solana')),
-    CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::billing.subscription_status) OR (cancelled_at IS NOT NULL))),
-    CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::billing.subscription_status) OR (cancel_type IS NOT NULL))),
-    CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::billing.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
+    CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled') OR (cancelled_at IS NOT NULL))),
+    CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled') OR (cancel_type IS NOT NULL))),
+    CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled') OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
     CONSTRAINT chk_ended_not_before_cancelled CHECK (((ended_at IS NULL) OR (cancelled_at IS NULL) OR (ended_at >= cancelled_at))),
-    CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due'::billing.subscription_status) OR (current_period_ends_at IS NOT NULL))),
+    CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due') OR (current_period_ends_at IS NOT NULL))),
     CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at))),
     CONSTRAINT chk_subscriptions_transient_retries CHECK (transient_retries >= 0),
     CONSTRAINT subscriptions_collection_policy_check CHECK (collection_policy IN ('provider', 'nmi_schedule', 'engine')),
+    CONSTRAINT subscriptions_status_check CHECK (status IN ('pending', 'active', 'past_due', 'awaiting_method', 'cancelled', 'unverified')),
+    CONSTRAINT subscriptions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade', 'engine_takeover')),
     CONSTRAINT subscriptions_nmi_schedule_rail_check CHECK ((collection_policy = 'nmi_schedule') = (rail = 'nmi' AND collection_policy <> 'engine'))
 );
 COMMENT ON TABLE billing.subscriptions IS 'Core subscription records tracking user billing relationships';
+COMMENT ON COLUMN billing.subscriptions.status IS 'Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; cancelled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.';
 COMMENT ON COLUMN billing.subscriptions.product_id IS 'Denormalized product ID for efficient user+product lookups without joining prices';
 COMMENT ON COLUMN billing.subscriptions.scheduled_price_id IS 'Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.';
 COMMENT ON COLUMN billing.subscriptions.tier_group IS 'Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs uq_subscriptions_customer_tier_group_active: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.';
@@ -1845,10 +1827,10 @@ ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_merchant_id_id_key UNIQUE (merchant_id, id);
 
 CREATE INDEX idx_subscriptions_customer ON billing.subscriptions USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_subscriptions_customer_active_created ON billing.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active'::billing.subscription_status);
+CREATE INDEX idx_subscriptions_customer_active_created ON billing.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active');
 CREATE INDEX idx_subscriptions_destructive_run ON billing.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_subscriptions_engine_due ON billing.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
-CREATE INDEX idx_subscriptions_due_dunning ON billing.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::billing.subscription_status) AND (next_retry_at IS NOT NULL));
+CREATE INDEX idx_subscriptions_due_dunning ON billing.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due') AND (next_retry_at IS NOT NULL));
 CREATE INDEX idx_subscriptions_gateway_order_id ON billing.subscriptions USING btree (merchant_id, rail, ((gateway_response ->> 'order_id'::text))) WHERE ((gateway_response ->> 'order_id'::text) IS NOT NULL);
 CREATE INDEX idx_subscriptions_grace_ends_at ON billing.subscriptions USING btree (grace_ends_at) WHERE (grace_ends_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_merchant_cancelled ON billing.subscriptions USING btree (merchant_id, cancelled_at) WHERE (cancelled_at IS NOT NULL);
@@ -1857,7 +1839,7 @@ CREATE INDEX idx_subscriptions_merchant_id ON billing.subscriptions USING btree 
 CREATE INDEX idx_subscriptions_merchant_started ON billing.subscriptions USING btree (merchant_id, started_at);
 CREATE INDEX idx_subscriptions_next_retry_at ON billing.subscriptions USING btree (next_retry_at) WHERE (next_retry_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_payment_method_id ON billing.subscriptions USING btree (payment_method_id);
-CREATE INDEX idx_subscriptions_period_overdue ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active'::billing.subscription_status);
+CREATE INDEX idx_subscriptions_period_overdue ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active');
 CREATE INDEX idx_subscriptions_price_id ON billing.subscriptions USING btree (price_id);
 CREATE INDEX idx_subscriptions_product_id ON billing.subscriptions USING btree (product_id);
 CREATE INDEX idx_subscriptions_psp ON billing.subscriptions USING btree (psp_id);
@@ -1912,14 +1894,17 @@ CREATE TABLE billing.subscription_status_transitions (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     subscription_id uuid NOT NULL,
-    from_status billing.subscription_status,
-    to_status billing.subscription_status NOT NULL,
+    from_status text,
+    to_status text NOT NULL,
     cancel_type text,
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     decision text,
     from_paid_through timestamp with time zone,
     to_paid_through timestamp with time zone,
-    CONSTRAINT chk_sst_real_transition CHECK (from_status IS DISTINCT FROM to_status OR from_paid_through IS DISTINCT FROM to_paid_through)
+    CONSTRAINT chk_sst_real_transition CHECK (from_status IS DISTINCT FROM to_status OR from_paid_through IS DISTINCT FROM to_paid_through),
+    CONSTRAINT subscription_status_transitions_from_status_check CHECK (from_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'cancelled', 'unverified')),
+    CONSTRAINT subscription_status_transitions_to_status_check CHECK (to_status IN ('pending', 'active', 'past_due', 'awaiting_method', 'cancelled', 'unverified')),
+    CONSTRAINT subscription_status_transitions_cancel_type_check CHECK (cancel_type IN ('user', 'merchant', 'expired', 'chargeback', 'upgrade', 'engine_takeover'))
 );
 COMMENT ON TABLE billing.subscription_status_transitions IS 'Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.';
 COMMENT ON COLUMN billing.subscription_status_transitions.cancel_type IS 'The subscription''s cancel_type at transition time (meaningful for to_status=cancelled).';
@@ -2052,7 +2037,8 @@ CREATE TABLE billing.solana_subscriptions (
     next_pull_at timestamp with time zone NOT NULL,
     status text DEFAULT 'active'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT solana_subscriptions_status_check CHECK (status IN ('active', 'cancelled', 'expired'))
 );
 COMMENT ON TABLE billing.solana_subscriptions IS 'On-chain mirror of one Solana subscription: its program accounts, mint and next pull.';
 
@@ -2102,7 +2088,7 @@ CREATE TABLE billing.payments (
     amount bigint NOT NULL,
     list_amount bigint NOT NULL,
     currency text NOT NULL,
-    status billing.payment_status DEFAULT 'completed'::billing.payment_status NOT NULL,
+    status text NOT NULL,
     subscription_id uuid,
     refunded_payment_id uuid,
     discount_code text,
@@ -2126,6 +2112,7 @@ CREATE TABLE billing.payments (
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     money_movement text DEFAULT 'none'::text NOT NULL,
+    CONSTRAINT payments_status_check CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
     CONSTRAINT chk_payment_not_future CHECK ((purchased_at <= (now() + '00:05:00'::interval))),
     CONSTRAINT chk_payments_attempt_kind CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text])))),
     CONSTRAINT chk_payments_money_movement CHECK ((money_movement = ANY (ARRAY['rail'::text, 'none'::text]))),
@@ -2214,6 +2201,7 @@ CREATE TABLE billing.checkout_sessions (
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     routing_reason jsonb,
     CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
+    CONSTRAINT checkout_sessions_status_check CHECK (status IN ('created', 'requires_action', 'succeeded', 'failed', 'expired', 'canceled')),
     CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text, 'payment_method'::text]))),
     CONSTRAINT checkout_sessions_monetary_terms CHECK (
       (mode = 'payment_method' AND price_id IS NULL AND amount IS NULL AND currency IS NULL AND payment_id IS NULL AND subscription_id IS NULL)
@@ -2559,11 +2547,11 @@ CREATE TABLE billing.ledger_accounts (
     debits_posted bigint DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT ledger_accounts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
-    CONSTRAINT ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text, 'fx_liquidity'::text, 'world'::text])))
+    CONSTRAINT ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text])))
 );
-COMMENT ON TABLE billing.ledger_accounts IS 'Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).';
+COMMENT ON TABLE billing.ledger_accounts IS 'Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits).';
 COMMENT ON COLUMN billing.ledger_accounts.customer_id IS 'NULL for system accounts (one per merchant+currency); set for per-customer balance accounts.';
-COMMENT ON COLUMN billing.ledger_accounts.account_type IS 'Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer''s outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits / fx_liquidity / world are merchant-wide system accounts.';
+COMMENT ON COLUMN billing.ledger_accounts.account_type IS 'Account role within a (merchant, currency) ledger. arrears_liability is PER-CUSTOMER: its negated balance is that payer''s outstanding owed, read O(1) on the admission path. customer_balance is per-customer; processor_clearing / platform_revenue / expired_credits / revoked_credits are merchant-wide system accounts.';
 COMMENT ON COLUMN billing.ledger_accounts.debits_must_not_exceed_credits IS 'TB sign flag: balance (credits-debits) may not go below zero (minus an applier-supplied arrears floor). Set on customer_balance.';
 COMMENT ON COLUMN billing.ledger_accounts.credits_posted IS 'Maintained counter: posted credits, for O(1) balance reads.';
 COMMENT ON COLUMN billing.ledger_accounts.debits_posted IS 'Maintained counter: posted debits, for O(1) balance reads.';
@@ -2732,15 +2720,15 @@ CREATE TABLE billing.grants (
     CONSTRAINT grants_amount_positive CHECK (((amount IS NULL) OR (amount > 0))),
     CONSTRAINT grants_credit_amount CHECK (((kind <> 'credit'::text) OR ((amount IS NOT NULL) AND (currency IS NOT NULL)))),
     CONSTRAINT grants_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
-    CONSTRAINT grants_event_check CHECK ((event = ANY (ARRAY['grant'::text, 'revoke'::text, 'expire'::text, 'supersede'::text, 'adjust'::text]))),
+    CONSTRAINT grants_event_check CHECK ((event = ANY (ARRAY['grant'::text, 'revoke'::text, 'expire'::text, 'supersede'::text]))),
     CONSTRAINT grants_event_supersedes CHECK (((event = 'grant'::text) = (supersedes_id IS NULL))),
     CONSTRAINT grants_kind_check CHECK ((kind = ANY (ARRAY['entitlement'::text, 'ownership'::text, 'credit'::text]))),
     CONSTRAINT grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text]))),
     CONSTRAINT grants_termination_no_window CHECK (((event = 'grant'::text) OR (ends_at IS NULL))),
     CONSTRAINT grants_valid_window CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
 );
-COMMENT ON TABLE billing.grants IS 'Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.';
-COMMENT ON COLUMN billing.grants.event IS 'Grant roots a grant; revoke/expire/supersede/adjust are new rows referencing it via supersedes_id. The grant row is never updated.';
+COMMENT ON TABLE billing.grants IS 'Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.';
+COMMENT ON COLUMN billing.grants.event IS 'Grant roots a grant; revoke/expire/supersede are new rows referencing it via supersedes_id. The grant row is never updated.';
 COMMENT ON COLUMN billing.grants.spec_snapshot IS 'Product entitlements/credits spec captured at issuance so derive-2 (grant->projection) is a pure function and replay is exact + historical.';
 
 ALTER TABLE ONLY billing.grants
@@ -3603,7 +3591,7 @@ CREATE TABLE billing.invoices (
     CONSTRAINT invoices_collection_failure_count_nonneg CHECK ((collection_failure_count >= 0)),
     CONSTRAINT invoices_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text]))),
     CONSTRAINT invoices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
-    CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text, 'finalized'::text])))
+    CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text])))
 );
 COMMENT ON TABLE billing.invoices IS 'Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.';
 COMMENT ON COLUMN billing.invoices.amount_due IS 'Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.';
@@ -3949,8 +3937,8 @@ CREATE VIEW billing.freeloader_episodes WITH (security_invoker='true') AS
             GREATEST(w.start_at,
                 CASE
                     WHEN (w.source_type = 'subscription'::text) THEN COALESCE(w.paid_through, '-infinity'::timestamp with time zone)
-                    WHEN (w.payment_status = 'completed'::billing.payment_status) THEN 'infinity'::timestamp with time zone
-                    WHEN (w.payment_status = 'refunded'::billing.payment_status) THEN w.refund_effective_at
+                    WHEN (w.payment_status = 'completed') THEN 'infinity'::timestamp with time zone
+                    WHEN (w.payment_status = 'refunded') THEN w.refund_effective_at
                     ELSE '-infinity'::timestamp with time zone
                 END, COALESCE(w.grant_covered_until, '-infinity'::timestamp with time zone)) AS unpaid_from,
             LEAST(w.window_end, now()) AS unpaid_until
@@ -3963,8 +3951,8 @@ CREATE VIEW billing.freeloader_episodes WITH (security_invoker='true') AS
     source_type,
     source_id,
         CASE
-            WHEN ((sub_status = 'past_due'::billing.subscription_status) AND (next_retry_at IS NOT NULL)) THEN 'sanctioned_dunning'::text
-            WHEN (sub_status = 'unverified'::billing.subscription_status) THEN 'awaiting_verification'::text
+            WHEN ((sub_status = 'past_due') AND (next_retry_at IS NOT NULL)) THEN 'sanctioned_dunning'::text
+            WHEN (sub_status = 'unverified') THEN 'awaiting_verification'::text
             ELSE 'unsanctioned'::text
         END AS cause,
     unpaid_from AS started_at,
@@ -3986,7 +3974,7 @@ CREATE VIEW billing.orphaned_episodes WITH (security_invoker='true') AS
             GREATEST(s.current_period_ends_at, s.ended_at) AS cov_end
            FROM (billing.subscriptions s
              JOIN billing.products pd ON (((pd.id = s.product_id) AND (pd.merchant_id = s.merchant_id))))
-          WHERE ((s.deleted_at IS NULL) AND (s.status <> 'pending'::billing.subscription_status) AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NOT NULL) AND (((pd.entitlements_spec IS NOT NULL) AND (pd.entitlements_spec <> '{}'::jsonb)) OR ((s.entitlements_spec_snapshot IS NOT NULL) AND (s.entitlements_spec_snapshot <> '{}'::jsonb))))
+          WHERE ((s.deleted_at IS NULL) AND (s.status <> 'pending') AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NOT NULL) AND (((pd.entitlements_spec IS NOT NULL) AND (pd.entitlements_spec <> '{}'::jsonb)) OR ((s.entitlements_spec_snapshot IS NOT NULL) AND (s.entitlements_spec_snapshot <> '{}'::jsonb))))
         UNION ALL
          SELECT p.merchant_id,
             p.customer_id,
@@ -3998,7 +3986,7 @@ CREATE VIEW billing.orphaned_episodes WITH (security_invoker='true') AS
            FROM ((billing.payments p
              JOIN billing.prices pr ON (((pr.id = p.price_id) AND (pr.merchant_id = p.merchant_id))))
              JOIN billing.products pd ON (((pd.id = pr.product_id) AND (pd.merchant_id = p.merchant_id))))
-          WHERE ((p.deleted_at IS NULL) AND (p.status = 'completed'::billing.payment_status) AND (p.amount > 0) AND (p.subscription_id IS NULL) AND (pr.access_duration_hours IS NOT NULL) AND (pd.entitlements_spec IS NOT NULL) AND (pd.entitlements_spec <> '{}'::jsonb))
+          WHERE ((p.deleted_at IS NULL) AND (p.status = 'completed') AND (p.amount > 0) AND (p.subscription_id IS NULL) AND (pr.access_duration_hours IS NOT NULL) AND (pd.entitlements_spec IS NOT NULL) AND (pd.entitlements_spec <> '{}'::jsonb))
         ), spans AS (
          SELECT c.merchant_id,
             c.customer_id,

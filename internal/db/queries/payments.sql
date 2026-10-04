@@ -17,7 +17,7 @@ INSERT INTO billing.payments (
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     sqlc.arg(currency),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::billing.payment_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed'),
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
     sqlc.narg(discount_metadata), sqlc.narg(entitlements_spec_snapshot),
@@ -43,7 +43,7 @@ INSERT INTO billing.payments (
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, $5, $6,
     sqlc.arg(currency),
-    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed')::billing.payment_status,
+    COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'completed'),
     sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(discount_code), sqlc.narg(discount_reason),
     sqlc.narg(discount_metadata), sqlc.narg(entitlements_spec_snapshot),

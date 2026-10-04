@@ -1113,7 +1113,7 @@ type ListActiveSubsMissingEntitlementProjectionRow struct {
 	ID                    uuid.UUID
 	CustomerID            uuid.UUID
 	ProductID             uuid.UUID
-	Status                BillingSubscriptionStatus
+	Status                string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	StartedAt             time.Time
@@ -1197,7 +1197,7 @@ type ListDeadSubsWithLiveEntitlementsParams struct {
 type ListDeadSubsWithLiveEntitlementsRow struct {
 	ID                  uuid.UUID
 	CustomerID          uuid.UUID
-	Status              BillingSubscriptionStatus
+	Status              string
 	CurrentPeriodEndsAt *time.Time
 	EndedAt             *time.Time
 }
@@ -2526,7 +2526,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	Rail              string
 	TransactionID     string
 	Amount            int64
-	Status            BillingPaymentStatus
+	Status            string
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
@@ -2681,7 +2681,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	CustomerID               uuid.UUID
 	PriceID                  *uuid.UUID
 	ProductID                uuid.UUID
-	Status                   BillingSubscriptionStatus
+	Status                   string
 	Rail                     string
 	RailSubscriptionID       string
 	UserEmail                *string
@@ -2774,7 +2774,7 @@ INSERT INTO billing.subscriptions (
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
-SELECT $1::uuid, pr.id, pr.product_id, $2::billing.subscription_status,
+SELECT $1::uuid, pr.id, pr.product_id, $2::text,
        $3, $4,
        $5,
        $6::timestamptz,
@@ -2799,7 +2799,7 @@ RETURNING id, entitlements_spec_snapshot
 
 type ReconcileMaterializeSubscriptionParams struct {
 	MerchantID         uuid.UUID
-	Status             BillingSubscriptionStatus
+	Status             string
 	Rail               string
 	RailSubscriptionID string
 	UserEmail          *string

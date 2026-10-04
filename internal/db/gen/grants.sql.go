@@ -1339,7 +1339,7 @@ type ListUngrantedSubscriptionsRow struct {
 	ID                    uuid.UUID
 	CustomerID            uuid.UUID
 	ProductID             uuid.UUID
-	Status                BillingSubscriptionStatus
+	Status                string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	StartedAt             time.Time

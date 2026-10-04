@@ -189,7 +189,7 @@ INSERT INTO billing.payments (
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
-    COALESCE(NULLIF($9::text, ''), 'completed')::billing.payment_status,
+    COALESCE(NULLIF($9::text, ''), 'completed'),
     $10, $11,
     $12, $13,
     $14, $15,
@@ -290,7 +290,7 @@ INSERT INTO billing.payments (
 ) VALUES (
     $1, $7::uuid, $2, $3, $4, $5, $6,
     $8,
-    COALESCE(NULLIF($9::text, ''), 'completed')::billing.payment_status,
+    COALESCE(NULLIF($9::text, ''), 'completed'),
     $10, $11,
     $12, $13,
     $14, $15,
@@ -1227,7 +1227,7 @@ type ListRefundRowsForTotalParams struct {
 
 type ListRefundRowsForTotalRow struct {
 	Amount int64
-	Status BillingPaymentStatus
+	Status string
 }
 
 func (q *Queries) ListRefundRowsForTotal(ctx context.Context, arg ListRefundRowsForTotalParams) ([]ListRefundRowsForTotalRow, error) {

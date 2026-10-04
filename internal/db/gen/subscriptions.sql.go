@@ -148,7 +148,7 @@ INSERT INTO billing.subscriptions (
 ) VALUES (
     $1, $5::uuid, $2, $3, $4, $6,
     $7,
-    COALESCE(NULLIF($8::text, ''), 'pending')::billing.subscription_status,
+    COALESCE(NULLIF($8::text, ''), 'pending'),
     $9,
     $10, $11, $12,
     $13, $14,
@@ -1578,7 +1578,7 @@ func (q *Queries) ListLiveSubscriptionsOnMethod(ctx context.Context, arg ListLiv
 const listMigratableSubscriptionsByPriceID = `-- name: ListMigratableSubscriptionsByPriceID :many
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions sub
 WHERE sub.merchant_id = $1::uuid AND sub.price_id = $2::uuid
-  AND sub.status IN ('active'::billing.subscription_status, 'past_due'::billing.subscription_status, 'awaiting_method'::billing.subscription_status)
+  AND sub.status IN ('active', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at
 `
@@ -2168,7 +2168,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = $4,
-    status = $5::billing.subscription_status,
+    status = $5,
     started_at = $6,
     ended_at = $7,
     current_period_starts_at = $8,
@@ -2200,7 +2200,7 @@ type UpdateSubscriptionAtParams struct {
 	PriceID                  *uuid.UUID
 	ProductID                uuid.UUID
 	EntitlementsSpecSnapshot []byte
-	Status                   BillingSubscriptionStatus
+	Status                   string
 	StartedAt                time.Time
 	EndedAt                  *time.Time
 	CurrentPeriodStartsAt    *time.Time
@@ -2270,7 +2270,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = $4,
-    status = $5::billing.subscription_status,
+    status = $5,
     started_at = $6,
     ended_at = $7,
     current_period_starts_at = $8,
@@ -2306,7 +2306,7 @@ type UpdateSubscriptionDecidedParams struct {
 	PriceID                  *uuid.UUID
 	ProductID                uuid.UUID
 	EntitlementsSpecSnapshot []byte
-	Status                   BillingSubscriptionStatus
+	Status                   string
 	StartedAt                time.Time
 	EndedAt                  *time.Time
 	CurrentPeriodStartsAt    *time.Time

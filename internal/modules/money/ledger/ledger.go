@@ -36,8 +36,6 @@ const (
 	// here (recoverable/reversible), not refunded; a refund moves it out to
 	// RailClearing. (#514, see docs/consistency-invariants.md §11 decision 4.)
 	RevokedCredits AccountType = "revoked_credits"
-	FXLiquidity    AccountType = "fx_liquidity"
-	World          AccountType = "world"
 )
 
 // TransferType is the closed vocabulary of ledger_transfers.transfer_type,

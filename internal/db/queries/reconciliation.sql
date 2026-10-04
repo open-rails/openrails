@@ -457,7 +457,7 @@ INSERT INTO billing.subscriptions (
     user_email, current_period_starts_at, current_period_ends_at, started_at,
     entitlements_spec_snapshot, customer_id, psp_id, collection_policy
 )
-SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::billing.subscription_status,
+SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), sqlc.arg(rail_subscription_id),
        sqlc.narg(user_email),
        sqlc.narg(period_starts_at)::timestamptz,
