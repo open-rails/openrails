@@ -1,5 +1,7 @@
--- billing.usage_events: append-only metered usage (#289), idempotent on
--- (tenant, payer, event_type, source, source_id).
+-- billing.usage_events: append-only metered usage, partitioned by month on
+-- occurred_at. Every read names a time range. The idempotency coordinate
+-- (merchant, payer, currency, event_type, source, source_id) is claimed under
+-- the customer spend lock by GetUsageEventByCoords over the ingest window.
 
 -- pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
 -- name: InsertUsageEvent :exec
@@ -13,6 +15,9 @@ INSERT INTO billing.usage_events (
 SELECT * FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND event_type = $3 AND source = $4 AND source_id = $5
+  AND occurred_at >= sqlc.arg(occurred_from)::timestamptz
+  AND occurred_at <= sqlc.arg(occurred_to)::timestamptz
+ORDER BY occurred_at DESC
 LIMIT 1;
 
 -- name: AggregateUsageTotals :many

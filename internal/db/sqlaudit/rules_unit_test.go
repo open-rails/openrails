@@ -221,3 +221,51 @@ func TestPrimaryKeyFilterDoesNotExcuseCompositeFragmentsOrSeqScans(t *testing.T)
 	}
 	t.Fatalf("primary-key recognition must not suppress physical seq scans: %+v", findings)
 }
+
+// A partitioned table is planned as one scan per partition. The rules see the
+// table once, and a scan that never names the partition key reads them all.
+func TestUnprunedPartitionRule(t *testing.T) {
+	cat := testCatalog()
+	cat.PartitionOf = map[string]string{"usage_events_y2026m09": "usage_events", "usage_events_y2026m10": "usage_events"}
+	cat.PartitionKey = map[string]string{"usage_events": "occurred_at"}
+	cat.MerchantScoped["usage_events"] = true
+	cat.Columns["usage_events"] = []string{"id", "merchant_id", "customer_id", "occurred_at"}
+	cat.Indexed["usage_events.merchant_id"], cat.Indexed["usage_events.customer_id"], cat.Indexed["usage_events.occurred_at"] = true, true, true
+
+	rules := func(sql string, plan planNode) []string {
+		t.Helper()
+		query := Query{Name: "q", Kind: "one", SQL: sql}
+		structure, err := query.Parse()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, f := range planFindings(query, structure, cat.foldPartitions(plan), cat) {
+			out = append(out, f.Rule)
+		}
+		return out
+	}
+	partitions := func(cond string) planNode {
+		return planNode{NodeType: "Append", Plans: []planNode{
+			{NodeType: "Index Scan", RelationName: "usage_events_y2026m09", IndexCond: cond},
+			{NodeType: "Index Scan", RelationName: "usage_events_y2026m10", IndexCond: cond},
+		}}
+	}
+
+	unbounded := rules("SELECT * FROM usage_events WHERE merchant_id = $1 AND customer_id = $2",
+		partitions("((merchant_id = $1) AND (customer_id = $2))"))
+	if len(unbounded) != 1 || unbounded[0] != RuleUnprunedPartition {
+		t.Fatalf("a read with no partition-key predicate must be reported once for the table, got %v", unbounded)
+	}
+	bounded := rules("SELECT * FROM usage_events WHERE merchant_id = $1 AND customer_id = $2 AND occurred_at >= $3",
+		partitions("((merchant_id = $1) AND (customer_id = $2) AND (occurred_at >= $3))"))
+	if len(bounded) != 0 {
+		t.Fatalf("a read bounded on the partition key is clean, got %v", bounded)
+	}
+	// An INSERT names its target and reads nothing.
+	insert := rules("INSERT INTO usage_events (merchant_id) VALUES ($1)",
+		planNode{NodeType: "ModifyTable", RelationName: "usage_events", Plans: []planNode{{NodeType: "Result"}}})
+	if len(insert) != 0 {
+		t.Fatalf("an insert is not a read, got %v", insert)
+	}
+}

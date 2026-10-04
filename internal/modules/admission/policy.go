@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -322,6 +323,10 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 		}
 		if window.WindowSeconds <= 0 {
 			return InvokerSpendLimit{}, fmt.Errorf("windows[%d].window_seconds must be positive", i)
+		}
+		// The spend gate keeps admissions for the longest window plus 30 days.
+		if limit := int64(spendgate.MaxWindow / time.Second); window.WindowSeconds > limit {
+			return InvokerSpendLimit{}, fmt.Errorf("windows[%d].window_seconds must be at most %d (%d days)", i, limit, limit/86400)
 		}
 		if window.Limit < 0 {
 			return InvokerSpendLimit{}, fmt.Errorf("windows[%d].limit must be non-negative", i)

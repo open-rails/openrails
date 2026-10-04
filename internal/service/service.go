@@ -42,6 +42,14 @@ func New(rt *app.Runtime) (*Service, error) {
 	return &Service{rt: rt}, nil
 }
 
+// spendGate is the admission gate on the engine's clock: an admission is
+// looked up within the retained range as that clock counts it.
+func (s *Service) spendGate() *spendgate.Gate {
+	gate := spendgate.New(s.rt.DB)
+	gate.SetClock(s.now)
+	return gate
+}
+
 func (s *Service) now() time.Time {
 	if s != nil && s.rt != nil && s.rt.Clock != nil {
 		return s.rt.Clock.Now()
@@ -58,6 +66,10 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 // apart from an engine fault. Wrapped errors carry the detail
 // (money.IdempotencyConflict: which field, committed vs retried).
 var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
+
+// ErrUsageOutsideIngestWindow is returned by RecordUsage when occurred_at is
+// older than the ingest window or ahead of the clock.
+var ErrUsageOutsideIngestWindow = money.ErrUsageOutsideIngestWindow
 
 // CaptureAdmission settles an admitted request. The first capture fixes its
 // amount and usage terms; an exact retry returns the original receipt.
@@ -81,7 +93,7 @@ func (s *Service) GetAdmission(ctx context.Context, requestID string) (*billing.
 		return nil, err
 	}
 	defer release()
-	row, err := spendgate.New(s.rt.DB).Get(ctx, strings.TrimSpace(requestID))
+	row, err := s.spendGate().Get(ctx, strings.TrimSpace(requestID))
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +107,7 @@ func (s *Service) AdmissionCustomer(ctx context.Context, requestID string) (iden
 		return identity.CustomerID{}, err
 	}
 	defer release()
-	row, err := spendgate.New(s.rt.DB).Get(ctx, requestID)
+	row, err := s.spendGate().Get(ctx, requestID)
 	return identity.CustomerID(row.CustomerID), err
 }
 
@@ -111,8 +123,7 @@ func (s *Service) ReleaseAdmission(ctx context.Context, requestID string) (*bill
 	if requestID == "" {
 		return nil, fmt.Errorf("request_id required")
 	}
-	gate := spendgate.New(s.rt.DB)
-	gate.SetClock(s.now)
+	gate := s.spendGate()
 	if err := gate.Release(ctx, requestID); err != nil {
 		return nil, err
 	}
@@ -137,8 +148,7 @@ func (s *Service) ExtendAdmission(ctx context.Context, requestID string, expires
 	if expiresAt.IsZero() {
 		return nil, ErrHoldDeadlineRequired
 	}
-	gate := spendgate.New(s.rt.DB)
-	gate.SetClock(s.now)
+	gate := s.spendGate()
 	err = gate.Extend(ctx, requestID, expiresAt)
 	if errors.Is(err, spendgate.ErrExpired) {
 		return nil, ErrHoldDeadlinePassed

@@ -127,10 +127,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 
 -- name: ListUsageMetersWithCatalog :many
 WITH activity AS (
-    SELECT event_type, count(*) AS event_count, max(occurred_at) AS last_event_at
-    FROM billing.usage_events
-    WHERE merchant_id = sqlc.arg(merchant_id)
-    GROUP BY event_type
+    -- Each meter's latest retained event: a backward index probe per partition,
+    -- never a count of its events. It spans every retained month by definition.
+    SELECT m.key AS meter_key,
+           (SELECT max(ue.occurred_at)
+              FROM billing.usage_events ue
+             WHERE ue.merchant_id = m.merchant_id
+               AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
+    FROM billing.catalog_meters m
+    WHERE m.merchant_id = sqlc.arg(merchant_id)
 ), override_counts AS (
     SELECT meter_key, count(*) AS override_count
     FROM billing.catalog_rate_cards
@@ -147,7 +152,7 @@ SELECT meter.key,
        meter.created_at,
        meter.updated_at,
        COALESCE(override_counts.override_count, 0) AS override_count,
-       COALESCE(activity.event_count, 0) > 0 AS has_activity,
+       (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
        activity.last_event_at,
        card.id AS card_id,
        card.product_id,
@@ -159,7 +164,7 @@ SELECT meter.key,
        card.updated_at AS card_updated_at
 FROM billing.catalog_meters meter
 LEFT JOIN activity
-  ON activity.event_type = COALESCE(NULLIF(meter.event_type, ''), meter.key)
+  ON activity.meter_key = meter.key
 LEFT JOIN override_counts
   ON override_counts.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
@@ -176,10 +181,15 @@ LIMIT sqlc.arg(fetch_limit)::int;
 
 -- name: GetUsageMeterWithCatalog :one
 WITH activity AS (
-    SELECT event_type, count(*) AS event_count, max(occurred_at) AS last_event_at
-    FROM billing.usage_events
-    WHERE merchant_id = sqlc.arg(merchant_id)
-    GROUP BY event_type
+    -- Each meter's latest retained event: a backward index probe per partition,
+    -- never a count of its events. It spans every retained month by definition.
+    SELECT m.key AS meter_key,
+           (SELECT max(ue.occurred_at)
+              FROM billing.usage_events ue
+             WHERE ue.merchant_id = m.merchant_id
+               AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
+    FROM billing.catalog_meters m
+    WHERE m.merchant_id = sqlc.arg(merchant_id)
 ), override_counts AS (
     SELECT meter_key, count(*) AS override_count
     FROM billing.catalog_rate_cards
@@ -196,7 +206,7 @@ SELECT meter.key,
        meter.created_at,
        meter.updated_at,
        COALESCE(override_counts.override_count, 0) AS override_count,
-       COALESCE(activity.event_count, 0) > 0 AS has_activity,
+       (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
        activity.last_event_at,
        card.id AS card_id,
        card.product_id,
@@ -208,7 +218,7 @@ SELECT meter.key,
        card.updated_at AS card_updated_at
 FROM billing.catalog_meters meter
 LEFT JOIN activity
-  ON activity.event_type = COALESCE(NULLIF(meter.event_type, ''), meter.key)
+  ON activity.meter_key = meter.key
 LEFT JOIN override_counts
   ON override_counts.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card

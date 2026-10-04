@@ -15,8 +15,21 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
+
+// ErrUsageOutsideIngestWindow refuses an event dated before the ingest window
+// or ahead of the clock: its month may have no partition, and its key could
+// not be looked up.
+var ErrUsageOutsideIngestWindow = fmt.Errorf("occurred_at must be within the last %d days and not in the future", int(retention.UsageIngestWindow/retention.Day))
+
+// usageKeyWindow is the occurred_at range an idempotency key is looked up in:
+// every event that could have been recorded and still be honoured at now.
+func usageKeyWindow(now time.Time) (from, to time.Time) {
+	return now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
+}
 
 // RecordUsageParams is one metered, host-priced usage event (issue #289). The
 // host supplies the final Amount (in the currency's internal precision); OpenRails
@@ -39,7 +52,8 @@ type RecordUsageParams struct {
 	// (source, source_id) post two distinct charges (or#894).
 	Key      IdempotencyKey
 	Metadata map[string]any
-	// OccurredAt defaults to now when zero.
+	// OccurredAt defaults to now when zero. It must lie within the ingest
+	// window (retention.UsageIngestWindow back, retention.UsageClockSkew ahead).
 	OccurredAt time.Time
 }
 
@@ -47,7 +61,9 @@ type RecordUsageParams struct {
 // in ONE transaction (issue #289). Idempotent on
 // (merchant, payer, event_type, source, source_id): a replayed request returns the
 // existing event with Replayed set and never double-charges, while a replay
-// carrying a CHANGED amount is refused (ErrIdempotencyKeyReused).
+// carrying a CHANGED amount is refused (ErrIdempotencyKeyReused). The event's
+// key is honoured for the ingest window after it occurred; the ledger debit of
+// a priced event is idempotent for good.
 // Concurrency-safe: the balance row is locked FOR UPDATE before the idempotency
 // check, so two concurrent identical records serialize and the second sees the
 // first's event.
@@ -82,6 +98,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		return nil, err
 	}
 
+	s.db.EnsurePartitions(ctx, s.now())
 	var ev *models.UsageEvent
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -92,6 +109,14 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		tenantID := tid.UUID()
 		payerID := payer.UUID()
 		now := s.now()
+		occurred := params.OccurredAt.UTC()
+		if params.OccurredAt.IsZero() {
+			occurred = now
+		}
+		keyFrom, keyTo := usageKeyWindow(now)
+		if occurred.Before(keyFrom) || occurred.After(keyTo) {
+			return ErrUsageOutsideIngestWindow
+		}
 
 		// Serialize per (merchant, payer) so the idempotency check below
 		// can't race a concurrent identical record into a double charge.
@@ -99,22 +124,16 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return err
 		}
 
-		existingRow, gerr := q.GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
-			MerchantID: tenantID, CustomerID: payerID,
-			Currency:  cur,
-			EventType: params.EventType, Source: params.Key.Source(), SourceID: params.Key.SourceID(),
-		})
-		if gerr == nil {
-			// or#891 item 3: the replay used to be returned unconditionally, so a
-			// retry that corrected Amount was answered with the first event and the
-			// first charge. Same key, different charging term = refusal.
-			ev, gerr = usageEventFromGen(existingRow)
-			if gerr != nil {
-				return gerr
-			}
-			pricingAuthority := "catalog"
-			if params.Amount > 0 {
-				pricingAuthority = "host"
+		pricingAuthority := "catalog"
+		if params.Amount > 0 {
+			pricingAuthority = "host"
+		}
+		// or#891 item 3: same key, different charging term = refusal, never the
+		// first event answered for a corrected one.
+		replay := func(row gen.BillingUsageEvent) error {
+			var rerr error
+			if ev, rerr = usageEventFromGen(row); rerr != nil {
+				return rerr
 			}
 			if ev.PricingAuthority != pricingAuthority {
 				return &IdempotencyConflict{
@@ -134,6 +153,17 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			ev.Replayed = true
 			return nil
 		}
+
+		coords := gen.GetUsageEventByCoordsParams{
+			MerchantID: tenantID, CustomerID: payerID,
+			Currency:  cur,
+			EventType: params.EventType, Source: params.Key.Source(), SourceID: params.Key.SourceID(),
+			OccurredFrom: keyFrom, OccurredTo: keyTo,
+		}
+		existingRow, gerr := q.GetUsageEventByCoords(ctx, coords)
+		if gerr == nil {
+			return replay(existingRow)
+		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
 			return gerr
 		}
@@ -143,31 +173,44 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		// owed up to the credit line. Prepay-only accounts (no line) deny when the
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
+		if params.Amount == 0 {
+			// A metered payer's first event opens its balance account: the
+			// permanent first-activity mark invoice periods are anchored on.
+			if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+				return err
+			}
+		}
 		if params.Amount > 0 {
-			if _, _, _, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false); derr != nil {
+			_, _, applied, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false)
+			if derr != nil {
 				return derr
 			}
 			// Link the usage event to the durable #512 spend transfer (the balance
 			// debit, else the owed accrual) at these coordinates.
-			if tr, terr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
+			tr, terr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
 				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 				Operation: string(params.Key.Operation()),
 				Source:    params.Key.Source(), SourceID: params.Key.SourceID(),
-			}); terr == nil {
-				id := tr.ID
-				debitID = &id
-			} else if !errors.Is(terr, pgx.ErrNoRows) {
+			})
+			if terr != nil && !errors.Is(terr, pgx.ErrNoRows) {
 				return terr
 			}
-		}
-
-		occurred := params.OccurredAt.UTC()
-		if params.OccurredAt.IsZero() {
-			occurred = now
-		}
-		pricingAuthority := "catalog"
-		if params.Amount > 0 {
-			pricingAuthority = "host"
+			if terr == nil {
+				id := tr.ID
+				debitID = &id
+				if !applied {
+					// The ledger debit is permanent and older than the key
+					// window: its event lies within the window around it.
+					coords.OccurredFrom, coords.OccurredTo = usageKeyWindow(tr.CreatedAt)
+					row, rerr := q.GetUsageEventByCoords(ctx, coords)
+					if rerr == nil {
+						return replay(row)
+					}
+					if !errors.Is(rerr, pgx.ErrNoRows) {
+						return rerr
+					}
+				}
+			}
 		}
 
 		ev = &models.UsageEvent{
@@ -252,11 +295,13 @@ func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 	var ev *models.UsageEvent
+	keyFrom, keyTo := usageKeyWindow(s.now())
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		row, gerr := s.db.Gen(ctx).GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(),
 			Currency:  cur,
 			EventType: eventType, Source: key.Source(), SourceID: key.SourceID(),
+			OccurredFrom: keyFrom, OccurredTo: keyTo,
 		})
 		if errors.Is(gerr, pgx.ErrNoRows) {
 			return nil

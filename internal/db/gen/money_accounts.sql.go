@@ -22,7 +22,8 @@ SELECT
      + COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = a.merchant_id AND ao.customer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
-               AND (ao.expires_at IS NULL OR ao.expires_at > $1::timestamptz)), 0))::bigint AS held,
+               AND ao.admitted_at >= $1::timestamptz
+               AND ao.expires_at > $2::timestamptz), 0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
@@ -39,14 +40,15 @@ LEFT JOIN billing.ledger_accounts ar
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
  AND ar.account_type = 'arrears_liability'
-WHERE a.merchant_id = $2::uuid
-  AND a.customer_id = $3::uuid
-  AND a.currency = $4::text
+WHERE a.merchant_id = $3::uuid
+  AND a.customer_id = $4::uuid
+  AND a.currency = $5::text
   AND a.account_type = 'customer_balance'
 LIMIT 1
 `
 
 type GetAdmissionCapacityParams struct {
+	HeldSince  time.Time
 	AsOf       time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -68,6 +70,7 @@ type GetAdmissionCapacityRow struct {
 // travel in this Postgres snapshot.
 func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
 	row := q.db.QueryRow(ctx, getAdmissionCapacity,
+		arg.HeldSince,
 		arg.AsOf,
 		arg.MerchantID,
 		arg.CustomerID,

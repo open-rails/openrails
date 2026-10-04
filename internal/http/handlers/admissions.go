@@ -252,6 +252,11 @@ func ExtendAdmission(r *httprequest.Request) {
 	case errors.Is(err, spendgate.ErrDeadlineShortened):
 		r.APIError(api.Coded(billing.CodeInvalidParam, "an extension cannot shorten the deadline").WithParam("expires_at"))
 	default:
+		var invalid *spendgate.ValidationError
+		if errors.As(err, &invalid) {
+			r.APIError(api.Coded(billing.CodeInvalidParam, invalid.Message).WithParam(invalid.Param))
+			return
+		}
 		writeMoneyError(r, err, "extend failed")
 	}
 }

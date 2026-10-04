@@ -12,6 +12,274 @@ import (
 	"github.com/google/uuid"
 )
 
+const declareRetentionSweep = `-- name: DeclareRetentionSweep :exec
+
+SELECT set_config('openrails.retention', $1::text, true)
+`
+
+// Row retention. Each statement deletes one bounded batch, oldest first, of
+// one merchant's rows past their period; the cleanup worker loops.
+// Tables that refuse ad-hoc deletes take them only from a transaction that
+// named the table here, and only for rows past the period their trigger
+// declares (billing.guard_retention_delete). Their sweeps count the period on
+// the database clock, the one the trigger reads.
+func (q *Queries) DeclareRetentionSweep(ctx context.Context, tableName string) error {
+	_, err := q.db.Exec(ctx, declareRetentionSweep, tableName)
+	return err
+}
+
+const deleteAbandonedCheckoutAttemptsBefore = `-- name: DeleteAbandonedCheckoutAttemptsBefore :execrows
+DELETE FROM billing.checkout_attempts
+WHERE merchant_id = $1::uuid
+  AND deleted_at IS NULL
+  AND id IN (
+    SELECT ca.id FROM billing.checkout_attempts ca
+    WHERE ca.merchant_id = $1::uuid
+      AND ca.status = 'expired' AND ca.deleted_at IS NULL
+      AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
+      AND ca.expires_at < $2::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
+    ORDER BY ca.expires_at
+    LIMIT $3::int
+)
+`
+
+type DeleteAbandonedCheckoutAttemptsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// An attempt that expired without reaching a provider: no payment,
+// subscription or provider transaction, and no provider intent, Solana Pay
+// reference or receipt names it. Its checkout session, if one still exists,
+// goes with it. A soft-deleted attempt belongs to a destructive run that can
+// still be undone, and is left to it.
+func (q *Queries) DeleteAbandonedCheckoutAttemptsBefore(ctx context.Context, arg DeleteAbandonedCheckoutAttemptsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAbandonedCheckoutAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteCostObservationsPastRetention = `-- name: DeleteCostObservationsPastRetention :execrows
+DELETE FROM billing.cost_observations
+WHERE merchant_id = $1::uuid
+  AND (operation_id, observation_id) IN (
+    SELECT co.operation_id, co.observation_id
+    FROM billing.cost_observations co
+    CROSS JOIN LATERAL (
+        SELECT 1 FROM billing.operation_authorizations oa
+         WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
+           AND oa.state <> 'open'
+           AND COALESCE(oa.settled_at, oa.released_at) < now() - make_interval(days => $2::int)
+         LIMIT 1) closed
+    WHERE co.merchant_id = $1::uuid
+      AND co.observed_at < now() - make_interval(days => $2::int)
+    ORDER BY co.observed_at
+    LIMIT $3::int
+)
+`
+
+type DeleteCostObservationsPastRetentionParams struct {
+	MerchantID    uuid.UUID
+	RetentionDays int32
+	RowLimit      int32
+}
+
+// An observation goes once its operation is settled or released and the
+// period has passed since: the settlement body, which is permanent, already
+// carries the digests of the two observations it was authored from. While the
+// operation is open its observations stay, however old.
+func (q *Queries) DeleteCostObservationsPastRetention(ctx context.Context, arg DeleteCostObservationsPastRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCostObservationsPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteFinishedOutboxIntentsBefore = `-- name: DeleteFinishedOutboxIntentsBefore :execrows
+DELETE FROM billing.provider_intents
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT pi.id FROM billing.provider_intents pi
+    WHERE pi.merchant_id = $1::uuid
+      AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
+      AND pi.destructive_run_id IS NULL
+      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'bt_account_updater_batch')
+      AND pi.updated_at < $2::timestamptz
+    ORDER BY pi.updated_at
+    LIMIT $3::int
+)
+`
+
+type DeleteFinishedOutboxIntentsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// Finished intents that only carried an instruction to a provider. An intent
+// that moved or refused money, enrolled a membership or erased a card is the
+// record of that: it is not one of these types and is never deleted here. A
+// mutation log entry that names a deleted intent keeps its own row and loses
+// the link.
+func (q *Queries) DeleteFinishedOutboxIntentsBefore(ctx context.Context, arg DeleteFinishedOutboxIntentsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFinishedOutboxIntentsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteProviderMutationLogsBefore = `-- name: DeleteProviderMutationLogsBefore :execrows
+DELETE FROM billing.provider_mutation_logs
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT ml.id FROM billing.provider_mutation_logs ml
+    WHERE ml.merchant_id = $1::uuid
+      AND ml.created_at < $2::timestamptz
+    ORDER BY ml.created_at
+    LIMIT $3::int
+)
+`
+
+type DeleteProviderMutationLogsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+func (q *Queries) DeleteProviderMutationLogsBefore(ctx context.Context, arg DeleteProviderMutationLogsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProviderMutationLogsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteReconciliationRunsPastRetention = `-- name: DeleteReconciliationRunsPastRetention :execrows
+DELETE FROM billing.maintenance_runs
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT mr.id FROM billing.maintenance_runs mr
+    WHERE mr.merchant_id = $1::uuid
+      AND mr.kind = 'reconciliation'
+      AND mr.started_at < now() - make_interval(days => $2::int)
+      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
+    ORDER BY mr.started_at
+    LIMIT $3::int
+)
+`
+
+type DeleteReconciliationRunsPastRetentionParams struct {
+	MerchantID    uuid.UUID
+	RetentionDays int32
+	RowLimit      int32
+}
+
+func (q *Queries) DeleteReconciliationRunsPastRetention(ctx context.Context, arg DeleteReconciliationRunsPastRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteReconciliationRunsPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteResolvedFindingsBefore = `-- name: DeleteResolvedFindingsBefore :execrows
+DELETE FROM billing.reconciliation_findings
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT rf.id FROM billing.reconciliation_findings rf
+    WHERE rf.merchant_id = $1::uuid
+      AND rf.resolved_at IS NOT NULL
+      AND GREATEST(rf.resolved_at, rf.last_seen_at) < $2::timestamptz
+    ORDER BY GREATEST(rf.resolved_at, rf.last_seen_at)
+    LIMIT $3::int
+)
+`
+
+type DeleteResolvedFindingsBeforeParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+// A finding still being seen is kept however long ago it was resolved: an
+// ignored drift that persists must not come back as new.
+func (q *Queries) DeleteResolvedFindingsBefore(ctx context.Context, arg DeleteResolvedFindingsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteResolvedFindingsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSubscriptionTransitionsPastRetention = `-- name: DeleteSubscriptionTransitionsPastRetention :execrows
+DELETE FROM billing.subscription_status_transitions
+WHERE merchant_id = $1::uuid
+  AND id IN (
+    SELECT st.id FROM billing.subscription_status_transitions st
+    WHERE st.merchant_id = $1::uuid
+      AND st.occurred_at < now() - make_interval(days => $2::int)
+    ORDER BY st.occurred_at
+    LIMIT $3::int
+)
+`
+
+type DeleteSubscriptionTransitionsPastRetentionParams struct {
+	MerchantID    uuid.UUID
+	RetentionDays int32
+	RowLimit      int32
+}
+
+func (q *Queries) DeleteSubscriptionTransitionsPastRetention(ctx context.Context, arg DeleteSubscriptionTransitionsPastRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSubscriptionTransitionsPastRetention, arg.MerchantID, arg.RetentionDays, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const dropMonthPartitions = `-- name: DropMonthPartitions :one
+SELECT billing.drop_month_partitions($1::name, $2::timestamptz)::int AS dropped
+`
+
+type DropMonthPartitionsParams struct {
+	TableName string
+	Before    time.Time
+}
+
+func (q *Queries) DropMonthPartitions(ctx context.Context, arg DropMonthPartitionsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, dropMonthPartitions, arg.TableName, arg.Before)
+	var dropped int32
+	err := row.Scan(&dropped)
+	return dropped, err
+}
+
+const ensureMonthPartitions = `-- name: EnsureMonthPartitions :one
+SELECT billing.ensure_month_partitions($1::name, $2::timestamptz, $3::timestamptz)::int AS created
+`
+
+type EnsureMonthPartitionsParams struct {
+	TableName string
+	FromAt    time.Time
+	ThroughAt time.Time
+}
+
+// Calendar-driven partition maintenance: neither statement reads a row.
+func (q *Queries) EnsureMonthPartitions(ctx context.Context, arg EnsureMonthPartitionsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, ensureMonthPartitions, arg.TableName, arg.FromAt, arg.ThroughAt)
+	var created int32
+	err := row.Scan(&created)
+	return created, err
+}
+
 const getSweepCursor = `-- name: GetSweepCursor :one
 SELECT cursor_merchant_id, cursor_version FROM billing.worker_state
 WHERE worker_kind = $1::text
@@ -27,6 +295,37 @@ func (q *Queries) GetSweepCursor(ctx context.Context, workerKind string) (GetSwe
 	var i GetSweepCursorRow
 	err := row.Scan(&i.CursorMerchantID, &i.CursorVersion)
 	return i, err
+}
+
+const listMonthPartitions = `-- name: ListMonthPartitions :many
+SELECT m.partition::text AS partition, m.range_from::timestamptz AS range_from, m.range_to::timestamptz AS range_to
+FROM billing.month_partitions($1::name) m
+`
+
+type ListMonthPartitionsRow struct {
+	Partition string
+	RangeFrom time.Time
+	RangeTo   time.Time
+}
+
+func (q *Queries) ListMonthPartitions(ctx context.Context, tableName string) ([]ListMonthPartitionsRow, error) {
+	rows, err := q.db.Query(ctx, listMonthPartitions, tableName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMonthPartitionsRow
+	for rows.Next() {
+		var i ListMonthPartitionsRow
+		if err := rows.Scan(&i.Partition, &i.RangeFrom, &i.RangeTo); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRetentionWorkMerchants = `-- name: ListRetentionWorkMerchants :many
@@ -87,6 +386,71 @@ FROM (
       WHERE ($1::uuid IS NULL OR nh.merchant_id > $1::uuid)
         AND nh.month < $9::timestamptz
       ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT st.merchant_id AS mid
+       FROM billing.subscription_status_transitions st
+      WHERE ($1::uuid IS NULL OR st.merchant_id > $1::uuid)
+        AND st.occurred_at < $10::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT ca.merchant_id AS mid
+       FROM billing.checkout_attempts ca
+      WHERE ($1::uuid IS NULL OR ca.merchant_id > $1::uuid)
+        AND ca.status = 'expired' AND ca.deleted_at IS NULL
+        AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
+        AND ca.expires_at < $11::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT rf.merchant_id AS mid
+       FROM billing.reconciliation_findings rf
+      WHERE ($1::uuid IS NULL OR rf.merchant_id > $1::uuid)
+        AND rf.resolved_at IS NOT NULL
+        AND GREATEST(rf.resolved_at, rf.last_seen_at) < $12::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    -- A run a finding still names is not due: counting it would revisit its
+    -- merchant every pass to delete nothing.
+    (SELECT DISTINCT mr.merchant_id AS mid
+       FROM billing.maintenance_runs mr
+      WHERE ($1::uuid IS NULL OR mr.merchant_id > $1::uuid)
+        AND mr.kind = 'reconciliation' AND mr.started_at < $13::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT pi.merchant_id AS mid
+       FROM billing.provider_intents pi
+      WHERE ($1::uuid IS NULL OR pi.merchant_id > $1::uuid)
+        AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
+        AND pi.destructive_run_id IS NULL
+        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'bt_account_updater_batch')
+        AND pi.updated_at < $14::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    (SELECT DISTINCT ml.merchant_id AS mid
+       FROM billing.provider_mutation_logs ml
+      WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
+        AND ml.created_at < $14::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
+    -- An observation of an operation still open is not due. The walk is over
+    -- the observations that still exist, each checked against its operation by
+    -- key: never over the authorizations, which are permanent. LATERAL with a
+    -- LIMIT keeps it one key lookup per observation, whatever the statistics.
+    (SELECT DISTINCT co.merchant_id AS mid
+       FROM billing.cost_observations co
+       CROSS JOIN LATERAL (
+            SELECT 1 FROM billing.operation_authorizations oa
+             WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
+               AND oa.state <> 'open'
+               AND COALESCE(oa.settled_at, oa.released_at) < $15::timestamptz
+             LIMIT 1) closed
+      WHERE ($1::uuid IS NULL OR co.merchant_id > $1::uuid)
+        AND co.observed_at < $15::timestamptz
+      ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
 LIMIT $3::int
@@ -102,6 +466,12 @@ type ListRetentionWorkMerchantsParams struct {
 	SettlementCutoff       time.Time
 	LifecycleCutoff        time.Time
 	AttemptCutoff          time.Time
+	TransitionCutoff       time.Time
+	CheckoutAttemptCutoff  time.Time
+	FindingCutoff          time.Time
+	RunCutoff              time.Time
+	ProviderWriteCutoff    time.Time
+	CostObservationCutoff  time.Time
 }
 
 // or#837 retention sweep: due-work discovery + the durable resume cursor.
@@ -120,6 +490,12 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.SettlementCutoff,
 		arg.LifecycleCutoff,
 		arg.AttemptCutoff,
+		arg.TransitionCutoff,
+		arg.CheckoutAttemptCutoff,
+		arg.FindingCutoff,
+		arg.RunCutoff,
+		arg.ProviderWriteCutoff,
+		arg.CostObservationCutoff,
 	)
 	if err != nil {
 		return nil, err

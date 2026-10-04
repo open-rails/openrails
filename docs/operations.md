@@ -666,6 +666,95 @@ across all references.
   recorded; the GC job then deletes it. Credited, review and duplicate
   receipts are kept.
 
+## Data retention
+
+Retention periods are constants, the same for every merchant, and not
+configuration (`internal/retention`). Every table has one class; its table
+comment states it, and a table added without one fails the build.
+
+| Class | What it means |
+|---|---|
+| Permanent | Never pruned: the ledger, grants, payments, invoices and their items and payments, receipts (catalog and configuration applications, credential publications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, metered rating watermarks, destructive runs and their before-images. |
+| Partitioned | Monthly partitions, created ahead and dropped whole by the calendar. No row is read to prune them. |
+| Rows | Rows past a period are deleted by the hourly cleanup job, oldest first. |
+| State | Configuration and entities (merchants, PSPs, catalog, customers, subscriptions, payment methods, cursors): one row per thing that exists. |
+
+Partitioned tables:
+
+| Table | Key | Dropped |
+|---|---|---|
+| `usage_events` | `occurred_at` | 24 months after the month's usage was invoiced. A month is invoiced by the end of the next one, so a month goes 26 months after it began. |
+| `admission_operations` | `admitted_at` | Once older than 61 days: the longest spend window (31 days) plus 30. |
+
+Row retention:
+
+| Table | Deleted |
+|---|---|
+| `subscription_status_transitions` | 25 months (761 days) after `occurred_at` |
+| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, catalog archive, Solana plan sunset, account-updater batch), 25 months after they last changed |
+| `provider_mutation_logs` | 25 months after `created_at` |
+| `cost_observations` | 90 days after their operation was settled or released |
+| `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |
+| `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
+| `checkout_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
+| `checkout_sessions` | at `purge_at`, 24 hours after the session expired |
+| `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
+| `notifications` | 90 days once read, 180 days if never read |
+| `webhook_events` | 90 days after completion |
+| `host_outbox` | 30 days after delivery; an undelivered event is never deleted |
+| `idempotency_keys`, `card_attempt_failures`, `solana_pay_references` | at expiry, past the longest card-abuse window, and after the 7-day watch window |
+
+What is kept on purpose:
+
+- **A provider intent that is the record of something is permanent.** Collections,
+  sales, enrollments, rebills, tier changes, refunds and Solana pulls (succeeded
+  or refused) are what grants, payments and invoices are checked against, and a
+  card erasure is the proof the card is gone. Only the instruction-only types
+  above age out. The list lives once in the baseline's
+  `idx_provider_intents_finished_outbox` and once in
+  `retention.OutboxIntentTypes`; a test keeps them equal.
+- **A checkout attempt that reached a provider is permanent**, expired or not:
+  one with a payment, a subscription or a provider transaction, or that a
+  provider intent or a Solana Pay reference or receipt names.
+- **A cost observation outlives its operation.** While the operation is open its
+  observations stay however old, because settlement is authored from them.
+- **A resolved finding that is still being seen stays**, so an ignored drift that
+  persists does not come back as new.
+
+How it runs:
+
+- The cleanup job (hourly) creates the partitions rows can be written into plus
+  two months ahead, drops the months past retention, then deletes rows for the
+  merchants that have any due, 1,000 rows per statement and at most 50,000 rows
+  per merchant per pass. A backlog drains over the following passes. Partitions
+  are also ensured at migration and by the first write a process makes in a new
+  month, so writes never wait for the job.
+- A partition belongs to its table's owner, whoever creates it. Under
+  `schema_owner` the logins OpenRails runs as hand each partition they create
+  to the shared owner, so any of them can drop it; that takes the right to
+  `SET ROLE` to the owner, which role membership gives by default.
+- Creating a partition attaches a table built beside the parent, so reads and
+  writes carry on. Dropping one locks the table briefly; it gives up after two
+  seconds rather than queue writers behind a long reader (a logical backup, a
+  merchant archive export) and the next pass tries again.
+- `subscription_status_transitions`, reconciliation runs and `cost_observations`
+  refuse every other `DELETE`: `billing.guard_retention_delete` lets one through
+  only when the transaction names the table in `openrails.retention` and the row
+  is older than the period the trigger declares. `usage_events` and
+  `admission_operations` rows leave only with their partition.
+
+What an integrator sees:
+
+- A usage event's `occurred_at` may be up to 35 days in the past and not in the
+  future; its `source` and `source_id` are honoured as its idempotency key for
+  those 35 days. A priced event's ledger debit is idempotent for good.
+- An admission's hold deadline, as admitted or as extended, is at most 30 days
+  past the admission, and a spend window is at most 31 days. After 61 days a
+  request id reads as never admitted.
+- Usage reports reach back about 26 months, subscription transition metrics 25.
+- A merchant archive restore does not bring back `usage_events` or
+  `admission_operations` rows already past their retention.
+
 ## Background worker schedule
 
 Everything runs by itself under River once `run-server` (or `run-worker`) is

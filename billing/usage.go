@@ -44,7 +44,9 @@ type UsageEventParams struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 	Source   string         `json:"source"`
 	SourceID string         `json:"source_id"`
-	// OccurredAt places the event in its rating window; nil is now.
+	// OccurredAt places the event in its rating window; nil is now. It may be
+	// up to 35 days in the past and not in the future, and the event's Source
+	// and SourceID are honoured as its idempotency key for those 35 days.
 	OccurredAt *time.Time `json:"occurred_at,omitempty"`
 }
 

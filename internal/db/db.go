@@ -29,6 +29,9 @@ type DB struct {
 	// rw relocates statements to the configured schema (#471); identity for
 	// the default schema. Inherited by tx-scoped wrappers.
 	rw schemaRewriter
+
+	// partitions is shared by every pool-backed handle of one database.
+	partitions *partitionState
 }
 
 // Connect retry pacing (xs-007 row 40). There is deliberately NO overall
@@ -69,7 +72,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg))}, nil
+	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg)), partitions: &partitionState{}}, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
@@ -160,7 +163,7 @@ func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	return &DB{river: &riverBinding{}, pool: pool, rw: newSchemaRewriter(schema)}, nil
+	return &DB{river: &riverBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}}, nil
 }
 
 // DataPool returns a schema-aware wrapper over the base pool for the rare

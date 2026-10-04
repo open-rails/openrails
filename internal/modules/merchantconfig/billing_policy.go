@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -20,6 +21,11 @@ import (
 // declare. Below a minute the measurement is dominated by how usage reporting
 // happens to be batched rather than by what is actually deployed.
 const MinAccrualRateWindowSeconds int64 = 60
+
+// MaxSpendWindowSeconds is the longest spend window a policy or a spend
+// delegation may declare. Admitted requests are kept for this long plus 30
+// days, so a longer window would count requests already dropped.
+const MaxSpendWindowSeconds = int64(retention.AdmissionMaxWindow / time.Second)
 
 // MaxBillingPolicyNameLength bounds a policy name. Names are merchant-chosen
 // identifiers that travel in manifests, bindings and API payloads, not prose.
@@ -95,6 +101,11 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 		windows, err := NormalizeBudgetWindows(label, "spend_windows", p.SpendWindows)
 		if err != nil {
 			return models.BillingPolicy{}, err
+		}
+		for i, w := range windows {
+			if w.WindowSeconds > MaxSpendWindowSeconds {
+				return models.BillingPolicy{}, fmt.Errorf("%s: spend_windows[%d].window_seconds must be at most %d (%d days)", label, i, MaxSpendWindowSeconds, MaxSpendWindowSeconds/86400)
+			}
 		}
 		out.SpendWindows = windows
 	case models.BillingPolicyAccrualRateCap:

@@ -97,8 +97,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		return nil, err
 	}
 
-	gate := spendgate.New(s.rt.DB)
-	gate.SetClock(s.now)
+	gate := s.spendGate()
 	loader := admission.NewSpendgatePolicyLoader(
 		admission.NewBillingPolicyStore(s.rt.DB),
 		admission.NewInvokerSpendLimitStore(s.rt.DB),
@@ -371,8 +370,7 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 
-	gate := spendgate.New(s.rt.DB)
-	gate.SetClock(s.now)
+	gate := s.spendGate()
 	usage, err := gate.WindowUsage(
 		ctx, payer.UUID(), currency, spendgate.Policy{Scopes: scopes}, req)
 	if err != nil {

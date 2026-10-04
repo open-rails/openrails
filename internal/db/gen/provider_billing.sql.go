@@ -13,7 +13,9 @@ import (
 )
 
 const getProviderBillingObservation = `-- name: GetProviderBillingObservation :one
-SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end, raw_body_available, raw_body_bytes, raw_body_digest, normalized_records_bytes, normalized_records_digest, cost_amount, has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
+SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end,
+       raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
+       has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
 FROM billing.cost_observations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
@@ -26,9 +28,30 @@ type GetProviderBillingObservationParams struct {
 	ObservationID string
 }
 
-func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProviderBillingObservationParams) (BillingCostObservation, error) {
+type GetProviderBillingObservationRow struct {
+	MerchantID              uuid.UUID
+	OperationID             string
+	ObservationID           string
+	NormalizedQuery         string
+	QueryStart              time.Time
+	QueryEnd                time.Time
+	RawBodyAvailable        bool
+	RawBodyDigest           []byte
+	NormalizedRecordsDigest []byte
+	CostAmount              *int64
+	HasNegativeRecord       bool
+	RefusalKind             *string
+	CoversLifetime          bool
+	QualificationReason     string
+	ObservedAt              time.Time
+}
+
+// An observation's facts without its bodies: the digests decide a replay and
+// author the settlement, so the stored bytes (up to 768 KB each) are never
+// read back.
+func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProviderBillingObservationParams) (GetProviderBillingObservationRow, error) {
 	row := q.db.QueryRow(ctx, getProviderBillingObservation, arg.MerchantID, arg.OperationID, arg.ObservationID)
-	var i BillingCostObservation
+	var i GetProviderBillingObservationRow
 	err := row.Scan(
 		&i.MerchantID,
 		&i.OperationID,
@@ -37,9 +60,7 @@ func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProv
 		&i.QueryStart,
 		&i.QueryEnd,
 		&i.RawBodyAvailable,
-		&i.RawBodyBytes,
 		&i.RawBodyDigest,
-		&i.NormalizedRecordsBytes,
 		&i.NormalizedRecordsDigest,
 		&i.CostAmount,
 		&i.HasNegativeRecord,

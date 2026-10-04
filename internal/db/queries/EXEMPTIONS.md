@@ -100,6 +100,10 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 - **`unindexed-filter`** — the query looks something up by `col = $n`, the scan
   is narrowed by nothing but `merchant_id`, and no index on that table covers
   `col`. A merchant_id index alone must not hide a missing lookup index.
+- **`unpruned-partition`** — a scan of a partitioned table (`usage_events`,
+  `admission_operations`) carries no predicate on its partition key, so every
+  partition is read. Partition scans are folded into their table before the
+  rules run, so a table is reported once however many partitions it has.
 
 ## AUDIT_ALLOWLIST.txt
 
@@ -121,6 +125,18 @@ transaction_id)` would make it provable.
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
 listing. The predicate is absent on most calls, so no index serves it
 generically; the merchant index bounds the scan, the page `LIMIT` the result.
+
+**PERMANENT — merchant archive over partitioned tables.** An archive is the
+merchant's whole retained history, so its export, count and in-flight refusal
+on `usage_events` and `admission_operations` read every partition by
+definition. It is an operator action, never a request or a routine job.
+
+**PERMANENT — existence over every retained month.** "Has this meter ever been
+used" (`UsageEventsExistForTypes`, the `*UsageMeter*WithCatalog` reads) and
+"has this merchant any usage" (`HasUsageActivity`) cannot name a time range:
+the answer is about all retained history. Each is one index probe per
+partition (an `EXISTS`, or the newest row through a backward scan), and none
+runs on a request's money path.
 
 `LockUsageEventsForMeterCorrection` is PERMANENT `unplannable`: it holds a
 table-level transaction lock so an event insert cannot race a meter's semantic

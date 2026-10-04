@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -599,7 +600,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 // denominated per fiat account currency (#474), so a payer with both USD and
 // EUR activity gets one invoice each.
 func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Time) (int, error) {
-	return s.finalizeInvoicePayers(ctx, func(gen.ListInvoicePayersRow) (time.Time, time.Time, error) {
+	return s.finalizeInvoicePayers(ctx, from, func(gen.ListInvoicePayersRow) (time.Time, time.Time, error) {
 		return from, to, nil
 	})
 }
@@ -614,19 +615,22 @@ func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, bound
 	if now.IsZero() {
 		now = s.now()
 	}
-	return s.finalizeInvoicePayers(ctx, func(p gen.ListInvoicePayersRow) (time.Time, time.Time, error) {
+	// The previous period starts at most two periods back, so three months of
+	// usage names every payer it could still have to rate.
+	usageSince := retention.MonthStart(now).AddDate(0, -3, 0)
+	return s.finalizeInvoicePayers(ctx, usageSince, func(p gen.ListInvoicePayersRow) (time.Time, time.Time, error) {
 		return PreviousInvoicePeriod(now, p.PeriodAnchor, boundary)
 	})
 }
 
 // finalizeInvoicePayers runs FinalizeInvoice over every (payer, currency)
 // ListInvoicePayers enumerates: ledger money movement OR catalog-priced usage
-// that finalize still has to rate. A usage-only payer (the metered platform
-// fee: zero-amount usage, no deposit or spend) has no ledger row until
-// FinalizeInvoice rates it, so enumerating ledger_transfers alone never
-// invoiced it. Rating stays inside FinalizeInvoice (exactly-once through the
-// #672 watermark); the enumeration is what had to widen.
-func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, period func(gen.ListInvoicePayersRow) (time.Time, time.Time, error)) (int, error) {
+// since usageSince that finalize still has to rate. A usage-only payer (the
+// metered platform fee: zero-amount usage, no deposit or spend) has no ledger
+// row until FinalizeInvoice rates it, so enumerating ledger_transfers alone
+// never invoiced it. Rating stays inside FinalizeInvoice (exactly-once through
+// the #672 watermark); the enumeration is what had to widen.
+func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, usageSince time.Time, period func(gen.ListInvoicePayersRow) (time.Time, time.Time, error)) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -634,7 +638,7 @@ func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, period func(ge
 	if err != nil {
 		return 0, err
 	}
-	payers, err := s.db.Gen(ctx).ListInvoicePayers(ctx, tid.UUID())
+	payers, err := s.db.Gen(ctx).ListInvoicePayers(ctx, gen.ListInvoicePayersParams{MerchantID: tid.UUID(), UsageSince: usageSince.UTC()})
 	if err != nil {
 		return 0, err
 	}

@@ -27,7 +27,8 @@ SELECT
      + COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = a.merchant_id AND ao.customer_id = a.customer_id AND ao.currency = a.currency AND ao.state = 'open'
-               AND (ao.expires_at IS NULL OR ao.expires_at > sqlc.arg(as_of)::timestamptz)), 0))::bigint AS held,
+               AND ao.admitted_at >= sqlc.arg(held_since)::timestamptz
+               AND ao.expires_at > sqlc.arg(as_of)::timestamptz), 0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of

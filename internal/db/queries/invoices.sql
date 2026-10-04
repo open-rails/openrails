@@ -2,26 +2,33 @@
 -- receivables at finalization; payments are allocated back to invoice_id.
 
 -- name: ListInvoicePayers :many
--- Every (payer, currency) the period sweep must finalize: payers with #512
--- ledger money movement, and payers whose only activity is catalog-priced
--- usage that FinalizeInvoice still has to rate (no ledger row exists before
--- rating, so ledger_transfers alone never enumerates a usage-only payer such
--- as a metered platform fee). period_anchor is the first recorded activity,
--- from append-only created_at columns so anniversary windows never move.
-SELECT customer_id::uuid AS customer_id, currency, MIN(period_anchor)::timestamptz AS period_anchor
-FROM (
-    SELECT customer_id, currency, MIN(created_at) AS period_anchor
-    FROM billing.ledger_transfers
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id IS NOT NULL
-    GROUP BY customer_id, currency
+-- Every (payer, currency) the period sweep must finalize: payers with ledger
+-- money movement, and payers whose only activity since usage_since is
+-- catalog-priced usage that FinalizeInvoice still has to rate (no ledger row
+-- exists before rating). period_anchor is the payer's first recorded activity:
+-- its first transfer or the opening of its balance account, which the first
+-- metered event opens. Both are permanent, so anniversary windows never move
+-- when old usage partitions are dropped.
+WITH payers AS (
+    SELECT lt.customer_id, lt.currency, MIN(lt.created_at) AS first_at, NULL::timestamptz AS usage_first_at
+    FROM billing.ledger_transfers lt
+    WHERE lt.merchant_id = sqlc.arg(merchant_id)::uuid AND lt.customer_id IS NOT NULL
+    GROUP BY lt.customer_id, lt.currency
     UNION ALL
-    SELECT customer_id, currency, MIN(created_at) AS period_anchor
-    FROM billing.usage_events
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pricing_authority = 'catalog'
-    GROUP BY customer_id, currency
-) activity
-GROUP BY customer_id, currency
-ORDER BY customer_id, currency;
+    SELECT ue.customer_id, ue.currency, NULL::timestamptz AS first_at, MIN(ue.created_at) AS usage_first_at
+    FROM billing.usage_events ue
+    WHERE ue.merchant_id = sqlc.arg(merchant_id)::uuid AND ue.pricing_authority = 'catalog'
+      AND ue.occurred_at >= sqlc.arg(usage_since)::timestamptz
+    GROUP BY ue.customer_id, ue.currency
+)
+SELECT p.customer_id::uuid AS customer_id, p.currency,
+       COALESCE(LEAST(MIN(p.first_at), MIN(a.created_at)), MIN(p.usage_first_at))::timestamptz AS period_anchor
+FROM payers p
+LEFT JOIN billing.ledger_accounts a
+  ON a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = p.customer_id
+ AND a.currency = p.currency AND a.account_type = 'customer_balance'
+GROUP BY p.customer_id, p.currency
+ORDER BY p.customer_id, p.currency;
 
 -- name: GetInvoiceByPeriod :one
 -- Idempotency key is per (payer, period, currency): one invoice per currency (#474).

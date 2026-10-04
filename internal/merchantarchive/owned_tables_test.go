@@ -2,6 +2,7 @@ package merchantarchive
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"regexp"
 	"slices"
@@ -67,7 +68,7 @@ func TestClassifyMapsDatabaseRefusals(t *testing.T) {
 var restoreOccupancyExempt = []string{"merchant_api_host_claims", "merchant_slug_aliases"}
 
 var (
-	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\);`)
+	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)
 	merchantColumn = regexp.MustCompile(`(?m)^\s*merchant_id uuid\b`)
 	restoreList    = regexp.MustCompile(`(?s)FUNCTION billing\.guard_billing_restore_receipt\(\).*?AND c\.relname = ANY\(ARRAY\[(.*?)\]::text\[\]\)`)
 	quoted         = regexp.MustCompile(`'(\w+)'`)
@@ -123,5 +124,42 @@ func TestOwnedTablesAndRestoreOccupancyCoverTheSchema(t *testing.T) {
 	sort.Strings(guard)
 	if !slices.Equal(want, guard) {
 		t.Errorf("guard_billing_restore_receipt must check every merchant-scoped table\nwant: %v\ngot:  %v", want, guard)
+	}
+}
+
+// A restore applies today's retention to the two partitioned tables: a row
+// older than its table keeps has no partition and is not inserted. Every other
+// table restores each archived row.
+func TestRestoreSkipsPartitionedRowsPastRetention(t *testing.T) {
+	bounded := map[string]string{"usage_events": "occurred_at", "admission_operations": "admitted_at"}
+	for _, p := range contract.Profiles {
+		query := insertQuery(p)
+		key, partitioned := bounded[p.Name]
+		if !partitioned {
+			if strings.Contains(query, " WHERE ") {
+				t.Errorf("%s is not partitioned but its restore insert is conditional: %s", p.Name, query)
+			}
+			continue
+		}
+		position := 0
+		for i, c := range p.Columns {
+			if c.Name == key {
+				position = i + 1
+			}
+		}
+		if position == 0 {
+			t.Fatalf("%s profile lacks its partition key %s", p.Name, key)
+		}
+		want := fmt.Sprintf(" WHERE $%d::text::%s >= $%d::timestamptz", position, p.Columns[position-1].Type, len(p.Columns)+1)
+		if !strings.HasSuffix(query, want) {
+			t.Errorf("%s restore insert must end with %q, got %s", p.Name, want, query)
+		}
+		delete(bounded, p.Name)
+	}
+	if len(bounded) != 0 {
+		t.Errorf("partitioned tables without an archive profile: %v", bounded)
+	}
+	if len(partitionKeys) != 2 || partitionDropBefore["usage_events"] == nil || partitionDropBefore["admission_operations"] == nil {
+		t.Errorf("restore must know every partitioned table: %v", partitionKeys)
 	}
 }

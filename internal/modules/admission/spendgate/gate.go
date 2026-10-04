@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/retention"
 )
 
 var (
@@ -27,6 +28,20 @@ var (
 	ErrCaptured          = errors.New("admission operation is already captured")
 	ErrDeadlineShortened = errors.New("extension cannot shorten the deadline")
 )
+
+// MaxWindow and MaxHold bound what an admission can still matter to, so its
+// monthly partition can be dropped by the calendar alone.
+const (
+	MaxWindow = retention.AdmissionMaxWindow
+	MaxHold   = retention.AdmissionMaxHold
+)
+
+func deadlineTooFar() error {
+	return &ValidationError{Param: "expires_at", Message: fmt.Sprintf("expires_at must be within %d days of the admission", int(MaxHold/retention.Day))}
+}
+
+// retainedSince bounds a lookup by request id to the admissions still kept.
+func retainedSince(now time.Time) time.Time { return retention.AdmissionsDropBefore(now) }
 
 type Conflict struct{ Field string }
 
@@ -136,18 +151,25 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	}
 	in.RequestID = strings.TrimSpace(in.RequestID)
 	in.Terms = in.Terms.normalized()
-	if row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID}); err == nil {
+	now := g.Now()
+	// The request id is claimed under this lock: no unique key spans partitions.
+	if err := q.LockAdmissionRequest(ctx, gen.LockAdmissionRequestParams{MerchantID: mid.UUID(), RequestID: in.RequestID}); err != nil {
+		return Decision{}, err
+	}
+	if row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID, AdmittedSince: retainedSince(now)}); err == nil {
 		return g.replay(row, in)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Decision{}, err
 	}
-	now := g.Now()
 	expiry := deadline(in.ExpiresAt)
 	if in.Cost > 0 && expiry == nil {
 		return Decision{}, ErrDeadlineRequired
 	}
 	if expiry != nil && !expiry.After(now) {
 		return Decision{}, ErrExpired
+	}
+	if expiry != nil && expiry.After(now.Add(MaxHold)) {
+		return Decision{}, deadlineTooFar()
 	}
 	capacity := in.AccountBalance
 	if capacity > math.MaxInt64-in.CreditLimit {
@@ -188,13 +210,6 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 		AvailableAmount:    capacity - in.Cost,
 		RequestedExpiresAt: expiry, AdmittedAt: now, WindowKeys: keys,
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		row, err = q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID})
-		if err != nil {
-			return Decision{}, err
-		}
-		return g.replay(row, in)
-	}
 	if err != nil {
 		return Decision{}, err
 	}
@@ -207,7 +222,7 @@ func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput)
 	if err != nil {
 		return nil, err
 	}
-	row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID})
+	row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID, AdmittedSince: retainedSince(g.Now())})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -275,7 +290,7 @@ func (g *Gate) Get(ctx context.Context, requestID string) (gen.BillingAdmissionO
 	if err != nil {
 		return gen.BillingAdmissionOperation{}, err
 	}
-	row, err := g.db.Gen(ctx).GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
+	row, err := g.db.Gen(ctx).GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID, AdmittedSince: retainedSince(g.Now())})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, ErrNotFound
 	}
@@ -290,7 +305,7 @@ func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(cont
 	}
 	return g.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
+		row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID, AdmittedSince: retainedSince(g.Now())})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -300,7 +315,7 @@ func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(cont
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: row.CustomerID}); err != nil {
 			return err
 		}
-		row, err = q.LockAdmissionOperation(ctx, gen.LockAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
+		row, err = q.LockAdmissionOperation(ctx, gen.LockAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID, AdmittedAt: row.AdmittedAt})
 		if err != nil {
 			return err
 		}
@@ -316,7 +331,7 @@ func (g *Gate) Release(ctx context.Context, requestID string) error {
 		if row.State == "released" {
 			return nil
 		}
-		_, err := d.Gen(ctx).ReleaseAdmissionOperation(ctx, gen.ReleaseAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AsOf: g.Now()})
+		_, err := d.Gen(ctx).ReleaseAdmissionOperation(ctx, gen.ReleaseAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, AsOf: g.Now()})
 		return err
 	})
 }
@@ -335,7 +350,10 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 		if row.ExpiresAt != nil && until.Before(*row.ExpiresAt) {
 			return ErrDeadlineShortened
 		}
-		_, err := d.Gen(ctx).ExtendAdmissionOperation(ctx, gen.ExtendAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AsOf: g.Now(), ExpiresAt: until.UTC()})
+		if until.After(row.AdmittedAt.Add(MaxHold)) {
+			return deadlineTooFar()
+		}
+		_, err := d.Gen(ctx).ExtendAdmissionOperation(ctx, gen.ExtendAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AdmittedAt: row.AdmittedAt, AsOf: g.Now(), ExpiresAt: until.UTC()})
 		return err
 	})
 }
@@ -351,7 +369,8 @@ func fixedOffsetMs(prefix string, durMs int64) int64 {
 }
 
 func windowPeriod(mid, payer uuid.UUID, currency string, w resolvedWindow, now time.Time) (string, time.Time, time.Time, error) {
-	if w.Duration < time.Millisecond || w.Limit < 0 {
+	// A window longer than MaxWindow would count admissions already dropped.
+	if w.Duration < time.Millisecond || w.Duration > MaxWindow || w.Limit < 0 {
 		return "", time.Time{}, time.Time{}, fmt.Errorf("invalid spend window")
 	}
 	key := w.identity(fmt.Sprintf("%s/%s/%s", mid, payer, currency))
