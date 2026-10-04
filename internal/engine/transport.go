@@ -38,7 +38,7 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 // authentication. Ambient host context is stripped before either path.
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := &router.Table{}
-	opts := httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})}
+	opts := httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{}), InProcess: true}
 	var authn billingauth.DelegatedAuthenticator
 	if rt.Auth != nil {
 		opts.Gate = embedhttp.IntegrationGate(rt)

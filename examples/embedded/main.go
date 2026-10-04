@@ -1,12 +1,12 @@
-// Command embedded runs OpenRails inside a host process, as the README's
-// "How to Install (Embedded)" does: the host owns the Postgres pool, the River
-// fleet and HTTP serving, and billing code uses the same *openrails.Client a
-// remote deployment uses.
+// Command embedded is the README's "How to Install (Embedded)" program: a
+// members-only video site where users sign in with AuthKit, buy a monthly
+// "premium" plan and only premium members can watch. newBilling, applyCatalog
+// and run are the README's code; newAuth is a development AuthKit.
 //
-// OPENRAILS_DATABASE_URL is required. OPENRAILS_EXAMPLE_ADDR serves the
-// mounted routes under /billing until interrupted; without it the command
-// checks the engine and exits. Authentication here is a stand-in: the bearer
-// token is the user's UUID. Use your identity provider instead.
+// Run it from this directory (it reads catalog.yaml) with DATABASE_URL and the
+// PSP's MOBIUS_ACCOUNT_ID, MOBIUS_SECURITY_KEY and MOBIUS_WEBHOOK_SIGNING_SECRET
+// (MOBIUS_RAIL=nmi). ADDR is the listen address (default :8080);
+// EXAMPLE_CHECK_ONLY=1 boots, checks readiness and exits.
 package main
 
 import (
@@ -16,87 +16,128 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
+	authkitgin "github.com/open-rails/authkit/adapters/gin"
+	"github.com/open-rails/authkit/iam"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails"
-	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	openrailsgin "github.com/open-rails/openrails/adapters/gin"
 	"github.com/open-rails/openrails/billing"
 )
 
-const catalog = `schema_version: 1
-products:
-  - key: premium
-    display_name: Premium
-    entitlements_spec: {premium: null}
-    prices:
-      - key: premium-monthly
-        currency: USD
-        unit_amount: 9990000
-        access_duration_hours: 720
-        auto_renew: true
-`
+// newAuth is a development AuthKit: open registration, ephemeral signing keys,
+// and a River fleet the host owns (shared with OpenRails below).
+func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
+	cfg := authkit.Config{
+		Schema:       "profiles",
+		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"myvideos"}},
+		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
+		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
+		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
+		River:        authkit.RiverConfig{HostOwned: true},
+	}
+	if err := authkit.Migrate(ctx, db, cfg, authkit.MigrateOptions{}); err != nil {
+		return nil, err
+	}
+	return authkit.New(ctx, cfg, authkit.Deps{Postgres: db})
+}
+
+func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*openrails.Client, error) {
+	// Your payment processor account (a PSP). This one is an NMI gateway named "mobius", read
+	// from MOBIUS_RAIL=nmi, MOBIUS_ACCOUNT_ID and MOBIUS_SECURITY_KEY. Declare as many as you like.
+	mobius, err := openrails.PSPFromEnv("mobius", os.LookupEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := openrails.Config{
+		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
+		TestMode:          openrails.Sandbox,            // Sandbox or Live: which PSP credentials are accepted
+		ProviderWriteMode: openrails.ProviderWritesFull, // ProviderWritesReadOnly never charges anyone
+		Merchant: openrails.MerchantDeclaration{
+			Slug: "myvideos", // you, the seller
+			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
+		},
+		HTTP: &openrails.HTTPConfig{
+			Checkout: true, // products, prices, checkout sessions and processor webhooks
+			CustomerRoutes: []openrails.CustomerRoutesConfig{
+				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
+			},
+		},
+		River: openrails.RiverHostOwned, // renewals, dunning and invoices run on your River workers
+	}
+
+	// 1. Create or upgrade OpenRails' tables. Safe to run on every boot.
+	if err := openrails.Migrate(ctx, db, cfg); err != nil {
+		return nil, err
+	}
+
+	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
+	// who is calling, and each user is their own paying customer.
+	return openrails.New(ctx, cfg, openrails.Deps{
+		Postgres: db,   // required: the same pool your app uses
+		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
+	})
+}
+
+// applyCatalog makes OpenRails' catalog match catalog.yaml: an unchanged file is a no-op,
+// an edited one is applied. Run it on every boot.
+func applyCatalog(ctx context.Context, bill *openrails.Client) error {
+	raw, err := os.ReadFile("catalog.yaml")
+	if err != nil {
+		return err
+	}
+	params, err := billing.ParseCatalogApplicationYAML(raw)
+	if err != nil {
+		return err
+	}
+	_, err = bill.Catalog.Apply(ctx, params)
+	return err
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Getenv); err != nil {
+	if err := run(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
 }
 
-func run(ctx context.Context, getenv func(string) string) error {
-	dsn := getenv("OPENRAILS_DATABASE_URL")
-	if dsn == "" {
-		return errors.New("OPENRAILS_DATABASE_URL is required")
-	}
-	db, err := pgxpool.New(ctx, dsn)
+func run(ctx context.Context) error {
+	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	cfg := openrails.Config{
-		Schema:              "billing",
-		TestMode:            openrails.Sandbox,
-		ProviderWriteMode:   openrails.ProviderWritesReadOnly,
-		AllowCatalogUpdates: true,
-		Merchant:            openrails.MerchantDeclaration{Slug: "example"},
-		HTTP: &openrails.HTTPConfig{
-			Checkout:       true,
-			CustomerRoutes: []openrails.CustomerRoutesConfig{{Scope: openrails.CustomerSelfService}},
-		},
-		River: openrails.RiverHostOwned,
-	}
-	if err := openrails.Migrate(ctx, db, cfg); err != nil {
-		return err
-	}
-	bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db, Authenticate: authenticate})
+	auth, err := newAuth(ctx, db) // see AuthKit's README
 	if err != nil {
 		return err
 	}
-	defer bill.Close(context.WithoutCancel(ctx))
-
-	params, err := billing.ParseCatalogApplicationYAML([]byte(catalog))
+	defer auth.Close()
+	bill, err := newBilling(ctx, db, auth)
 	if err != nil {
 		return err
 	}
-	if _, err := bill.Catalog.Apply(ctx, params); err != nil {
+	defer bill.Close(ctx)
+	if err := applyCatalog(ctx, bill); err != nil {
 		return err
 	}
 
-	// One River fleet runs the host's jobs and OpenRails' (and AuthKit's, when
-	// the host runs AuthKit). A host-owned fleet migrates River itself.
+	// One River worker fleet runs your jobs, AuthKit's and OpenRails' (rebills, retries, invoices).
+	// The fleet is yours, so you create River's tables ("" is River's default schema, public).
 	if err := riverhelpers.ApplyMigrations(ctx, db, ""); err != nil {
 		return err
 	}
-	workers, err := riverhelpers.New(ctx, db, &river.Config{}, bill.RiverJobs())
+	workers, err := riverhelpers.New(ctx, db, &river.Config{}, auth.RiverJobs(), bill.RiverJobs())
 	if err != nil {
 		return err
 	}
@@ -104,44 +145,47 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer workers.StopAndCancel(context.WithoutCancel(ctx))
+	if err := auth.Start(ctx); err != nil {
+		return err
+	}
 	if err := bill.Start(ctx); err != nil {
 		return err
 	}
-	if err := bill.Ready(ctx); err != nil {
+
+	r := gin.Default()
+	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in under /api/v1
+		return err
+	}
+	if err := openrailsgin.Mount(r.Group("/billing"), bill); err != nil { // billing under /billing/v1
 		return err
 	}
 
-	mux := http.NewServeMux()
-	if err := openrailshttp.Mount(mux, bill, "/billing"); err != nil {
-		return err
-	}
-	premium, err := bill.HasEntitlement(ctx, uuid.NewString(), "premium", time.Now())
-	if err != nil {
-		return err
-	}
-	log.Printf("embedded OpenRails ready for merchant %s (a new user has premium: %t)", bill.MerchantID(), premium)
+	// Our own route: only premium members can watch.
+	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
+		claims, _ := auth.VerifyRequest(c.Request)
+		premium, err := bill.HasEntitlement(c, claims.UserID, "premium", time.Now())
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		if !premium {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "premium_required"})
+			return
+		}
+		c.File("videos/" + c.Param("id") + ".mp4")
+	})
 
-	addr := getenv("OPENRAILS_EXAMPLE_ADDR")
+	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
+		return bill.Ready(ctx)
+	}
+	addr := os.Getenv("ADDR")
 	if addr == "" {
-		return nil
+		addr = ":8080"
 	}
-	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: addr, Handler: r, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		_ = server.Shutdown(context.WithoutCancel(ctx))
 	}()
-	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
-}
-
-// authenticate is a stand-in for the host's identity provider: the bearer
-// token is the user's UUID, and each user pays for themselves.
-func authenticate(r *http.Request) (openrails.Identity, error) {
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if _, err := uuid.Parse(token); !ok || err != nil {
-		return openrails.Identity{}, openrails.ErrUnauthenticated
-	}
-	return openrails.Identity{Kind: openrails.User, Issuer: "https://example.invalid", SubjectID: token, CustomerID: token}, nil
+	return server.ListenAndServe()
 }

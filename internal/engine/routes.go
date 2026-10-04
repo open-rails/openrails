@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -83,4 +84,22 @@ func (e *Engine) buildRoutes() ([]routebundle.Route, error) {
 		return nil, err
 	}
 	return routebundle.FromTable(table), nil
+}
+
+// Console is the admin console for a host to mount at /admin/ on its root
+// router; nil unless Config.AdminConsole is enabled. A control plane serves the
+// console in Routes instead.
+func (e *Engine) Console() http.Handler {
+	cfg := e.App.Config
+	if operator.Get(e.App) != nil || !cfg.AdminConsole.IsEnabled() || !adminconsole.Present(e.App.ConsoleAssets) {
+		return nil
+	}
+	return adminconsole.Handler(adminconsole.Config{
+		AuthBaseURL:            cfg.AdminConsole.AuthBaseURL,
+		APIBaseURL:             cfg.AdminConsole.APIBaseURL,
+		NLWidgetsEnabled:       cfg.LLM.IsConfigured(),
+		AskEnabled:             cfg.LLM.AskConfigured(),
+		CatalogCopilotEnabled:  cfg.LLM.CatalogCopilotConfigured(),
+		CatalogDraftingEnabled: cfg.LLM.CatalogDraftingConfigured(),
+	}, e.App.ConsoleAssets)
 }

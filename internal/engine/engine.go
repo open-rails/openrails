@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -73,10 +74,22 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err := validate(&cfg, deps); err != nil {
 		return nil, err
 	}
-	auth := integration(deps)
+	auth, err := integration(deps)
+	if err != nil {
+		return nil, err
+	}
 	httpCfg, err := httpConfig(cfg, auth)
 	if err != nil {
 		return nil, err
+	}
+	consoleAssets := deps.ConsoleAssets
+	if consoleAssets == nil {
+		consoleAssets = admin.FS()
+	}
+	// A control plane checks this when it builds its surface, so its
+	// maintenance commands run on a console-less binary.
+	if cfg.ControlPlane == nil && cfg.AdminConsole.IsEnabled() && !adminconsole.Present(consoleAssets) {
+		return nil, fmt.Errorf("openrails: Config.AdminConsole is enabled but there is no console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
 	}
 	if deps.Postgres != nil && (cfg.DB == nil || cfg.DB.GetConnectionString() == "") {
 		url := deps.Postgres.Config().ConnString()
@@ -125,7 +138,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err := rt.EnsureMerchantsService(ctx); err != nil {
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
-	application.ConsoleAssets = admin.FS()
+	application.ConsoleAssets = consoleAssets
 	rt.Auth = auth
 	signerPending, err := configureMerchant(ctx, application, e.merchant)
 	if err != nil {
@@ -209,8 +222,20 @@ func validate(cfg *config.Config, deps config.Deps) error {
 	if (deps.UserExists == nil) != (deps.UserEmail == nil) {
 		return fmt.Errorf("openrails: set Deps.UserExists and Deps.UserEmail together")
 	}
-	if deps.Authenticate == nil && (deps.Authorize != nil || deps.RecentSignIn != nil) {
-		return fmt.Errorf("openrails: Deps.Authorize and Deps.RecentSignIn require Deps.Authenticate")
+	if cfg.ControlPlane != nil && (deps.AuthKit != nil || deps.Authenticate != nil) {
+		return fmt.Errorf("openrails: Config.ControlPlane authenticates with its own AuthKit; leave Deps.AuthKit and Deps.Authenticate unset")
+	}
+	if deps.AuthKit != nil {
+		if deps.Authenticate != nil || deps.Authorize != nil || deps.RecentSignIn != nil {
+			return fmt.Errorf("openrails: set Deps.AuthKit or Deps.Authenticate/Authorize/RecentSignIn, not both")
+		}
+	} else {
+		if deps.CustomerFor != nil || deps.AuthorityFor != nil {
+			return fmt.Errorf("openrails: Deps.CustomerFor and Deps.AuthorityFor require Deps.AuthKit")
+		}
+		if deps.Authenticate == nil && (deps.Authorize != nil || deps.RecentSignIn != nil) {
+			return fmt.Errorf("openrails: Deps.Authorize and Deps.RecentSignIn require Deps.Authenticate")
+		}
 	}
 	if len(deps.ProviderCredentials) > 0 {
 		for _, rails := range cfg.Merchant.PSPs {

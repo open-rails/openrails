@@ -11,7 +11,7 @@ test_mode: sandbox        # sandbox | live; allowed in every environment (#762) 
 secret_backend: snapshot # immutable host values; alternatively vault or encrypted db
 merchant_config_http: false # standalone configuration routes; local Client stays available
 credential_read_only: false # may restrict a managed backend; cannot grant storage privileges
-allow_catalog_updates: false # enable ordinary catalog Client/API writes; independent of credential custody
+allow_catalog_updates: false # publish catalog mutation routes over HTTP; independent of credential custody
 # Trusted local operator catalog application remains available when false.
 # DB credentials require encryption.master_key in every credential posture.
 # alert_secret_backend: db # optional managed outbound webhooks beside a snapshot

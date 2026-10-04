@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"io/fs"
 	"net"
 	"net/http"
 
@@ -31,9 +32,24 @@ type Deps struct {
 	// ProviderCredentials are snapshot credentials for existing PSPs.
 	ProviderCredentials []ProviderCredentialSnapshot
 
-	// Authenticate says who is calling. Return ErrUnauthenticated when the
-	// request carries no valid credential. Required for any published route
-	// group except provider webhooks.
+	// AuthKit authenticates callers with the host's AuthKit: its
+	// *authkit.Client (or an authkit Verifier for the host's audiences).
+	// OpenRails derives authentication, live authorization and the recent
+	// sign-in check from it. Mutually exclusive with Authenticate.
+	AuthKit billingauth.Verifier
+	// CustomerFor maps an AuthKit caller to the customer who pays (a canonical
+	// UUID; "" for none). Default: a user pays for themselves, so the customer
+	// is the AuthKit user ID.
+	CustomerFor func(ctx context.Context, caller billingauth.Identity) (customerID string, err error)
+	// AuthorityFor names the AuthKit group and permission that authorize a
+	// staff operation. Required, with AuthKit, for the staff and machine route
+	// groups: only the host knows which group holds its billing staff.
+	AuthorityFor func(ctx context.Context, required billingauth.Requirement) (billingauth.Authority, error)
+
+	// Authenticate, Authorize and RecentSignIn are for hosts with other auth.
+	// Authenticate says who is calling; return ErrUnauthenticated when the
+	// request carries no valid credential. Required (or AuthKit) for any
+	// published route group except provider webhooks.
 	Authenticate func(*http.Request) (billingauth.Identity, error)
 	// Authorize checks live, for the exact operation and target, that an
 	// authenticated identity holds a staff permission. Return ErrForbidden to
@@ -51,6 +67,11 @@ type Deps struct {
 	// ResolveUsername maps a provider-supplied username to a user ID (the
 	// CCBill username bridge).
 	ResolveUsername func(ctx context.Context, username string) (userID string, err error)
+
+	// ConsoleAssets is a host-built admin console (web/admin's Vite build,
+	// rooted at index.html). Nil uses the build embedded in this module, when
+	// the binary was built with one.
+	ConsoleAssets fs.FS
 
 	// EmailSender and SMSSender deliver the control plane's AuthKit messages.
 	EmailSender EmailSender

@@ -46,7 +46,6 @@ merchants:
 
 	boot := func() (*openrails.Client, error) {
 		cfg := f.config()
-		cfg.AllowCatalogUpdates = false
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Vault = &openrails.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token}
 		cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}

@@ -184,6 +184,18 @@ func (c *Client) RoutesRequireRoot() bool {
 	return c != nil && c.engine != nil && c.engine.RoutesRequireRoot()
 }
 
+// AdminConsole is the merchant admin console, for an embedded host to mount at
+// /admin/ on its root router (the build's asset URLs are rooted there). It is
+// nil unless Config.AdminConsole is enabled; the console comes from
+// Deps.ConsoleAssets, else from the build embedded in this module. With
+// Config.ControlPlane the console is part of Routes instead.
+func (c *Client) AdminConsole() http.Handler {
+	if c == nil || c.engine == nil {
+		return nil
+	}
+	return c.engine.Console()
+}
+
 // RiverJobs is OpenRails' contribution to a host-owned River fleet (workers,
 // periodic jobs and QueueBilling), for riverhelpers.New alongside the host's
 // and AuthKit's. It fails that composition on a remote client.

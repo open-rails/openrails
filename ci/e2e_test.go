@@ -57,15 +57,15 @@ func newFixture(t *testing.T) *fixture {
 }
 
 // config is the fixture's engine configuration: its own schema for billing
-// tables and managed River.
+// tables and managed River. Catalog updates stay unpublished: the in-process
+// Client writes its own catalog as the process owner.
 func (f *fixture) config() openrails.Config {
 	return openrails.Config{
-		Schema:              f.schema,
-		RiverSchema:         f.schema,
-		TestMode:            openrails.Sandbox,
-		ProviderWriteMode:   openrails.ProviderWritesReadOnly,
-		AllowCatalogUpdates: true,
-		ReturnOrigins:       []string{"https://e2e.test"},
+		Schema:            f.schema,
+		RiverSchema:       f.schema,
+		TestMode:          openrails.Sandbox,
+		ProviderWriteMode: openrails.ProviderWritesReadOnly,
+		ReturnOrigins:     []string{"https://e2e.test"},
 	}
 }
 

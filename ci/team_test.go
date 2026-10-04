@@ -40,7 +40,6 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			ctx := t.Context()
 			slug := "team-" + uuid.NewString()[:8]
 			cfg := f.config()
-			cfg.AllowCatalogUpdates = false
 			cfg.ControlPlane = &openrails.ControlPlaneConfig{HostedPosture: hosted, Auth: openrails.AuthConfig{
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}

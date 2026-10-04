@@ -20,6 +20,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/permissions"
 )
 
@@ -267,6 +268,18 @@ func TestCatalogWritePolicy(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code, "the guard also refuses if a write is ever mounted")
 	require.Contains(t, rec.Body.String(), "catalog_updates_disabled")
 	require.False(t, called)
+
+	// The embedded Client's own handler registers mutations with the flag off,
+	// and the guard admits only its host principal: the process owner.
+	rt := &app.Runtime{Config: &config.Config{}}
+	inProcess := &router.Table{}
+	RegisterCatalogRoutes(router.NewMux(inProcess, "/merchant/catalog", rt), rt, Options{InProcess: true})
+	require.Contains(t, routeKeys(inProcess), "POST /merchant/catalog/applications")
+	owner := httptest.NewRequest(http.MethodPost, "/products", nil)
+	owner = owner.WithContext(requestauth.WithHostPrincipal(owner.Context(), &requestauth.HostPrincipal{}))
+	rec = httptest.NewRecorder()
+	catalogWriteGuardMW(&config.Config{})(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, owner, nil))
+	require.True(t, called)
 }
 
 // Administrative velocity limits apply per operation class after

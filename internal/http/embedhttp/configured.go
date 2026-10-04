@@ -23,10 +23,10 @@ func ValidateHTTPConfig(cfg *config.HTTPConfig, auth *billingauth.Integration) e
 		return err
 	}
 	if cfg.Checkout && (auth == nil || auth.Authentication == nil) {
-		return fmt.Errorf("openrails HTTP: Checkout requires Deps.Authenticate")
+		return fmt.Errorf("openrails HTTP: Checkout requires Deps.AuthKit or Deps.Authenticate")
 	}
 	if (cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
-		return fmt.Errorf("openrails HTTP: management surfaces require Deps.Authenticate and Deps.Authorize")
+		return fmt.Errorf("openrails HTTP: management surfaces require Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
 	}
 	return nil
 }

@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	riverhelpers "github.com/open-rails/helpers/river"
+	"github.com/open-rails/openrails/internal/db"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 )
@@ -91,6 +93,10 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 	}, func(ctx context.Context, binding riverhelpers.Binding) error {
 		client := binding.Client
 		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
+			if host && errors.Is(err, db.ErrRiverTablesMissing) {
+				// A host-owned fleet migrates River itself; name the call.
+				return fmt.Errorf("%w: call riverhelpers.ApplyMigrations(ctx, pool, %q) before riverhelpers.New (a host-owned fleet migrates River itself; openrails.Migrate does not)", err, client.Schema())
+			}
 			return err
 		}
 		r.riverCompositionMu.Lock()

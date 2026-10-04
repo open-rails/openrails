@@ -468,8 +468,9 @@ in product/price list filters. Ordinary merchant product creation continues to
 use the merchant-owned default catalog.
 
 Reads need `merchant:catalog:read`; writes need `merchant:catalog:update` and
-`allow_catalog_updates: true`. The flag defaults to false and omits ordinary
-catalog mutation routes; embedded Client mutations follow the same policy.
+`allow_catalog_updates: true`. The flag defaults to false and omits
+catalog mutation routes from HTTP; the embedded in-process Client is the
+process owner and is not gated by it.
 Catalog reads remain available. Storage is always the database, independently
 of provider credential custody. Trusted local operator application can run
 when ordinary writes are disabled; there is no remote bypass.

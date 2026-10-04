@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	authhelpers "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
@@ -122,7 +121,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 			{Scope: openrails.CustomerBillingManagement, Prefix: ManagePrefix},
 		}},
 	}
-	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, Authenticate: authenticate(auth), RecentSignIn: recentSignIn(auth)})
+	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth})
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}
@@ -173,34 +172,6 @@ var checkoutRouting = []openrails.CheckoutRoutingRuleConfig{
 // BillingRoutes returns the embedded billing routes, relative to /billing.
 func (r *Runtime) BillingRoutes() ([]openrails.Route, error) {
 	return r.Client.Routes()
-}
-
-// authenticate maps an AuthKit user session to the paying customer: each user
-// pays for themselves.
-func authenticate(auth *authkit.Client) func(*http.Request) (openrails.Identity, error) {
-	return func(r *http.Request) (openrails.Identity, error) {
-		claims, err := auth.VerifyRequest(r)
-		if err != nil || claims.UserID == "" {
-			return openrails.Identity{}, openrails.ErrUnauthenticated
-		}
-		return openrails.Identity{Kind: openrails.User, Issuer: claims.Issuer, SubjectID: claims.UserID, CustomerID: claims.UserID}, nil
-	}
-}
-
-// recentSignIn asks AuthKit whether the user signed in recently enough to
-// move money.
-func recentSignIn(auth *authkit.Client) func(*http.Request) error {
-	return func(r *http.Request) error {
-		principal, err := auth.AuthenticateRequest(r.Context(), r)
-		if err != nil {
-			return err
-		}
-		checker, ok := principal.(authhelpers.RecentSignInChecker)
-		if !ok {
-			return errors.New("harness: AuthKit principal cannot report its sign-in time")
-		}
-		return checker.CheckRecentSignIn(r.Context())
-	}
 }
 
 // Mount registers AuthKit at /auth/v1 and OpenRails at /billing on mux.

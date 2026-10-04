@@ -79,3 +79,24 @@ func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 	completed(3)
 	stop()
 }
+
+// A host-owned fleet migrates River itself. Forgetting to is refused with the
+// exact call to make, when the fleet is composed and again at Start.
+func TestHostOwnedRiverNamesTheMissingMigration(t *testing.T) {
+	f := newFixture(t)
+	cfg := f.config()
+	cfg.RiverSchema, cfg.River = "", openrails.RiverHostOwned
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	unmigrated := f.schema + "_jobs"
+	_, err = f.pool.Exec(t.Context(), "CREATE SCHEMA "+pgx.Identifier{unmigrated}.Sanitize())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{unmigrated}.Sanitize()+" CASCADE")
+	})
+	_, err = riverkit.New(t.Context(), f.pool, &river.Config{Schema: unmigrated}, client.RiverJobs())
+	require.ErrorContains(t, err, `riverhelpers.ApplyMigrations(ctx, pool, "`+unmigrated+`")`)
+	require.ErrorContains(t, client.Start(t.Context()), "riverhelpers.ApplyMigrations")
+}

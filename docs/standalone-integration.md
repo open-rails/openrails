@@ -96,7 +96,7 @@ applications carry a stable ID and revision precondition; managed credentials us
 separate publication operations. See [metadata applications](merchant-configuration-applications.md).
 
 Catalogs always use database state. `allow_catalog_updates` independently controls
-ordinary catalog Client/API mutations and defaults to false in both credential
+catalog mutations over HTTP (the remote Client included) and defaults to false in both credential
 modes. Disabled mutations are absent from the route bundle; reads remain available.
 Trusted operator application is still permitted and uses durable application IDs
 so an unchanged artifact does not overwrite later edits. This does not change

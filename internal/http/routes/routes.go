@@ -43,6 +43,10 @@ type Options struct {
 	// Gate has resolved the effective principal, so counters key the authorized
 	// user rather than an untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
+
+	// InProcess marks the embedded Client's own handler: catalog mutations are
+	// registered for its host principal whatever AllowCatalogUpdates says.
+	InProcess bool
 }
 
 type GateOptions struct {
@@ -666,7 +670,7 @@ func bearerToken(header string) string {
 
 func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	readActions := catalog
-	catalog = withCatalogWritePolicy(catalog, rt)
+	catalog = withCatalogWritePolicy(catalog, rt, opts)
 	read := opts.merchantActionPermissionMW(permissions.MerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
@@ -806,7 +810,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// overage). PUT rides the grant class; DELETE the destructive class —
 	// dropping a negotiated card silently reprices the customer at default.
 	customers.Handle(http.MethodGet, "/rate-overrides", h(httphandlers.ListAdminRateOverrides), customerRead...)
-	catalogRates := withCatalogWritePolicy(customers, rt)
+	catalogRates := withCatalogWritePolicy(customers, rt, opts)
 	catalogRates.Handle(http.MethodPut, "/rate-overrides/:meter_key", h(httphandlers.PutAdminRateOverride), grantWrite...)
 	catalogRates.Handle(http.MethodDelete, "/rate-overrides/:meter_key", h(httphandlers.DeleteAdminRateOverride), revokeWrite...)
 

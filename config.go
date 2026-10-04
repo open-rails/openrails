@@ -67,8 +67,10 @@ type (
 	CredentialClass = billingauth.CredentialClass
 	// Requirement is the permission, scope and target Deps.Authorize checks.
 	Requirement = billingauth.Requirement
-	Target      = billingauth.Target
-	Scope       = billingauth.Scope
+	// Authority is the AuthKit group and permission Deps.AuthorityFor names.
+	Authority = billingauth.Authority
+	Target    = billingauth.Target
+	Scope     = billingauth.Scope
 	// DelegatedPrincipal is a customer route's own authentication result: an
 	// explicit merchant and paying subject.
 	DelegatedPrincipal = billingauth.DelegatedPrincipal

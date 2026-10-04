@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"net"
 	"net/http"
 
@@ -415,6 +416,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		} else {
 			if err := runtime.DB.ValidateRiverJobBinding(ctx, pool, producer.Schema()); err != nil {
 				pool.Close() // This producer pool was created internally above.
+				if errors.Is(err, db.ErrRiverTablesMissing) {
+					return nil, fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) before openrails.New", err)
+				}
 				return nil, fmt.Errorf("init River producer binding: %w", err)
 			}
 			runtime.RiverProducer = producer

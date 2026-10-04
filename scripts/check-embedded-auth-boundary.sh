@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# A package graph fence: the billing engine's request path authenticates through
-# the host's Deps hooks and never links AuthKit. Only the opt-in control plane
-# (internal/controlplane, internal/operator) does; AuthKit's iam vocabulary types
-# the control plane's message senders in Deps.
+# Engine packages only: root links AuthKit for the opt-in control plane (#1121); billing itself must not.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 packages=(./internal/config ./internal/billingauth ./internal/app ./internal/service ./internal/http/embedhttp ./internal/http/inprocess ./internal/hosttools)

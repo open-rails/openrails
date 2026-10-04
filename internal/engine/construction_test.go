@@ -3,16 +3,20 @@ package engine
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"testing/fstest"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -43,17 +47,23 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
 			c.HTTP = &config.HTTPConfig{Checkout: true}
 		}), config.Deps{}, "may only add CustomerRoutes"},
-		"river schema injection":  {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
-		"river schema host owned": {with(sandbox, func(c *config.Config) { c.River = config.RiverHostOwned; c.RiverSchema = "jobs" }), config.Deps{}, "applies to managed River"},
-		"unknown river owner":     {with(sandbox, func(c *config.Config) { c.River = "nobody" }), config.Deps{}, "Config.River"},
-		"posture unset":           {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
-		"write mode unset":        {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
-		"unknown write mode":      {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
-		"authorize without authn": {sandbox, config.Deps{Authorize: func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return nil }}, "require Deps.Authenticate"},
-		"half a user directory":   {sandbox, config.Deps{UserExists: func(context.Context, string) (bool, error) { return true, nil }}, "together"},
-		"stripe seam on live":     {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
-		"nmi seam on live":        {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
-		"clock seam on live":      {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
+		"river schema injection":      {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
+		"river schema host owned":     {with(sandbox, func(c *config.Config) { c.River = config.RiverHostOwned; c.RiverSchema = "jobs" }), config.Deps{}, "applies to managed River"},
+		"unknown river owner":         {with(sandbox, func(c *config.Config) { c.River = "nobody" }), config.Deps{}, "Config.River"},
+		"posture unset":               {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
+		"write mode unset":            {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
+		"unknown write mode":          {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
+		"authorize without authn":     {sandbox, config.Deps{Authorize: func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return nil }}, "require Deps.Authenticate"},
+		"authkit and authenticate":    {sandbox, config.Deps{AuthKit: verifier{}, Authenticate: authenticate}, "not both"},
+		"customer hook without kit":   {sandbox, config.Deps{CustomerFor: func(context.Context, billingauth.Identity) (string, error) { return "", nil }}, "require Deps.AuthKit"},
+		"nil authkit client":          {sandbox, config.Deps{AuthKit: (*verifier)(nil)}, "Deps.AuthKit"},
+		"authkit staff without group": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{MerchantAdmin: true} }), config.Deps{AuthKit: verifier{}}, "Deps.AuthorityFor"},
+		"control plane and authkit":   {with(sandbox, func(c *config.Config) { c.ControlPlane = &config.ControlPlaneConfig{} }), config.Deps{AuthKit: verifier{}}, "its own AuthKit"},
+		"console without a build":     {with(sandbox, func(c *config.Config) { c.AdminConsole = &config.AdminConsoleConfig{Enabled: true} }), config.Deps{ConsoleAssets: fstest.MapFS{}}, "no console build"},
+		"half a user directory":       {sandbox, config.Deps{UserExists: func(context.Context, string) (bool, error) { return true, nil }}, "together"},
+		"stripe seam on live":         {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
+		"nmi seam on live":            {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
+		"clock seam on live":          {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
 		"two credential sources": {with(sandbox, func(c *config.Config) {
 			c.Merchant = config.MerchantDeclaration{Slug: "m", PSPs: map[string]config.PSPConfig{"stripe": {"stripe": {AccountID: "acct", Secrets: map[string]string{"secret_key": "sk"}}}}}
 		}), config.Deps{ProviderCredentials: []config.ProviderCredentialSnapshot{{Rail: "stripe"}}}, "either Deps.ProviderCredentials or Config.Merchant"},
@@ -91,26 +101,102 @@ func TestEmbeddedDefaults(t *testing.T) {
 func TestAuthenticationHooks(t *testing.T) {
 	var identity billingauth.Identity
 	var authzErr error
-	auth := integration(config.Deps{
+	hooks, err := integration(config.Deps{
 		Authenticate: func(*http.Request) (billingauth.Identity, error) { return identity, nil },
 		Authorize:    func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return authzErr },
 	})
+	require.NoError(t, err)
 	r, _ := http.NewRequest(http.MethodGet, "/", nil)
 	for kind, want := range map[billingauth.PrincipalKind]billingauth.CredentialClass{
 		billingauth.User: billingauth.CredentialClassUserSession, billingauth.Machine: billingauth.CredentialClassAutomation,
 	} {
 		identity = billingauth.Identity{Kind: kind}
-		got, err := auth.Authentication.AuthenticateRequest(r.Context(), r)
+		got, err := hooks.Authentication.AuthenticateRequest(r.Context(), r)
 		require.NoError(t, err)
 		require.Equal(t, want, got.CredentialClass)
 	}
 	for err, status := range map[error]int{billingauth.ErrUnauthenticated: http.StatusUnauthorized, billingauth.ErrForbidden: http.StatusForbidden} {
 		authzErr = err
 		var gate billingauth.GateError
-		require.ErrorAs(t, auth.Authorization.Authorize(r.Context(), r, identity, billingauth.Requirement{}), &gate)
+		require.ErrorAs(t, hooks.Authorization.Authorize(r.Context(), r, identity, billingauth.Requirement{}), &gate)
 		require.Equal(t, status, gate.Status)
 	}
-	require.Nil(t, integration(config.Deps{}), "no hook authenticates nobody")
+	none, err := integration(config.Deps{})
+	require.NoError(t, err)
+	require.Nil(t, none, "no hook authenticates nobody")
+}
+
+// verifier is a host's AuthKit as OpenRails sees it: it verifies a request
+// into a helpers/auth principal whose Can checks permissions live.
+type verifier struct {
+	identity auth.Identity
+	allowed  map[string]bool // "group/permission"
+	stepUp   error
+}
+
+func (v verifier) AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error) {
+	return v, nil
+}
+func (v verifier) Identity() auth.Identity { return v.identity }
+func (v verifier) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
+	return v.allowed[scope.ID+"/"+permission], nil
+}
+func (v verifier) CheckRecentSignIn(context.Context) error { return v.stepUp }
+
+// With Deps.AuthKit the host writes no mapping: an AuthKit user pays for
+// themselves, staff authority is checked live in the group AuthorityFor
+// names, and the recent sign-in check is the principal's own.
+func TestAuthKitDerivesAuthentication(t *testing.T) {
+	const user, org, issuer = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "https://auth.example"
+	kit := verifier{identity: auth.Identity{Kind: auth.KindUser, Issuer: issuer, Subject: user, Email: "u@example.com"},
+		allowed: map[string]bool{"staff/merchant:payments:refund": true}, stepUp: auth.ErrStepUpRequired}
+	request := func() *http.Request { return requestauth.Begin(httptest.NewRequest(http.MethodGet, "/", nil)) }
+
+	derived, err := integration(config.Deps{AuthKit: kit})
+	require.NoError(t, err)
+	r := request()
+	got, err := derived.Authentication.AuthenticateRequest(r.Context(), r)
+	require.NoError(t, err)
+	require.Equal(t, billingauth.Identity{Kind: billingauth.User, Issuer: issuer, SubjectID: user, CustomerID: user, Email: "u@example.com", CredentialClass: billingauth.CredentialClassUserSession}, got)
+	require.Nil(t, derived.Authorization, "no AuthorityFor publishes no staff routes")
+	require.ErrorIs(t, derived.RecentSignIn.CheckRecentSignIn(r.Context(), r), auth.ErrStepUpRequired)
+
+	mapped, err := integration(config.Deps{AuthKit: kit,
+		CustomerFor: func(_ context.Context, caller billingauth.Identity) (string, error) {
+			require.Equal(t, user, caller.SubjectID)
+			return org, nil
+		},
+		AuthorityFor: func(_ context.Context, required billingauth.Requirement) (billingauth.Authority, error) {
+			return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: "staff"}, Permission: required.Permission}, nil
+		},
+	})
+	require.NoError(t, err)
+	r = request()
+	got, err = mapped.Authentication.AuthenticateRequest(r.Context(), r)
+	require.NoError(t, err)
+	require.Equal(t, org, got.CustomerID, "the hook names who pays")
+	require.NoError(t, mapped.Authorization.Authorize(r.Context(), r, got, billingauth.Requirement{Permission: "merchant:payments:refund"}))
+	var gate billingauth.GateError
+	require.ErrorAs(t, mapped.Authorization.Authorize(r.Context(), r, got, billingauth.Requirement{Permission: "merchant:settings:update"}), &gate)
+	require.Equal(t, http.StatusForbidden, gate.Status)
+}
+
+// The console is the host's build when supplied, mounted only when enabled.
+func TestAdminConsoleServesHostAssets(t *testing.T) {
+	assets := fstest.MapFS{"index.html": {Data: []byte("<!doctype html>host build")}}
+	engine := func(enabled bool) *Engine {
+		cfg := &config.Config{AdminConsole: &config.AdminConsoleConfig{Enabled: enabled, APIBaseURL: "/billing/v1", AuthBaseURL: "/api/v1"}}
+		return &Engine{App: &app.App{Config: cfg, ConsoleAssets: assets, Runtime: &app.Runtime{Config: cfg}}}
+	}
+	require.Nil(t, engine(false).Console())
+	require.Nil(t, (&Engine{App: &app.App{Config: &config.Config{AdminConsole: &config.AdminConsoleConfig{Enabled: true}}}}).Console(), "no build, no console")
+	console := engine(true).Console()
+	rec := httptest.NewRecorder()
+	console.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/", nil))
+	require.Contains(t, rec.Body.String(), "host build")
+	rec = httptest.NewRecorder()
+	console.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/config.json", nil))
+	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false}`, rec.Body.String())
 }
 
 // Host transactions run under the engine's merchant; a caller context pinned

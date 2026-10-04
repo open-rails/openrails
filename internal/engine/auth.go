@@ -3,18 +3,42 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
+	"github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// integration adapts the host's hooks to the engine's authentication and
-// authorization boundary; nil when the host authenticates nobody.
-func integration(deps config.Deps) *billingauth.Integration {
+// integration is the engine's authentication and authorization boundary:
+// derived from the host's AuthKit, or adapted from its own hooks. Nil when
+// the host authenticates nobody.
+func integration(deps config.Deps) (*billingauth.Integration, error) {
+	if deps.AuthKit != nil {
+		options := billingauth.IntegrationOptions{Verifier: deps.AuthKit, Customer: billingauth.SubjectCustomerID}
+		if customerFor := deps.CustomerFor; customerFor != nil {
+			options.Customer = func(ctx context.Context, principal auth.Principal) (billingauth.CustomerIdentity, error) {
+				caller, ok := billingauth.IdentityOf(principal.Identity())
+				if !ok {
+					return billingauth.CustomerIdentity{}, billingauth.ErrUnauthenticated
+				}
+				id, err := customerFor(ctx, caller)
+				return billingauth.CustomerIdentity{ID: id}, err
+			}
+		}
+		if deps.AuthorityFor != nil {
+			options.Authority = billingauth.AuthorityResolver(deps.AuthorityFor)
+		}
+		out, err := billingauth.NewIntegration(options)
+		if err != nil {
+			return nil, fmt.Errorf("openrails: Deps.AuthKit: %w", err)
+		}
+		return out, nil
+	}
 	if deps.Authenticate == nil {
-		return nil
+		return nil, nil
 	}
 	authenticate := deps.Authenticate
 	out := &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(_ context.Context, r *http.Request) (billingauth.Identity, error) {
@@ -51,7 +75,7 @@ func integration(deps config.Deps) *billingauth.Integration {
 	if recent := deps.RecentSignIn; recent != nil {
 		out.RecentSignIn = billingauth.RecentSignInFunc(func(_ context.Context, r *http.Request) error { return recent(r) })
 	}
-	return out
+	return out, nil
 }
 
 type userDirectoryFuncs struct {

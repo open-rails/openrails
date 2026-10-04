@@ -24,7 +24,7 @@ import (
 // their merchant-administrator surfaces and are never mounted in this group.
 func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	readActions := rr
-	rr = withCatalogWritePolicy(rr, rt)
+	rr = withCatalogWritePolicy(rr, rt, opts)
 	scope := []router.Middleware{}
 	if rt != nil && rt.DB != nil {
 		scope = append(scope, middleware.MerchantDBConnMW(rt.DB))
@@ -127,7 +127,7 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 // RegisterCatalogCollectionRoutes is the separately authorized merchant-admin
 // collection. Supplying an owner subject here is permitted only by that grant.
 func RegisterCatalogCollectionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	rr = withCatalogWritePolicy(rr, rt)
+	rr = withCatalogWritePolicy(rr, rt, opts)
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))

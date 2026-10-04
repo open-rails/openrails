@@ -472,7 +472,7 @@ func (r *Runtime) StartWorkers(ctx context.Context) (stop func(), err error) {
 		return nil, fmt.Errorf("runtime is closed")
 	}
 	if r.hostRiver && !r.hostRiverBound.Load() {
-		return nil, fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverhelpers.New")
+		return nil, fmt.Errorf("host-owned River is not bound: before Start, call riverhelpers.ApplyMigrations(ctx, pool, schema) and riverhelpers.New(ctx, pool, riverConfig, client.RiverJobs())")
 	}
 	loopCtx, stopLoops := context.WithCancel(ctx)
 	var pollerDone chan struct{}

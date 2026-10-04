@@ -367,7 +367,7 @@ Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
 configuration routes require explicit HTTP publication. Snapshot credential writes
 are unavailable, while authorized metadata operations and archive decisions remain
 available through the Client. Catalog mutation routes are omitted unless
-`allow_catalog_updates: true`; the same policy denies ordinary embedded Client
-writes. Catalog reads remain available, and trusted local operator application
+`allow_catalog_updates: true`. The embedded in-process Client is the process
+owner and writes its own catalog whatever the flag says. Catalog reads remain available, and trusted local operator application
 is independent of this flag. Catalog data always lives in the database.
 See [self-hosting-mode1.md](self-hosting-mode1.md).

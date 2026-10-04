@@ -118,18 +118,8 @@ func (p *providerIntegration) identity(ctx context.Context, r *http.Request) (Id
 		return Identity{}, err
 	}
 	i := principal.Identity()
-	out := Identity{Issuer: i.Issuer, SubjectID: i.Subject, Email: i.Email, EmailVerified: i.EmailVerified, Username: i.Username, SessionID: i.SessionID, CredentialClass: CredentialClassAutomation}
-	if strings.TrimSpace(i.Issuer) == "" || strings.TrimSpace(i.Subject) == "" {
-		return Identity{}, ErrUnauthenticated
-	}
-	switch i.Kind {
-	case auth.KindUser:
-		out.Kind, out.CredentialClass = User, CredentialClassUserSession
-	case auth.KindDelegated:
-		out.Kind = Delegated
-	case auth.KindAPIKey, auth.KindRemoteApplication, auth.KindDeviceKey:
-		out.Kind = Machine
-	default:
+	out, ok := IdentityOf(i)
+	if !ok {
 		return Identity{}, ErrUnauthenticated
 	}
 	if p.options.Customer != nil {
@@ -146,6 +136,27 @@ func (p *providerIntegration) identity(ctx context.Context, r *http.Request) (Id
 		}
 	}
 	return out, nil
+}
+
+// IdentityOf is a verified helpers/auth identity as a billing Identity, before
+// any customer mapping: a user's credential is a user session, every other
+// kind automation. False for an unknown kind or a missing issuer or subject.
+func IdentityOf(i auth.Identity) (Identity, bool) {
+	out := Identity{Issuer: i.Issuer, SubjectID: i.Subject, Email: i.Email, EmailVerified: i.EmailVerified, Username: i.Username, SessionID: i.SessionID, CredentialClass: CredentialClassAutomation}
+	if strings.TrimSpace(i.Issuer) == "" || strings.TrimSpace(i.Subject) == "" {
+		return Identity{}, false
+	}
+	switch i.Kind {
+	case auth.KindUser:
+		out.Kind, out.CredentialClass = User, CredentialClassUserSession
+	case auth.KindDelegated:
+		out.Kind = Delegated
+	case auth.KindAPIKey, auth.KindRemoteApplication, auth.KindDeviceKey:
+		out.Kind = Machine
+	default:
+		return Identity{}, false
+	}
+	return out, true
 }
 
 func (p *providerIntegration) Authorize(ctx context.Context, r *http.Request, identity Identity, required Requirement) error {

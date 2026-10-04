@@ -85,7 +85,7 @@ explicit:
 | `River`, `RiverSchema` | default managed | Who runs the job fleet (section 4). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `AllowCatalogUpdates` | false | Enables ordinary product, price, catalog and metering writes, including `Client.Catalog.Apply`. |
+| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Catalog`, delegated credentials). The in-process Client writes its own catalog without it. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
 
 | Deps field | Meaning |
@@ -93,7 +93,9 @@ explicit:
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
 | `Redis`, `Cache` | Shared rate limits and cache; in memory without them. |
 | `Vault`, `ProviderCredentials` | A borrowed Vault client; snapshot credentials for existing PSPs. |
-| `Authenticate`, `Authorize`, `RecentSignIn` | Your authentication hooks (section 6). |
+| `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
+| `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
+| `ConsoleAssets` | A host-built admin console (section 6). |
 | `UserExists`, `UserEmail`, `ResolveUsername` | Optional identity lookups for billing notices and the CCBill username bridge. |
 | `EmailSender`, `SMSSender`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
@@ -111,7 +113,7 @@ card-testing; Redis-backed with `Deps.Redis`). Override them, or set
 ### 4. Boot, lifecycle and River
 
 ```go
-client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, Authenticate: authenticate})
+client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth})
 if err != nil { return err }
 defer client.Close(ctx)
 ```
@@ -135,6 +137,7 @@ OpenRails builds its own client and `Start` runs it. With
 AuthKit's and OpenRails':
 
 ```go
+if err := riverhelpers.ApplyMigrations(ctx, pool, ""); err != nil { return err } // the fleet is yours
 workers, err := riverhelpers.New(ctx, pool, &river.Config{
     Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 10}},
 }, auth.RiverJobs(), client.RiverJobs())
@@ -144,8 +147,11 @@ defer workers.StopAndCancel(context.WithoutCancel(ctx))
 if err := client.Start(ctx); err != nil { return err } // loops outside River, e.g. the Solana Pay poller
 ```
 
-`Start` refuses a host-owned fleet that has not composed `RiverJobs`. `Close`
-stops what `Start` started; close the client before the pool. OpenRails also
+A host-owned fleet migrates River itself, once per boot before composing it:
+`riverhelpers.ApplyMigrations(ctx, pool, "")` (`""` is River's default schema,
+`public`; `openrails.Migrate` leaves River alone). Without it `riverhelpers.New`
+fails naming that call, and `Start` refuses a fleet that has not composed
+`RiverJobs`. `Close` stops what `Start` started; close the client before the pool. OpenRails also
 watches the fleet from outside River: `openrails_job_progress` fails while it is
 stalled.
 
@@ -210,9 +216,10 @@ managed provider credentials are published through `Client.PaymentProviders` wit
 an operation ID and expected account revision. `HTTP.MerchantConfig` opts into
 the settings/provider route family, with normal authentication and authorization.
 
-**Catalog authoring**: storage is always the database. With
-`AllowCatalogUpdates`, use the Client (`Catalog.Apply` for a declarative
-catalog, or `Products.Create`, `Prices.Create`, `Prices.SetKey`). YAML is
+**Catalog authoring**: storage is always the database. The in-process Client
+is the process owner and writes its catalog directly (`Catalog.Apply` for a
+declarative catalog, or `Products.Create`, `Prices.Create`, `Prices.SetKey`);
+`AllowCatalogUpdates` only publishes catalog mutations to HTTP callers. YAML is
 decoded into the same typed request as JSON (`billing.ParseCatalogApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
 record, and `prune: true` archives omitted products and prices. Price keys name
@@ -273,25 +280,38 @@ grants; it is not assigned automatically.
 ### 6. Authentication and HTTP
 
 OpenRails has no logins of its own: it asks your auth who is calling. The same
-hooks protect explicit credentials on headless Client calls and published routes.
+authentication protects explicit credentials on headless Client calls and
+published routes.
+
+**With AuthKit**, pass your client: `openrails.Deps{Postgres: pool, AuthKit: auth}`.
+OpenRails derives everything from it and the host writes no mapping:
+
+- Authentication is AuthKit's verification of the request. A user pays for
+  themselves: the customer is the AuthKit user ID. `Deps.CustomerFor` overrides
+  who pays (for example the user's organization); it returns a canonical UUID.
+- Authorization is checked live through AuthKit, per operation.
+  `Deps.AuthorityFor` names the AuthKit group and permission that authorize a
+  staff operation; only the host knows which group holds its billing staff, so
+  the staff and machine route groups require it. Native JWT roles never confer
+  privileges.
+- The recent sign-in check (operations that move money, grant access or mint
+  credentials; `permissions.RequiresRecentSignIn`) is AuthKit's: a stale
+  sign-in is 403 `step_up_required` with AuthKit's challenge.
+
+**With other auth**, supply the same three as hooks (not together with `AuthKit`):
 
 - `Deps.Authenticate(r)` returns the caller's `openrails.Identity`: `Kind`
   (`openrails.User`, `Machine` or `Delegated`), the original `Issuer` and
   `SubjectID`, and for personal customer, checkout and own-catalog operations
   the explicitly mapped canonical UUID `CustomerID` (who pays). Return
   `openrails.ErrUnauthenticated` for a request without a valid credential.
-  OpenRails never guesses or hashes the customer mapping. A user's own
-  credential is a user session unless you set `CredentialClass`.
+  OpenRails never guesses or hashes the customer mapping.
 - `Deps.Authorize(r, identity, requirement)` checks live that the identity
-  holds `requirement.Permission` on `requirement.Target` (scope merchant,
-  customer or platform). Return `openrails.ErrForbidden` to refuse. Required for
-  the staff and machine route groups; native JWT roles never confer privileges.
-- `Deps.RecentSignIn(r)` answers whether a native user signed in recently.
-  Every operation that moves money, grants access or mints credentials needs it
-  (`permissions.RequiresRecentSignIn`); a stale sign-in is 403
-  `step_up_required` with the provider's challenge. Without the hook native
-  users are refused those operations. With AuthKit, ask the verified principal's
-  helpers/auth `RecentSignInChecker`.
+  holds `requirement.Permission` on `requirement.Target`. Return
+  `openrails.ErrForbidden` to refuse. Required for the staff and machine route
+  groups.
+- `Deps.RecentSignIn(r)` answers whether a native user signed in recently;
+  without it native users are refused the operations that need it.
 
 `Config.HTTP` selects the routes `client.Routes()` returns; mount them once with
 the adapter for your router:
@@ -327,9 +347,11 @@ sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
 Original request URLs and bodies reach authentication and webhook verification
 unchanged. Routes are materialized once, so remounting never resets rate limits.
 
-**Admin console** (optional, #754): the console is served by the control
-plane's standalone surface when `AdminConsole.Enabled`, from web/admin's build.
-See [admin-console.md](admin-console.md).
+**Admin console** (optional, #754): with `Config.AdminConsole.Enabled`,
+`client.AdminConsole()` is the console's handler for the host to mount at
+`/admin/` on its root router. The console is `Deps.ConsoleAssets` when the host
+supplies its own build, else the build embedded in the OpenRails module when
+the binary was built with one. See [admin-console.md](admin-console.md).
 
 ### 7. Calling the engine
 
