@@ -235,14 +235,12 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			}
 		}
 	}
-	delegated := false
-	if cfg.HTTP != nil {
+	if cfg.HTTP != nil && deps.AuthenticateCustomer == nil {
 		for _, routes := range cfg.HTTP.CustomerRoutes {
-			delegated = delegated || routes.Delegated
+			if routes.Delegated {
+				return fmt.Errorf("openrails: Config.HTTP.CustomerRoutes profile %q is Delegated; set Deps.AuthenticateCustomer", routes.Prefix)
+			}
 		}
-	}
-	if delegated != (deps.AuthenticateCustomer != nil) {
-		return fmt.Errorf("openrails: set Deps.AuthenticateCustomer exactly when a Config.HTTP.CustomerRoutes profile is Delegated")
 	}
 	if (deps.UserExists == nil) != (deps.UserEmail == nil) {
 		return fmt.Errorf("openrails: set Deps.UserExists and Deps.UserEmail together")

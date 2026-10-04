@@ -362,9 +362,10 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | `MerchantAPI` | Service and API-key routes; requires `Authorize` |
 
 A native customer profile serves `Config.Merchant` (or its own `Merchant`
-slug). An advanced, delegated audience can mount a profile under its own
-`Prefix` with its own `Authenticate` returning an explicit merchant and paying
-subject; it confers no permissions by default and keeps verified credential
+slug). An advanced, delegated audience mounts a profile under its own `Prefix`
+with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
+returning an explicit merchant and paying subject. It confers no permissions
+by default and keeps verified credential
 class and invoker restrictions. An invoker-scoped principal may read only its
 own `/v1/me/spend-limits`.
 

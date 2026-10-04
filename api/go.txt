@@ -247,27 +247,27 @@ pkg openrails, type Authority struct, Permission string
 pkg openrails, type Authority struct, Scope auth.Scope
 pkg openrails, type BillingPolicyBindingConfig = config.BillingPolicyBindingConfig
 pkg openrails, type BillingPolicyBindingConfig struct
-pkg openrails, type BillingPolicyBindingConfig struct, Policy string `yaml:"policy" koanf:"policy"`
-pkg openrails, type BillingPolicyBindingConfig struct, Tier string `yaml:"tier,omitempty" koanf:"tier"`
+pkg openrails, type BillingPolicyBindingConfig struct, Policy string `yaml:"policy"`
+pkg openrails, type BillingPolicyBindingConfig struct, Tier string `yaml:"tier,omitempty"`
 pkg openrails, type BillingPolicyConfig = config.BillingPolicyConfig
 pkg openrails, type BillingPolicyConfig struct
-pkg openrails, type BillingPolicyConfig struct, AccrualRateCapPerHour int64 `yaml:"accrual_rate_cap_per_hour,omitempty" koanf:"accrual_rate_cap_per_hour"`
-pkg openrails, type BillingPolicyConfig struct, AccrualRateWindow string `yaml:"accrual_rate_window,omitempty" koanf:"accrual_rate_window"`
-pkg openrails, type BillingPolicyConfig struct, BadSpendWindows []config.BudgetWindowConfig `yaml:"bad_spend_windows,omitempty" koanf:"bad_spend_windows"`
-pkg openrails, type BillingPolicyConfig struct, CollectionCycleBoundary string `yaml:"collection_cycle_boundary,omitempty" koanf:"collection_cycle_boundary"`
-pkg openrails, type BillingPolicyConfig struct, CollectionThreshold *int64 `yaml:"collection_threshold,omitempty" koanf:"collection_threshold"`
-pkg openrails, type BillingPolicyConfig struct, DelinquencyAmountFloor *int64 `yaml:"delinquency_amount_floor,omitempty" koanf:"delinquency_amount_floor"`
-pkg openrails, type BillingPolicyConfig struct, DelinquencyGraceDays *int `yaml:"delinquency_grace_days,omitempty" koanf:"delinquency_grace_days"`
-pkg openrails, type BillingPolicyConfig struct, Kind string `yaml:"kind" koanf:"kind"`
-pkg openrails, type BillingPolicyConfig struct, OutstandingCap int64 `yaml:"outstanding_cap,omitempty" koanf:"outstanding_cap"`
-pkg openrails, type BillingPolicyConfig struct, PolicyCurrency string `yaml:"policy_currency,omitempty" koanf:"policy_currency"`
-pkg openrails, type BillingPolicyConfig struct, SpendWindows []config.BudgetWindowConfig `yaml:"spend_windows,omitempty" koanf:"spend_windows"`
+pkg openrails, type BillingPolicyConfig struct, AccrualRateCapPerHour int64 `yaml:"accrual_rate_cap_per_hour,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, AccrualRateWindow string `yaml:"accrual_rate_window,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, BadSpendWindows []config.BudgetWindowConfig `yaml:"bad_spend_windows,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, CollectionCycleBoundary string `yaml:"collection_cycle_boundary,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, CollectionThreshold *int64 `yaml:"collection_threshold,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, DelinquencyAmountFloor *int64 `yaml:"delinquency_amount_floor,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, DelinquencyGraceDays *int `yaml:"delinquency_grace_days,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, Kind string `yaml:"kind"`
+pkg openrails, type BillingPolicyConfig struct, OutstandingCap int64 `yaml:"outstanding_cap,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, PolicyCurrency string `yaml:"policy_currency,omitempty"`
+pkg openrails, type BillingPolicyConfig struct, SpendWindows []config.BudgetWindowConfig `yaml:"spend_windows,omitempty"`
 pkg openrails, type BudgetWindowConfig = config.BudgetWindowConfig
 pkg openrails, type BudgetWindowConfig struct
-pkg openrails, type BudgetWindowConfig struct, Currency string `yaml:"currency,omitempty" koanf:"currency"`
-pkg openrails, type BudgetWindowConfig struct, Key string `yaml:"key" koanf:"key"`
-pkg openrails, type BudgetWindowConfig struct, Limit int64 `yaml:"limit" koanf:"limit"`
-pkg openrails, type BudgetWindowConfig struct, Window string `yaml:"window" koanf:"window"`
+pkg openrails, type BudgetWindowConfig struct, Currency string `yaml:"currency,omitempty"`
+pkg openrails, type BudgetWindowConfig struct, Key string `yaml:"key"`
+pkg openrails, type BudgetWindowConfig struct, Limit int64 `yaml:"limit"`
+pkg openrails, type BudgetWindowConfig struct, Window string `yaml:"window"`
 pkg openrails, type Cache = cache.Cache
 pkg openrails, type Cache interface
 pkg openrails, type Cache interface, Clear(context.Context) error
@@ -287,15 +287,15 @@ pkg openrails, type CheckoutConfig struct, EmbedOrigins []string
 pkg openrails, type CheckoutConfig struct, PageURL string
 pkg openrails, type CheckoutRoutingMatchConfig = config.CheckoutRoutingMatchConfig
 pkg openrails, type CheckoutRoutingMatchConfig struct
-pkg openrails, type CheckoutRoutingMatchConfig struct, Country string `yaml:"country,omitempty" koanf:"country"`
-pkg openrails, type CheckoutRoutingMatchConfig struct, Currency string `yaml:"currency,omitempty" koanf:"currency"`
-pkg openrails, type CheckoutRoutingMatchConfig struct, Mode string `yaml:"mode,omitempty" koanf:"mode"`
-pkg openrails, type CheckoutRoutingMatchConfig struct, Price string `yaml:"price,omitempty" koanf:"price"`
-pkg openrails, type CheckoutRoutingMatchConfig struct, Product string `yaml:"product,omitempty" koanf:"product"`
+pkg openrails, type CheckoutRoutingMatchConfig struct, Country string `yaml:"country,omitempty"`
+pkg openrails, type CheckoutRoutingMatchConfig struct, Currency string `yaml:"currency,omitempty"`
+pkg openrails, type CheckoutRoutingMatchConfig struct, Mode string `yaml:"mode,omitempty"`
+pkg openrails, type CheckoutRoutingMatchConfig struct, Price string `yaml:"price,omitempty"`
+pkg openrails, type CheckoutRoutingMatchConfig struct, Product string `yaml:"product,omitempty"`
 pkg openrails, type CheckoutRoutingRuleConfig = config.CheckoutRoutingRuleConfig
 pkg openrails, type CheckoutRoutingRuleConfig struct
-pkg openrails, type CheckoutRoutingRuleConfig struct, Match config.CheckoutRoutingMatchConfig `yaml:"match,omitempty" koanf:"match"`
-pkg openrails, type CheckoutRoutingRuleConfig struct, Prefer []string `yaml:"prefer" koanf:"prefer"`
+pkg openrails, type CheckoutRoutingRuleConfig struct, Match config.CheckoutRoutingMatchConfig `yaml:"match,omitempty"`
+pkg openrails, type CheckoutRoutingRuleConfig struct, Prefer []string `yaml:"prefer"`
 pkg openrails, type Client struct
 pkg openrails, type Client struct, Catalog *CatalogClient
 pkg openrails, type Client struct, MerchantConfiguration *MerchantConfigurationClient
@@ -364,10 +364,10 @@ pkg openrails, type CredentialTarget struct, MerchantID billing.MerchantID
 pkg openrails, type CredentialTarget struct, MerchantSlug string
 pkg openrails, type CustodianAccountConfig = config.CustodianAccountConfig
 pkg openrails, type CustodianAccountConfig struct
-pkg openrails, type CustodianAccountConfig struct, AccountID string `yaml:"account_id,omitempty" koanf:"account_id"`
-pkg openrails, type CustodianAccountConfig struct, Archived bool `yaml:"archived,omitempty" koanf:"archived"`
-pkg openrails, type CustodianAccountConfig struct, Secrets map[string]string `yaml:"secrets,omitempty" koanf:"secrets"`
-pkg openrails, type CustodianAccountConfig struct, Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
+pkg openrails, type CustodianAccountConfig struct, AccountID string `yaml:"account_id,omitempty"`
+pkg openrails, type CustodianAccountConfig struct, Archived bool `yaml:"archived,omitempty"`
+pkg openrails, type CustodianAccountConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
+pkg openrails, type CustodianAccountConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
 pkg openrails, type CustodianConfig = config.CustodianConfig
 pkg openrails, type CustodianConfig map[string]config.CustodianAccountConfig
 pkg openrails, type CustomerHTTPScope = config.CustomerHTTPScope
@@ -475,11 +475,11 @@ pkg openrails, type Identity struct, SubjectID string
 pkg openrails, type Identity struct, Username string
 pkg openrails, type InvoiceConfig = config.InvoiceConfig
 pkg openrails, type InvoiceConfig struct
-pkg openrails, type InvoiceConfig struct, BillingPeriodBoundary string `yaml:"billing_period_boundary,omitempty" koanf:"billing_period_boundary"`
-pkg openrails, type InvoiceConfig struct, CollectionThreshold *int64 `yaml:"collection_threshold,omitempty" koanf:"collection_threshold"`
-pkg openrails, type InvoiceConfig struct, DelinquencyAmountFloor *int64 `yaml:"delinquency_amount_floor,omitempty" koanf:"delinquency_amount_floor"`
-pkg openrails, type InvoiceConfig struct, DelinquencyGraceDays *int `yaml:"delinquency_grace_days,omitempty" koanf:"delinquency_grace_days"`
-pkg openrails, type InvoiceConfig struct, MonthlyFloor *int64 `yaml:"monthly_floor,omitempty" koanf:"monthly_floor"`
+pkg openrails, type InvoiceConfig struct, BillingPeriodBoundary string `yaml:"billing_period_boundary,omitempty"`
+pkg openrails, type InvoiceConfig struct, CollectionThreshold *int64 `yaml:"collection_threshold,omitempty"`
+pkg openrails, type InvoiceConfig struct, DelinquencyAmountFloor *int64 `yaml:"delinquency_amount_floor,omitempty"`
+pkg openrails, type InvoiceConfig struct, DelinquencyGraceDays *int `yaml:"delinquency_grace_days,omitempty"`
+pkg openrails, type InvoiceConfig struct, MonthlyFloor *int64 `yaml:"monthly_floor,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct
 pkg openrails, type InvoiceSweepArgs struct, Collect bool `json:"collect,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct, CollectionThresholdAmount int64 `json:"collection_threshold_amount,omitempty"`
@@ -506,24 +506,24 @@ pkg openrails, type MerchantCreationConfig struct, ReservedSlugs []string
 pkg openrails, type MerchantCreationConfig struct, SlugPattern string
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
-pkg openrails, type MerchantDeclaration struct, APIHost string `yaml:"api_host,omitempty" koanf:"api_host"`
-pkg openrails, type MerchantDeclaration struct, BillingPolicies map[string]config.BillingPolicyConfig `yaml:"billing_policies,omitempty" koanf:"billing_policies"`
-pkg openrails, type MerchantDeclaration struct, BillingPolicyBindings []config.BillingPolicyBindingConfig `yaml:"billing_policy_bindings,omitempty" koanf:"billing_policy_bindings"`
-pkg openrails, type MerchantDeclaration struct, CheckoutRouting []config.CheckoutRoutingRuleConfig `yaml:"checkout_routing,omitempty" koanf:"checkout_routing"`
-pkg openrails, type MerchantDeclaration struct, Custodians map[string]config.CustodianConfig `yaml:"custodians,omitempty" koanf:"custodians"`
-pkg openrails, type MerchantDeclaration struct, DelegatedInvokerWastedSpendWindows []config.BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty" koanf:"delegated_invoker_wasted_spend_windows"`
-pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name" koanf:"display_name"`
-pkg openrails, type MerchantDeclaration struct, Invoice *config.InvoiceConfig `yaml:"invoice,omitempty" koanf:"invoice"`
-pkg openrails, type MerchantDeclaration struct, PSPs map[string]config.PSPConfig `yaml:"psps,omitempty" koanf:"psps"`
-pkg openrails, type MerchantDeclaration struct, Profile config.MerchantProfileConfig `yaml:"profile,omitempty" koanf:"profile"`
-pkg openrails, type MerchantDeclaration struct, Slug string `yaml:"-" koanf:"-"`
+pkg openrails, type MerchantDeclaration struct, APIHost string `yaml:"api_host,omitempty"`
+pkg openrails, type MerchantDeclaration struct, BillingPolicies map[string]config.BillingPolicyConfig `yaml:"billing_policies,omitempty"`
+pkg openrails, type MerchantDeclaration struct, BillingPolicyBindings []config.BillingPolicyBindingConfig `yaml:"billing_policy_bindings,omitempty"`
+pkg openrails, type MerchantDeclaration struct, CheckoutRouting []config.CheckoutRoutingRuleConfig `yaml:"checkout_routing,omitempty"`
+pkg openrails, type MerchantDeclaration struct, Custodians map[string]config.CustodianConfig `yaml:"custodians,omitempty"`
+pkg openrails, type MerchantDeclaration struct, DelegatedInvokerWastedSpendWindows []config.BudgetWindowConfig `yaml:"delegated_invoker_wasted_spend_windows,omitempty"`
+pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
+pkg openrails, type MerchantDeclaration struct, Invoice *config.InvoiceConfig `yaml:"invoice,omitempty"`
+pkg openrails, type MerchantDeclaration struct, PSPs map[string]config.PSPConfig `yaml:"psps,omitempty"`
+pkg openrails, type MerchantDeclaration struct, Profile config.MerchantProfileConfig `yaml:"profile,omitempty"`
+pkg openrails, type MerchantDeclaration struct, Slug string `yaml:"-"`
 pkg openrails, type MerchantProfileConfig = config.MerchantProfileConfig
 pkg openrails, type MerchantProfileConfig struct
-pkg openrails, type MerchantProfileConfig struct, DisplayName string `yaml:"display_name,omitempty" koanf:"display_name"`
-pkg openrails, type MerchantProfileConfig struct, FromEmail string `yaml:"from_email,omitempty" koanf:"from_email"`
-pkg openrails, type MerchantProfileConfig struct, LogoURL string `yaml:"logo_url,omitempty" koanf:"logo_url"`
-pkg openrails, type MerchantProfileConfig struct, SignupURL string `yaml:"signup_url,omitempty" koanf:"signup_url"`
-pkg openrails, type MerchantProfileConfig struct, SupportURL string `yaml:"support_url,omitempty" koanf:"support_url"`
+pkg openrails, type MerchantProfileConfig struct, DisplayName string `yaml:"display_name,omitempty"`
+pkg openrails, type MerchantProfileConfig struct, FromEmail string `yaml:"from_email,omitempty"`
+pkg openrails, type MerchantProfileConfig struct, LogoURL string `yaml:"logo_url,omitempty"`
+pkg openrails, type MerchantProfileConfig struct, SignupURL string `yaml:"signup_url,omitempty"`
+pkg openrails, type MerchantProfileConfig struct, SupportURL string `yaml:"support_url,omitempty"`
 pkg openrails, type NamingConfig = config.NamingConfig
 pkg openrails, type NamingConfig struct
 pkg openrails, type NamingConfig struct, Enabled *bool
@@ -533,8 +533,8 @@ pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig map[string]config.ProviderRailAccountConfig
 pkg openrails, type PSPSignerConfig = config.PSPSignerConfig
 pkg openrails, type PSPSignerConfig struct
-pkg openrails, type PSPSignerConfig struct, Key string `yaml:"key,omitempty" koanf:"key"`
-pkg openrails, type PSPSignerConfig struct, Mode string `yaml:"mode,omitempty" koanf:"mode"`
+pkg openrails, type PSPSignerConfig struct, Key string `yaml:"key,omitempty"`
+pkg openrails, type PSPSignerConfig struct, Mode string `yaml:"mode,omitempty"`
 pkg openrails, type PaymentProviderClient struct
 pkg openrails, type PriceClient struct
 pkg openrails, type PrincipalKind = billingauth.PrincipalKind
@@ -552,13 +552,13 @@ pkg openrails, type ProviderCredentialSnapshot struct, MerchantID billing.Mercha
 pkg openrails, type ProviderCredentialSnapshot struct, Rail string
 pkg openrails, type ProviderRailAccountConfig = config.ProviderRailAccountConfig
 pkg openrails, type ProviderRailAccountConfig struct
-pkg openrails, type ProviderRailAccountConfig struct, AccountID string `yaml:"account_id,omitempty" koanf:"account_id"`
-pkg openrails, type ProviderRailAccountConfig struct, Archived bool `yaml:"archived,omitempty" koanf:"archived"`
-pkg openrails, type ProviderRailAccountConfig struct, Custodian string `yaml:"custodian,omitempty" koanf:"custodian"`
-pkg openrails, type ProviderRailAccountConfig struct, LegacyEnvironment string `yaml:"environment,omitempty" koanf:"environment"`
-pkg openrails, type ProviderRailAccountConfig struct, Secrets map[string]string `yaml:"secrets,omitempty" koanf:"secrets"`
-pkg openrails, type ProviderRailAccountConfig struct, Settings map[string]any `yaml:"settings,omitempty" koanf:"settings"`
-pkg openrails, type ProviderRailAccountConfig struct, Signer *config.PSPSignerConfig `yaml:"signer,omitempty" koanf:"signer"`
+pkg openrails, type ProviderRailAccountConfig struct, AccountID string `yaml:"account_id,omitempty"`
+pkg openrails, type ProviderRailAccountConfig struct, Archived bool `yaml:"archived,omitempty"`
+pkg openrails, type ProviderRailAccountConfig struct, Custodian string `yaml:"custodian,omitempty"`
+pkg openrails, type ProviderRailAccountConfig struct, LegacyEnvironment string `yaml:"environment,omitempty"`
+pkg openrails, type ProviderRailAccountConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
+pkg openrails, type ProviderRailAccountConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
+pkg openrails, type ProviderRailAccountConfig struct, Signer *config.PSPSignerConfig `yaml:"signer,omitempty"`
 pkg openrails, type ProviderSandboxConfig = config.ProviderSandboxConfig
 pkg openrails, type ProviderSandboxConfig struct
 pkg openrails, type ProviderSandboxConfig struct, CCBillDataLinkURL string

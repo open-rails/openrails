@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -97,4 +98,36 @@ func TestExportedIdentifiersAreDocumented(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestConfigIsPlainData keeps the ruling that Config is data: anything that
+// reaches outside the process, or is code, belongs in Deps.
+func TestConfigIsPlainData(t *testing.T) {
+	seen := map[reflect.Type]bool{}
+	var walk func(path string, typ reflect.Type)
+	walk = func(path string, typ reflect.Type) {
+		if seen[typ] {
+			return
+		}
+		seen[typ] = true
+		switch typ.Kind() {
+		case reflect.Func, reflect.Chan, reflect.UnsafePointer:
+			t.Errorf("%s is a %s", path, typ.Kind())
+		case reflect.Interface:
+			// any holds declared settings (map[string]any); nothing else does.
+			if typ.NumMethod() > 0 {
+				t.Errorf("%s is the interface %s", path, typ)
+			}
+		case reflect.Pointer, reflect.Slice, reflect.Array:
+			walk(path, typ.Elem())
+		case reflect.Map:
+			walk(path, typ.Key())
+			walk(path, typ.Elem())
+		case reflect.Struct:
+			for i := range typ.NumField() {
+				walk(path+"."+typ.Field(i).Name, typ.Field(i).Type)
+			}
+		}
+	}
+	walk("Config", reflect.TypeFor[Config]())
 }

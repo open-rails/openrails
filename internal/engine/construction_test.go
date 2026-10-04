@@ -41,6 +41,13 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"customer without verifier": {with(sandbox, func(c *config.Config) {
 			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true}}}
 		}), config.Deps{}, "requires its own authenticator"},
+		"delegated customer without hook": {with(sandbox, func(c *config.Config) {
+			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/portal", Delegated: true}}}
+		}), config.Deps{}, "set Deps.AuthenticateCustomer"},
+		"control plane with native customers": {with(sandbox, func(c *config.Config) {
+			c.ControlPlane = &config.ControlPlaneConfig{}
+			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Merchant: "m"}}}
+		}), config.Deps{}, "must be Delegated"},
 		"merchant admin without auth": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{MerchantAdmin: true} }), config.Deps{}, "management surfaces require"},
 		"catalog without authorize":   {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Catalog: true} }), config.Deps{Authenticate: authenticate}, "management surfaces require"},
 		"control plane with groups": {with(sandbox, func(c *config.Config) {

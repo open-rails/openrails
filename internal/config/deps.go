@@ -62,8 +62,8 @@ type Deps struct {
 	RecentSignIn func(*http.Request) error
 	// AuthenticateCustomer authenticates the customer route profiles marked
 	// Delegated: it maps a request to an explicit merchant and paying
-	// customer. profile is the profile's Prefix. Set it exactly when a
-	// profile is Delegated.
+	// customer. profile is the profile's Prefix. Required when a profile is
+	// Delegated.
 	AuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)
 
 	// CheckoutCustomer is the buyer's current identity, asked on every hosted
