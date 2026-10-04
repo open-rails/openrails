@@ -79,6 +79,12 @@ func (r *Runtime) ReportSignerKeyChange(err error) {
 	r.signerIdentity.record(err)
 }
 
+// ReportDeclaredCatalog records why Config.Catalog is not applied yet (nil
+// once it is). Ready fails until then.
+func (r *Runtime) ReportDeclaredCatalog(err error) {
+	r.declaredCatalog.record(err)
+}
+
 // SignerIdentityState is nil unless a Transit signer key change awaits approval.
 func (r *Runtime) SignerIdentityState() error {
 	_, err := r.signerIdentity.observed()

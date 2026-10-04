@@ -276,7 +276,11 @@ func adminUsageMeterPageDTO(
 }
 
 func adminCatalogOwnership(r *httprequest.Request) (string, bool) {
-	return "database", r.State != nil && catalogpolicy.Check(r.Request.Context(), r.State.Config) == nil
+	if r.State == nil {
+		return "database", false
+	}
+	ctx, cfg := r.Request.Context(), r.State.Config
+	return "database", catalogpolicy.Check(ctx, cfg) == nil && catalogpolicy.CheckDeclared(ctx, cfg) == nil
 }
 
 func writeMeteringValidationError(r *httprequest.Request, code string, err error) {
@@ -317,7 +321,7 @@ func writeMeteringError(r *httprequest.Request, err error) {
 	case errors.Is(err, billingservice.ErrRateCardCurrencyMismatch):
 		status, code = http.StatusConflict, "rate_card_currency_mismatch"
 	default:
-		r.InternalError("metering operation failed", err)
+		writeRefusal(r, err, "metering operation failed")
 		return
 	}
 	r.APIError(api.NewAPIError(status, api.ErrorTypeInvalidRequest, code, err.Error()))

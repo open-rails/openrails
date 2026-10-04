@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
@@ -105,6 +106,13 @@ type Config struct {
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
 	Merchant MerchantDeclaration `koanf:"-"`
+	// Catalog declares Merchant's catalog (billing.ParseCatalogApplicationYAML
+	// of the host's catalog.yaml). New applies it before returning: unchanged
+	// it replays, edited it converges. While it is set, writes to the
+	// merchant's catalog are refused (billing.ErrCatalogDeclared); creator
+	// catalogs and negotiated payer rates stay writable. Nil leaves the
+	// catalog to the API.
+	Catalog *billing.CatalogApplyParams `koanf:"-"`
 	// HTTP selects the route groups Client.Routes publishes; nil publishes none.
 	HTTP *HTTPConfig `koanf:"-"`
 	// ControlPlane attaches the OpenRails-owned AuthKit control plane (the
@@ -172,6 +180,7 @@ type Config struct {
 	// AllowCatalogUpdates enables ordinary product, price, catalog and metering
 	// definition mutations and their HTTP routes. Defaults to false independently
 	// of provider credential custody. Trusted operator bootstrap remains available.
+	// A declared Catalog still refuses the merchant's own catalog.
 	// Env: ALLOW_CATALOG_UPDATES.
 	AllowCatalogUpdates bool `koanf:"allow_catalog_updates,omitempty"`
 	// MerchantManifestOverlays are YAML files in the manifest's own shape

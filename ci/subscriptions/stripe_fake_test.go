@@ -78,6 +78,8 @@ type stripeFake struct {
 	lost      int
 	listDown  bool
 	subsDown  bool
+	// pricesDown fails every Price read with a 503.
+	pricesDown bool
 	// amounts are legacy prices created at Stripe at other than 9.99.
 	amounts map[string]int64
 }
@@ -112,7 +114,8 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		f.lost++
 	}
 	down := f.listDown && r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents" ||
-		f.subsDown && r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/subscriptions/")
+		f.subsDown && r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/subscriptions/") ||
+		f.pricesDown && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/prices/")
 	f.mu.Unlock()
 	if lost {
 		return nil, errors.New("connection reset before Stripe received the request")
@@ -167,6 +170,13 @@ func (f *stripeFake) listUnavailable(down bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listDown = down
+}
+
+// priceReadsUnavailable makes every Price read fail.
+func (f *stripeFake) priceReadsUnavailable(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pricesDown = down
 }
 
 func (f *stripeFake) hold(g *gate) *gate {

@@ -64,6 +64,21 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"stripe seam on live":         {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
 		"nmi seam on live":            {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
 		"clock seam on live":          {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
+		"catalog without merchant":    {with(sandbox, func(c *config.Config) { c.Catalog = &billing.CatalogApplyParams{SchemaVersion: 1} }), config.Deps{}, "set Config.Merchant"},
+		"guarded catalog": {with(sandbox, func(c *config.Config) {
+			revision := int64(3)
+			c.Merchant.Slug = "m"
+			c.Catalog = &billing.CatalogApplyParams{SchemaVersion: 1, ApplicationID: "once", ExpectedRevision: &revision}
+		}), config.Deps{}, "is the desired state"},
+		"invalid catalog": {with(sandbox, func(c *config.Config) {
+			c.Merchant.Slug = "m"
+			c.Catalog = &billing.CatalogApplyParams{}
+		}), config.Deps{}, "Config.Catalog: "},
+		"catalog with control plane": {with(sandbox, func(c *config.Config) {
+			c.ControlPlane = &config.ControlPlaneConfig{}
+			c.Merchant.Slug = "m"
+			c.Catalog = &billing.CatalogApplyParams{SchemaVersion: 1}
+		}), config.Deps{}, "control plane's merchants"},
 		"two credential sources": {with(sandbox, func(c *config.Config) {
 			c.Merchant = config.MerchantDeclaration{Slug: "m", PSPs: map[string]config.PSPConfig{"stripe": {"stripe": {AccountID: "acct", Secrets: map[string]string{"secret_key": "sk"}}}}}
 		}), config.Deps{ProviderCredentials: []config.ProviderCredentialSnapshot{{Rail: "stripe"}}}, "either Deps.ProviderCredentials or Config.Merchant"},

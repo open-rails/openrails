@@ -5,18 +5,36 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // catalogMutation fences every service authoring operation in merchant-first
 // lock order. Nested writes share one local transaction and cannot commit early.
-func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (out T, err error) {
+// A declared catalog refuses them outside a creator's own catalog.
+func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (T, error) {
+	_, owned := catalogscope.FromContext(ctx)
+	return lockedCatalogWrite(ctx, s, !owned, fn)
+}
+
+// payerTermsMutation is catalogMutation for a payer's negotiated rates, which
+// a declared catalog does not govern.
+func payerTermsMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (T, error) {
+	return lockedCatalogWrite(ctx, s, false, fn)
+}
+
+func lockedCatalogWrite[T any](ctx context.Context, s *Service, declarable bool, fn func(context.Context, *Service) (T, error)) (out T, err error) {
 	if s == nil || s.rt == nil {
 		return out, fmt.Errorf("catalog service not initialized")
 	}
 	if err = catalogpolicy.Check(ctx, s.rt.Config); err != nil {
 		return out, err
+	}
+	if declarable {
+		if err = catalogpolicy.CheckDeclared(ctx, s.rt.Config); err != nil {
+			return out, err
+		}
 	}
 	if s.catalogWriteLocked {
 		return fn(ctx, s)
@@ -66,11 +84,19 @@ func (s *Service) catalogAfterCommit(ctx context.Context, work func(context.Cont
 	work(ctx, s)
 }
 
+// checkCatalogWritePolicy refuses a write before any provider work it
+// would start; catalogMutation checks again under the lock.
 func (s *Service) checkCatalogWritePolicy(ctx context.Context) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("catalog service not initialized")
 	}
-	return catalogpolicy.Check(ctx, s.rt.Config)
+	if err := catalogpolicy.Check(ctx, s.rt.Config); err != nil {
+		return err
+	}
+	if _, owned := catalogscope.FromContext(ctx); owned {
+		return nil
+	}
+	return catalogpolicy.CheckDeclared(ctx, s.rt.Config)
 }
 
 // CatalogRevision is a read-only merchant revision lookup. A paginated caller

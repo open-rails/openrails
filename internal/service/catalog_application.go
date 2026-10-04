@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -23,6 +26,32 @@ import (
 // network writes; unsupported provider-link changes fail before local mutation.
 func (s *Service) ApplyCatalog(ctx context.Context, params billing.CatalogApplyParams) (*billing.CatalogApplicationReceipt, error) {
 	return s.applyCatalog(ctx, params, s.verifyCatalogProviderReference)
+}
+
+// ErrCatalogProviderUnconfirmed: a provider reference could not be confirmed
+// (no answer by the deadline, or its account is not usable yet). Nothing was
+// committed; the same application can be retried.
+var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference unconfirmed")
+
+// ApplyDeclaredCatalog applies the host's Config.Catalog, the one write a
+// declared catalog accepts. Provider reference reads end at deadline (zero:
+// none); one that fails without a provider refusal is
+// ErrCatalogProviderUnconfirmed.
+func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params billing.CatalogApplyParams, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
+	verify := func(ctx context.Context, provider, rail, account, product string, req CreatePriceRequest, link map[string]string) (map[string]string, error) {
+		if !deadline.IsZero() {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, deadline)
+			defer cancel()
+		}
+		out, err := s.verifyCatalogProviderReference(ctx, provider, rail, account, product, req, link)
+		var refusal *apperr.Error
+		if err != nil && !(errors.As(err, &refusal) && refusal.Status < http.StatusInternalServerError) {
+			return nil, fmt.Errorf("%w: %w", ErrCatalogProviderUnconfirmed, err)
+		}
+		return out, err
+	}
+	return s.applyCatalog(catalogpolicy.OperatorContext(ctx), params, verify)
 }
 
 func (s *Service) applyCatalog(ctx context.Context, params billing.CatalogApplyParams, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {

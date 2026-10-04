@@ -161,6 +161,8 @@ type world struct {
 	mount func(*openrails.HTTPConfig)
 	// deps adjusts the host hooks before start.
 	deps func(*openrails.Deps)
+	// booted sees the engine the moment New returns, before anything else runs.
+	booted func(*openrails.Client)
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
@@ -307,6 +309,9 @@ func (w *world) start() {
 	rt, err := openrails.New(t.Context(), *cfg, deps)
 	require.NoError(t, err)
 	w.rt = rt
+	if w.booted != nil {
+		w.booted(rt)
+	}
 	jobs, err := riverkit.New(t.Context(), pool, riverConfig, rt.RiverJobs())
 	require.NoError(t, err)
 	if w.replica != nil && !w.replica.f.scheduled {
