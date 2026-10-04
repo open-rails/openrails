@@ -1241,12 +1241,12 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 	}
 
 	f.LocalEvidence = map[string]any{
-		"checkout_session_id": checkoutSessionRef(d.MemoLocalID),
+		"checkout_attempt_id": checkoutAttemptRef(d.MemoLocalID),
 		"customer_id":         customerID.String(),
 		"price_id":            billing.PriceID(priceID).String(),
 		"correlated_via":      "purchase_memo",
 	}
-	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout session (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
+	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout attempt (recipient, mint and amount agree); enforce backfills the missing billing.payments row with money from the on-chain transfer"
 	f.Apply = &ApplyAction{BackfillPayment: &BackfillPaymentAction{
 		Rail:          string(ProviderSolana),
 		TransactionID: t.TransactionID,
@@ -1259,7 +1259,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 			"reconcile_backfill":  true,
 			"correlated_via":      "purchase_memo",
 			"discovered_via":      "wallet_scan",
-			"checkout_session_id": checkoutSessionRef(d.MemoLocalID),
+			"checkout_attempt_id": checkoutAttemptRef(d.MemoLocalID),
 			"provider":            string(provider),
 		},
 	}}
@@ -1457,11 +1457,11 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 	return findings
 }
 
-// checkoutSessionRef spells a purchase memo's local id, a checkout session
-// UUID, as the session's wire id; a memo that is not a UUID stays verbatim.
-func checkoutSessionRef(memoLocalID string) string {
+// checkoutAttemptRef spells a purchase memo's local id, a checkout attempt
+// UUID, as the attempt's wire id; a memo that is not a UUID stays verbatim.
+func checkoutAttemptRef(memoLocalID string) string {
 	if u, err := uuid.Parse(memoLocalID); err == nil {
-		return billing.CheckoutSessionID(u).String()
+		return billing.CheckoutAttemptID(u).String()
 	}
 	return memoLocalID
 }

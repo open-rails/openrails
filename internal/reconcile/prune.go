@@ -43,7 +43,7 @@ type PruneResult struct {
 	SubscriptionsSkipped   int // excess but entangled with the #514 grant ledger
 	Payments               int
 	PaymentsSkipped        int // excess but with protected dependents
-	CheckoutSessions       int // dependents soft-deleted with their subscription
+	CheckoutAttempts       int // dependents soft-deleted with their subscription
 	Entitlements           int
 	SubscriptionIDs        []uuid.UUID
 	SkippedSubscriptionIDs []uuid.UUID
@@ -101,7 +101,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 //     would orphan an append-only grant. Such excess is retracted through
 //     convergence (grant revoke), not deletion.
 //   - A payment with protected dependents (a grant, a refund, an entitlement
-//     grant, or a checkout session) is SKIPPED for the same reason.
+//     grant, or a checkout attempt) is SKIPPED for the same reason.
 //
 // Dry-run (Apply=false) only discovers and counts; it writes nothing. Must be
 // called inside a merchant-scoped connection (the CLI's RunInMerchantConn).
@@ -274,7 +274,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 		// all stamped with the run so the rollback restores them together.
 		if err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			tq := gen.New(tx)
-			cs, e := tq.PruneSoftDeleteCheckoutSessionsBySubscription(ctx, gen.PruneSoftDeleteCheckoutSessionsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID, Now: now, RunID: runID})
+			cs, e := tq.PruneSoftDeleteCheckoutAttemptsBySubscription(ctx, gen.PruneSoftDeleteCheckoutAttemptsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID, Now: now, RunID: runID})
 			if e != nil {
 				return e
 			}
@@ -285,7 +285,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 			if _, e := tq.PruneSoftDeleteSubscriptionByID(ctx, gen.PruneSoftDeleteSubscriptionByIDParams{MerchantID: mid, ID: subID, Now: now, RunID: runID}); e != nil {
 				return e
 			}
-			res.CheckoutSessions += int(cs)
+			res.CheckoutAttempts += int(cs)
 			res.Entitlements += int(ent)
 			return nil
 		}); err != nil {
@@ -310,7 +310,7 @@ func affectedJSON(res PruneResult) []byte {
 	b, _ := json.Marshal(map[string]int{
 		"subscriptions":     res.Subscriptions,
 		"payments":          res.Payments,
-		"checkout_sessions": res.CheckoutSessions,
+		"checkout_attempts": res.CheckoutAttempts,
 		"entitlements":      res.Entitlements,
 	})
 	return b
@@ -333,7 +333,7 @@ type RollbackResult struct {
 	RunID            uuid.UUID
 	Subscriptions    int64
 	Payments         int64
-	CheckoutSessions int64
+	CheckoutAttempts int64
 	Entitlements     int64
 }
 
@@ -391,8 +391,8 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 		if res.Payments, e = tq.RestorePaymentsByDestructiveRun(ctx, gen.RestorePaymentsByDestructiveRunParams{MerchantID: mid, RunID: runID}); e != nil {
 			return fmt.Errorf("restore payments: %w", e)
 		}
-		if res.CheckoutSessions, e = tq.RestoreCheckoutSessionsByDestructiveRun(ctx, gen.RestoreCheckoutSessionsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
-			return fmt.Errorf("restore checkout sessions: %w", e)
+		if res.CheckoutAttempts, e = tq.RestoreCheckoutAttemptsByDestructiveRun(ctx, gen.RestoreCheckoutAttemptsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
+			return fmt.Errorf("restore checkout attempts: %w", e)
 		}
 		if res.Entitlements, e = tq.RestoreEntitlementsByDestructiveRun(ctx, gen.RestoreEntitlementsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
 			return fmt.Errorf("restore entitlements: %w", e)

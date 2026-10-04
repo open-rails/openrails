@@ -38,10 +38,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -240,13 +240,13 @@ type Runtime struct {
 	DeduplicationService         *webhooks.DeduplicationService
 
 	CheckoutService        *checkout.CheckoutService
-	CheckoutSessionService *checkout.CheckoutSessionService
-	// HostedCheckout stores hosted checkout sessions (#1124).
-	HostedCheckout *hostedcheckout.Store
-	// CheckoutCustomer is the buyer's current identity for a hosted checkout
+	CheckoutAttemptService *checkout.CheckoutAttemptService
+	// CheckoutSessions stores checkout sessions (#1124).
+	CheckoutSessions *checkoutsession.Store
+	// CheckoutCustomer is the buyer's current identity for a checkout session
 	// action; ErrForbidden for one who may no longer buy. Nil uses the
 	// identity given at mint.
-	CheckoutCustomer func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error)
+	CheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)
 	// AuthenticateCustomer authenticates Delegated customer route profiles
 	// (Deps.AuthenticateCustomer); profile is the profile's prefix.
 	AuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)

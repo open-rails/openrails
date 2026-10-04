@@ -25,7 +25,6 @@ type ReferenceKind string
 const (
 	ReferencePurchase  ReferenceKind = "purchase"
 	ReferenceSubscribe ReferenceKind = "subscribe"
-	ReferenceLifecycle ReferenceKind = "lifecycle"
 )
 
 // watchWindow keeps a settled purchase reference watched, so a second or late
@@ -155,14 +154,14 @@ func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID 
 		watch = settle.Add(watchWindow)
 	}
 	row, err := l.db.Gen(ctx).RegisterSolanaPayReference(ctx, gen.RegisterSolanaPayReferenceParams{
-		MerchantID: mid.UUID(), Reference: reference, CheckoutSessionID: sessionID, Kind: string(kind),
+		MerchantID: mid.UUID(), Reference: reference, CheckoutAttemptID: sessionID, Kind: string(kind),
 		SettleUntil: settle, WatchUntil: watch, Now: now,
 	})
 	if err != nil {
 		return row, err
 	}
 	if row.Reference != reference {
-		return row, fmt.Errorf("checkout session %s already has Solana Pay reference %s", sessionID, row.Reference)
+		return row, fmt.Errorf("checkout attempt %s already has Solana Pay reference %s", sessionID, row.Reference)
 	}
 	return row, nil
 }
@@ -307,7 +306,7 @@ func (l *PayLedger) Record(ctx context.Context, r Receipt, now time.Time) error 
 		return err
 	}
 	n, err := l.db.Gen(ctx).InsertSolanaPayReceipt(ctx, gen.InsertSolanaPayReceiptParams{
-		MerchantID: mid.UUID(), Reference: r.Reference, Signature: r.Signature, CheckoutSessionID: r.SessionID,
+		MerchantID: mid.UUID(), Reference: r.Reference, Signature: r.Signature, CheckoutAttemptID: r.SessionID,
 		Disposition: string(r.Disposition), ReviewReason: optional(r.ReviewReason), Recipient: r.Recipient, TokenMint: r.TokenMint,
 		ExpectedAmount: expected, ReceivedAmount: received, Payer: optional(r.Payer), LandedAt: r.LandedAt,
 		PaymentID: r.PaymentID, Now: now,
@@ -329,7 +328,7 @@ func (l *PayLedger) RaiseReview(ctx context.Context, r Receipt, customerID strin
 	}
 	meta := map[string]any{
 		"reference":           r.Reference,
-		"checkout_session_id": r.SessionID.String(),
+		"checkout_attempt_id": r.SessionID.String(),
 		"review_reason":       r.ReviewReason,
 		"recipient":           r.Recipient,
 		"token_mint":          r.TokenMint,
@@ -374,7 +373,7 @@ func RecordLateSettlement(ctx context.Context, database *db.DB, landedAt time.Ti
 		Err:            fmt.Errorf("transfer landed %s after its quote expired", landedAt.Sub(late.ExpiresAt).Round(time.Second)),
 		Metadata: map[string]any{
 			"reference":           reference,
-			"checkout_session_id": strings.TrimSpace(late.SessionID),
+			"checkout_attempt_id": strings.TrimSpace(late.SessionID),
 			"price_id":            late.PriceID,
 			"quote_expired_at":    late.ExpiresAt.UTC().Format(time.RFC3339),
 			"landed_at":           landedAt.UTC().Format(time.RFC3339),
@@ -402,7 +401,7 @@ func DeleteSettled(ctx context.Context, d *db.DB, now time.Time, batch int32) (i
 
 func receiptFromRow(r gen.BillingSolanaPayReceipt) *Receipt {
 	out := &Receipt{
-		Reference: r.Reference, Signature: r.Signature, SessionID: r.CheckoutSessionID,
+		Reference: r.Reference, Signature: r.Signature, SessionID: r.CheckoutAttemptID,
 		Disposition: Disposition(r.Disposition), Recipient: r.Recipient, TokenMint: r.TokenMint,
 		ExpectedAmount: uint64(max(r.ExpectedAmount, 0)), ReceivedAmount: uint64(max(r.ReceivedAmount, 0)),
 		LandedAt: r.LandedAt, PaymentID: r.PaymentID,

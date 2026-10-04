@@ -28,7 +28,7 @@ var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 269)
+	require.Len(t, Catalog(), 256)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()
@@ -158,12 +158,11 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, pass, providers)
 	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, pass)
 	require.Len(t, subscriptions, 4)
-	require.Len(t, management, 35)
+	require.Len(t, management, 33)
 	for key := range subscriptions {
 		require.Contains(t, management, key, "each scope includes the narrower ones")
 	}
-	require.NotContains(t, management, "POST /v1/me/checkout")
-	require.Contains(t, management, "POST /v1/me/checkout/{id}/confirm")
+	require.NotContains(t, management, "POST /v1/me/checkout-sessions")
 }
 
 func sorted(list []string) []string {
@@ -182,7 +181,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	seen = map[string]int{}
 	none := routesurface.ProviderRoutes{}
 	RegisterUserRoutes(recorder{base: "/v1", seen: seen}, nil, Options{ProviderRoutes: &none})
-	require.NotContains(t, seen, "GET /v1/solana/config")
+	require.NotContains(t, seen, "GET /v1/solana/tokens")
 	require.NotContains(t, seen, "GET /v1/captcha/status")
 	require.Contains(t, seen, "GET /v1/products")
 

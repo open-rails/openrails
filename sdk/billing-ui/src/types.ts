@@ -1,12 +1,19 @@
-// Wire types for the hosted checkout session surface, validated at runtime
-// with zod so a drifting API fails loudly at the boundary instead of rendering
-// garbage. OpenRails serves the session (GET /v1/checkout-sessions/{id}) and
-// publishes the same document as Go types (billing.HostedCheckoutSession) and
-// a canonical fixture
-// (testdata/wire/hosted_checkout_session.json) that src/types.test.ts decodes.
+// Wire types for the checkout session surface, validated at runtime with zod
+// so a drifting API fails loudly at the boundary instead of rendering garbage.
+// OpenRails serves the session (GET /v1/checkout-sessions/{id}) and pins its
+// shape in a canonical fixture (testdata/wire/checkout_session.json) that
+// src/types.test.ts decodes.
 import { z } from "zod"
 
 import { isAmount, isUnitDecimals, MAX_UNIT_DECIMALS } from "./lib/money"
+
+// optional reads a field OpenRails always sends, null when empty, as
+// undefined.
+const optional = <T extends z.ZodType>(schema: T) =>
+  schema
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional()
 
 // Money is an exact signed int64 decimal string of the plan currency's native
 // unit ("99000000" is 99 USD at unit_decimals 6). A JSON number is refused:
@@ -81,8 +88,10 @@ export const checkoutOperationSchema = z.object({
   status: z.string(),
 })
 
-export const paymentRailOptionSchema = z.object({
+export const paymentOptionSchema = z.object({
   id: z.string().min(1),
+  /** The PSP the option pays on; saving a Stripe Elements card names it. */
+  psp_id: optional(z.string()),
   rail: z.string(),
   mode: z.enum(["one_off", "subscription"]),
   // card: the PSP takes cards on OpenRails itself (card_entry: server); the
@@ -95,13 +104,23 @@ export const paymentRailOptionSchema = z.object({
     "solana_pay",
   ]),
   /** The PSP's checkout key; saving a new card names it. */
-  psp_key: z.string().optional(),
-  // Browser-safe rail config the host serves (nmi: Collect.js
-  // tokenization_key + tokenization_url; stripe: publishable_key; driver
-  // card: none).
-  public_config: z.record(z.string(), z.string()).optional(),
+  psp_key: optional(z.string()),
+  // Browser-safe rail config (nmi: Collect.js tokenization_key +
+  // tokenization_url; stripe: publishable_key; driver card: none).
+  public_config: optional(z.record(z.string(), z.string())),
 })
-export type PaymentRailOption = z.infer<typeof paymentRailOptionSchema>
+export type PaymentOption = z.infer<typeof paymentOptionSchema>
+
+// The step a payment awaits: Stripe's or CCBill's page (an https URL, opened
+// in the top window), or a Solana Pay link shown as a QR code.
+export const nextActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("redirect_to_url"), url: httpsURLSchema }),
+  z.object({
+    type: z.literal("solana_pay"),
+    url: z.string().startsWith("solana:"),
+  }),
+])
+export type NextAction = z.infer<typeof nextActionSchema>
 
 // A card the session's customer has already stored with this merchant. Display
 // data only — paying with one sends its id, which the host resolves.
@@ -123,7 +142,7 @@ export type SavedPaymentMethod = z.infer<typeof savedPaymentMethodSchema>
 // Amounts are in the plan's currency at the plan's unit_decimals.
 export const checkoutLineItemSchema = z.object({
   label: z.string(),
-  sublabel: z.string().optional(),
+  sublabel: optional(z.string()),
   amount: amountSchema,
 })
 export type CheckoutLineItem = z.infer<typeof checkoutLineItemSchema>
@@ -133,7 +152,7 @@ export const checkoutPlanSchema = z.object({
   unit_amount: amountSchema,
   currency: z.string().min(1),
   unit_decimals: unitDecimalsSchema,
-  period_hours: z.number().nullish(),
+  period_hours: optional(z.number()),
   automatically_renews: z.boolean(),
 })
 export type CheckoutPlan = z.infer<typeof checkoutPlanSchema>
@@ -143,23 +162,23 @@ export const checkoutSessionSchema = z.object({
   status: checkoutSessionStatusSchema,
   merchant: z.object({ display_name: z.string() }),
   plan: checkoutPlanSchema,
-  line_items: z.array(checkoutLineItemSchema).optional(),
-  tax: amountSchema.optional(),
-  due_today: amountSchema.optional(),
-  rails: z.array(paymentRailOptionSchema),
-  saved_methods: z.array(savedPaymentMethodSchema).optional(),
-  transaction_url: z.string().startsWith("solana:").optional(),
-  payment_id: z.string().optional(),
-  subscription_id: z.string().optional(),
-  failure_message: z.string().optional(),
+  line_items: optional(z.array(checkoutLineItemSchema)),
+  tax: optional(amountSchema),
+  due_today: optional(amountSchema),
+  options: z.array(paymentOptionSchema),
+  saved_methods: optional(z.array(savedPaymentMethodSchema)),
+  next_action: nextActionSchema.nullish(),
+  payment_id: optional(z.string()),
+  subscription_id: optional(z.string()),
+  failure_message: optional(z.string()),
   failure: paymentFailureSchema.nullish(),
   operation: checkoutOperationSchema.nullish(),
-  // Present on hosted-page reads so the page host can redirect on success.
-  success_url: returnURLSchema.optional(),
+  // Lets the page's host redirect on success.
+  success_url: optional(returnURLSchema),
   // The origin of the app that framed the payment page: the only origin the
   // page exchanges frame messages with.
-  embed_origin: z.string().url().optional(),
-  expires_at: z.string().nullish(),
+  embed_origin: optional(z.string().url()),
+  expires_at: optional(z.string()),
 })
 export type CheckoutSession = z.infer<typeof checkoutSessionSchema>
 
@@ -196,14 +215,13 @@ export type PayRequest = z.infer<typeof payRequestSchema>
 
 export const payResultSchema = z.object({
   status: checkoutSessionStatusSchema,
-  redirect_url: httpsURLSchema.optional(),
-  transaction_url: z.string().startsWith("solana:").optional(),
-  payment_id: z.string().optional(),
-  subscription_id: z.string().optional(),
-  failure_message: z.string().optional(),
+  next_action: nextActionSchema.nullish(),
+  /** The card payment to authenticate when status is requires_action. */
+  operation: checkoutOperationSchema.nullish(),
+  payment_id: optional(z.string()),
+  subscription_id: optional(z.string()),
+  failure_message: optional(z.string()),
   failure: paymentFailureSchema.nullish(),
-  /** The payment operation to authenticate when status is requires_action. */
-  operation_id: z.string().optional(),
 })
 export type PayResult = z.infer<typeof payResultSchema>
 

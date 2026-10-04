@@ -591,7 +591,7 @@ func nmiUpgradeTierChangeResponse(in gen.BillingRailIntent) (*TierChangeResponse
 	}
 	resp := &TierChangeResponse{
 		Object: "tier_change", Mode: "tier_change", Action: action, Effective: effectiveOf(action), PriceID: (billing.PriceID(p.PriceID)).String(),
-		Payment: CheckoutSessionPaymentResponse{Rail: in.Rail}, SubscriptionID: &subID,
+		Payment: CheckoutAttemptPaymentResponse{Rail: in.Rail}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(),
 	}

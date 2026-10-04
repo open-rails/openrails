@@ -131,10 +131,10 @@ func TestHTTPRouteExposureMatchesConfiguration(t *testing.T) {
 		code         int
 	}{
 		{http.MethodGet, "/api/pay/v1/me/balance", http.StatusUnauthorized},
-		{http.MethodPost, "/api/pay/v1/checkout", http.StatusUnauthorized},
+		{http.MethodPost, "/api/pay/v1/me/checkout-sessions", http.StatusUnauthorized},
 		{http.MethodPut, "/api/pay/v1/merchant/payment-providers/stripe", http.StatusUnauthorized},
 		{http.MethodOptions, "/api/pay/v1/me/balance", http.StatusNoContent},
-		{http.MethodOptions, "/api/pay/v1/checkout", http.StatusNoContent},
+		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 	} {
 		rec := serve(mux, tc.method, tc.path, "{}", "Authorization", "Bearer invalid")
 		require.Equal(t, tc.code, rec.Code, tc.method+" "+tc.path+" "+rec.Body.String())
@@ -194,8 +194,7 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
-// One limiter per runtime: a second host mount or a sibling route in the same
-// bucket must not reset the counters.
+// One limiter per runtime: a second host mount must not reset the counters.
 func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Delegated: true}}}, false)
 	rt.App.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
@@ -204,9 +203,8 @@ func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 		mux  http.Handler
 		path string
 	}{
-		{first, "/first/v1/me/checkout"},
-		{second, "/second/v1/me/checkout"},
-		{first, "/first/v1/me/checkout/sessions"},
+		{first, "/first/v1/me/checkout-sessions"},
+		{second, "/second/v1/me/checkout-sessions"},
 	} {
 		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader("{}"))
 		req.RemoteAddr = "203.0.113.94:1234"
@@ -258,7 +256,7 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 		require.Equal(t, tc.status, rec.Code, rec.Body.String())
 	}
 	require.Equal(t, map[string]int{"portal": 2, "platform": 2}, calls)
-	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/merchant/payment-providers", platform + "/checkout", platform + "/payment-methods"} {
+	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/merchant/payment-providers", platform + "/checkout-sessions", platform + "/payment-methods"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay"+path, "").Code, path)
 	}
 	routes, err := rt.Routes()
@@ -293,11 +291,10 @@ func TestCustomerExposureValidation(t *testing.T) {
 func TestCustomerBillingManagementScope(t *testing.T) {
 	rt := httpRuntime(&config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/v1/me", Scope: config.CustomerBillingManagement, Delegated: true}}}, false)
 	mux := mountAt(t, rt, "/api/pay")
-	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods", "/checkout/cs_existing"} {
+	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods"} {
 		require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, "/api/pay/v1/me"+path, "").Code, path)
 	}
-	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodPost, "/api/pay/v1/me/checkout/cs_existing/confirm", "").Code)
-	for _, path := range []string{"/checkout", "/subscriptions/x/change-tier", "/subscriptions/x/provider-cutover", "/billing-portal", "/subscriptions/x/solana-tier-change"} {
+	for _, path := range []string{"/checkout-sessions", "/subscriptions/x/change-tier", "/subscriptions/x/provider-cutover", "/billing-portal", "/subscriptions/x/solana-tier-change"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay/v1/me"+path, "").Code, path)
 	}
 	rec := serve(mux, http.MethodGet, "/api/pay/v1/capabilities", "")

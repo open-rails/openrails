@@ -33,7 +33,7 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 
 | Bucket | Config key | Default rpm | Routes |
 |---|---|---|---|
-| `checkout` | `checkout` | 10 | Browser checkout create/confirm POSTs — see note |
+| `checkout` | `checkout` | 10 | Browser checkout mint/pay POSTs — see note |
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
@@ -43,10 +43,9 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 A bucket with no configured limit falls back to the `default` entry; a configured limit ≤ 0
 means 60 rpm.
 
-> The `checkout` bucket covers POSTs under the public `/v1/checkout` and
-> `/v1/checkout-sessions` and self-service `/v1/me/checkout` route families.
-> Read-only GETs remain in `default`.
-> A hosted checkout session is also limited per session id, whatever address
+> The `checkout` bucket covers POSTs to `/v1/me/checkout-sessions` and under
+> `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs remain in
+> `default`. A checkout session is also limited per session id, whatever address
 > presents it: 120 reads and 10 pays a minute.
 
 > **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail

@@ -33,7 +33,7 @@ type StripeLivenessRecord struct {
 	CurrentPeriodStart time.Time
 	CurrentPeriodEnd   time.Time
 	// CustomerID is Stripe's cus_… id; Metadata is the subscription metadata
-	// (checkout stamps user_id / internal_price_id / checkout_session_id there).
+	// (checkout stamps user_id / internal_price_id / checkout_attempt_id there).
 	// PriceID is the first item's Stripe price id. Fetch-sourced identity for
 	// the #684 converge path — never read from webhook payloads.
 	CustomerID string

@@ -5,7 +5,7 @@ unit/static/security checks run separately. The old broad integration runner,
 browser harness, scheduled backstop and devnet workflows have been removed.
 
 `ci/` tests migration replay, catalog/merchant isolation, product
-provisioning, hosted checkout idempotency, signed webhook replay, exact integer
+provisioning, checkout session idempotency, signed webhook replay, exact integer
 money, browser-safe JSON and recovery of the rescue worker itself after a crash.
 `ci/subscriptions` exercises:
 

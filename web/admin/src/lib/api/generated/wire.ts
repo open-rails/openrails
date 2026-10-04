@@ -296,10 +296,50 @@ export type ChangeTierRequest = {
   price_id?: string
 }
 
+export type CheckoutAttempt = {
+  object: string
+  id: string
+  customer_id: string
+  status: "canceled" | "created" | "expired" | "failed" | "processing" | "requires_action" | "succeeded"
+  mode: string
+  price_id: string | null
+  amount: string | null
+  currency: string | null
+  payment_id: string | null
+  subscription_id: string | null
+  payment_method_id: string | null
+  next_action: NextAction | null
+  operation: PaymentOperation | null
+  failure: PaymentFailure | null
+  expires_at: string | null
+  created_at: string
+  metadata: Record<string, string> | null
+}
+
+export type CheckoutAttemptNextAction = {
+  type: string
+  redirect_to_url?: CheckoutAttemptRedirectToURL
+  transactions?: string[]
+}
+
+export type CheckoutAttemptPaymentResponse = {
+  rail: string
+  reference?: string
+  transaction_url?: string
+  solana_pay_url?: string
+  redirect_url?: string
+  transaction_id?: string
+}
+
+export type CheckoutAttemptRedirectToURL = {
+  url?: string
+}
+
 export type CheckoutConfig = {
   object: string
   psps: CheckoutPSPConfig[] | null
   solana?: SolanaCheckoutConfig
+  options: CheckoutOption[] | null
 }
 
 export type CheckoutCustomerIdentity = {
@@ -307,6 +347,17 @@ export type CheckoutCustomerIdentity = {
   verified_email?: string
   username?: string
   client_ip?: string
+}
+
+export type CheckoutOption = {
+  selector: string
+  psp_id: string
+  rail: string
+  mode: string
+  driver?: string
+  public_config?: Record<string, string>
+  status?: string
+  retry_after?: number
 }
 
 export type CheckoutPSPConfig = {
@@ -340,18 +391,6 @@ export type CheckoutPaymentOptions = {
   last_four?: string
   card_type?: string
   expiry_date?: string
-  card?: CardEntry
-}
-
-export type CheckoutRailOption = {
-  selector: string
-  psp_id: string
-  rail: string
-  mode: string
-  driver?: string
-  public_config?: Record<string, string>
-  status?: string
-  retry_after?: number
 }
 
 export type CheckoutRoutingCandidateResponse = {
@@ -392,72 +431,61 @@ export type CheckoutRoutingRule = {
 }
 
 export type CheckoutSession = {
-  capture?: CustodianCaptureAction
-  payment_method_id?: string
   id: string
   status: string
-  mode: string
-  price_id: string | null
-  amount: string | null
-  currency: string | null
-  payment_status: string
-  client_secret: string | null
-  url: string | null
-  subscription_id: string | null
+  merchant: CheckoutSessionMerchant
+  plan: CheckoutSessionPlan
+  line_items: CheckoutSessionLineItem[] | null
+  tax: string | null
+  due_today: string | null
+  options: CheckoutSessionOption[] | null
+  saved_methods: CheckoutSessionSavedMethod[] | null
+  next_action: NextAction | null
+  operation: PaymentOperation | null
   payment_id: string | null
-  expires_at?: string
-  created_at: string
-  metadata: Record<string, string> | null
-  rail_data: Record<string, unknown> | null
-  operation?: PaymentOperation
-  failure?: PaymentFailure
+  subscription_id: string | null
+  failure_message: string | null
+  failure: PaymentFailure | null
+  success_url: string | null
+  embed_origin: string | null
+  expires_at: string
 }
 
-export type CheckoutSessionConfirmRequest = {
-  payment?: CheckoutSessionConfirmRequestPayment
+export type CheckoutSessionLineItem = {
+  label: string
+  sublabel: string | null
+  amount: string
 }
 
-export type CheckoutSessionConfirmRequestPayment = {
-  capture?: CustodianCaptureReference
-  rail?: string
-  signature?: string
-  wallet?: string
+export type CheckoutSessionLink = {
+  id: string
+  url: string | null
+  expires_at: string
 }
 
-export type CheckoutSessionCreateRequest = {
+export type CheckoutSessionMerchant = {
+  display_name: string
+}
+
+export type CheckoutSessionMintRequest = {
   price_id?: string
   price_key?: string
-  entitlement?: string
-  offer_kind?: "finite" | "permanent" | "recurring"
-  mode?: string
-  payment?: CheckoutSessionPaymentParams
-  metadata?: Record<string, string>
-  subscription_id?: string
-  new_price_id?: string
   success_url?: string
-  cancel_url?: string
 }
 
-export type CheckoutSessionMembershipQuote = {
-  product_name: string
-  cycle_hours: number
-  entitlements: Record<string, number | null> | null
+export type CheckoutSessionOption = {
+  id: string
+  psp_id: string
+  rail: string
+  mode: string
+  driver: string
+  public_config: Record<string, string> | null
 }
 
-export type CheckoutSessionNextAction = {
-  type: string
-  redirect_to_url?: CheckoutSessionRedirectToURL
-  transactions?: string[]
-}
-
-export type CheckoutSessionPaymentParams = {
-  psp_id?: string
-  rail?: string
-  payment_method_id?: string
+export type CheckoutSessionPayRequest = {
+  option_id?: string
   payment_token?: string
-  token_symbol?: string
-  flow?: string
-  wallet?: string
+  payment_method_id?: string
   email?: string
   name_on_card?: string
   address1?: string
@@ -465,47 +493,37 @@ export type CheckoutSessionPaymentParams = {
   state?: string
   zip?: string
   country?: string
+  token_symbol?: string
   last_four?: string
   card_type?: string
   expiry_date?: string
   card?: CardEntry
 }
 
-export type CheckoutSessionPaymentResponse = {
-  rail: string
-  reference?: string
-  transaction_url?: string
-  solana_pay_url?: string
-  redirect_url?: string
-  transaction_id?: string
-}
-
-export type CheckoutSessionRedirectToURL = {
-  url?: string
-}
-
-export type CheckoutSessionResponse = {
-  operation?: PaymentOperation
-  failure?: PaymentFailure
-  membership_quote?: CheckoutSessionMembershipQuote
-  capture?: CustodianCaptureAction
-  payment_method_id?: string
-  object: string
-  id: string
+export type CheckoutSessionPayResult = {
   status: string
-  mode: string
-  price_id: string | null
-  amount: string | null
-  currency: string | null
-  url?: string
-  payment: CheckoutSessionPaymentResponse
-  payment_id?: string
-  subscription_id?: string
-  expires_at?: string
-  created_at: string
-  next_action?: CheckoutSessionNextAction
-  message?: string
-  metadata?: Record<string, string>
+  next_action: NextAction | null
+  operation: PaymentOperation | null
+  payment_id: string | null
+  subscription_id: string | null
+  failure_message: string | null
+  failure: PaymentFailure | null
+}
+
+export type CheckoutSessionPlan = {
+  display_name: string
+  unit_amount: string
+  currency: string
+  unit_decimals: number
+  period_hours: number | null
+  automatically_renews: boolean
+}
+
+export type CheckoutSessionSavedMethod = {
+  id: string
+  option_id: string
+  rail: string
+  card: CardDetails | null
 }
 
 export type CollectionPaymentMethod = {
@@ -519,14 +537,7 @@ export type Column = {
   unit?: string
 }
 
-export type ConfirmCheckoutSessionRequest = {
-  customer_id?: string
-  payment?: ConfirmPayment
-}
-
-export type ConfirmPayment = {
-  capture?: CustodianCaptureReference
-  rail?: string
+export type ConfirmCheckoutAttemptRequest = {
   signature?: string
   wallet?: string
 }
@@ -541,7 +552,7 @@ export type CopilotAskResult = {
   drafts?: Draft[]
 }
 
-export type CreateCheckoutSessionRequest = {
+export type CreateCheckoutAttemptRequest = {
   customer?: CheckoutCustomerIdentity
   price_id?: string
   price_key?: string
@@ -551,10 +562,9 @@ export type CreateCheckoutSessionRequest = {
   metadata?: Record<string, string> | null
   success_url?: string
   cancel_url?: string
-  confirm?: boolean
 }
 
-export type CreateHostedCheckoutSessionRequest = {
+export type CreateCheckoutSessionRequest = {
   customer?: CheckoutCustomerIdentity
   price_id?: string
   price_key?: string
@@ -582,12 +592,6 @@ export type CreatePaymentMethodParams = {
   payment_token?: string
   card?: CardEntry
   billing_details?: BillingDetails
-}
-
-export type CreatePaymentMethodSessionRequest = {
-  customer?: CheckoutCustomerIdentity
-  payment?: CheckoutPaymentOptions
-  metadata?: Record<string, string>
 }
 
 export type CreatePriceDraft = {
@@ -634,21 +638,6 @@ export type CreateProductParams = {
   tier_group?: string
   tier_rank?: number
   archived?: boolean
-}
-
-export type CreateSolanaCancelSessionRequest = {
-  customer?: CheckoutCustomerIdentity
-  subscription_id?: string
-  payment?: CheckoutPaymentOptions
-  metadata?: Record<string, string>
-}
-
-export type CreateSolanaTierChangeSessionRequest = {
-  customer?: CheckoutCustomerIdentity
-  subscription_id?: string
-  new_price_id?: string
-  payment?: CheckoutPaymentOptions
-  metadata?: Record<string, string>
 }
 
 export type CreateSubscriptionRepriceRequest = {
@@ -729,24 +718,6 @@ export type CurrencyUnits = {
   code: string
   decimals: number
   minor_decimals: number
-}
-
-export type CustodianCaptureAction = {
-  kind: string
-  custodian_id: string
-  session_id: string
-  customer_id: string
-  api_base_url: string
-  sdk_url: string
-  public_api_key: string
-  sdk_authorization: string
-  expires_at: string
-}
-
-export type CustodianCaptureReference = {
-  custodian_id?: string
-  session_id?: string
-  token?: string
 }
 
 export type Customer = {
@@ -1070,100 +1041,6 @@ export type HostEvent = {
   delinquency?: DelinquencyHostEvent
 }
 
-export type HostedCheckoutLineItem = {
-  label: string
-  sublabel?: string
-  amount: string
-}
-
-export type HostedCheckoutMerchant = {
-  display_name: string
-}
-
-export type HostedCheckoutMintRequest = {
-  price_id?: string
-  price_key?: string
-  success_url?: string
-}
-
-export type HostedCheckoutPayRequest = {
-  option_id?: string
-  payment_token?: string
-  payment_method_id?: string
-  email?: string
-  name_on_card?: string
-  address1?: string
-  city?: string
-  state?: string
-  zip?: string
-  country?: string
-  token_symbol?: string
-  last_four?: string
-  card_type?: string
-  expiry_date?: string
-  card?: CardEntry
-}
-
-export type HostedCheckoutPayResult = {
-  status: string
-  redirect_url?: string
-  transaction_url?: string
-  payment_id?: string
-  subscription_id?: string
-  failure_message?: string
-  failure?: PaymentFailure
-}
-
-export type HostedCheckoutPlan = {
-  display_name: string
-  unit_amount: string
-  currency: string
-  unit_decimals: number
-  period_hours?: number
-  automatically_renews: boolean
-}
-
-export type HostedCheckoutRail = {
-  id: string
-  rail: string
-  mode: string
-  driver: string
-  public_config?: Record<string, string>
-}
-
-export type HostedCheckoutSavedMethod = {
-  id: string
-  option_id: string
-  rail: string
-  card: CardDetails | null
-}
-
-export type HostedCheckoutSession = {
-  id: string
-  status: string
-  merchant: HostedCheckoutMerchant
-  plan: HostedCheckoutPlan
-  line_items?: HostedCheckoutLineItem[]
-  tax?: string
-  due_today?: string
-  rails: HostedCheckoutRail[] | null
-  saved_methods?: HostedCheckoutSavedMethod[]
-  transaction_url?: string
-  payment_id?: string
-  subscription_id?: string
-  failure_message?: string
-  failure?: PaymentFailure
-  success_url?: string
-  embed_origin?: string
-  expires_at: string
-}
-
-export type HostedCheckoutSessionLink = {
-  id: string
-  url?: string
-  expires_at: string
-}
-
 export type Invoice = {
   id: string
   customer_id: string
@@ -1346,6 +1223,12 @@ export type MeterRateCard = {
   allowance: Allowance | null
   created_at: string
   updated_at: string
+}
+
+export type NextAction = {
+  type: string
+  url: string | null
+  transactions: string[] | null
 }
 
 export type Notification = {
@@ -1632,6 +1515,14 @@ export type PaymentMethodRef = {
   rail?: string
   rail_customer_ref?: string
   rail_method_ref?: string
+}
+
+export type PaymentMethodSetup = {
+  id: string
+  status: string
+  setup_intent_id?: string
+  client_secret?: string
+  payment_method_id?: string
 }
 
 export type PaymentMethodSetupParams = {
@@ -2253,22 +2144,6 @@ export type SolanaPayPostResponse = {
   message?: string
 }
 
-export type SolanaRuntimeConfigResponse = {
-  network: string
-  chain: string
-  rpcUrl?: string
-  explorerCluster?: string
-  preferredToken: string
-  tokens: TokenInfo[] | null
-  features: SolanaRuntimeConfigResponseFeatures
-}
-
-export type SolanaRuntimeConfigResponseFeatures = {
-  solanaPay: boolean
-  recurringSubscriptions: boolean
-  solanaPayRecurringSubscriptions: boolean
-}
-
 export type SolanaTierChangeConfirmRequest = {
   signature?: string
   new_price_id?: string
@@ -2317,14 +2192,6 @@ export type StripeEngineAuthentication = {
   payment_intent_id?: string
   client_secret?: string
   provider_payment_method_id?: string
-}
-
-export type StripeMethodSetupResponse = {
-  id: string
-  status: string
-  setup_intent_id?: string
-  client_secret?: string
-  payment_method_id?: string
 }
 
 export type Subscription = {
@@ -2438,9 +2305,9 @@ export type TierChangeResponse = {
   effective?: string
   price_id: string
   url?: string
-  payment: CheckoutSessionPaymentResponse
+  payment: CheckoutAttemptPaymentResponse
   subscription_id?: string
-  next_action?: CheckoutSessionNextAction
+  next_action?: CheckoutAttemptNextAction
   message?: string
   delayed_start?: string
   currency?: string

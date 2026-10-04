@@ -48,7 +48,7 @@ for (const [name, key, mode] of [
     const doc = await (
       await request.get(`/billing/v1/checkout-sessions/${session.id}`)
     ).json()
-    expect(doc.rails).toContainEqual(
+    expect(doc.options).toContainEqual(
       expect.objectContaining({
         rail: "solana",
         mode,

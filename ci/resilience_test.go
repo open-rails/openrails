@@ -105,7 +105,7 @@ func probe(t *testing.T, rt *openrails.Client, name string) error {
 
 func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.CheckoutPSPConfig, bool) {
 	t.Helper()
-	cfg, err := client.GetCheckoutConfig(t.Context())
+	cfg, err := client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
 	require.NoError(t, err)
 	for _, psp := range cfg.PSPs {
 		if psp.Rail == rail {
@@ -134,8 +134,8 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer:       billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
+	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:sol",
 		OfferKind:      kind,
@@ -163,8 +163,8 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer:       billing.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "reader@example.test"},
+	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
 		PriceKey:       price.Key,
 		Entitlement:    "content:post",
 		OfferKind:      billing.OfferPermanent,
@@ -174,7 +174,8 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 		CancelURL:      "https://e2e.test/cancel",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "stripe", session.RailData["rail"])
+	require.NotNil(t, session.NextAction, "%+v", session)
+	require.Equal(t, "redirect_to_url", session.NextAction.Type)
 }
 
 // First boot with Vault, Redis and the NMI posture probe all unavailable: the

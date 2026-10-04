@@ -70,18 +70,18 @@ type SolanaDueSubscriptionSource func(ctx context.Context, before time.Time) (ma
 
 // SolanaLocalRecord kinds — the two record types #713 stamps a memo for.
 const (
-	SolanaLocalKindCheckoutSession = "checkout_session"
+	SolanaLocalKindCheckoutAttempt = "checkout_attempt"
 	SolanaLocalKindPullIntent      = "pull_intent"
 )
 
 // SolanaLocalRecord is what a #713 memo local-id resolves to locally. The
-// expected* fields are the checkout session's bound quote — what the wallet
+// expected* fields are the checkout attempt's bound quote — what the wallet
 // scan verifies the on-chain transfer against (mismatch parks the finding).
 type SolanaLocalRecord struct {
-	Kind string // SolanaLocalKindCheckoutSession | SolanaLocalKindPullIntent
+	Kind string // SolanaLocalKindCheckoutAttempt | SolanaLocalKindPullIntent
 	Rail string
 
-	// checkout_session fields.
+	// checkout_attempt fields.
 	CustomerID           uuid.UUID
 	PriceID              uuid.UUID
 	SessionStatus        string
@@ -798,7 +798,7 @@ func classifySolanaTx(tx *solanago.Transaction) (solanaTxClass, bool) {
 
 // --- #714 merchant-wallet scan ---
 
-// wrappedSOLMint is the canonical wrapped-SOL mint; checkout sessions bind
+// wrappedSOLMint is the canonical wrapped-SOL mint; checkout attempts bind
 // native-SOL quotes as "" or this mint.
 const wrappedSOLMint = "So11111111111111111111111111111111111111112"
 
@@ -821,7 +821,7 @@ type solanaDiscovery struct {
 	ParkReason  string `json:"park_reason,omitempty"`
 	Kind        string `json:"kind"` // one_off | pull
 	MemoLocalID string `json:"memo_local_id"`
-	LocalKind   string `json:"local_kind"` // checkout_session | pull_intent | none
+	LocalKind   string `json:"local_kind"` // checkout_attempt | pull_intent | none
 	CustomerID  string `json:"customer_id,omitempty"`
 	PriceID     string `json:"price_id,omitempty"`
 }
@@ -1135,25 +1135,25 @@ func (f *SolanaFetcher) verifyWalletDiscovery(ctx context.Context, c *walletScan
 	}
 
 	switch rec.Kind {
-	case SolanaLocalKindCheckoutSession:
+	case SolanaLocalKindCheckoutAttempt:
 		d.LocalKind = rec.Kind
 		switch {
 		case c.kind != solanaDiscoveryKindOneOff:
-			park("memo resolves to a checkout session but the transaction is a subscription pull")
+			park("memo resolves to a checkout attempt but the transaction is a subscription pull")
 		case rec.Rail != "" && rec.Rail != string(ProviderSolana):
-			park(fmt.Sprintf("memo resolves to a %s checkout session, not a solana one", rec.Rail))
+			park(fmt.Sprintf("memo resolves to a %s checkout attempt, not a solana one", rec.Rail))
 		case rec.ExpectedRecipient != "" && rec.ExpectedRecipient != wallet:
-			park("checkout session expects a different recipient wallet than the scanned merchant wallet")
+			park("checkout attempt expects a different recipient wallet than the scanned merchant wallet")
 		case !c.hasMoney:
-			park("memo claims a checkout session but the transaction moved no money into the wallet: " + c.moneyNote)
+			park("memo claims a checkout attempt but the transaction moved no money into the wallet: " + c.moneyNote)
 		case rec.ExpectedTokenAmount == 0:
-			park("checkout session carries no bound solana token quote to verify against")
+			park("checkout attempt carries no bound solana token quote to verify against")
 		case !sameSolanaAsset(rec.ExpectedMint, c.transfer.Mint):
 			park(fmt.Sprintf("transfer asset %s disagrees with the session's quoted mint %s", assetName(c.transfer.Mint), assetName(rec.ExpectedMint)))
 		case rec.ExpectedTokenAmount != c.transfer.BaseUnits:
 			park(fmt.Sprintf("transfer of %d base units disagrees with the session's quoted %d", c.transfer.BaseUnits, rec.ExpectedTokenAmount))
 		case rec.SettledTransactionID != "" && rec.SettledTransactionID != c.txn.TransactionID:
-			park("checkout session already settled by a different signature: " + rec.SettledTransactionID)
+			park("checkout attempt already settled by a different signature: " + rec.SettledTransactionID)
 		default:
 			d.CustomerID = rec.CustomerID.String()
 			d.PriceID = rec.PriceID.String()

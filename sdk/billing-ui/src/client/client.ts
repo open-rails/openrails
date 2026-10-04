@@ -18,7 +18,8 @@ import type * as wire from "./generated/wire"
 import {
   cardSetupSchema,
   currencyRegistrySchema,
-  hostedCheckoutLinkSchema,
+  checkoutSessionLinkSchema,
+  checkoutConfigSchema,
   paymentAuthenticationSchema,
   invoiceSchema,
   listPageSchema,
@@ -28,7 +29,6 @@ import {
   priceSchema,
   productSchema,
   solanaCancelTxSchema,
-  solanaConfigSchema,
   solanaTierChangeSchema,
   solanaTierChangeTxSchema,
   solanaTokensSchema,
@@ -37,7 +37,8 @@ import {
   tierChangeSchema,
   type CardSetup,
   type Currency,
-  type HostedCheckoutLink,
+  type CheckoutSessionLink,
+  type CheckoutConfig,
   type PaymentAuthentication,
   type CurrencyScales,
   type Invoice,
@@ -48,7 +49,6 @@ import {
   type PaymentMethod,
   type Price,
   type Product,
-  type SolanaConfig,
   type SolanaTierChange,
   type SolanaTierChangeTx,
   type SolanaToken,
@@ -611,7 +611,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       priceKey?: string
       priceId?: string
       successUrl?: string
-    }): Promise<HostedCheckoutLink> {
+    }): Promise<CheckoutSessionLink> {
       if (!input.priceKey === !input.priceId)
         return Promise.reject(
           localError(
@@ -619,13 +619,13 @@ export function createBillingClient(options: BillingClientOptions = {}) {
             "Pass exactly one of priceKey or priceId."
           )
         )
-      return json(hostedCheckoutLinkSchema, "/me/checkout/sessions", {
+      return json(checkoutSessionLinkSchema, "/me/checkout-sessions", {
         method: "POST",
         body: {
           price_key: input.priceKey,
           price_id: input.priceId,
           success_url: input.successUrl,
-        } satisfies wire.HostedCheckoutMintRequest,
+        } satisfies wire.CheckoutSessionMintRequest,
       })
     },
 
@@ -644,7 +644,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           try {
             return await json(payResultSchema, `${path}/pay`, {
               method: "POST",
-              body: request satisfies wire.HostedCheckoutPayRequest,
+              body: request satisfies wire.CheckoutSessionPayRequest,
               anonymous: true,
             })
           } catch (err) {
@@ -665,19 +665,24 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       }
     },
 
-    /** Network and accepted tokens; served only with a Solana PSP. */
-    getSolanaConfig(signal?: AbortSignal): Promise<SolanaConfig> {
-      return json(solanaConfigSchema, "/solana/config", { signal })
+    /**
+     * The merchant's public checkout configuration: its PSPs and, with a
+     * Solana PSP, the network and accepted tokens a wallet adapter needs.
+     */
+    getCheckoutConfig(signal?: AbortSignal): Promise<CheckoutConfig> {
+      return json(checkoutConfigSchema, "/checkout-config", {
+        signal,
+        anonymous: true,
+      })
     },
 
     /**
-     * Accepted tokens with live prices. `priceId` or `checkoutSessionId` adds
-     * each token's `quote`; `wallet` adds its `balance`.
+     * Accepted tokens with live prices. `priceId` adds each token's `quote`;
+     * `wallet` adds its `balance`.
      */
     async listSolanaTokens(
       opts: {
         priceId?: string
-        checkoutSessionId?: string
         wallet?: string
         signal?: AbortSignal
       } = {}
@@ -685,7 +690,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       const { tokens } = await json(solanaTokensSchema, "/solana/tokens", {
         query: {
           price_id: opts.priceId,
-          checkout_session_id: opts.checkoutSessionId,
           wallet: opts.wallet,
         },
         signal: opts.signal,

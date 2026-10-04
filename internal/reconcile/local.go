@@ -399,7 +399,7 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 }
 
 // SolanaLocalRecordResolverFromDB resolves #713 memo local-ids against the two
-// record kinds the stamp names: checkout sessions (one-off local-id = session
+// record kinds the stamp names: checkout attempts (one-off local-id = session
 // id) and rail intents (pull local-id = #674 intent id). (nil, nil) = no local
 // record; backend errors surface so the run retries instead of parking noise.
 func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
@@ -408,9 +408,9 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 		if scopeErr != nil {
 			return nil, scopeErr
 		}
-		row, err := d.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
+		row, err := d.Gen(ctx).GetCheckoutAttemptByID(ctx, gen.GetCheckoutAttemptByIDParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
 		if err == nil {
-			session, err := models.CheckoutSessionFromGen(row)
+			session, err := models.CheckoutAttemptFromGen(row)
 			if err != nil {
 				return nil, err
 			}
@@ -418,7 +418,7 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 				return nil, nil
 			} // setup is not a Solana payment obligation
 			rec := &SolanaLocalRecord{
-				Kind:                SolanaLocalKindCheckoutSession,
+				Kind:                SolanaLocalKindCheckoutAttempt,
 				Rail:                string(session.Rail),
 				CustomerID:          session.CustomerID,
 				PriceID:             *session.PriceID,
@@ -454,7 +454,7 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 	}
 }
 
-// solanaStateStr / solanaStateU64 read the checkout session's rail_state jsonb
+// solanaStateStr / solanaStateU64 read the checkout attempt's rail_state jsonb
 // (written by the solana checkout flow: recipient / token_mint / token_amount).
 func solanaStateStr(state map[string]any, key string) string {
 	if s, ok := state[key].(string); ok {

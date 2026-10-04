@@ -79,9 +79,9 @@ func integration(deps config.Deps) (*billingauth.Integration, error) {
 	return out, nil
 }
 
-// checkoutCustomer is the hosted checkout account check: the host's hook, else
+// checkoutCustomer is the checkout session account check: the host's hook, else
 // the AuthKit user when customers are AuthKit users.
-func checkoutCustomer(deps config.Deps) func(context.Context, string) (billing.CheckoutCustomerIdentity, error) {
+func checkoutCustomer(deps config.Deps) func(context.Context, billing.CustomerID) (billing.CheckoutCustomerIdentity, error) {
 	if deps.CheckoutCustomer != nil {
 		return deps.CheckoutCustomer
 	}
@@ -91,12 +91,12 @@ func checkoutCustomer(deps config.Deps) func(context.Context, string) (billing.C
 	if !ok || deps.CustomerFor != nil {
 		return nil
 	}
-	return func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error) {
-		users, err := directory.Users(ctx, []string{customerID})
+	return func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error) {
+		users, err := directory.Users(ctx, []string{customerID.String()})
 		if err != nil {
 			return billing.CheckoutCustomerIdentity{}, err
 		}
-		user, ok := users[customerID]
+		user, ok := users[customerID.String()]
 		if !ok || user.Ban != nil || user.DeletedAt != nil {
 			return billing.CheckoutCustomerIdentity{}, billingauth.ErrForbidden
 		}

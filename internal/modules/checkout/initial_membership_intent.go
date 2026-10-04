@@ -705,10 +705,10 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 }
 
 func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.BillingRailIntent, p InitialMembershipPayload, success bool) error {
-	if p.CheckoutSessionID == nil {
+	if p.CheckoutAttemptID == nil {
 		return nil
 	}
-	id := *p.CheckoutSessionID
+	id := *p.CheckoutAttemptID
 	params := gen.CompleteInitialMembershipSessionParams{ID: id, MerchantID: in.MerchantID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: p.Terms.PSPID, Rail: in.Rail, Status: "failed", Now: h.Checkout.now().UTC()}
 	if success {
 		params.Status = "succeeded"

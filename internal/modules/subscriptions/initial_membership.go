@@ -29,9 +29,9 @@ type NMIInitialScheduleTerms struct {
 
 // InitialMembershipPayload is one accepted operation with mutually exclusive
 // native-schedule and engine-custody legs. Terms and Instrument own payment and
-// access authority; CheckoutSessionID binds only the terminal session projection.
+// access authority; CheckoutAttemptID binds only the terminal session projection.
 type InitialMembershipPayload struct {
-	CheckoutSessionID      *uuid.UUID                 `json:"checkout_session_id,omitempty"`
+	CheckoutAttemptID      *uuid.UUID                 `json:"checkout_attempt_id,omitempty"`
 	Terms                  InitialMembershipTerms     `json:"terms"`
 	Instrument             charge.FrozenInstrument    `json:"instrument"`
 	RequestFingerprint     string                     `json:"request_fingerprint"`
@@ -71,10 +71,10 @@ func DecodeInitialMembershipPayload(in gen.BillingRailIntent) (InitialMembership
 		return p, errors.New("initial membership payload has trailing data")
 	}
 
-	if p.CheckoutSessionID != nil && (*p.CheckoutSessionID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
+	if p.CheckoutAttemptID != nil && (*p.CheckoutAttemptID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
 		return p, errors.New("initial membership has invalid quoted-session binding")
 	}
-	if p.Upgrade() != (p.RequestedPrice != "") || (p.Upgrade() && (p.CheckoutSessionID != nil || !strings.HasPrefix(p.CheckoutIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != p.Terms.Replaces.SubscriptionID)) {
+	if p.Upgrade() != (p.RequestedPrice != "") || (p.Upgrade() && (p.CheckoutAttemptID != nil || !strings.HasPrefix(p.CheckoutIdempotencyKey, TierChangeKeyPrefix) || in.SubscriptionID == nil || *in.SubscriptionID != p.Terms.Replaces.SubscriptionID)) {
 		return p, errors.New("engine upgrade has no exact tier-change binding")
 	}
 	if err := p.Terms.Validate(); err != nil {

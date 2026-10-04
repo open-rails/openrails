@@ -95,13 +95,6 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	require.Contains(t, fmt.Sprint(out), "tier group")
 	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/solana-tier-change/confirm", "", map[string]any{"new_price_id": price("vip"), "signature": solanago.Signature{}.String()})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
-	status, out = b.call(http.MethodPost, "/checkout", "tc-"+uuid.NewString(), map[string]any{
-		"mode": "solana_tier_change", "subscription_id": sub, "new_price_id": price("vip"),
-		"payment":     map[string]any{"rail": "solana", "psp_id": shop.option.PSPID},
-		"success_url": "https://e2e.test/return", "cancel_url": "https://e2e.test/return?canceled=1",
-	})
-	require.Equal(t, http.StatusBadRequest, status, "%v", out)
-	require.Contains(t, fmt.Sprint(out), "tier group")
 	require.False(t, b.entitled("vip-"+sfx))
 	require.True(t, b.entitled("basic-"+sfx))
 

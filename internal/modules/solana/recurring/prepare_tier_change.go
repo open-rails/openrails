@@ -76,7 +76,7 @@ type PrepareTierChangeInput struct {
 	// Reference, when set, attaches a Solana Pay REFERENCE (read-only, non-signer)
 	// to the atomic tx's cancel instruction so the reference poller can detect the
 	// landed tier change via getSignaturesForAddress — letting a Solana Pay
-	// checkout session drive a tier change. Empty => no tagging.
+	// checkout attempt drive a tier change. Empty => no tagging.
 	Reference string
 }
 

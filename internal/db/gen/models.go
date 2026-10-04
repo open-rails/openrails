@@ -146,8 +146,8 @@ type BillingCatalogRateCard struct {
 	CustomerID *uuid.UUID
 }
 
-// One provider checkout attempt: the PSP, mode and terms a checkout created at the provider.
-type BillingCheckoutSession struct {
+// One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly.
+type BillingCheckoutAttempt struct {
 	ID             uuid.UUID
 	PriceID        *uuid.UUID
 	Mode           string
@@ -167,7 +167,7 @@ type BillingCheckoutSession struct {
 	UpdatedAt      time.Time
 	MerchantID     uuid.UUID
 	CustomerID     uuid.UUID
-	// PSP selected for this provider checkout/session. Required.
+	// PSP selected for this attempt. Required.
 	PspID uuid.UUID
 	// Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
 	DeletedAt           *time.Time
@@ -175,6 +175,22 @@ type BillingCheckoutSession struct {
 	DestructiveRunClass *string
 	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
 	RoutingReason []byte
+}
+
+// One checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt numbers the current payment attempt and attempt_id is the checkout attempt it created; attempt advances only after that attempt failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it.
+type BillingCheckoutSession struct {
+	MerchantID uuid.UUID
+	IDHash     []byte
+	CustomerID uuid.UUID
+	PriceID    uuid.UUID
+	Offer      []byte
+	SuccessUrl string
+	Origin     string
+	Attempt    int32
+	AttemptID  *uuid.UUID
+	ExpiresAt  time.Time
+	PurgeAt    time.Time
+	CreatedAt  time.Time
 }
 
 // Credential publication receipts. Identities and exact secret references only, never secret values.
@@ -378,22 +394,6 @@ type BillingHostOutbox struct {
 	DeliveredAt *time.Time
 	// Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.
 	DedupeKey string
-}
-
-// One hosted checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt is the current payment attempt and engine_session_id the checkout session it created; attempt advances only after that session failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it.
-type BillingHostedCheckoutSession struct {
-	MerchantID      uuid.UUID
-	IDHash          []byte
-	CustomerID      uuid.UUID
-	PriceID         uuid.UUID
-	Offer           []byte
-	SuccessUrl      string
-	Origin          string
-	Attempt         int32
-	EngineSessionID *uuid.UUID
-	ExpiresAt       time.Time
-	PurgeAt         time.Time
-	CreatedAt       time.Time
 }
 
 // One claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by retention.
@@ -1281,7 +1281,7 @@ type BillingSolanaPayReceipt struct {
 	MerchantID        uuid.UUID
 	Reference         string
 	Signature         string
-	CheckoutSessionID uuid.UUID
+	CheckoutAttemptID uuid.UUID
 	Disposition       string
 	ReviewReason      *string
 	Recipient         string
@@ -1300,7 +1300,7 @@ type BillingSolanaPayReceipt struct {
 type BillingSolanaPayReference struct {
 	MerchantID        uuid.UUID
 	Reference         string
-	CheckoutSessionID uuid.UUID
+	CheckoutAttemptID uuid.UUID
 	Kind              string
 	Status            string
 	SettleUntil       time.Time

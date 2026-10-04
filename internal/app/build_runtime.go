@@ -36,10 +36,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
@@ -299,7 +299,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// SEC-30: the durable card-testing ledger works on every replica, Redis or not.
 	cardFailureLedger := abuse.NewFailureLedger(database, clock, abuse.DefaultCardAbuseConfig())
-	serviceInstances.CheckoutSessionService.SetCardFailureLedger(cardFailureLedger)
+	serviceInstances.CheckoutAttemptService.SetCardFailureLedger(cardFailureLedger)
 
 	// #725/#788: collection adapters arm PER MERCHANT from the armed rail
 	// state at charge time — no boot adapter map exists anymore.
@@ -346,8 +346,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		DeduplicationService:         serviceInstances.DeduplicationService,
 
 		CheckoutService:        serviceInstances.CheckoutService,
-		CheckoutSessionService: serviceInstances.CheckoutSessionService,
-		HostedCheckout:         hostedcheckout.NewStore(database),
+		CheckoutAttemptService: serviceInstances.CheckoutAttemptService,
+		CheckoutSessions:       checkoutsession.NewStore(database),
 		CardAbuseGuard:         cardAbuseGuard,
 		CaptchaStore:           captchaStore,
 		CardFailureLedger:      cardFailureLedger,
@@ -382,8 +382,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if serviceInstances.CheckoutService != nil {
 		serviceInstances.CheckoutService.NMIClients = nmiClients
 	}
-	if serviceInstances.CheckoutSessionService != nil {
-		serviceInstances.CheckoutSessionService.SetPSPPosture(runtime.PSPPostureDisarmed)
+	if serviceInstances.CheckoutAttemptService != nil {
+		serviceInstances.CheckoutAttemptService.SetPSPPosture(runtime.PSPPostureDisarmed)
 	}
 	if runtime.RailPaymentMethodService != nil {
 		runtime.RailPaymentMethodService.NMIClients = nmiClients
@@ -396,9 +396,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		serviceInstances.SolanaPayService.SetMintDecimals(runtime.SolanaMintDecimals)
 		serviceInstances.SolanaPayService.SetMintInfo(solanaRPCResolver.ChainReader())
 	}
-	if serviceInstances.CheckoutSessionService != nil {
-		serviceInstances.CheckoutSessionService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
-		serviceInstances.CheckoutSessionService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
+	if serviceInstances.CheckoutAttemptService != nil {
+		serviceInstances.CheckoutAttemptService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
+		serviceInstances.CheckoutAttemptService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
 	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
@@ -646,7 +646,7 @@ type servicesInstances struct {
 	WebhookDispatcher *webhooks.WebhookDispatcher
 
 	CheckoutService        *checkout.CheckoutService
-	CheckoutSessionService *checkout.CheckoutSessionService
+	CheckoutAttemptService *checkout.CheckoutAttemptService
 	MoneyService           *money.MoneyService
 	MetricsService         *metrics.Service
 	DashboardService       *dashboard.Service
@@ -871,7 +871,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	if checkoutService.PurchaseService != nil {
 		checkoutService.PurchaseService.SetProductAccessService(productAccessService)
 	}
-	checkoutSessionService := checkout.NewCheckoutSessionService(
+	checkoutAttemptService := checkout.NewCheckoutAttemptService(
 		database,
 		priceService,
 		productService,
@@ -886,12 +886,12 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		railConfigs,
 		clock,
 	)
-	webhookDispatcher.CheckoutSessionService = checkoutSessionService
+	webhookDispatcher.CheckoutAttemptService = checkoutAttemptService
 	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 
-	// The poller settles through the checkout session service, the one
+	// The poller settles through the checkout attempt service, the one
 	// crediting path for Solana Pay purchases.
-	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, checkoutSessionService, clock)
+	solanaPayPoller := solanamodule.NewSolanaPayPoller(database, checkoutAttemptService, clock)
 
 	return &servicesInstances{
 		SubscriptionService:          subscriptionService,
@@ -917,7 +917,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		DeduplicationService:         deduplicationService,
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
-		CheckoutSessionService:       checkoutSessionService,
+		CheckoutAttemptService:       checkoutAttemptService,
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,
 		DashboardService:             dashboardService,

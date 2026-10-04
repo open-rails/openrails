@@ -1,7 +1,7 @@
 -- name: CompleteInitialMembershipSession :execrows
 -- The accepted operation owns its terminal checkout projection. Expiry is only
 -- an offer deadline and cannot erase an accepted financial operation.
-UPDATE billing.checkout_sessions
+UPDATE billing.checkout_attempts
 SET status=sqlc.arg(status)::text,payment_id=sqlc.narg(payment_id)::uuid,
     subscription_id=sqlc.narg(subscription_id)::uuid,transaction_id=sqlc.narg(transaction_id)::text,
     expires_at=NULL,updated_at=sqlc.arg(now)

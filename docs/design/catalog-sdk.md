@@ -54,10 +54,10 @@ access, err := client.ProductAccess.CheckMany(ctx, &billing.ProductAccessCheckMa
 if err != nil { return err }
 _ = access[productID]
 
-session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionRequest{
+attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptRequest{
     Customer: billing.CheckoutCustomerIdentity{ID: customerID},
     PriceID: price.ID,
-    PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe"},
+    PaymentOptions: billing.CheckoutPaymentOptions{Rail: "stripe", PaymentMethodID: methodID},
     IdempotencyKey: checkoutAttemptKey,
     SuccessURL: successURL,
     CancelURL: cancelURL,

@@ -38,7 +38,7 @@ null on the last page and is passed back as `?cursor=`.
 |---|---|
 | Public (catalog, health, capabilities, solana pricing) | none |
 | Self-service `/v1/me/*` | `Authorization: DPoP <delegated JWT>` plus per-request `DPoP` proof (native: Bearer plus matching TLS client certificate) — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
-| Checkout `/v1/checkout` | any authenticated user bearer |
+| Checkout sessions `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Merchant `/v1/merchant/*`, `/v1/import/*` | `Authorization: Bearer <API key (openrails_st_…) | service JWT | user access token>` — every route is gated on a `merchant:*` permission, not on credential type |
 | Platform `/v1/platform/*` | human operator session checked against root-group grants (standalone only) |
 | Webhooks | provider signature / source-IP verification, no bearer |
@@ -75,45 +75,27 @@ admin responses are never replayed by global middleware.
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
 | GET | `/v1/products` | optional | Products on sale, each with its current prices; a price's `psps` carry the status only. Query: `limit`, `cursor` |
 | GET | `/v1/prices` | optional | Prices on sale. Query: `product_id`, `currency`, `auto_renew`, `limit`, `cursor` |
-| GET | `/v1/currencies` | none | The currency scale registry: `{object:"currencies", currencies:[{code, decimals, minor_decimals}]}`. Every monetary string on the wire is in native units (`10^decimals` per major unit); providers settle in `10^minor_decimals`. System-fixed, merchant-independent; `billing.Currencies()` is the same table in Go. Hosts stamp it into the hosted checkout document as `plan.unit_decimals` ([commerce](commerce.md#hosted-checkout-document)) |
-| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, checkout, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`elements`/`redirect`/`wallet`, `checkout` marks PSPs that take new purchases and cards under the checkout routing, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Stripe `publishable_key`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear. When a Solana PSP is armed, `solana` carries `{network, chain, preferred_token, tokens[]}` (the same acceptance policy as `/v1/solana/config`) |
-| GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
-| GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
+| GET | `/v1/currencies` | none | The currency scale registry: `{object:"currencies", currencies:[{code, decimals, minor_decimals}]}`. Every monetary string on the wire is in native units (`10^decimals` per major unit); providers settle in `10^minor_decimals`. System-fixed, merchant-independent; `billing.Currencies()` is the same table in Go. OpenRails stamps it into the checkout session document as `plan.unit_decimals` ([checkout](commerce.md#checkout-sessions)) |
+| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, checkout, config}`, where `key` is a merchant checkout attempt's `payment.rail` value, `flow` is `tokenize`/`elements`/`redirect`/`wallet`, `checkout` marks PSPs that take new purchases and cards under the checkout routing, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Stripe `publishable_key`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear. When a Solana PSP is armed, `solana` carries `{network, chain, preferred_token, tokens[]}` |
+| GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }`. Query: `price_id`, `wallet` |
 
 There is no `/health` route — probes are `/health/live` and `/health/ready`.
 
-## 2. Checkout + rail-specific public routes
+## 2. Checkout sessions
 
-Top-level checkout requires an authenticated user bearer. The same three
-handlers are also mounted under `/v1/me/checkout/*` (delegated token) — see
-section 3.
+A browser buys through a checkout session ([checkout](commerce.md)): the
+signed-in customer mints one (section 3) or the merchant's server does (section
+4), and the session id is then the only credential.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/v1/checkout` | bearer | Create a checkout session for a new subscription or one-off purchase |
-| GET | `/v1/checkout/{id}` | bearer | Retrieve a session (403 if it belongs to another user) |
-| POST | `/v1/checkout/{id}/confirm` | bearer | Confirm a Solana session: `{ payment: { rail: "solana", signature, wallet? } }` |
-| GET | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transfer/transaction request for the session (buyer signs; mounted when a Solana rail is configured) |
-| POST | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transaction-request callback |
-| GET | `/v1/checkout-sessions/{id}` | none (the id is the credential) | Hosted checkout session document ([hosted checkout](commerce.md#hosted-checkout)) |
-| POST | `/v1/checkout-sessions/{id}/pay` | none (the id is the credential) | Pay a hosted checkout session |
+| GET | `/v1/checkout-sessions/{id}` | the id | The session document: plan, amounts, `options`, saved methods, status |
+| POST | `/v1/checkout-sessions/{id}/pay` | the id | Pay with one option: `{option_id, payment_token \| payment_method_id \| card \| token_symbol, billing fields}` → `{status, next_action, operation, failure, payment_id, subscription_id}` |
+| GET | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | Solana Pay transaction request label (mounted when a Solana rail is configured) |
+| POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | Solana Pay transaction-request callback: the wallet posts its account and receives the transaction to sign |
 
-`POST /v1/checkout` body:
-
-- `price_id` (required)
-- The price determines one-time versus recurring billing; a caller-supplied `mode` is rejected
-- `payment` (required):
-  - `rail` (optional) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`). Naming one pins it (never silently switched); omitting it hands the choice to the merchant's routing policy, which falls through unavailable PSPs and records the decision on the session's `routing_reason` (or#288)
-  - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
-  - `token_symbol` for `solana`; `flow` — `transfer_request` (default) or `transaction_request` (`wallet` required)
-  - billing details for `ccbill`: canonical `name_on_card`, `zip`, and ISO-3166 alpha-2 `country`; `address1`, `city`, and `state` are optional, and the verified email comes from the authenticated identity rather than this payload
-  - Stripe hosted Checkout collects its own email and billing address; those fields are not required in this request
-- `metadata` (optional string map)
-
-Response: checkout session with `payment` details, `next_action`
-(redirect/solana), and `payment_id`/`subscription_id` once completed. Tier
-changes are NOT supported here — if the user already has an active subscription
-in the price's tier group the response is `{ "status": "blocked" }` pointing at
+A buyer who already has an active subscription in the price's tier group gets
+`{ "status": "blocked" }`; tier changes go through
 `POST /v1/me/subscriptions/{id}/change-tier`.
 
 ## 3. Self-service (`/v1/me/*`)
@@ -256,15 +238,9 @@ collection choice through foreign keys; no replacement method is selected.
 
 ### Checkout (delegated)
 
-Same semantics as `/v1/checkout` (section 2), with the delegated token as the
-buyer.
-
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/me/checkout` | Create a checkout session |
-| GET | `/v1/me/checkout/{id}` | Retrieve the caller's checkout session |
-| POST | `/v1/me/checkout/{id}/confirm` | Confirm the caller's Solana checkout session |
-| POST | `/v1/me/checkout/sessions` | Mint a [hosted checkout](commerce.md#hosted-checkout) session: `{price_key \| price_id, success_url?}` → `201 {id, url?, expires_at}` |
+| POST | `/v1/me/checkout-sessions` | Mint a [checkout session](commerce.md#checkout-sessions): `{price_key \| price_id, success_url?}` → `201 {id, url, expires_at}` |
 
 ## 4. Merchant machine surface (`/v1/merchant/*`, `/v1/import/*`)
 
@@ -284,17 +260,11 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:read` | A customer's product access |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 opaque entitlement keys; optional `at` instant |
 | POST | `/v1/merchant/customers/{customer_id}/product-access/check` | `merchant:customer-settings:read` | Check access for exactly one bounded product_ids or product_keys list without loading purchase history |
-| GET | `/v1/merchant/checkout-sessions/by-key` | `merchant:customer-settings:read` | Read-only customer receipt lookup by Idempotency-Key and required accepted entitlement; no payment token or provider call |
-| POST | `/v1/merchant/checkout-sessions/lookup` | `merchant:checkout:create` | Read-only original-request lookup by customer and Idempotency-Key; changed payload returns idempotency_key_reused, absent attempt returns 404 |
-| POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Create a checkout for the supplied customer identity; exactly one price_id or price_key, optional entitlement and offer_kind assertions, required Idempotency-Key header |
-| POST | `/v1/merchant/payment-method-sessions` | `merchant:checkout:create` | Create a nonmonetary saved-payment-method setup session for the supplied customer |
-| POST | `/v1/merchant/solana-cancel-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription cancellation session |
-| POST | `/v1/merchant/solana-tier-change-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription tier-change session |
-| GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
-| POST | `/v1/merchant/hosted-checkout-sessions` | `merchant:checkout:create` | Mint a hosted checkout session for the supplied customer and price |
-| POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
-| GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for exactly one query price_id or price_key; no provider request |
-| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant |
+| POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Mint a checkout session for the supplied customer and price; hand its id to that customer's browser |
+| POST | `/v1/merchant/checkout-attempts` | `merchant:checkout:create` | Charge now for the supplied customer identity: exactly one price_id or price_key, optional entitlement and offer_kind assertions, required Idempotency-Key header. Creating the attempt accepts the price's terms |
+| GET | `/v1/merchant/checkout-attempts/{id}` | `merchant:customer-settings:read` | Read a checkout attempt |
+| POST | `/v1/merchant/checkout-attempts/{id}/confirm` | `merchant:checkout:create` | Confirm a Solana attempt with the wallet's signature: `{signature, wallet?}`; `202` while it is processing |
+| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant; with `price_id` or `price_key`, the `options` that can sell that price, locally ready, no provider request |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Admit requests and place their holds: `{ items: [AdmitParams] }` → `{ items: [{ status, admission, error }] }`, one verdict per item. Each item's caller-chosen `request_id` identifies the admission: a retry with the same terms answers the same `Admission` (`replayed`), changed terms are `idempotency_key_reused`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (RFC3339): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
 | GET | `/v1/merchant/admissions/{request_id}` | `merchant:usage:read` | One `Admission` and its hold state (`open`, `captured`, `released`, `expired`); 404 `admission_not_found` |

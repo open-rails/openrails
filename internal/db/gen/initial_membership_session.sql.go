@@ -13,7 +13,7 @@ import (
 )
 
 const completeInitialMembershipSession = `-- name: CompleteInitialMembershipSession :execrows
-UPDATE billing.checkout_sessions
+UPDATE billing.checkout_attempts
 SET status=$1::text,payment_id=$2::uuid,
     subscription_id=$3::uuid,transaction_id=$4::text,
     expires_at=NULL,updated_at=$5

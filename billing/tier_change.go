@@ -10,9 +10,9 @@ type TierChangeResponse struct {
 	Effective      string                         `json:"effective,omitempty"`       // now (upgrade) | period_end (downgrade)
 	PriceID        string                         `json:"price_id"`                  // Target price ID
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
-	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
+	Payment        CheckoutAttemptPaymentResponse `json:"payment"`                   // Rail info
 	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
-	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
+	NextAction     *CheckoutAttemptNextAction     `json:"next_action,omitempty"`     // For redirects
 	Message        string                         `json:"message,omitempty"`         // User-friendly message
 	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
 	// Money summary so the client can confirm/announce what actually happened.
@@ -86,9 +86,9 @@ type TierChangePreviewResponse struct {
 	Message          string     `json:"message,omitempty"`
 }
 
-type CheckoutSessionNextAction struct {
+type CheckoutAttemptNextAction struct {
 	Type          string                        `json:"type"`
-	RedirectToURL *CheckoutSessionRedirectToURL `json:"redirect_to_url,omitempty"`
+	RedirectToURL *CheckoutAttemptRedirectToURL `json:"redirect_to_url,omitempty"`
 	// Transactions carries base64-encoded UNSIGNED Solana transactions the
 	// subscriber's wallet must sign + send, in order, for type
 	// "solana_sign_transactions" (recurring subscribe, #261). After sending, the
@@ -97,11 +97,11 @@ type CheckoutSessionNextAction struct {
 	Transactions []string `json:"transactions,omitempty"`
 }
 
-type CheckoutSessionRedirectToURL struct {
+type CheckoutAttemptRedirectToURL struct {
 	URL string `json:"url,omitempty"`
 }
 
-type CheckoutSessionPaymentResponse struct {
+type CheckoutAttemptPaymentResponse struct {
 	Rail           string `json:"rail"`
 	Reference      string `json:"reference,omitempty"`
 	TransactionURL string `json:"transaction_url,omitempty"`

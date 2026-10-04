@@ -66,18 +66,18 @@ SELECT EXISTS(
 
 -- name: PaymentHasProtectedDependents :one
 -- A payment is unsafe to remove if it feeds the #514 grant ledger, backs a
--- refund, an admin grant, or a checkout session. Such rows are retracted through
+-- refund, an admin grant, or a checkout attempt. Such rows are retracted through
 -- convergence (grant revoke), never pruned.
 SELECT
   EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_id = sqlc.arg(payment_id)::uuid)
   OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = sqlc.arg(payment_id)::uuid AND r.deleted_at IS NULL)
-  OR EXISTS(SELECT 1 FROM billing.checkout_sessions cs WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.payment_id = sqlc.arg(payment_id)::uuid AND cs.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing.checkout_attempts cs WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.payment_id = sqlc.arg(payment_id)::uuid AND cs.deleted_at IS NULL)
   AS protected;
 
 -- --- or#858 soft delete ------------------------------------------------------
 
--- name: PruneSoftDeleteCheckoutSessionsBySubscription :execrows
-UPDATE billing.checkout_sessions
+-- name: PruneSoftDeleteCheckoutAttemptsBySubscription :execrows
+UPDATE billing.checkout_attempts
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
@@ -129,8 +129,8 @@ UPDATE billing.payments
 SET deleted_at = NULL, destructive_run_id = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
--- name: RestoreCheckoutSessionsByDestructiveRun :execrows
-UPDATE billing.checkout_sessions
+-- name: RestoreCheckoutAttemptsByDestructiveRun :execrows
+UPDATE billing.checkout_attempts
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 

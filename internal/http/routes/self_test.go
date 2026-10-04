@@ -56,7 +56,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 		"GET /v1/me/balance", "GET /v1/me/transactions", "GET /v1/me/tier?group=premium", "GET /v1/me/spend-limits",
 		"PUT /v1/me/collection-payment-method", "POST /v1/me/subscriptions/sub_1/cancel", "POST /v1/me/subscriptions/sub_1/resume",
 		"PUT /v1/me/subscriptions/sub_1/payment-method", "POST /v1/me/subscriptions/sub_1/change-tier",
-		"POST /v1/me/subscriptions/sub_1/solana-cancel-tx", "POST /v1/me/checkout",
+		"POST /v1/me/subscriptions/sub_1/solana-cancel-tx",
 	} {
 		method, path, _ := strings.Cut(route, " ")
 		code := reach(payer, method, path, nil)
@@ -65,7 +65,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 
 	invoker := customerSurface(customerAuth("end-user-7"))
 	require.True(t, passedGates(reach(invoker, http.MethodGet, "/v1/me/spend-limits", nil)))
-	for _, route := range []string{"GET /v1/me/balance", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/checkout"} {
+	for _, route := range []string{"GET /v1/me/balance", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/checkout-sessions"} {
 		method, path, _ := strings.Cut(route, " ")
 		require.Equal(t, http.StatusForbidden, reach(invoker, method, path, nil), route)
 	}
@@ -95,12 +95,12 @@ func TestCustomerRouteInventories(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, []string{
-		"POST /me/checkout", "POST /me/checkout/sessions", "POST /me/billing-portal",
+		"POST /me/checkout-sessions", "POST /me/billing-portal",
 		"POST /me/subscriptions/{id}/change-tier", "POST /me/subscriptions/{id}/change-tier/preview",
 		"POST /me/subscriptions/{id}/provider-cutover", "GET /me/subscriptions/{id}/provider-cutover", "POST /me/subscriptions/{id}/provider-cutover/preview",
 		"POST /me/subscriptions/{id}/solana-tier-change", "POST /me/subscriptions/{id}/solana-tier-change/confirm",
 	}, purchaseOnly, "management scope never purchases or changes plans")
-	require.Subset(t, management, []string{"GET /me/checkout/{id}", "POST /me/checkout/{id}/confirm", "POST /me/subscriptions/{id}/solana-cancel", "GET /me/spend-limits"})
+	require.Subset(t, management, []string{"POST /me/subscriptions/{id}/solana-cancel", "GET /me/spend-limits"})
 
 	require.ElementsMatch(t, []string{
 		"PUT /me/collection-payment-method", "POST /me/subscriptions/{id}/cancel", "POST /me/subscriptions/{id}/resume", "PUT /me/subscriptions/{id}/payment-method",

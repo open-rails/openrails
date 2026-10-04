@@ -34,8 +34,8 @@ var excludedTables = map[string]string{
 	"dashboard_configs":      "presentation",
 	"merchant_deks":          "encryption key material", "merchant_secrets": "credentials are re-entered at destination",
 	"merchant_destructive_policy": "deployment safety policy", "merchant_webhooks": "destinations and signing-key versions are reconfigured",
-	"hosted_checkout_sessions": "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout session; a buyer mints a new one at the destination",
-	"notifications":            "inbox and notification delivery", "rail_mutation_logs": "operator evidence; raw bodies excluded",
+	"checkout_sessions": "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout attempt; a buyer mints a new one at the destination",
+	"notifications":     "inbox and notification delivery", "rail_mutation_logs": "operator evidence; raw bodies excluded",
 	"reconciliation_findings":         "operator observations",
 	"product_archive_operations":      "operation replay receipts; the refunds they produced are archived payments",
 	"account_updater_batches":         "unsupported provider job evidence; any rows refused",
@@ -68,7 +68,7 @@ var excludedColumns = map[string]string{
 	"rebill_cycles":                   "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason",
 	"payment_method_updates":          "id merchant_id payment_method_id customer_id psp_id source kind event_ref at created_at",
 	"idempotency_keys":                "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
-	"hosted_checkout_sessions":        "merchant_id id_hash customer_id price_id offer success_url origin attempt engine_session_id expires_at purge_at created_at",
+	"checkout_sessions":               "merchant_id id_hash customer_id price_id offer success_url origin attempt attempt_id expires_at purge_at created_at",
 	"dashboard_configs":               "merchant_id layout updated_at updated_by",
 	"merchant_deks":                   "merchant_id wrapped_dek created_at updated_at",
 	"merchant_secrets":                "merchant_id name value version created_at updated_at",
@@ -80,8 +80,8 @@ var excludedColumns = map[string]string{
 	"nmi_bulk_checkpoints":            "merchant_id psp_id since until next_page started_at",
 	"nmi_history_months":              "merchant_id psp_id month kind category reason authorizations",
 	"nmi_history_reads":               "merchant_id psp_id read_at",
-	"solana_pay_references":           "merchant_id reference checkout_session_id kind status settle_until watch_until next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
-	"solana_pay_receipts":             "merchant_id reference signature checkout_session_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
+	"solana_pay_references":           "merchant_id reference checkout_attempt_id kind status settle_until watch_until next_poll_at signature seen_until scan_stack scan_below built_transaction built_valid_height created_at updated_at",
+	"solana_pay_receipts":             "merchant_id reference signature checkout_attempt_id disposition review_reason recipient token_mint expected_amount received_amount payer landed_at payment_id resolved_at resolution created_at",
 	"product_archive_operations":      "merchant_id id idempotency_key request_sha256 product_id purchase_action purchased_since reason created_at",
 	"reconciliation_findings":         "id merchant_id finding_type rail psp_id openrails_resource_type openrails_resource_id external_resource_id field openrails_value external_value subject_key severity status recommended_action first_seen_run last_seen_run last_seen_at resolved_at resolution operator_notes created_at updated_at evidence resolved_by notified_at notified_severity seen_run_class",
 	"account_updater_batches":         "id merchant_id custodian_id job_ref status instruments result_counts failure_reason submitted_at last_polled_at completed_at created_at updated_at",
@@ -99,7 +99,7 @@ var omittedColumns = map[string]string{
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
 	"payments":          "discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
-	"checkout_sessions": "destructive_run_class",
+	"checkout_attempts": "destructive_run_class",
 	"entitlements":      "period destructive_run_class",
 	"usage_events":      "metadata",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
@@ -235,7 +235,7 @@ type rowCheck struct{ table, predicate string }
 var preflightChecks = []rowCheck{
 	{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
 	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
-	{"checkout_sessions", "status NOT IN ('succeeded','failed','expired','canceled')"},
+	{"checkout_attempts", "status NOT IN ('succeeded','failed','expired','canceled')"},
 	// A request still running under a live claim has an outcome the archive
 	// would miss; settled, failed and lapsed claims are not moved (#1099).
 	{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},
@@ -347,7 +347,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 		return err
 	}
 	if purchaseInvalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: purchaseInvalid}
+		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: purchaseInvalid}
 	}
 	if err := validateSubscriptionCollectionReferences(ctx, tx, id); err != nil {
 		return err
@@ -363,21 +363,21 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 		return quoteErr
 	}
 	if quoteInvalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: quoteInvalid}
+		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: quoteInvalid}
 	}
 	stripeInvalid, stripeErr := gen.New(tx).CountInvalidStripeSetupReferences(ctx, id.UUID())
 	if stripeErr != nil {
 		return stripeErr
 	}
 	if stripeInvalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: stripeInvalid}
+		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: stripeInvalid}
 	}
 	invalid, err := gen.New(tx).CountInvalidCheckoutCaptureReferences(ctx, id.UUID())
 	if err != nil {
 		return err
 	}
 	if invalid != 0 {
-		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: invalid}
+		return &Error{Code: "unsupported_state", Table: "checkout_attempts", Count: invalid}
 	}
 
 	for _, c := range referenceChecks {

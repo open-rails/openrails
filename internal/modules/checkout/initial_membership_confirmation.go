@@ -109,13 +109,13 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		}
 		if sessionID != nil {
 			if *sessionID == uuid.Nil {
-				return ErrCheckoutSessionValidation
+				return ErrCheckoutAttemptValidation
 			}
 			// Lock the validated persisted quote while accepting its binding.
-			if _, err := d.Gen(ctx).LockCheckoutSessionForShare(ctx, gen.LockCheckoutSessionForShareParams{MerchantID: mid.UUID(), ID: *sessionID}); err != nil {
+			if _, err := d.Gen(ctx).LockCheckoutAttemptForShare(ctx, gen.LockCheckoutAttemptForShareParams{MerchantID: mid.UUID(), ID: *sessionID}); err != nil {
 				return err
 			}
-			session, err := NewCheckoutSessionRepo(d).GetByID(ctx, *sessionID)
+			session, err := NewCheckoutAttemptRepo(d).GetByID(ctx, *sessionID)
 			if err != nil {
 				return err
 			}
@@ -124,7 +124,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 				return err
 			}
 			if session.Rail != models.Rail(method.Rail) || quote.SubscriptionID != accepted.SubscriptionID || quote.PaymentID != accepted.PaymentID || initialMembershipQuoteFingerprint(quote) != fingerprint {
-				return ErrCheckoutSessionConflict
+				return ErrCheckoutAttemptConflict
 			}
 		}
 		var binding *charge.HyperSwitchBinding
@@ -168,7 +168,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
 			label = *psp.Key
 		}
-		payload := subscriptions.InitialMembershipPayload{CheckoutSessionID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method, accepted.PSPID), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
+		payload := subscriptions.InitialMembershipPayload{CheckoutAttemptID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method, accepted.PSPID), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
 		return err
 	})

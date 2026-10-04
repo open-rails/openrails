@@ -27,21 +27,21 @@ func TestInitialMembershipQuote(t *testing.T) {
 	product := models.Product{ID: uuid.New(), DisplayName: "Quoted membership", EntitlementsSpec: map[string]*int{"quota": &quota}}
 	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: intPtr(720)}
 	expiry := now.Add(time.Hour)
-	session := models.CheckoutSession{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutSessionModeSubscription, Rail: models.RailNMI,
-		Status: models.CheckoutSessionStatusRequiresAction, Amount: new(price.Amount), Currency: new(price.Currency), ExpiresAt: &expiry}
+	session := models.CheckoutAttempt{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutAttemptModeSubscription, Rail: models.RailNMI,
+		Status: models.CheckoutAttemptStatusRequiresAction, Amount: new(price.Amount), Currency: new(price.Currency), ExpiresAt: &expiry}
 	method := gen.BillingPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, Rail: "nmi", Custodian: models.CustodianHyperSwitch, CustodianID: &custodian, RailCustomerRef: "customer", RailMethodRef: "method"}
 
 	require.NoError(t, quoteInitialMembership(ctx, &session, &price, &product, method, now))
 	encoded, err := json.Marshal(session)
 	require.NoError(t, err)
-	var restored models.CheckoutSession
+	var restored models.CheckoutAttempt
 	require.NoError(t, json.Unmarshal(encoded, &restored))
 	quoted, err := readInitialMembershipQuote(&restored)
 	require.NoError(t, err)
 	require.Equal(t, quota, *quoted.Entitlements["quota"])
 	require.Equal(t, 720*time.Hour, quoted.PeriodEnd.Sub(quoted.PeriodStart))
 
-	view := (&CheckoutSessionService{}).sessionToResponse(&restored)
+	view := (&CheckoutAttemptService{}).sessionToResponse(&restored)
 	require.Equal(t, "Quoted membership", view.MembershipQuote.ProductName)
 	*view.MembershipQuote.Entitlements["quota"] = 0
 	again, err := readInitialMembershipQuote(&restored)
@@ -50,7 +50,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 
 	repriced := price
 	repriced.Amount = 123
-	require.ErrorIs(t, quoteInitialMembership(ctx, &restored, &repriced, &product, method, now), ErrCheckoutSessionConflict, "a quoted session is never re-quoted")
+	require.ErrorIs(t, quoteInitialMembership(ctx, &restored, &repriced, &product, method, now), ErrCheckoutAttemptConflict, "a quoted session is never re-quoted")
 
 	principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: customer.String()}
 	accepted, err := acceptedInitialMembershipQuote(ctx, &restored, principal, now.Add(10*time.Minute))
@@ -69,15 +69,15 @@ func TestInitialMembershipQuote(t *testing.T) {
 		bad := principal
 		mutate(&bad)
 		_, err := acceptedInitialMembershipQuote(ctx, &restored, bad, now)
-		require.ErrorIs(t, err, ErrCheckoutSessionForbidden)
+		require.ErrorIs(t, err, ErrCheckoutAttemptForbidden)
 	}
 	_, err = acceptedInitialMembershipQuote(ctx, &restored, principal, expiry)
-	require.ErrorIs(t, err, ErrCheckoutSessionExpired)
+	require.ErrorIs(t, err, ErrCheckoutAttemptExpired)
 
 	tampered := restored
 	tampered.Amount = new(int64(1))
 	_, err = readInitialMembershipQuote(&tampered)
-	require.ErrorIs(t, err, ErrCheckoutSessionConflict, "the session row and its quote must agree")
+	require.ErrorIs(t, err, ErrCheckoutAttemptConflict, "the session row and its quote must agree")
 	require.Nil(t, restored.PaymentID, "quoting claims no payment")
 
 	for name, mutate := range map[string]func(*models.Price, *gen.BillingPaymentMethod){

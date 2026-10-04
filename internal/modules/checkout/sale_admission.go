@@ -124,11 +124,11 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method, target.Scope.ID), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
 	if req.acceptedPurchase != nil {
 		out.PaymentID = req.acceptedPurchase.PaymentID
-		id, err := billing.ParseCheckoutSessionID(req.CheckoutSessionID)
+		id, err := billing.ParseCheckoutAttemptID(req.CheckoutAttemptID)
 		if err != nil {
 			return out, err
 		}
-		out.CheckoutSessionID = id.UUID()
+		out.CheckoutAttemptID = id.UUID()
 	}
 	return out, nil
 }

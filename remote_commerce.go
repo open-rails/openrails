@@ -9,205 +9,93 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// refuseCard: a Card re-encodes as a redaction, so a Client cannot carry one.
-// It reaches OpenRails only in the request that first carried it (the mounted
-// customer and checkout routes); the refused card is wiped.
-func refuseCard(payment billing.CheckoutPaymentOptions) error {
-	if payment.Card == nil {
-		return nil
-	}
-	payment.Card.Zero()
-	return invalidErr("a card cannot be sent through a Client: post it to OpenRails' own routes")
-}
-
-// CreateCheckoutSession starts a purchase of one price, named by exactly one
-// of PriceID and PriceKey. Retries with the same IdempotencyKey never charge
-// twice. A card cannot travel through a Client: card entry goes to OpenRails'
-// own routes.
-func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	if err := refuseCard(request.PaymentOptions); err != nil {
+// CreateCheckoutSession hands a purchase to a customer: one price, paid on the
+// payment page. The returned ID reads and pays the session with no other
+// credential (billing-ui's checkoutSource), so it goes to that customer's
+// browser only.
+func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error) {
+	if _, err := requireTypedID("customer.id", request.Customer.ID); err != nil {
 		return nil, err
 	}
-	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
+	if request.PriceID.IsZero() == (strings.TrimSpace(request.PriceKey) == "") {
 		return nil, invalidErr("exactly one of price_id or price_key is required")
 	}
-	if request.PriceID != "" {
-		if id, err := billing.ParsePriceID(request.PriceID); err != nil || id.IsZero() {
-			return nil, invalidErr("price_id must be a valid price ID; use price_key for an opaque key")
-		}
-	}
-	var out billing.CheckoutSession
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/checkout-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
+	var out billing.CheckoutSessionLink
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/checkout-sessions", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CreateHostedCheckoutSession mints a hosted checkout session for a host that
-// starts checkout server-side: one customer, one price. The returned ID reads
-// and pays the session with no other credential (billing-ui's
-// checkoutSource), so it goes to that customer's browser only.
-func (c *Client) CreateHostedCheckoutSession(ctx context.Context, request billing.CreateHostedCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.HostedCheckoutSessionLink, error) {
-	if _, err := requireCustomerID(request.Customer.ID); err != nil {
+// CreateCheckoutAttempt charges one price for a customer now, relaying that
+// customer's pay action; a recurring price is enrolled. Retries with the same
+// IdempotencyKey never charge twice. A step the buyer must take (a redirect, a
+// Solana Pay link) is the attempt's NextAction.
+func (c *Client) CreateCheckoutAttempt(ctx context.Context, request billing.CreateCheckoutAttemptRequest, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
+	if _, err := requireTypedID("customer.id", request.Customer.ID); err != nil {
 		return nil, err
 	}
-	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
+	if request.PriceID.IsZero() == (strings.TrimSpace(request.PriceKey) == "") {
 		return nil, invalidErr("exactly one of price_id or price_key is required")
-	}
-	var out billing.HostedCheckoutSessionLink
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/hosted-checkout-sessions", request, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// LookupCheckoutSession is a read-only idempotency probe for thin host
-// wrappers. It never creates, routes, or contacts a provider.
-func (c *Client) LookupCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	if err := refuseCard(request.PaymentOptions); err != nil {
-		return nil, err
 	}
 	if strings.TrimSpace(request.IdempotencyKey) == "" {
-		return nil, invalidErr("Idempotency-Key required")
+		return nil, invalidErr("IdempotencyKey is required")
 	}
-	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
-		return nil, invalidErr("exactly one of price_id or price_key is required")
-	}
-	var out billing.CheckoutSession
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/checkout-sessions/lookup", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
+	var out billing.CheckoutAttempt
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/checkout-attempts", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CreatePaymentMethodSession starts saving a card without a purchase.
-func (c *Client) CreatePaymentMethodSession(ctx context.Context, request billing.CreatePaymentMethodSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	if err := refuseCard(request.PaymentOptions); err != nil {
+// GetCheckoutAttempt reads one checkout attempt.
+func (c *Client) GetCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
+	attempt, err := requireTypedID("id", id)
+	if err != nil {
 		return nil, err
 	}
-	var out billing.CheckoutSession
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/payment-method-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
+	var out billing.CheckoutAttempt
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-attempts/"+attempt, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CreateSolanaCancelSession prepares the transaction a customer signs to
-// cancel a Solana subscription.
-func (c *Client) CreateSolanaCancelSession(ctx context.Context, request billing.CreateSolanaCancelSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	if err := refuseCard(request.PaymentOptions); err != nil {
+// ConfirmCheckoutAttempt completes a Solana attempt with the signature of the
+// transaction the buyer's wallet signed (next action
+// solana_sign_transactions).
+func (c *Client) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, request billing.ConfirmCheckoutAttemptRequest, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
+	attempt, err := requireTypedID("id", id)
+	if err != nil {
 		return nil, err
 	}
-	var out billing.CheckoutSession
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/solana-cancel-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
+	var out billing.CheckoutAttempt
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/checkout-attempts/"+attempt+"/confirm", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// CreateSolanaTierChangeSession prepares the transaction a customer signs to
-// change a Solana subscription's tier.
-func (c *Client) CreateSolanaTierChangeSession(ctx context.Context, request billing.CreateSolanaTierChangeSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	if err := refuseCard(request.PaymentOptions); err != nil {
-		return nil, err
+// GetCheckoutConfig returns the merchant's checkout configuration: its armed
+// PSPs and their public values, and with a price, the ways checkout can sell
+// it.
+func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.CheckoutConfigQuery, requestOptions ...RequestOption) (*billing.CheckoutConfig, error) {
+	if !query.PriceID.IsZero() && strings.TrimSpace(query.PriceKey) != "" {
+		return nil, invalidErr("price_id and price_key are exclusive")
 	}
-	var out billing.CheckoutSession
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/solana-tier-change-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
-		return nil, err
+	values := url.Values{}
+	if !query.PriceID.IsZero() {
+		values.Set("price_id", query.PriceID.String())
 	}
-	return &out, nil
-}
-
-// GetCheckoutSession reads one of a customer's checkout sessions.
-func (c *Client) GetCheckoutSession(ctx context.Context, customerID string, sessionID string, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	customer, err := requireCustomerID(customerID)
-	if err != nil {
-		return nil, err
+	if strings.TrimSpace(query.PriceKey) != "" {
+		values.Set("price_key", query.PriceKey)
 	}
-	typedSession, err := billing.ParseCheckoutSessionID(sessionID)
-	if err != nil {
-		return nil, invalidErr("invalid session_id")
+	path := "/v1/merchant/checkout-config"
+	if len(values) > 0 {
+		path += "?" + values.Encode()
 	}
-	session, err := requireTypedID("session_id", typedSession)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CheckoutSession
-	path := "/v1/merchant/checkout-sessions/" + session + "?" + url.Values{"customer_id": {customer}}.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetCheckoutSessionByKey retrieves an accepted resource checkout without its
-// original payment token. This read never resumes dispatch or alters the strict
-// Create/Lookup request fingerprint. Entitlement must match admission exactly.
-func (c *Client) GetCheckoutSessionByKey(ctx context.Context, customerID, idempotencyKey, entitlement string, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	customer, err := requireCustomerID(customerID)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(entitlement) == "" {
-		return nil, invalidErr("idempotency key and entitlement are required")
-	}
-	var out billing.CheckoutSession
-	path := "/v1/merchant/checkout-sessions/by-key?" + url.Values{"customer_id": {customer}, "entitlement": {entitlement}}.Encode()
-	if err := c.doWithHeaders(ctx, http.MethodGet, path, nil, &out, http.Header{"Idempotency-Key": {idempotencyKey}}, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ConfirmCheckoutSession completes a session that awaits the customer, such
-// as a signed Solana transaction.
-func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID string, request billing.ConfirmCheckoutSessionRequest, requestOptions ...RequestOption) (*billing.CheckoutSession, error) {
-	typedSession, err := billing.ParseCheckoutSessionID(sessionID)
-	if err != nil {
-		return nil, invalidErr("invalid session_id")
-	}
-	session, err := requireTypedID("session_id", typedSession)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CheckoutSession
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/checkout-sessions/"+session+"/confirm", request, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListCheckoutRailOptions returns the ways checkout can sell a price now: one
-// option per armed PSP whose rail can make the sale.
-func (c *Client) ListCheckoutRailOptions(ctx context.Context, priceID string, requestOptions ...RequestOption) ([]billing.CheckoutRailOption, error) {
-	price, err := requirePriceID(priceID)
-	if err != nil {
-		return nil, err
-	}
-	var out []billing.CheckoutRailOption
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-options?"+url.Values{"price_id": {price}}.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// ListCheckoutRailOptionsByKey reads ready providers for the current offer
-// named by an opaque price key, including keys that resemble price IDs.
-func (c *Client) ListCheckoutRailOptionsByKey(ctx context.Context, priceKey string, requestOptions ...RequestOption) ([]billing.CheckoutRailOption, error) {
-	if strings.TrimSpace(priceKey) == "" {
-		return nil, invalidErr("price_key is required")
-	}
-	var out []billing.CheckoutRailOption
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-options?"+url.Values{"price_key": {priceKey}}.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// GetCheckoutConfig returns the bound merchant's public checkout configuration.
-func (c *Client) GetCheckoutConfig(ctx context.Context, requestOptions ...RequestOption) (*billing.CheckoutConfig, error) {
 	var out billing.CheckoutConfig
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-config", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

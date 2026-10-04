@@ -17,16 +17,16 @@ const session = fixtureSession({
     unit_amount: "7990000",
     currency: "USD",
     unit_decimals: 6,
-    period_hours: renews ? 1 : null,
+    period_hours: renews ? 1 : undefined,
     automatically_renews: renews,
   },
-  expires_at: null,
+  expires_at: undefined,
 })
-const rail = session.rails[0]
+const rail = session.options[0]
 const source: CheckoutSource = {
   getSession: async () => ({
     ...session,
-    rails: [rail],
+    options: [rail],
     saved_methods: session.saved_methods?.map((method) => ({
       ...method,
       option_id: rail.id,

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (269), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (256), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -24,21 +24,17 @@ Health, metrics and capability discovery. Only the standalone server serves the 
 
 ## Checkout (public)
 
-What a checkout page needs: the catalog a buyer may see, checkout, hosted checkout sessions.
+What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/currencies` | public | — | — | 200 `CurrencyRegistry` |  |
 | GET | `/v1/checkout-config` | public | — | — | 200 `CheckoutConfig` |  |
-| GET | `/v1/solana/config` | public | — | — | 200 `SolanaRuntimeConfigResponse` | when `solana` |
 | GET | `/v1/solana/tokens` | public | — | — | 200 `SupportedTokensResponse` | when `solana` |
-| POST | `/v1/checkout` | user | — | `CheckoutSessionCreateRequest` | 200 `CheckoutSessionResponse` | `Idempotency-Key` |
-| GET | `/v1/checkout/{id}` | user | — | — | 200 `CheckoutSessionResponse` |  |
-| POST | `/v1/checkout/{id}/confirm` | user | — | `CheckoutSessionConfirmRequest` | 200 `CheckoutSessionResponse`<br>202 `CheckoutSessionResponse` |  |
-| GET | `/v1/checkout-sessions/{id}` | session_id | — | — | 200 `HostedCheckoutSession` |  |
-| POST | `/v1/checkout-sessions/{id}/pay` | session_id | — | `HostedCheckoutPayRequest` | 200 `HostedCheckoutPayResult` |  |
-| GET | `/v1/checkout/{id}/solana-pay` | session_id | — | — | 200 `SolanaPayGetResponse` | when `solana` |
-| POST | `/v1/checkout/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
+| GET | `/v1/checkout-sessions/{id}` | session_id | — | — | 200 `CheckoutSession` |  |
+| POST | `/v1/checkout-sessions/{id}/pay` | session_id | — | `CheckoutSessionPayRequest` | 200 `CheckoutSessionPayResult` |  |
+| GET | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | — | 200 `SolanaPayGetResponse` | when `solana` |
+| POST | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/captcha/status` | public | — | — | 200 untyped |  |
 | GET | `/v1/captcha/client.js` | public | — | — | 200 `application/javascript` |  |
 | GET | `/v1/products` | optional | — | — | 200 `ListPage<Product>` |  |
@@ -50,10 +46,7 @@ A customer acting on its own account.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/me/checkout` | customer | — | `CheckoutSessionCreateRequest` | 200 `CheckoutSessionResponse` | `Idempotency-Key` |
-| POST | `/v1/me/checkout/sessions` | customer | — | `HostedCheckoutMintRequest` | 201 `HostedCheckoutSessionLink` | when `hosted_checkout` |
-| GET | `/v1/me/checkout/{id}` | customer | — | — | 200 `CheckoutSessionResponse` | scope `billing_management` |
-| POST | `/v1/me/checkout/{id}/confirm` | customer | — | `CheckoutSessionConfirmRequest` | 200 `CheckoutSessionResponse`<br>202 `CheckoutSessionResponse` | scope `billing_management` |
+| POST | `/v1/me/checkout-sessions` | customer | — | `CheckoutSessionMintRequest` | 201 `CheckoutSessionLink` | when `checkout_sessions` |
 | POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `HandlersCancelSubscriptionRequest` | 202 untyped | scope `subscription_management` |
 | POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 202 untyped | scope `subscription_management` |
 | PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `UpdateSubscriptionPaymentMethodRequest` | 200 untyped | scope `subscription_management` |
@@ -88,9 +81,9 @@ A customer acting on its own account.
 | POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | scope `billing_management` |
 | PUT | `/v1/me/payment-methods/{id}` | customer | — | `ReplacePaymentMethodCardParams` | 200 `PaymentMethod`<br>202 — | scope `billing_management`; `Idempotency-Key` |
 | DELETE | `/v1/me/payment-methods/{id}` | customer | — | — | 202 —<br>204 — | scope `billing_management` |
-| POST | `/v1/me/payment-method-setups` | customer | — | `PaymentMethodSetupParams` | 200 `StripeMethodSetupResponse` | scope `billing_management`; `Idempotency-Key` |
-| GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `StripeMethodSetupResponse` | scope `billing_management` |
-| POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `StripeMethodSetupResponse` | scope `billing_management` |
+| POST | `/v1/me/payment-method-setups` | customer | — | `PaymentMethodSetupParams` | 200 `PaymentMethodSetup` | scope `billing_management`; `Idempotency-Key` |
+| GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `PaymentMethodSetup` | scope `billing_management` |
+| POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `PaymentMethodSetup` | scope `billing_management` |
 | POST | `/v1/me/billing-portal` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
 | GET | `/v1/me/notifications` | customer | — | — | 200 `PathPageOfNotification` | scope `billing_management` |
 | GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 untyped | scope `billing_management` |
@@ -102,16 +95,10 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/merchant/checkout-sessions` | merchant | `merchant:checkout:create` | `CreateCheckoutSessionRequest` | 200 `CheckoutSession` | `Idempotency-Key` |
-| POST | `/v1/merchant/checkout-sessions/lookup` | merchant | `merchant:checkout:create` | `CreateCheckoutSessionRequest` | 200 `CheckoutSession` | `Idempotency-Key` |
-| POST | `/v1/merchant/hosted-checkout-sessions` | merchant | `merchant:checkout:create` | `CreateHostedCheckoutSessionRequest` | 201 `HostedCheckoutSessionLink` |  |
-| POST | `/v1/merchant/payment-method-sessions` | merchant | `merchant:checkout:create` | `CreatePaymentMethodSessionRequest` | 200 `CheckoutSession` | `Idempotency-Key` |
-| POST | `/v1/merchant/solana-cancel-sessions` | merchant | `merchant:checkout:create` | `CreateSolanaCancelSessionRequest` | 200 `CheckoutSession` | `Idempotency-Key` |
-| POST | `/v1/merchant/solana-tier-change-sessions` | merchant | `merchant:checkout:create` | `CreateSolanaTierChangeSessionRequest` | 200 `CheckoutSession` | `Idempotency-Key` |
-| GET | `/v1/merchant/checkout-sessions/by-key` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutSession` | `Idempotency-Key` |
-| GET | `/v1/merchant/checkout-sessions/{id}` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutSession` |  |
-| POST | `/v1/merchant/checkout-sessions/{id}/confirm` | merchant | `merchant:checkout:create` | `ConfirmCheckoutSessionRequest` | 200 `CheckoutSession` |  |
-| GET | `/v1/merchant/checkout-options` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutRailOption[]` |  |
+| POST | `/v1/merchant/checkout-sessions` | merchant | `merchant:checkout:create` | `CreateCheckoutSessionRequest` | 201 `CheckoutSessionLink` |  |
+| POST | `/v1/merchant/checkout-attempts` | merchant | `merchant:checkout:create` | `CreateCheckoutAttemptRequest` | 200 `CheckoutAttempt` | `Idempotency-Key` |
+| GET | `/v1/merchant/checkout-attempts/{id}` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutAttempt` |  |
+| POST | `/v1/merchant/checkout-attempts/{id}/confirm` | merchant | `merchant:checkout:create` | `ConfirmCheckoutAttemptRequest` | 200 `CheckoutAttempt`<br>202 `CheckoutAttempt` |  |
 | GET | `/v1/merchant/checkout-config` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutConfig` |  |
 | GET | `/v1/merchant/catalog/revision` | merchant | `merchant:catalog:read` | — | 200 `CatalogRevision` |  |
 | POST | `/v1/merchant/catalog/applications` | merchant | `merchant:catalog:update` | `Application` | 200 `CatalogApplicationReceipt` | catalog write |

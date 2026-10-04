@@ -50,7 +50,7 @@ func TestSolanaPlanTerms(t *testing.T) {
 		}
 		cfg[bad[0]] = bad[1]
 		_, err := parseSolanaPlanTerms(cfg)
-		require.ErrorIs(t, err, ErrCheckoutSessionValidation, "%v", bad)
+		require.ErrorIs(t, err, ErrCheckoutAttemptValidation, "%v", bad)
 	}
 	_, err = parseSolanaPlanTerms(nil)
 	require.Error(t, err)
@@ -63,35 +63,33 @@ func TestSolanaPlanTerms(t *testing.T) {
 // Which sessions surface a solana_pay_url, and the flow is declared, never
 // inferred (or#893).
 func TestSolanaSessionFlows(t *testing.T) {
-	mk := func(rail models.Rail, mode models.CheckoutSessionMode, flow string) *models.CheckoutSession {
-		return &models.CheckoutSession{ID: uuid.New(), Status: models.CheckoutSessionStatusRequiresAction, Rail: rail, Mode: mode, RailState: map[string]any{"flow": flow}}
+	mk := func(rail models.Rail, mode models.CheckoutAttemptMode, flow string) *models.CheckoutAttempt {
+		return &models.CheckoutAttempt{ID: uuid.New(), Status: models.CheckoutAttemptStatusRequiresAction, Rail: rail, Mode: mode, RailState: map[string]any{"flow": flow}}
 	}
 	for _, tc := range []struct {
 		name    string
-		session *models.CheckoutSession
+		session *models.CheckoutAttempt
 		payURL  bool
 	}{
-		{"recurring subscribe", mk(models.RailSolana, models.CheckoutSessionModeSubscription, "transaction_request"), true},
-		{"one-off transaction request", mk(models.RailSolana, models.CheckoutSessionModeOneOff, "transaction_request"), true},
-		{"cancel lifecycle", mk(models.RailSolana, models.CheckoutSessionModeSolanaCancel, ""), true},
-		{"tier-change lifecycle", mk(models.RailSolana, models.CheckoutSessionModeSolanaTierChange, ""), true},
-		{"wallet-connected subscribe", mk(models.RailSolana, models.CheckoutSessionModeSubscription, "subscription"), false},
-		{"transfer request", mk(models.RailSolana, models.CheckoutSessionModeOneOff, "transfer_request"), false},
-		{"non-solana rail", mk(models.RailStripe, models.CheckoutSessionModeSubscription, "transaction_request"), false},
+		{"recurring subscribe", mk(models.RailSolana, models.CheckoutAttemptModeSubscription, "transaction_request"), true},
+		{"one-off transaction request", mk(models.RailSolana, models.CheckoutAttemptModeOneOff, "transaction_request"), true},
+		{"wallet-connected subscribe", mk(models.RailSolana, models.CheckoutAttemptModeSubscription, "subscription"), false},
+		{"transfer request", mk(models.RailSolana, models.CheckoutAttemptModeOneOff, "transfer_request"), false},
+		{"non-solana rail", mk(models.RailStripe, models.CheckoutAttemptModeSubscription, "transaction_request"), false},
 		{"nil", nil, false},
 	} {
 		require.Equal(t, tc.payURL, solanaSessionUsesPayURL(tc.session), tc.name)
 	}
 
 	for _, tc := range []struct{ base, prefix string }{
-		{"https://api.test.com", "solana:https://api.test.com/v1/checkout/"},
-		{"https://api.test.com/billing", "solana:https://api.test.com/billing/v1/checkout/"},
-		{"https://api.test.com/", "solana:https://api.test.com/v1/checkout/"},
+		{"https://api.test.com", "solana:https://api.test.com/v1/checkout-attempts/"},
+		{"https://api.test.com/billing", "solana:https://api.test.com/billing/v1/checkout-attempts/"},
+		{"https://api.test.com/", "solana:https://api.test.com/v1/checkout-attempts/"},
 	} {
-		svc := &CheckoutSessionService{config: &config.Config{PublicBillingBaseURL: tc.base}, rails: solanaRails()}
-		session := mk(models.RailSolana, models.CheckoutSessionModeOneOff, "transaction_request")
+		svc := &CheckoutAttemptService{config: &config.Config{PublicBillingBaseURL: tc.base}, rails: solanaRails()}
+		session := mk(models.RailSolana, models.CheckoutAttemptModeOneOff, "transaction_request")
 		url := svc.sessionToResponse(session).Payment.SolanaPayURL
-		require.Equal(t, fmt.Sprintf("%s%s/solana-pay", tc.prefix, billing.CheckoutSessionID(session.ID)), url, tc.base)
+		require.Equal(t, fmt.Sprintf("%s%s/solana-pay", tc.prefix, billing.CheckoutAttemptID(session.ID)), url, tc.base)
 	}
 
 	require.True(t, isSolanaTransferRequestFlow(mk(models.RailSolana, "", " Transfer_Request ")))
@@ -105,18 +103,18 @@ func TestSolanaSessionFlows(t *testing.T) {
 // proof expiry stands, and failed/canceled are never clock outcomes.
 func TestSucceedTransition(t *testing.T) {
 	for _, tc := range []struct {
-		status  models.CheckoutSessionStatus
+		status  models.CheckoutAttemptStatus
 		settled bool
 		proceed bool
 		err     error
 	}{
-		{models.CheckoutSessionStatusRequiresAction, false, true, nil},
-		{models.CheckoutSessionStatusCreated, true, true, nil},
-		{models.CheckoutSessionStatusSucceeded, true, false, nil},
-		{models.CheckoutSessionStatusExpired, false, false, ErrCheckoutSessionConflict},
-		{models.CheckoutSessionStatusExpired, true, true, nil},
-		{models.CheckoutSessionStatusFailed, true, false, ErrCheckoutSessionConflict},
-		{models.CheckoutSessionStatusCanceled, true, false, ErrCheckoutSessionConflict},
+		{models.CheckoutAttemptStatusRequiresAction, false, true, nil},
+		{models.CheckoutAttemptStatusCreated, true, true, nil},
+		{models.CheckoutAttemptStatusSucceeded, true, false, nil},
+		{models.CheckoutAttemptStatusExpired, false, false, ErrCheckoutAttemptConflict},
+		{models.CheckoutAttemptStatusExpired, true, true, nil},
+		{models.CheckoutAttemptStatusFailed, true, false, ErrCheckoutAttemptConflict},
+		{models.CheckoutAttemptStatusCanceled, true, false, ErrCheckoutAttemptConflict},
 	} {
 		proceed, err := succeedTransition(tc.status, tc.settled)
 		require.Equal(t, tc.proceed, proceed, "%s settled=%v", tc.status, tc.settled)
@@ -142,9 +140,9 @@ func (noopSolanaTransactions) ReferenceHasOurTransfer(context.Context, string, s
 // Build and confirm use only the persisted quote; a session missing any part
 // of it is refused before anything reaches the chain.
 func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
-	quoted := func() *models.CheckoutSession {
+	quoted := func() *models.CheckoutAttempt {
 		ref := solanaReference
-		return &models.CheckoutSession{
+		return &models.CheckoutAttempt{
 			ID: uuid.New(), CustomerID: uuid.New(), PriceID: new(uuid.New()), Amount: new(int64(10_000)), Currency: new("USD"), Reference: &ref,
 			RailState: map[string]any{"token_symbol": "USDC", "token_mint": devnetUSDCMint, "token_amount": uint64(100_000_000), "recipient": recipientWallet},
 		}
@@ -159,21 +157,21 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 	require.Equal(t, s.ID, req.SessionID)
 	require.Equal(t, int64(10_000), req.Amount)
 
-	svc := &CheckoutSessionService{rails: solanaRails(), solanaTransactionService: noopSolanaTransactions{}, checkoutService: &capturingExecutor{}}
-	confirm := &CheckoutSessionConfirmRequest{Payment: CheckoutSessionConfirmPayment{Signature: "sig"}}
+	svc := &CheckoutAttemptService{rails: solanaRails(), solanaTransactionService: noopSolanaTransactions{}, checkoutService: &capturingExecutor{}}
+	confirm := &CheckoutAttemptConfirmRequest{Payment: CheckoutAttemptConfirmPayment{Signature: "sig"}}
 	for _, tc := range []struct {
 		name   string
-		mutate func(*models.CheckoutSession)
+		mutate func(*models.CheckoutAttempt)
 		want   string
 	}{
-		{"token amount", func(s *models.CheckoutSession) { delete(s.RailState, "token_amount") }, "token_amount"},
-		{"recipient", func(s *models.CheckoutSession) { delete(s.RailState, "recipient") }, "recipient missing"},
-		{"reference", func(s *models.CheckoutSession) { s.Reference = nil }, "reference missing"},
-		{"mint", func(s *models.CheckoutSession) {
+		{"token amount", func(s *models.CheckoutAttempt) { delete(s.RailState, "token_amount") }, "token_amount"},
+		{"recipient", func(s *models.CheckoutAttempt) { delete(s.RailState, "recipient") }, "recipient missing"},
+		{"reference", func(s *models.CheckoutAttempt) { s.Reference = nil }, "reference missing"},
+		{"mint", func(s *models.CheckoutAttempt) {
 			s.RailState["token_mint"] = "OtherMint1111111111111111111111111111111111"
 		}, "token_mint mismatch"},
-		{"native SOL mint for a token", func(s *models.CheckoutSession) { s.RailState["token_mint"] = solanamodule.WrappedSOLMint }, "native SOL mint"},
-		{"wallet", func(s *models.CheckoutSession) { s.RailState["payer"] = "someone-else" }, "wallet does not match"},
+		{"native SOL mint for a token", func(s *models.CheckoutAttempt) { s.RailState["token_mint"] = solanamodule.WrappedSOLMint }, "native SOL mint"},
+		{"wallet", func(s *models.CheckoutAttempt) { s.RailState["payer"] = "someone-else" }, "wallet does not match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := quoted()
@@ -181,7 +179,7 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 			req := *confirm
 			req.Payment.Wallet = "payer_wallet"
 			_, err := svc.confirmSolanaSession(context.Background(), s, &req, &UserIdentity{ID: s.CustomerID.String()})
-			require.ErrorIs(t, err, ErrCheckoutSessionValidation)
+			require.ErrorIs(t, err, ErrCheckoutAttemptValidation)
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
@@ -189,36 +187,18 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 		s := quoted()
 		delete(s.RailState, key)
 		_, err := solanaBuildRequestFromSession(s, "payer_wallet", "USDC")
-		require.ErrorIs(t, err, ErrCheckoutSessionValidation, key)
+		require.ErrorIs(t, err, ErrCheckoutAttemptValidation, key)
 	}
-}
-
-func TestSolanaLifecycleState(t *testing.T) {
-	subID, newPrice := uuid.New(), uuid.New()
-	cancel := (&CheckoutSessionService{}).buildLifecycleState(&solanaLifecycleState{mode: models.CheckoutSessionModeSolanaCancel, subscriptionID: subID, productName: "Pro"})
-	require.Equal(t, string(models.CheckoutSessionModeSolanaCancel), cancel["flow"])
-	require.Equal(t, subID.String(), cancel["subscription_id"])
-	require.NotContains(t, cancel, "new_price_id")
-
-	change := (&CheckoutSessionService{}).buildLifecycleState(&solanaLifecycleState{
-		mode: models.CheckoutSessionModeSolanaTierChange, subscriptionID: subID,
-		tierChange: &resolvedSolanaLifecycleTierChange{newPriceID: newPrice, isUpgrade: true, firstChargeBaseUnits: 31_330_000,
-			newTerms: solanaPlanTerms{planID: 99, mintSymbol: "USDC", amount: 50_000_000, period: 720, createdAt: 1_700_000_000}},
-	})
-	require.Equal(t, newPrice.String(), change["new_price_id"])
-	require.Equal(t, "31330000", change["tier_first_charge_base_units"], "base units persist as decimal strings")
-	require.Equal(t, uint64(50_000_000), getUint64Field(change, "tier_new_amount_base_units"))
-	require.True(t, getBoolField(change, "tier_is_upgrade"))
 }
 
 // Poller-driven confirms have no request PSP; they pin the session's so the
 // rows they write are attributable (or#893), and never invent one.
 func TestPollerConfirmContextPinsSessionPSP(t *testing.T) {
-	svc := &CheckoutSessionService{}
+	svc := &CheckoutAttemptService{}
 	psp := uuid.New()
-	require.Equal(t, psp, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{PspID: psp})))
+	require.Equal(t, psp, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutAttempt{PspID: psp})))
 	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), nil)))
-	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{})))
+	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutAttempt{})))
 }
 
 // A settlement error is retried only when another attempt can get past it —

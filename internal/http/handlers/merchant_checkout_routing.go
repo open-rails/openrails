@@ -39,7 +39,7 @@ type CheckoutRoutingDryRunResponse struct {
 	Mode       string                             `json:"mode,omitempty"`
 	Candidates []checkoutRoutingCandidateResponse `json:"candidates"`
 	// RoutingReason is the exact document a real session would persist on
-	// checkout_sessions.routing_reason for this decision.
+	// checkout_attempts.routing_reason for this decision.
 	RoutingReason any `json:"routing_reason,omitempty"`
 }
 

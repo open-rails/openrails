@@ -220,7 +220,7 @@ checkout_routing:
   `credentials_missing`, `link_missing`, `mode_unsupported`, `service_unavailable`,
   `ambiguous_selector`, `unknown_selector`, `resolve_failed`. A **decline is not one of
   them** — routing never retries a charge on a second processor.
-- **Why did this customer get CCBill?** `checkout_sessions.routing_reason` holds the
+- **Why did this customer get CCBill?** `checkout_attempts.routing_reason` holds the
   decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
   with its class. Written once at creation, never rewritten.
 - **Preview without charging**: `POST /v1/merchant/payment-providers/routing/dry-run`

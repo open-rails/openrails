@@ -142,27 +142,27 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		r.UsageEvents += row.EventCount
 	}
 
-	options, err := client.ListCheckoutRailOptionsByKey(ctx, in.CheckoutPriceKey)
+	checkoutConfig, err := client.GetCheckoutConfig(ctx, billing.CheckoutConfigQuery{PriceKey: in.CheckoutPriceKey})
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
-	r.CheckoutRails = len(options)
+	r.CheckoutRails = len(checkoutConfig.Options)
 	buyer := in.CheckoutCustomerID
-	request := billing.CreateCheckoutSessionRequest{
-		Customer:       billing.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
+	request := billing.CreateCheckoutAttemptRequest{
+		Customer:       billing.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
 		PriceKey:       in.CheckoutPriceKey,
 		IdempotencyKey: in.Run + ":checkout",
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID.String(), NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}
-	session, err := client.CreateCheckoutSession(ctx, request)
+	session, err := client.CreateCheckoutAttempt(ctx, request)
 	if err != nil {
 		return r, fmt.Errorf("create checkout: %w", err)
 	}
-	replayed, err := client.CreateCheckoutSession(ctx, request)
+	replayed, err := client.CreateCheckoutAttempt(ctx, request)
 	if err != nil {
 		return r, fmt.Errorf("replay checkout: %w", err)
 	}
-	read, err := client.GetCheckoutSession(ctx, buyer.String(), session.ID)
+	read, err := client.GetCheckoutAttempt(ctx, session.ID)
 	if err != nil {
 		return r, fmt.Errorf("read checkout: %w", err)
 	}

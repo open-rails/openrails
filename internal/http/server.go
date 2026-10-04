@@ -180,8 +180,8 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if deps.Runtime.CheckoutService == nil {
 		return nil, fmt.Errorf("server runtime checkout service is required")
 	}
-	if deps.Runtime.CheckoutSessionService == nil {
-		return nil, fmt.Errorf("server runtime checkout session service is required")
+	if deps.Runtime.CheckoutAttemptService == nil {
+		return nil, fmt.Errorf("server runtime checkout attempt service is required")
 	}
 	if deps.Runtime.SubscriptionService == nil {
 		return nil, fmt.Errorf("server runtime subscription service is required")

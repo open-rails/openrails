@@ -27,7 +27,7 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // and benefits. Recovery never reloads a current catalog or extends these
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
-	CheckoutSessionID   uuid.UUID               `json:"checkout_session_id,omitempty"`
+	CheckoutAttemptID   uuid.UUID               `json:"checkout_attempt_id,omitempty"`
 	RequestFingerprint  string                  `json:"request_fingerprint"`
 	Provider            string                  `json:"provider"`
 	PSP                 string                  `json:"psp"`

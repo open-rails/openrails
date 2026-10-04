@@ -6,7 +6,7 @@ import { cn } from "cn"
 import { Label } from "#orck/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
 import { railMeta, solanaHint, solanaToken } from "#orck/lib/rail-meta"
-import type { PaymentRailOption } from "#orck/types"
+import type { PaymentOption } from "#orck/types"
 
 export function MethodList({
   rails,
@@ -16,12 +16,12 @@ export function MethodList({
   idPrefix,
   renderBody,
 }: {
-  rails: PaymentRailOption[]
+  rails: PaymentOption[]
   selected: string
   onSelect: (optionID: string) => void
   disabled?: boolean
   idPrefix: string
-  renderBody: (option: PaymentRailOption, active: boolean) => React.ReactNode
+  renderBody: (option: PaymentOption, active: boolean) => React.ReactNode
 }) {
   // One rail needs no chooser: render its body alone.
   if (rails.length === 1)

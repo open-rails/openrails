@@ -7,12 +7,13 @@ import {
   canAuthenticatePayment,
   cardSetupDriver,
   checkoutPsps,
-  checkoutRails,
+  railPsp,
   savedMethodsFor,
   type PspConfig,
 } from "./psp"
 import { BillingProvider } from "./react/provider"
 import { SavePaymentMethod } from "./save-payment-method"
+import type { PaymentOption } from "./types"
 
 const nmi: PspConfig = {
   psp_id: "psp_nmi",
@@ -44,47 +45,23 @@ const ccbill: PspConfig = {
 }
 
 describe("PSP flows", () => {
-  it("renders exactly the rails OpenRails advertised", () => {
-    const rails = checkoutRails([
+  it("matches saved cards to a session's options by PSP", () => {
+    const options: PaymentOption[] = [
       {
-        selector: "nmi",
+        id: "option_a",
         psp_id: "psp_nmi",
         rail: "nmi",
         mode: "subscription",
         driver: "collect_js",
-        public_config: nmi.config ?? undefined,
       },
       {
-        selector: "solana",
+        id: "option_b",
         psp_id: "psp_solana",
         rail: "solana",
         mode: "subscription",
         driver: "solana_pay",
-        public_config: { token_symbol: "DUSD", network: "devnet" },
       },
-      // Armed but not browser-drivable (no publishable key for a subscription).
-      {
-        selector: "stripe",
-        psp_id: "psp_stripe",
-        rail: "stripe",
-        mode: "subscription",
-      },
-      {
-        selector: "x",
-        psp_id: "psp_x",
-        rail: "x",
-        mode: "one_off",
-        driver: "wire",
-      },
-    ])
-    expect(rails.map((r) => [r.id, r.driver, r.mode, r.psp_key])).toEqual([
-      ["psp_nmi", "collect_js", "subscription", "nmi"],
-      ["psp_solana", "solana_pay", "subscription", "solana"],
-    ])
-    expect(rails[1].public_config).toEqual({
-      token_symbol: "DUSD",
-      network: "devnet",
-    })
+    ]
     expect(
       savedMethodsFor(
         [
@@ -92,9 +69,10 @@ describe("PSP flows", () => {
           { id: "pm_2", psp_id: "psp_solana" },
           { id: "pm_3", psp_id: "psp_nmi", health: { active: false } },
         ],
-        rails
-      ).map((m) => [m.id, m.card?.last4])
-    ).toEqual([["pm_1", "1111"]])
+        options
+      ).map((m) => [m.id, m.option_id, m.card?.last4])
+    ).toEqual([["pm_1", "option_a", "1111"]])
+    expect(railPsp(options[0]).psp_id).toBe("psp_nmi")
   })
 
   it("picks the in-page card setup from the PSP configuration", () => {
@@ -110,23 +88,19 @@ describe("PSP flows", () => {
 
   it("offers Stripe Elements as an in-page card rail and hides non-checkout PSPs", () => {
     const elements = { ...stripe, flow: "elements" }
-    const rails = checkoutRails([
+    const rails: PaymentOption[] = [
       {
-        selector: "stripe",
+        id: "option_stripe",
         psp_id: "psp_stripe",
         rail: "stripe",
         mode: "one_off",
         driver: "stripe_elements",
         public_config: { publishable_key: "pk_test_1" },
       },
-    ])
-    expect(rails).toEqual([
-      expect.objectContaining({
-        id: "psp_stripe",
-        driver: "stripe_elements",
-        psp_key: "stripe",
-      }),
-    ])
+    ]
+    expect(railPsp(rails[0])).toEqual(
+      expect.objectContaining({ psp_id: "psp_stripe", flow: "elements" })
+    )
     expect(
       savedMethodsFor(
         [

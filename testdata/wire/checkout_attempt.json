@@ -1,0 +1,21 @@
+{
+  "object": "checkout_attempt",
+  "id": "chk_ffffffff-ffff-4fff-8fff-ffffffffffff",
+  "customer_id": "22222222-2222-2222-2222-222222222222",
+  "status": "succeeded",
+  "mode": "subscription",
+  "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "amount": "9223372036854775807",
+  "currency": "USD",
+  "payment_id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "payment_method_id": null,
+  "next_action": null,
+  "operation": null,
+  "failure": null,
+  "expires_at": "2026-09-16T00:00:00.123456789Z",
+  "created_at": "2026-09-16T00:00:00.123456789Z",
+  "metadata": {
+    "plan": "pro"
+  }
+}

@@ -13,11 +13,9 @@ Money amounts are integers in the currency's native units (micros for USD:
 `$5.00 = 5_000_000`), carried as decimal strings — parse with `BigInt`, never
 `Number` ([money-wire.md](money-wire.md)).
 A **rail** is the gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a **PSP** is the
-merchant's account on a rail, named by its key (`mobius` = an NMI account). Checkout's
-`payment.rail` value is the PSP key; a bare rail kind is also accepted when the merchant
-has exactly one PSP armed on it (ambiguous kinds 400, naming the armed keys). Omitting
-`payment.rail` entirely lets the merchant's routing policy pick — see
-[Letting the merchant route](#letting-the-merchant-route).
+merchant's account on a rail, named by its key (`mobius` = an NMI account). A checkout
+session lists its `options`, one per PSP that can sell the price, in the merchant's
+routing order; the page pays with one of them ([Checkout](#checkout)).
 
 ### Authentication
 
@@ -81,9 +79,7 @@ POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} — upgr
 PUT  /v1/me/subscriptions/:id/payment-method  swap the card on an NMI-backed subscription
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/:id     replace NMI card / provider-aware delete
-POST /v1/me/checkout                      create a checkout session
-GET  /v1/me/checkout/:id                  poll session status
-POST /v1/me/checkout/:id/confirm          finalize client-completed flows (Solana)
+POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
 POST /v1/me/billing-portal                → {"url": ...} (Stripe-portal deployments)
 GET  /v1/me/notifications[.../unread-count]   billing notifications
 ```
@@ -124,17 +120,19 @@ catalog.
     POST the resulting `payment_token`.
   - `elements` — Stripe with a declared `publishable_key`: save the card in the page
     (`POST /v1/me/payment-method-setups`, Stripe.js `confirmSetup`, then
-    `.../confirm`), then POST checkout with its `payment_method_id`.
-  - `redirect` — nothing needed in the browser; POST checkout and follow the `url`
-    (CCBill; Stripe without a publishable key).
+    `.../confirm`), then pay the checkout session with its `payment_method_id`.
+  - `redirect` — nothing needed in the browser; paying answers a `redirect_to_url`
+    `next_action` (Stripe without a publishable key, one-off prices only).
 - `checkout` is true for PSPs that take new purchases and new cards under the
   merchant's checkout routing (a catch-all `checkout_routing` rule naming one PSP
   makes it the only checkout PSP). Other armed PSPs stay listed for existing cards.
-  - `wallet` — the buyer's wallet signs; chain/token detail comes from
-    `GET /v1/solana/config` and `GET /v1/solana/tokens`.
-- `key` is the value to send as checkout's `payment.rail`.
-- Which of these can sell a given price is answered per price by
-  `ListCheckoutRailOptions` (`GET /v1/merchant/checkout-options`), see below.
+  - `wallet` — the buyer's wallet pays; the document's `solana` object carries the
+    network and accepted tokens, and `GET /v1/solana/tokens?wallet=` adds a
+    wallet's balances.
+- `key` is the selector a merchant checkout attempt sends as `payment.rail`.
+- Which of these can sell a given price is answered by the checkout session's
+  `options`, or for the merchant by `GetCheckoutConfig` with a price
+  (`GET /v1/merchant/checkout-config?price_id=`), see below.
 - `custodian` is **who holds the card**, which is not the same question as `rail` (who charges
   it). `psp` means the gateway itself; anything else is a third party whose SDK your page
   tokenizes against — same rail, different script and different public key. Read `flow` and
@@ -153,8 +151,8 @@ Rail-specific gotchas the UI must handle:
   `action: upgrade | downgrade`. Upgrades are immediate with proration; downgrades come
   back `succeeded` with `delayed_start` (takes effect at period end). CCBill upgrades
   return `requires_action` with a top-level `url` — redirect. Solana: 400, unsupported.
-- `POST /v1/checkout` (the session-auth surface) rejects a second subscription in the
-  same tier group with `status: "blocked"` — send those users to `change-tier`.
+- Paying a checkout session for a second subscription in the same tier group
+  answers `status: "blocked"` — send those users to `change-tier`.
 
 ### Checkout rail eligibility (#1078)
 
@@ -168,10 +166,10 @@ sale, per the rail registry:
 | Solana | yes (Solana Pay) | the price's published on-chain plan |
 | CCBill | no | no (imported subscriptions keep working) |
 
-Each `ListCheckoutRailOptions` result carries `driver` (`collect_js`,
+Each checkout option carries `psp_id`, `rail`, `driver` (`collect_js`, `card`,
 `stripe_elements`, `redirect`, `solana_pay`) and `public_config` (NMI/Stripe
 public keys; Solana `token_symbol`, `token_name`, `network`). `@openrails/billing-ui`
-renders them as they are (`checkoutRails(options)`); hosts add no rail logic.
+renders them as they are; hosts add no rail logic.
 Catalog application refuses an active price that declares PSPs when none of
 them, nor any armed rail selling on local terms, can sell it
 (`price_not_sellable`); a checkout nothing can serve fails with the per-PSP
@@ -179,104 +177,54 @@ skip reasons.
 
 ### Checkout
 
-One endpoint for every rail. A session moves
-`created → requires_action → succeeded | failed | expired` and is single-use.
+A browser buys through a **checkout session**. Mint one for a price, then read and
+pay it by its id; the id is the only credential the payment page needs, so the page
+can live on another host. `@openrails/billing-ui`'s
+`<Checkout source={client.checkoutSource(id)} />` runs all of this.
 
-```json
-POST /v1/me/checkout
-{
-  "price_id": "price_...",
-  "mode": "subscription",            // optional; inferred from the price
-  "payment": {
-    "rail": "mobius | ccbill | stripe | solana",  // PSP key (rail kind ok if unambiguous);
-                                     // omit to let the merchant's routing policy pick
-    "payment_method_id": "pm_...",   // saved card — mobius/stripe
-    "payment_token": "tok_...",      // fresh browser-tokenized card — mobius/stripe
-    "token_symbol": "USDC",          // solana
-    "name_on_card": "...", "zip": "...", "country": "US"
-  },                                 // CCBill minimum; street/city/state optional
-  "metadata": { "source": "web" }
-}
+```
+POST /v1/me/checkout-sessions        {"price_id" | "price_key", "success_url"?} → 201 {id, url, expires_at}
+GET  /v1/checkout-sessions/:id       the offer: plan, amounts, options, saved methods, status
+POST /v1/checkout-sessions/:id/pay   {"option_id", instrument, billing fields} → {status, next_action, operation, failure}
 ```
 
-Send an `Idempotency-Key` header on create — retries with the same key replay the
-original response instead of double-charging.
+The pay body names one of the session's `options` and the instrument its `driver`
+takes: `payment_token` (`collect_js`), `card` (`card`: the page posts the card to
+OpenRails, which vaults it), `payment_method_id` (a saved card, or `stripe_elements`),
+or `token_symbol` (`solana_pay`). Options are listed in the merchant's routing order.
+Paying twice with the same attempt charges once; a session takes 10 attempts and is
+payable for 30 minutes.
 
 Render `name_on_card` as one visible input with `autocomplete="cc-name"`.
 OpenRails keeps that full value canonical and projects it onto provider-specific
 first/last fields only at the rail boundary. `first_name` and `last_name` are
 not request fields: a body that names them is refused (`unknown_field`).
 
-CCBill uses the authenticated account's verified email; do not treat a browser
-`payment.email` value as identity. Its hosted-card API requires name, country,
-and postal code, while street, city, and state are optional. Omitting those
-optional fields from this request does not reconfigure the hosted FlexForm:
-disable or make its Address Fields optional separately in CCBill FlexForms
-Admin when that is the desired customer experience. Stripe hosted Checkout
-collects its own customer and billing fields.
+The chosen PSP and the reason for it are recorded on the checkout attempt
+(`checkout_attempts.routing_reason`), so support can answer "why did this customer
+get this PSP" without guessing. Merchants can preview a decision without creating
+anything: `POST /v1/merchant/payment-providers/routing/dry-run` with
+`{"price_id": "...", "country": "US"}` returns the winner, the ranked fallbacks, and
+every skipped candidate with its reason.
 
-#### Letting the merchant route
+The pay answer's `status` tells the page what to do next:
 
-`payment.rail` is optional. Name a PSP and you get that PSP — an explicit choice is never
-silently switched, because your page has already committed to that PSP's flow. Omit it and
-the merchant's routing policy picks: the first PSP in their preference order that can
-actually serve this price right now, skipping any that is unarmed, archived, missing
-credentials, missing a price link, or unable to serve the mode. Merchants who declare no
-policy get the built-in order (stripe, nmi, ccbill, solana).
-
-Only omit it when your page can drive whatever comes back — read `flow` for the returned
-`payment.rail` from `/v1/checkout-config` and branch on it. If you have already collected a
-card token, name the PSP you tokenized against.
-
-The chosen PSP and the reason for it are recorded on the session
-(`checkout_sessions.routing_reason`), so support can answer "why did this customer get
-CCBill" without guessing. Merchants can preview a decision without creating anything:
-`POST /v1/merchant/payment-providers/routing/dry-run` with `{"price_id": "...", "country":
-"US"}` returns the winner, the ranked fallbacks, and every skipped candidate with its
-reason.
-
-The response's `next_action` tells the frontend what to do next:
-
-**Redirect flow** (`flow: "redirect"` — hosted payment page: CCBill; Stripe hosted checkout):
-1. POST the session with billing fields. Response: `status: "requires_action"`,
-   `next_action.type: "redirect_to_url"`, top-level `url`.
-2. Redirect the browser to `url`. The user pays on the provider's page (cards never
-   touch you or OpenRails) and is redirected back to your site.
-3. A provider webhook finalizes the payment server-side. Poll
-   `GET /v1/me/checkout/:id` until `status: "succeeded"` (then `payment_id` /
-   `subscription_id` are set), and refresh `/v1/me/entitlements/active`.
-
-**Saved-card flow** (`flow: "elements"` — Stripe; also any saved NMI card):
-1. POST the session with `payment_method_id`. The card is charged in place (customer
-   present); nothing redirects.
-2. `status: "succeeded"` — done. `status: "requires_action"` with `operation.id` — run
-   the provider challenge (3-D Secure): `GET /v1/me/payment-operations/:op/authentication`
-   gives the client secret for Stripe.js; then `POST .../authentication/confirm`, which
-   verifies with the provider. `status: "processing"` — poll `GET /v1/me/checkout/:id`;
-   never start another attempt.
-3. A definite decline is a `402 card_declined` whose `metadata.failure`
-   (`{reason, message, field}`) is safe to show the buyer; `field` names the card field
-   to correct. Fraud-related declines always read `generic_decline`. Retry with another
-   card under a new idempotency key.
-
-**Tokenized-vault flow** (`flow: "tokenize"` — NMI-backed rails, e.g. `mobius`):
-1. Load the rail's tokenization script and render its hosted card fields — script URL
-   and public key come from `GET /v1/checkout-config`. The card goes browser →
-   gateway; you receive a one-time `payment_token`.
-2. POST the session with `payment_token` (or `payment_method_id` of a saved card).
-3. OpenRails vaults the token into a reusable payment method, charges immediately, and
-   responds synchronously: `status: "succeeded"`, `payment.transaction_id`. The raw
-   token is consumed once and never stored.
-
-**Solana** (`flow: "wallet"`; one-off only — `mode: "subscription"` is a 400):
-1. POST with `rail: "solana"`, `token_symbol`, and `flow` — **required**, no default.
-2. `flow: "transfer_request"` returns `payment.transaction_url` +
-   `payment.reference` — render as a QR code (`next_action.type: "solana_qr"`).
-   `flow: "transaction_request"` returns `payment.transaction_data` for the connected
-   wallet to sign (`next_action.type: "solana_transaction"`).
-3. After the user pays/signs, `POST /v1/me/checkout/:id/confirm` with
-   `{ "payment": { "rail": "solana", "signature": "...", "wallet": "..." } }`.
-   Confirm is idempotent — safe to retry.
+- `succeeded` — done; `payment_id` / `subscription_id` are set. Refresh `/v1/me/entitlements/active`.
+- `failed` — a definite decline; `failure` (`{reason, message, field}`) is safe to
+  show the buyer, and `field` names the card field to correct. Fraud-related declines
+  always read `generic_decline`. Pay again with another card.
+- `processing` — re-read the session until it settles; never start another attempt.
+- `blocked` — the buyer cannot make this purchase (already a member).
+- `requires_action` — one of:
+  - `next_action.type: "redirect_to_url"`: open `url` (Stripe hosted Checkout) in the
+    top window. The buyer returns to `success_url`; a provider webhook settles the
+    payment, and the session reads `succeeded`.
+  - `next_action.type: "solana_pay"`: show `url`, a `solana:` Solana Pay transfer
+    link, as a QR code or wallet link. OpenRails watches the payment's reference on
+    chain and settles.
+  - `operation.id`: a card challenge (3-D Secure).
+    `GET /v1/me/payment-operations/:op/authentication` gives the client secret for
+    Stripe.js; then `POST .../authentication/confirm`, which verifies with the provider.
 
 ```mermaid
 sequenceDiagram
@@ -286,16 +234,30 @@ sequenceDiagram
     participant P as Payment rail
     B->>Y: GET /api/billing-token (session cookie)
     Y-->>B: delegated JWT (TTL ~5 min)
-    B->>O: POST /v1/me/checkout (DPoP delegated JWT + proof)
-    O-->>B: requires_action + redirect url
-    B->>P: redirect — user pays on hosted page
-    P-->>O: webhook: payment finalized
-    B->>O: GET /v1/me/checkout/:id (poll)
+    B->>O: POST /v1/me/checkout-sessions (DPoP delegated JWT + proof)
+    O-->>B: {id, url}
+    B->>O: GET /v1/checkout-sessions/:id
+    B->>O: POST /v1/checkout-sessions/:id/pay
+    O->>P: charge
     O-->>B: status succeeded, subscription_id
 ```
 
-(Embedded mode: drop the token exchange — the browser calls
-`/billing/v1/me/checkout` with its normal session credential.)
+(Embedded mode: drop the token exchange — the browser mints at
+`/billing/v1/me/checkout-sessions` with its normal session credential.)
+
+A merchant's server can charge without a browser session: `CreateCheckoutAttempt`
+(`POST /v1/merchant/checkout-attempts`) relays the customer's pay click with a saved
+method, an NMI `payment_token` or a Solana wallet, and answers the same statuses
+(see [the checkout API](api/commerce.md)). `CreateCheckoutSession`
+(`POST /v1/merchant/checkout-sessions`) hands a price to a customer's browser.
+
+CCBill uses the authenticated account's verified email; do not treat a browser
+`email` value as identity. Its hosted-card API requires name, country,
+and postal code, while street, city, and state are optional. Omitting those
+optional fields does not reconfigure the hosted FlexForm:
+disable or make its Address Fields optional separately in CCBill FlexForms
+Admin when that is the desired customer experience. Stripe hosted Checkout
+collects its own customer and billing fields.
 
 ### Payment methods
 

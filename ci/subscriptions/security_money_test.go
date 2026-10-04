@@ -32,16 +32,16 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			cheap := w.membership("content:basic", 1_000_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			request := func(priceID, entitlement string) billing.CreateCheckoutSessionRequest {
-				return billing.CreateCheckoutSessionRequest{
-					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
+			request := func(priceID billing.PriceID, entitlement string) billing.CreateCheckoutAttemptRequest {
+				return billing.CreateCheckoutAttemptRequest{
+					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: priceID,
 					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				}
 			}
 
 			for _, tp := range []topology{embedded, remote} {
-				_, err := w.client[tp].CreateCheckoutSession(ctx, request(cheap.ID.String(), "content:vip"))
+				_, err := w.client[tp].CreateCheckoutAttempt(ctx, request(cheap.ID, "content:vip"))
 				require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
 			}
 			_, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
@@ -53,18 +53,19 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			archived := w.membership("content:archived", 1_000_000)
 			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID.String(), Action: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
 			require.NoError(t, err)
-			_, err = client.CreateCheckoutSession(ctx, request(archived.ID.String(), "content:archived"))
+			_, err = client.CreateCheckoutAttempt(ctx, request(archived.ID, "content:archived"))
 			require.Error(t, err, "an archived price is not purchasable")
 
-			session, err := client.CreateCheckoutSession(ctx, request(member.ID.String(), "content:vip"))
-			require.NoError(t, err)
-			status, body := c.call(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{
-				"payment": map[string]any{"rail": rail}, "amount": "1", "currency": "JPY", "price_id": cheap.ID, "quantity": 0,
+			// The caller cannot name an amount, a currency or a quantity.
+			status, body := w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{
+				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "payment": map[string]any{"rail": rail}, "amount": "1", "currency": "JPY", "quantity": 0,
 			})
-			t.Logf("confirm with tampered fields: %d %v", status, body)
-			if status >= 300 {
-				c.must(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": rail}})
-			}
+			require.Equal(t, http.StatusBadRequest, status, "%v", body)
+			code, _ := errorOf(body)
+			require.Equal(t, billing.CodeUnknownField, code)
+
+			_, err = client.CreateCheckoutAttempt(ctx, request(member.ID, "content:vip"))
+			require.NoError(t, err)
 			w.settle()
 			ledger := w.railLedger(rail)
 			require.Len(t, ledger, 1)
@@ -94,8 +95,8 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			buy := func(client *openrails.Client) error {
-				_, err := client.CreateCheckoutSession(context.WithoutCancel(t.Context()), billing.CreateCheckoutSessionRequest{
-					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:post", PriceID: price.ID.String(),
+				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), billing.CreateCheckoutAttemptRequest{
+					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
 				})

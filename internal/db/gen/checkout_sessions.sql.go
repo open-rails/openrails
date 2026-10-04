@@ -12,34 +12,30 @@ import (
 	"github.com/google/uuid"
 )
 
-const acceptPaymentMethodSetupSession = `-- name: AcceptPaymentMethodSetupSession :execrows
+const advanceCheckoutSessionAttempt = `-- name: AdvanceCheckoutSessionAttempt :execrows
 UPDATE billing.checkout_sessions
-SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
-    expires_at=$2,status='requires_action',updated_at=$3
-WHERE id=$4 AND merchant_id=$5
-  AND mode='payment_method' AND status='created' AND deleted_at IS NULL
-  AND expires_at>$3 AND rail_state->'capture'=$6::jsonb
+SET attempt = attempt + 1, attempt_id = NULL
+WHERE merchant_id = $1::uuid
+  AND id_hash = $2::bytea
+  AND attempt = $3::int
+  AND purge_at > $4::timestamptz
 `
 
-type AcceptPaymentMethodSetupSessionParams struct {
-	Capture    []byte
-	ExpiresAt  *time.Time
+type AdvanceCheckoutSessionAttemptParams struct {
+	MerchantID uuid.UUID
+	IDHash     []byte
+	Attempt    int32
 	Now        time.Time
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Previous   []byte
 }
 
-// Only one prepared vendor session is accepted and exposed to the browser.
-// Concurrent losers reload that same action; no accepted session is retargeted.
-func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg AcceptPaymentMethodSetupSessionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, acceptPaymentMethodSetupSession,
-		arg.Capture,
-		arg.ExpiresAt,
-		arg.Now,
-		arg.ID,
+// Compare-and-set on attempt: concurrent callers advance a terminally failed
+// attempt once.
+func (q *Queries) AdvanceCheckoutSessionAttempt(ctx context.Context, arg AdvanceCheckoutSessionAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceCheckoutSessionAttempt,
 		arg.MerchantID,
-		arg.Previous,
+		arg.IDHash,
+		arg.Attempt,
+		arg.Now,
 	)
 	if err != nil {
 		return 0, err
@@ -47,404 +43,75 @@ func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg Accep
 	return result.RowsAffected(), nil
 }
 
-const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
-INSERT INTO billing.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,created_at,updated_at)
-VALUES($1,$2,$3,NULL,'nmi','hyperswitch',$4,$5,$6,$7::text,$8::text,$9::smallint,$10::smallint,'pan_proxy',$11,$11)
-ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
-DO UPDATE SET id=billing.payment_methods.id
-WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
-  AND billing.payment_methods.custodian='hyperswitch'
-RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at
-`
-
-type AttachCapturedPaymentMethodParams struct {
-	ID               uuid.UUID
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	CustodianID      *uuid.UUID
-	VendorCustomerID string
-	VendorMethodID   string
-	CardBrand        *string
-	CardLast4        *string
-	CardExpMonth     *int16
-	CardExpYear      *int16
-	Now              time.Time
-}
-
-// Capture attachment never reparents an existing instrument to another payer.
-func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCapturedPaymentMethodParams) (BillingPaymentMethod, error) {
-	row := q.db.QueryRow(ctx, attachCapturedPaymentMethod,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.CustodianID,
-		arg.VendorCustomerID,
-		arg.VendorMethodID,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.Now,
-	)
-	var i BillingPaymentMethod
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.Rail,
-		&i.PspID,
-		&i.Custodian,
-		&i.CustodianID,
-		&i.RailCustomerRef,
-		&i.RailMethodRef,
-		&i.StoredCredentialRecurringRef,
-		&i.StoredCredentialUnscheduledRef,
-		&i.CardBrand,
-		&i.CardLast4,
-		&i.CardExpMonth,
-		&i.CardExpYear,
-		&i.Metadata,
-		&i.Fingerprint,
-		&i.NetworkTokenID,
-		&i.NetworkTokenStatus,
-		&i.NetworkTokenPar,
-		&i.ChargeVia,
-		&i.ParkReason,
-		&i.ParkedAt,
-		&i.AccountUpdaterCheckedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const bindSolanaCheckoutSession = `-- name: BindSolanaCheckoutSession :execrows
-UPDATE billing.checkout_sessions SET
-    reference = $2,
-    rail_state = $3,
-    updated_at = $4
-WHERE checkout_sessions.merchant_id = $5::uuid AND id = $1
-  AND rail = 'solana'
-  AND status = 'requires_action'
-  AND (reference IS NULL OR reference = $2)
-  AND (COALESCE(rail_state ->> 'payer', '') = '' OR rail_state ->> 'payer' = $6::text)
-  AND deleted_at IS NULL
-`
-
-type BindSolanaCheckoutSessionParams struct {
-	ID         uuid.UUID
-	Reference  *string
-	RailState  []byte
-	UpdatedAt  time.Time
-	MerchantID uuid.UUID
-	Payer      string
-}
-
-func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaCheckoutSessionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bindSolanaCheckoutSession,
-		arg.ID,
-		arg.Reference,
-		arg.RailState,
-		arg.UpdatedAt,
-		arg.MerchantID,
-		arg.Payer,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const claimHostedPurchaseDispatch = `-- name: ClaimHostedPurchaseDispatch :execrows
+const bindCheckoutSessionAttempt = `-- name: BindCheckoutSessionAttempt :execrows
 UPDATE billing.checkout_sessions
-SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
-WHERE merchant_id=$1::uuid AND id=$2::uuid
-  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
-  AND status IN ('created','failed') AND rail_state ? 'accepted_purchase'
-  AND NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
-  AND NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
+SET attempt_id = $1::uuid
+WHERE merchant_id = $2::uuid
+  AND id_hash = $3::bytea
+  AND attempt = $4::int
+  AND attempt_id IS NULL
 `
 
-type ClaimHostedPurchaseDispatchParams struct {
+type BindCheckoutSessionAttemptParams struct {
+	AttemptID  uuid.UUID
 	MerchantID uuid.UUID
-	ID         uuid.UUID
+	IDHash     []byte
+	Attempt    int32
 }
 
-// Claim once before sending a hosted purchase to Stripe. A crash or transport
-// failure after this point has an unknown provider outcome; it is not a license
-// to create another payable session after provider idempotency retention ends.
-func (q *Queries) ClaimHostedPurchaseDispatch(ctx context.Context, arg ClaimHostedPurchaseDispatchParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimHostedPurchaseDispatch, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const claimSolanaCheckoutSignature = `-- name: ClaimSolanaCheckoutSignature :execrows
-UPDATE billing.checkout_sessions SET transaction_id = $1::text
-WHERE checkout_sessions.merchant_id = $2::uuid AND id = $3::uuid
-  AND rail = 'solana'
-  AND deleted_at IS NULL
-  AND (transaction_id IS NULL OR transaction_id = $1::text)
-`
-
-type ClaimSolanaCheckoutSignatureParams struct {
-	Signature  string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// Binds a verified landed Solana transaction to the one checkout it settles.
-// Zero rows: the checkout is already settled by another transaction. A unique
-// violation (uq_checkout_sessions_solana_signature): the transaction already
-// settles another checkout.
-func (q *Queries) ClaimSolanaCheckoutSignature(ctx context.Context, arg ClaimSolanaCheckoutSignatureParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimSolanaCheckoutSignature, arg.Signature, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const closeHostedCheckoutFromProvider = `-- name: CloseHostedCheckoutFromProvider :execrows
-UPDATE billing.checkout_sessions
-SET status=CASE WHEN status='succeeded' THEN status ELSE $1::text END,
-    rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
-    updated_at=$2::timestamptz
-WHERE merchant_id=$3::uuid AND id=$4::uuid
-  AND psp_id=$5::uuid AND rail='stripe' AND deleted_at IS NULL
-`
-
-type CloseHostedCheckoutFromProviderParams struct {
-	Status     string
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	PspID      uuid.UUID
-}
-
-func (q *Queries) CloseHostedCheckoutFromProvider(ctx context.Context, arg CloseHostedCheckoutFromProviderParams) (int64, error) {
-	result, err := q.db.Exec(ctx, closeHostedCheckoutFromProvider,
-		arg.Status,
-		arg.Now,
+// Records the engine session of an attempt that is still current and unbound.
+func (q *Queries) BindCheckoutSessionAttempt(ctx context.Context, arg BindCheckoutSessionAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindCheckoutSessionAttempt,
+		arg.AttemptID,
 		arg.MerchantID,
-		arg.ID,
-		arg.PspID,
+		arg.IDHash,
+		arg.Attempt,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const completePaymentMethodSetupSession = `-- name: CompletePaymentMethodSetupSession :execrows
-UPDATE billing.checkout_sessions
-SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
-    status='succeeded',updated_at=$2
-WHERE id=$3 AND merchant_id=$4
-  AND mode='payment_method' AND status='requires_action' AND deleted_at IS NULL
-  AND expires_at>$2
-`
-
-type CompletePaymentMethodSetupSessionParams struct {
-	Capture    []byte
-	Now        time.Time
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-// Completion and erasure of the short-lived secret commit with attachment.
-func (q *Queries) CompletePaymentMethodSetupSession(ctx context.Context, arg CompletePaymentMethodSetupSessionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, completePaymentMethodSetupSession,
-		arg.Capture,
-		arg.Now,
-		arg.ID,
-		arg.MerchantID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const countInvalidCheckoutCaptureReferences = `-- name: CountInvalidCheckoutCaptureReferences :one
-SELECT count(*) FROM billing.checkout_sessions cs
-WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='nmi'
-AND (
- NOT EXISTS(SELECT 1 FROM billing.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
- OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
-)
-`
-
-// Terminal replay retains the original capture authority even after a later
-// legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
-// deletion leaves historical replay intact and does not recreate the method.
-func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidCheckoutCaptureReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countInvalidEngineCheckoutReferences = `-- name: CountInvalidEngineCheckoutReferences :one
-SELECT count(*) FROM billing.checkout_sessions cs
-LEFT JOIN billing.rail_intents i ON i.merchant_id=cs.merchant_id
- AND i.payload->>'checkout_session_id'=cs.id::text AND i.intent_type='initial_membership'
-WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'initial_membership_quote'
-AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
- OR (i.id IS NOT NULL AND (
-   i.rail<>cs.rail OR i.psp_id<>cs.psp_id OR i.price_id<>cs.price_id OR i.payload->'terms'->>'customer_id'<>cs.customer_id::text
-   OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
-   OR (i.status='failed_terminal' AND cs.status<>'failed'))))
-`
-
-func (q *Queries) CountInvalidEngineCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidEngineCheckoutReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countInvalidPurchaseCheckoutReferences = `-- name: CountInvalidPurchaseCheckoutReferences :one
-SELECT count(*) FROM billing.checkout_sessions s
-LEFT JOIN billing.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
-WHERE s.merchant_id=$1::uuid AND s.rail_state ? 'accepted_purchase'
- AND (p.id IS NULL
-   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
-   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
-   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM p.amount::text
-   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
-   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
-   OR p.auto_renew)
-`
-
-// Archive integrity includes tombstones and preserves accepted commercial
-// snapshots against their immutable price identity, not current product text.
-func (q *Queries) CountInvalidPurchaseCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidPurchaseCheckoutReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countInvalidStripeSetupReferences = `-- name: CountInvalidStripeSetupReferences :one
-SELECT count(*) FROM billing.checkout_sessions cs
-WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'
-AND EXISTS(SELECT 1 FROM billing.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id)
-`
-
-func (q *Queries) CountInvalidStripeSetupReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvalidStripeSetupReferences, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
 INSERT INTO billing.checkout_sessions (
-    id, merchant_id, customer_id, price_id, mode, rail, status, amount,
-    currency, expires_at, reference, transaction_id, payment_id,
-    subscription_id, metadata, rail_fields, rail_state, routing_reason,
-    psp_id, created_at, updated_at
+    merchant_id, id_hash, customer_id, price_id, offer, success_url, origin, expires_at, purge_at, created_at
 ) VALUES (
-    $1, $8::uuid, $2, $3, $4, $5, $6, $7,
-    $9,
-    $10, $11, $12,
-    $13, $14, $15,
-    $16, $17, $18,
-    $19::uuid,
-    COALESCE(NULLIF($20::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($21::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $1::uuid, $2::bytea, $3::uuid, $4::uuid,
+    $5::jsonb, $6::text, $7::text,
+    $8::timestamptz, $9::timestamptz, $10::timestamptz
 )
+ON CONFLICT (merchant_id, id_hash) DO NOTHING
 `
 
 type CreateCheckoutSessionParams struct {
-	ID             uuid.UUID
-	CustomerID     uuid.UUID
-	PriceID        *uuid.UUID
-	Mode           string
-	Rail           string
-	Status         string
-	Amount         *int64
-	MerchantID     uuid.UUID
-	Currency       *string
-	ExpiresAt      *time.Time
-	Reference      *string
-	TransactionID  *string
-	PaymentID      *uuid.UUID
-	SubscriptionID *uuid.UUID
-	Metadata       []byte
-	RailFields     []byte
-	RailState      []byte
-	RoutingReason  []byte
-	PspID          uuid.UUID
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	MerchantID uuid.UUID
+	IDHash     []byte
+	CustomerID uuid.UUID
+	PriceID    uuid.UUID
+	Offer      []byte
+	SuccessUrl string
+	Origin     string
+	ExpiresAt  time.Time
+	PurgeAt    time.Time
+	Now        time.Time
 }
 
-// billing.checkout_sessions.
+// billing.checkout_sessions (#1124). The row is immutable after mint
+// except for the payment attempt and the engine session it created. Times are
+// the engine clock's, passed in.
 func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createCheckoutSession,
-		arg.ID,
+		arg.MerchantID,
+		arg.IDHash,
 		arg.CustomerID,
 		arg.PriceID,
-		arg.Mode,
-		arg.Rail,
-		arg.Status,
-		arg.Amount,
-		arg.MerchantID,
-		arg.Currency,
+		arg.Offer,
+		arg.SuccessUrl,
+		arg.Origin,
 		arg.ExpiresAt,
-		arg.Reference,
-		arg.TransactionID,
-		arg.PaymentID,
-		arg.SubscriptionID,
-		arg.Metadata,
-		arg.RailFields,
-		arg.RailState,
-		arg.RoutingReason,
-		arg.PspID,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const createPaymentMethodSetupSession = `-- name: CreatePaymentMethodSetupSession :execrows
-INSERT INTO billing.checkout_sessions
-(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
-VALUES($1,$2,$3,$4,'payment_method','nmi','created',$5,$6,$7,$8,$8)
-ON CONFLICT (merchant_id, id) DO NOTHING
-`
-
-type CreatePaymentMethodSetupSessionParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	PspID      uuid.UUID
-	ExpiresAt  *time.Time
-	RailState  []byte
-	Metadata   []byte
-	Now        time.Time
-}
-
-// A setup row is addressed by the stable merchant/customer/idempotency-key
-// UUID. The first writer owns its immutable request fingerprint and binding.
-func (q *Queries) CreatePaymentMethodSetupSession(ctx context.Context, arg CreatePaymentMethodSetupSessionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, createPaymentMethodSetupSession,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.PspID,
-		arg.ExpiresAt,
-		arg.RailState,
-		arg.Metadata,
+		arg.PurgeAt,
 		arg.Now,
 	)
 	if err != nil {
@@ -453,596 +120,71 @@ func (q *Queries) CreatePaymentMethodSetupSession(ctx context.Context, arg Creat
 	return result.RowsAffected(), nil
 }
 
-const expireCheckoutSessionByID = `-- name: ExpireCheckoutSessionByID :execrows
-UPDATE billing.checkout_sessions
-SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
-    status = 'expired', updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND id = $3::uuid
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL
+const deleteExpiredCheckoutSessions = `-- name: DeleteExpiredCheckoutSessions :execrows
+DELETE FROM billing.checkout_sessions s
+USING (
+    SELECT merchant_id, id_hash FROM billing.checkout_sessions
+    WHERE purge_at <= $1::timestamptz
+    ORDER BY purge_at
+    LIMIT $2::int
+    FOR UPDATE SKIP LOCKED
+) expired
+WHERE s.merchant_id = expired.merchant_id
+  AND s.id_hash = expired.id_hash
+  AND s.purge_at <= $1::timestamptz
 `
 
-type ExpireCheckoutSessionByIDParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
+type DeleteExpiredCheckoutSessionsParams struct {
+	Now      time.Time
+	RowLimit int32
 }
 
-// Repair for life.checkout_session.stale: mark one stale session expired.
-func (q *Queries) ExpireCheckoutSessionByID(ctx context.Context, arg ExpireCheckoutSessionByIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, expireCheckoutSessionByID, arg.Now, arg.MerchantID, arg.ID)
+// Bounded: row_limit caps one statement and the cleanup worker loops.
+func (q *Queries) DeleteExpiredCheckoutSessions(ctx context.Context, arg DeleteExpiredCheckoutSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredCheckoutSessions, arg.Now, arg.RowLimit)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
-UPDATE billing.checkout_sessions
-SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
-    status = 'expired', updated_at = $1
-WHERE deleted_at IS NULL
-  AND ctid IN (
-    SELECT cs.ctid FROM billing.checkout_sessions cs
-    WHERE cs.merchant_id = $2::uuid
-      AND cs.expires_at IS NOT NULL AND cs.expires_at < $1::timestamptz
-      AND cs.status IN ('created', 'requires_action')
-      AND cs.deleted_at IS NULL
-    LIMIT $3::int
-)
-`
-
-type ExpireCheckoutSessionsParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	RowLimit   int32
-}
-
-// Retention sweep (or#877 B4): one pass per merchant off the directory walk,
-// with the merchant predicate written out.
-// or#837: batched — row_limit bounds one statement, the caller loops.
-func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckoutSessionsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, expireCheckoutSessions, arg.Now, arg.MerchantID, arg.RowLimit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const failCheckoutSessionInitialization = `-- name: FailCheckoutSessionInitialization :execrows
-UPDATE billing.checkout_sessions cs
-SET status = 'failed', updated_at = $1::timestamptz,
-    rail_state = COALESCE(cs.rail_state, '{}'::jsonb) || jsonb_build_object('message', $2::text, 'failure_reason', $2::text,
-      'failure_kind', $3::text, 'failure_code', $4::text)
-WHERE cs.merchant_id = $5::uuid AND cs.id = $6::uuid
-  AND cs.deleted_at IS NULL AND cs.status = 'created'
-  AND NOT EXISTS (SELECT 1 FROM billing.rail_intents i
-                  WHERE i.merchant_id = cs.merchant_id AND i.idempotency_key = ANY($7::text[]))
-`
-
-type FailCheckoutSessionInitializationParams struct {
-	Now        time.Time
-	Reason     string
-	Kind       string
-	Code       string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	IntentKeys []string
-}
-
-// A definite refusal fails a created session only while no provider
-// operation was admitted for it. Run after LockCheckoutSessionForAdmission in
-// the same transaction, so the intent check reads committed admissions.
-func (q *Queries) FailCheckoutSessionInitialization(ctx context.Context, arg FailCheckoutSessionInitializationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, failCheckoutSessionInitialization,
-		arg.Now,
-		arg.Reason,
-		arg.Kind,
-		arg.Code,
-		arg.MerchantID,
-		arg.ID,
-		arg.IntentKeys,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const failHostedPurchaseInitialization = `-- name: FailHostedPurchaseInitialization :execrows
-UPDATE billing.checkout_sessions
-SET status='failed', updated_at=$1::timestamptz,
-    rail_state=rail_state || jsonb_build_object('failure_reason', $2::text)
-      || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
-              THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END
-WHERE merchant_id=$3::uuid AND id=$4::uuid
-  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
-  AND status<>'succeeded'
-`
-
-type FailHostedPurchaseInitializationParams struct {
-	Now        time.Time
-	Reason     string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// Validation failed before dispatch, or the dispatched request had an unknown
-// outcome. Decide from the persisted claim atomically, never a stale Go copy.
-func (q *Queries) FailHostedPurchaseInitialization(ctx context.Context, arg FailHostedPurchaseInitializationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, failHostedPurchaseInitialization,
-		arg.Now,
-		arg.Reason,
-		arg.MerchantID,
-		arg.ID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
-SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, p.pending_signer_public_key,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
-JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
-WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
-FOR SHARE OF p,c
-`
-
-type GetCheckoutCaptureAccountsForShareParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-}
-
-type GetCheckoutCaptureAccountsForShareRow struct {
-	BillingPsp       BillingPsp
-	BillingCustodian BillingCustodian
-}
-
-// Recheck current authority after vendor metadata readback, inside only the
-// short local attachment transaction. Archive/reconfiguration serializes here.
-func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg GetCheckoutCaptureAccountsForShareParams) (GetCheckoutCaptureAccountsForShareRow, error) {
-	row := q.db.QueryRow(ctx, getCheckoutCaptureAccountsForShare, arg.MerchantID, arg.PspID)
-	var i GetCheckoutCaptureAccountsForShareRow
-	err := row.Scan(
-		&i.BillingPsp.ID,
-		&i.BillingPsp.MerchantID,
-		&i.BillingPsp.Rail,
-		&i.BillingPsp.Environment,
-		&i.BillingPsp.AccountID,
-		&i.BillingPsp.Key,
-		&i.BillingPsp.Evidence,
-		&i.BillingPsp.FirstSeenAt,
-		&i.BillingPsp.LastVerifiedAt,
-		&i.BillingPsp.ReplacedAt,
-		&i.BillingPsp.CreatedAt,
-		&i.BillingPsp.UpdatedAt,
-		&i.BillingPsp.Archived,
-		&i.BillingPsp.CustodianID,
-		&i.BillingPsp.PendingSignerPublicKey,
-		&i.BillingCustodian.ID,
-		&i.BillingCustodian.MerchantID,
-		&i.BillingCustodian.Key,
-		&i.BillingCustodian.Kind,
-		&i.BillingCustodian.Environment,
-		&i.BillingCustodian.AccountID,
-		&i.BillingCustodian.Settings,
-		&i.BillingCustodian.CredentialVersions,
-		&i.BillingCustodian.Archived,
-		&i.BillingCustodian.CreatedAt,
-		&i.BillingCustodian.UpdatedAt,
-	)
-	return i, err
-}
-
-const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions WHERE checkout_sessions.merchant_id = $2::uuid AND id = $1
-  AND deleted_at IS NULL
-`
-
-type GetCheckoutSessionByIDParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) GetCheckoutSessionByID(ctx context.Context, arg GetCheckoutSessionByIDParams) (BillingCheckoutSession, error) {
-	row := q.db.QueryRow(ctx, getCheckoutSessionByID, arg.ID, arg.MerchantID)
-	var i BillingCheckoutSession
-	err := row.Scan(
-		&i.ID,
-		&i.PriceID,
-		&i.Mode,
-		&i.Rail,
-		&i.Status,
-		&i.Amount,
-		&i.Currency,
-		&i.ExpiresAt,
-		&i.Reference,
-		&i.TransactionID,
-		&i.PaymentID,
-		&i.SubscriptionID,
-		&i.RailFields,
-		&i.RailState,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.RoutingReason,
-	)
-	return i, err
-}
-
-const getCheckoutSessionByReference = `-- name: GetCheckoutSessionByReference :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions cs
-WHERE cs.merchant_id = $2::uuid AND cs.reference = $1
-  AND cs.deleted_at IS NULL
-LIMIT 1
-`
-
-type GetCheckoutSessionByReferenceParams struct {
-	Reference  *string
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) GetCheckoutSessionByReference(ctx context.Context, arg GetCheckoutSessionByReferenceParams) (BillingCheckoutSession, error) {
-	row := q.db.QueryRow(ctx, getCheckoutSessionByReference, arg.Reference, arg.MerchantID)
-	var i BillingCheckoutSession
-	err := row.Scan(
-		&i.ID,
-		&i.PriceID,
-		&i.Mode,
-		&i.Rail,
-		&i.Status,
-		&i.Amount,
-		&i.Currency,
-		&i.ExpiresAt,
-		&i.Reference,
-		&i.TransactionID,
-		&i.PaymentID,
-		&i.SubscriptionID,
-		&i.RailFields,
-		&i.RailState,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.RoutingReason,
-	)
-	return i, err
-}
-
-const getLatestOpenCheckoutSession = `-- name: GetLatestOpenCheckoutSession :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions cs
-WHERE cs.merchant_id = $4::uuid AND cs.customer_id = $1
-  AND cs.price_id = $2
-  AND cs.rail = $3
-  AND cs.status IN ('created', 'requires_action')
-  AND (cs.expires_at IS NULL OR cs.expires_at > $5::timestamptz)
-  AND cs.deleted_at IS NULL
-ORDER BY cs.created_at DESC
-LIMIT 1
-`
-
-type GetLatestOpenCheckoutSessionParams struct {
-	CustomerID uuid.UUID
-	PriceID    *uuid.UUID
-	Rail       string
-	MerchantID uuid.UUID
-	Now        time.Time
-}
-
-func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLatestOpenCheckoutSessionParams) (BillingCheckoutSession, error) {
-	row := q.db.QueryRow(ctx, getLatestOpenCheckoutSession,
-		arg.CustomerID,
-		arg.PriceID,
-		arg.Rail,
-		arg.MerchantID,
-		arg.Now,
-	)
-	var i BillingCheckoutSession
-	err := row.Scan(
-		&i.ID,
-		&i.PriceID,
-		&i.Mode,
-		&i.Rail,
-		&i.Status,
-		&i.Amount,
-		&i.Currency,
-		&i.ExpiresAt,
-		&i.Reference,
-		&i.TransactionID,
-		&i.PaymentID,
-		&i.SubscriptionID,
-		&i.RailFields,
-		&i.RailState,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.RoutingReason,
-	)
-	return i, err
-}
-
-const getPaymentMethodSetupSessionForUpdate = `-- name: GetPaymentMethodSetupSessionForUpdate :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_sessions
-WHERE id=$1 AND merchant_id=$2
-  AND mode='payment_method' AND deleted_at IS NULL
-FOR UPDATE
-`
-
-type GetPaymentMethodSetupSessionForUpdateParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg GetPaymentMethodSetupSessionForUpdateParams) (BillingCheckoutSession, error) {
-	row := q.db.QueryRow(ctx, getPaymentMethodSetupSessionForUpdate, arg.ID, arg.MerchantID)
-	var i BillingCheckoutSession
-	err := row.Scan(
-		&i.ID,
-		&i.PriceID,
-		&i.Mode,
-		&i.Rail,
-		&i.Status,
-		&i.Amount,
-		&i.Currency,
-		&i.ExpiresAt,
-		&i.Reference,
-		&i.TransactionID,
-		&i.PaymentID,
-		&i.SubscriptionID,
-		&i.RailFields,
-		&i.RailState,
-		&i.Metadata,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.PspID,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.RoutingReason,
-	)
-	return i, err
-}
-
-const hasUnresolvedProductCheckout = `-- name: HasUnresolvedProductCheckout :one
-SELECT EXISTS (
- SELECT 1 FROM billing.checkout_sessions s
- JOIN billing.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
- WHERE s.merchant_id=$1::uuid
-   AND s.customer_id=$2::uuid
-   AND p.product_id=$3::uuid
-   AND s.id<>$4::uuid AND s.mode='one_off'
-   AND s.status<>'succeeded'
-   AND (s.status IN ('created','requires_action')
-     OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
-   -- #1099: a session whose sale finally failed is resolved by that outcome.
-   AND NOT EXISTS (SELECT 1 FROM billing.rail_intents f
-     WHERE f.merchant_id=s.merchant_id
-       AND f.idempotency_key IN ('nmi_sale:checkout_native_session:'||s.id::text, 'custodian_sale:checkout_native_session:'||s.id::text)
-       AND f.status IN ('failed_terminal','expired','superseded'))
-)
-`
-
-type HasUnresolvedProductCheckoutParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	ProductID       uuid.UUID
-	ExceptSessionID uuid.UUID
-}
-
-// A local expiry or failed HTTP request does not prove a provider cannot charge.
-// Only a completed purchase or authoritative provider cancellation releases a
-// hosted session. NMI's accepted operation owns uncertainty after submission.
-func (q *Queries) HasUnresolvedProductCheckout(ctx context.Context, arg HasUnresolvedProductCheckoutParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasUnresolvedProductCheckout,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.ProductID,
-		arg.ExceptSessionID,
-	)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
-const listStaleCheckoutSessions = `-- name: ListStaleCheckoutSessions :many
-SELECT id FROM billing.checkout_sessions
+const getCheckoutSession = `-- name: GetCheckoutSession :one
+SELECT customer_id, price_id, offer, success_url, origin, attempt, attempt_id, expires_at
+FROM billing.checkout_sessions
 WHERE merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
-  AND expires_at IS NOT NULL AND expires_at < $3::timestamptz
-  AND status IN ('created', 'requires_action')
-  AND deleted_at IS NULL
-ORDER BY expires_at
+  AND id_hash = $2::bytea
+  AND purge_at > $3::timestamptz
 `
 
-type ListStaleCheckoutSessionsParams struct {
+type GetCheckoutSessionParams struct {
 	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
+	IDHash     []byte
 	Now        time.Time
 }
 
-// #511 LIFE plane (life.checkout_session.stale): expired-but-not-terminal
-// checkout sessions for a scope. Detection (read-only) for the Convergence Engine.
-func (q *Queries) ListStaleCheckoutSessions(ctx context.Context, arg ListStaleCheckoutSessionsParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listStaleCheckoutSessions, arg.MerchantID, arg.CustomerID, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const lockCheckoutSessionForAdmission = `-- name: LockCheckoutSessionForAdmission :one
-SELECT status FROM billing.checkout_sessions
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-  AND deleted_at IS NULL
-FOR UPDATE
-`
-
-type LockCheckoutSessionForAdmissionParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// #1099: the session's lock orders intent admission against a definite
-// failure; the caller refuses to admit on a terminal session.
-func (q *Queries) LockCheckoutSessionForAdmission(ctx context.Context, arg LockCheckoutSessionForAdmissionParams) (string, error) {
-	row := q.db.QueryRow(ctx, lockCheckoutSessionForAdmission, arg.MerchantID, arg.ID)
-	var status string
-	err := row.Scan(&status)
-	return status, err
-}
-
-const lockCheckoutSessionForShare = `-- name: LockCheckoutSessionForShare :one
-SELECT id FROM billing.checkout_sessions
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-  AND deleted_at IS NULL
-FOR SHARE
-`
-
-type LockCheckoutSessionForShareParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) LockCheckoutSessionForShare(ctx context.Context, arg LockCheckoutSessionForShareParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, lockCheckoutSessionForShare, arg.MerchantID, arg.ID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const lockPurchasableCheckoutPrice = `-- name: LockPurchasableCheckoutPrice :one
-SELECT p.id FROM billing.prices p
-JOIN billing.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
-WHERE p.id=$1::uuid AND p.merchant_id=$2::uuid
-  AND NOT p.archived AND NOT product.archived
-FOR SHARE OF p, product
-`
-
-type LockPurchasableCheckoutPriceParams struct {
+type GetCheckoutSessionRow struct {
+	CustomerID uuid.UUID
 	PriceID    uuid.UUID
-	MerchantID uuid.UUID
+	Offer      []byte
+	SuccessUrl string
+	Origin     string
+	Attempt    int32
+	AttemptID  *uuid.UUID
+	ExpiresAt  time.Time
 }
 
-func (q *Queries) LockPurchasableCheckoutPrice(ctx context.Context, arg LockPurchasableCheckoutPriceParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, lockPurchasableCheckoutPrice, arg.PriceID, arg.MerchantID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows
-UPDATE billing.checkout_sessions SET
-    customer_id = $2,
-    price_id = $3,
-    mode = $4,
-    rail = $5,
-    status = $6,
-    amount = $7,
-    currency = $8,
-    expires_at = $9,
-    reference = $10,
-    transaction_id = $11,
-    payment_id = $12,
-    subscription_id = $13,
-    metadata = $14,
-    rail_fields = $15,
-    rail_state = COALESCE($16::jsonb, '{}'::jsonb)
-      || CASE WHEN rail_state ? '_openrails_request_fingerprint' THEN jsonb_build_object('_openrails_request_fingerprint', rail_state->'_openrails_request_fingerprint') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state ? 'accepted_purchase' THEN jsonb_build_object('accepted_purchase', rail_state->'accepted_purchase') ELSE '{}'::jsonb END
-      || CASE WHEN rail_state->>'purchase_submitted'='true' THEN '{"purchase_submitted":true}'::jsonb ELSE '{}'::jsonb END
-      || CASE WHEN rail_state->>'provider_closed'='true' THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END,
-    psp_id = $17::uuid,
-    updated_at = $18
-WHERE checkout_sessions.merchant_id = $19::uuid AND id = $1
-  AND deleted_at IS NULL
-  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
-       OR status <> 'succeeded' OR $6 = 'succeeded')
-  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
-       OR (customer_id=$2 AND price_id IS NOT DISTINCT FROM $3 AND mode=$4 AND rail=$5
-           AND amount IS NOT DISTINCT FROM $7 AND currency IS NOT DISTINCT FROM $8
-           AND psp_id=$17::uuid))
-  AND (NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
-       OR COALESCE(($16::jsonb->>'provider_closed')::boolean, false))
-`
-
-type UpdateCheckoutSessionParams struct {
-	ID             uuid.UUID
-	CustomerID     uuid.UUID
-	PriceID        *uuid.UUID
-	Mode           string
-	Rail           string
-	Status         string
-	Amount         *int64
-	Currency       *string
-	ExpiresAt      *time.Time
-	Reference      *string
-	TransactionID  *string
-	PaymentID      *uuid.UUID
-	SubscriptionID *uuid.UUID
-	Metadata       []byte
-	RailFields     []byte
-	RailState      []byte
-	PspID          uuid.UUID
-	UpdatedAt      time.Time
-	MerchantID     uuid.UUID
-}
-
-func (q *Queries) UpdateCheckoutSession(ctx context.Context, arg UpdateCheckoutSessionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateCheckoutSession,
-		arg.ID,
-		arg.CustomerID,
-		arg.PriceID,
-		arg.Mode,
-		arg.Rail,
-		arg.Status,
-		arg.Amount,
-		arg.Currency,
-		arg.ExpiresAt,
-		arg.Reference,
-		arg.TransactionID,
-		arg.PaymentID,
-		arg.SubscriptionID,
-		arg.Metadata,
-		arg.RailFields,
-		arg.RailState,
-		arg.PspID,
-		arg.UpdatedAt,
-		arg.MerchantID,
+func (q *Queries) GetCheckoutSession(ctx context.Context, arg GetCheckoutSessionParams) (GetCheckoutSessionRow, error) {
+	row := q.db.QueryRow(ctx, getCheckoutSession, arg.MerchantID, arg.IDHash, arg.Now)
+	var i GetCheckoutSessionRow
+	err := row.Scan(
+		&i.CustomerID,
+		&i.PriceID,
+		&i.Offer,
+		&i.SuccessUrl,
+		&i.Origin,
+		&i.Attempt,
+		&i.AttemptID,
+		&i.ExpiresAt,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	return i, err
 }

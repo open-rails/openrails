@@ -42,10 +42,10 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
 | `catalog_scope_mismatch` | 403 | `authorization_error` | The catalog scope does not match the authorized merchant and catalog. |
 | `catalog_updates_disabled` | 403 | `invalid_request_error` | Catalog updates over HTTP are disabled in this deployment. |
+| `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
 | `checkout_offer_unavailable` | 422 | `invalid_request_error` | The purchase is not available. |
 | `checkout_payment_in_progress` | 409 | `invalid_request_error` | A payment on this checkout session is already being processed. |
 | `checkout_request_invalid` | 422 | `invalid_request_error` | The checkout request is invalid. |
-| `checkout_session_closed` | 409 | `invalid_request_error` | The checkout session already completed or was canceled. |
 | `checkout_session_expired` | 410 | `invalid_request_error` | The checkout session expired. |
 | `checkout_session_not_found` | 404 | `invalid_request_error` | The checkout session does not exist. |
 | `checkout_session_unavailable` | 403 | `authorization_error` | The checkout session is not available to this caller. |

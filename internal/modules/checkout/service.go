@@ -46,7 +46,7 @@ import (
 )
 
 // TierChangeResponse represents the response from a tier change operation.
-// This reuses the CheckoutSessionResponse envelope pattern for API consistency.
+// This reuses the CheckoutAttemptResponse envelope pattern for API consistency.
 type TierChangeResponse = billing.TierChangeResponse
 
 // TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
@@ -408,7 +408,7 @@ func (s *CheckoutService) processSubscription(
 	coverage *CoverageInfo,
 	rail string,
 ) (*CheckoutResponse, error) {
-	return nil, errors.New("new engine subscriptions require a saved-method checkout session and explicit agreement confirmation")
+	return nil, errors.New("new engine subscriptions require a saved-method checkout attempt and explicit agreement confirmation")
 }
 
 // processOneTimePurchase handles one-time purchases
@@ -498,7 +498,7 @@ func (s *CheckoutService) processCCBillSubscription(
 		Country:       strings.ToUpper(strings.TrimSpace(req.Country)),
 		FlexID:        flexID,
 		FormName:      formName,
-		ReservationID: req.CheckoutSessionID,
+		ReservationID: req.CheckoutAttemptID,
 		// #819: bill the PRICE's currency. An unbillable/absent currency errors
 		// below — before a form exists, therefore before any charge.
 		Currency: price.Currency,
@@ -738,7 +738,7 @@ func (s *CheckoutService) processSolanaPurchase(
 	product *models.Product,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
-	return nil, errors.New("solana checkout is handled via /v1/checkout sessions")
+	return nil, errors.New("solana checkout is handled via /v1/checkout attempts")
 }
 
 func (s *CheckoutService) processStripeSubscription(
@@ -788,7 +788,7 @@ func (s *CheckoutService) processStripeSubscription(
 		CustomerEmail:     userEmail(user),
 		InternalPriceID:   price.ID.String(),
 		TrialEnd:          trialEnd,
-		CheckoutSessionID: req.CheckoutSessionID,
+		CheckoutAttemptID: req.CheckoutAttemptID,
 		IdempotencyKey:    req.IdempotencyKey,
 	})
 	if err != nil {
@@ -861,7 +861,7 @@ func (s *CheckoutService) processStripePayment(
 		UserID:            user.ID,
 		CustomerEmail:     userEmail(user),
 		InternalPriceID:   price.ID.String(),
-		CheckoutSessionID: req.CheckoutSessionID,
+		CheckoutAttemptID: req.CheckoutAttemptID,
 		IdempotencyKey:    req.IdempotencyKey,
 	})
 	if err != nil {
@@ -1109,7 +1109,7 @@ type stripeCheckoutParams struct {
 	CustomerEmail     string
 	InternalPriceID   string
 	TrialEnd          int64
-	CheckoutSessionID string
+	CheckoutAttemptID string
 	IdempotencyKey    string
 }
 
@@ -1144,14 +1144,14 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
 	values.Set("metadata[internal_price_id]", params.InternalPriceID)
-	if strings.TrimSpace(params.CheckoutSessionID) != "" {
-		values.Set("metadata[checkout_session_id]", strings.TrimSpace(params.CheckoutSessionID))
+	if strings.TrimSpace(params.CheckoutAttemptID) != "" {
+		values.Set("metadata[checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
 	}
 	if params.Mode == "subscription" {
 		values.Set("subscription_data[metadata][user_id]", params.UserID)
 		values.Set("subscription_data[metadata][internal_price_id]", params.InternalPriceID)
-		if strings.TrimSpace(params.CheckoutSessionID) != "" {
-			values.Set("subscription_data[metadata][checkout_session_id]", strings.TrimSpace(params.CheckoutSessionID))
+		if strings.TrimSpace(params.CheckoutAttemptID) != "" {
+			values.Set("subscription_data[metadata][checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
 		}
 		if params.TrialEnd > 0 {
 			values.Set("subscription_data[trial_end]", strconv.FormatInt(params.TrialEnd, 10))
@@ -1175,7 +1175,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 		if err != nil {
 			return "", err
 		}
-		id, err := billing.ParseCheckoutSessionID(params.CheckoutSessionID)
+		id, err := billing.ParseCheckoutAttemptID(params.CheckoutAttemptID)
 		if err != nil {
 			return "", err
 		}
@@ -1184,7 +1184,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 			return "", err
 		}
 		if claimed == 0 {
-			return "", ErrCheckoutSessionPending
+			return "", ErrCheckoutAttemptPending
 		}
 	}
 	resp, err := client.Do(req)
@@ -1643,7 +1643,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	if existingSub.ScheduledPriceID != nil {
 		return &TierChangeResponse{
 			Object: "tier_change", Status: "blocked", Mode: "tier_change", Action: action,
-			PriceID: (billing.PriceID(newPrice.ID)).String(), Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
+			PriceID: (billing.PriceID(newPrice.ID)).String(), Payment: CheckoutAttemptPaymentResponse{Rail: "stripe"},
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
@@ -1772,7 +1772,7 @@ func (s *CheckoutService) processTierChangeSolana(
 		Mode:           "tier_change",
 		Action:         action,
 		PriceID:        (billing.PriceID(newPrice.ID)).String(),
-		Payment:        CheckoutSessionPaymentResponse{Rail: "solana"},
+		Payment:        CheckoutAttemptPaymentResponse{Rail: "solana"},
 		SubscriptionID: &subIDStr,
 		Message:        msg,
 	}, nil
@@ -1798,7 +1798,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Mode:    "tier_change",
 			Action:  action,
 			PriceID: (billing.PriceID(newPrice.ID)).String(),
-			Payment: CheckoutSessionPaymentResponse{Rail: "ccbill"},
+			Payment: CheckoutAttemptPaymentResponse{Rail: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
 	}
@@ -1819,7 +1819,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 		PriceID:        (billing.PriceID(newPrice.ID)).String(),
 		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
-		Payment: CheckoutSessionPaymentResponse{
+		Payment: CheckoutAttemptPaymentResponse{
 			Rail:        "ccbill",
 			RedirectURL: checkoutResp.RedirectURL,
 		},
@@ -1828,9 +1828,9 @@ func (s *CheckoutService) processTierChangeCCBill(
 
 	// Build NextAction for redirect
 	if checkoutResp.RedirectURL != "" {
-		resp.NextAction = &CheckoutSessionNextAction{
+		resp.NextAction = &CheckoutAttemptNextAction{
 			Type: "redirect_to_url",
-			RedirectToURL: &CheckoutSessionRedirectToURL{
+			RedirectToURL: &CheckoutAttemptRedirectToURL{
 				URL: checkoutResp.RedirectURL,
 			},
 		}

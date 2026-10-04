@@ -62,8 +62,8 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", refusedCard), "blocked on replica %s", r.replica.name)
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", visa), "a good card is refused while blocked")
 			for _, tp := range []topology{embedded, remote} {
-				_, err := r.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: "content:members", PriceID: price.ID.String(),
+				_, err := r.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: r.psp["nmi"], Rail: "nmi"},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 				})
@@ -119,8 +119,8 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	t.Parallel()
 	declined := card{Brand: "visa", Last4: "0002", Decline: "202"}
 	pay := func(w *world, tp topology, price string, c *customer, ip string, cd card) error {
-		_, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: c.id, ClientIP: ip}, PriceID: price, IdempotencyKey: "host-" + uuid.NewString(), Confirm: true,
+		_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id), ClientIP: ip}, PriceID: pid(price), IdempotencyKey: "host-" + uuid.NewString(),
 			PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(cd), NameOnCard: "Host Payer", Zip: "10001", Country: "US"},
 		})
 		return err

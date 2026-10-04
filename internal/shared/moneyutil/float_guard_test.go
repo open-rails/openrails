@@ -92,7 +92,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/solana/support.go:FiatMicrosToStablecoinBaseUnits": "passes the identity FX RATE 1.0 into the exact-rational converter",
 
 		// --- Checkout: the persisted quote's rates ------------------------
-		"internal/modules/checkout/session_service.go:setSolanaQuoteState": "persists token_price_usd / fx_rate (RATES); token_amount is written as a decimal string",
+		"internal/modules/checkout/attempt_service.go:setSolanaQuoteState": "persists token_price_usd / fx_rate (RATES); token_amount is written as a decimal string",
 
 		// --- Solana token feed + display: rates, not amounts ---------------
 		"internal/integrations/pyth/client.go:Price":                           "Pyth Price/Conf are the feed's quoted RATE and its confidence interval",

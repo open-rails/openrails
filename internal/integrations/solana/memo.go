@@ -11,7 +11,7 @@ import (
 
 // SPL Memo self-recognition stamp (#713), format "openrails:1:<local-id>":
 // version segment + the ONE field the chain cannot derive — local-id is the
-// openrails-side UUID of OUR record for that money movement (checkout session
+// openrails-side UUID of OUR record for that money movement (checkout attempt
 // for one-offs, pull intent for recurring). Merchant, kind and amount are
 // deliberately omitted: derivable from the chain. STANDING INVARIANTS: the
 // memo is a DISCOVERY HINT, never money truth — money truth is only the

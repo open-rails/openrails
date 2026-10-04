@@ -216,13 +216,10 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?auto_renew=`, `?limit=`, `?cursor=`) |
 | `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
 | `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
-| `POST /billing/v1/me/checkout/sessions` | start a checkout for a price, as the signed-in user |
+| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price, as the signed-in user |
 | `GET /billing/v1/checkout-sessions/{id}`, `POST …/{id}/pay` | read and pay that checkout; the session id is the credential, so a payment page on another host can use it |
-| `POST /billing/v1/checkout` | start an engine checkout session (Solana and redirect flows) |
-| `GET /billing/v1/checkout/{id}` | read a session |
-| `POST /billing/v1/checkout/{id}/confirm` | confirm a Solana payment |
-| `GET`, `POST /billing/v1/checkout/{id}/solana-pay` | the Solana Pay request a wallet signs |
-| `GET /billing/v1/solana/config`, `/solana/tokens` | Solana network and supported tokens (when a Solana PSP is declared) |
+| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs |
+| `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
 | `GET /billing/v1/capabilities` | which of these route groups are mounted, for your UI |
 
 **Your customers' own billing** (`HTTP.CustomerRoutes`, signed in, always as the caller)
@@ -252,7 +249,6 @@ Mounting gives your users these routes under `/billing`:
 | `PUT /billing/v1/me/collection-payment-method` | the card invoices are charged to |
 | `GET /billing/v1/me/notifications`, `/me/notifications/unread-count` | billing notices ("your card was declined") |
 | `POST /billing/v1/me/notifications/{id}/read` | mark one read |
-| `POST /billing/v1/me/checkout`, `GET /me/checkout/{id}` | start or read their own checkout session |
 
 **Payment processors** (always mounted)
 
@@ -297,7 +293,7 @@ export function App() {
 function UpgradeButton() {
   const [sessionId, setSessionId] = useState<string>()
   async function upgrade() {
-    // POST /billing/v1/me/checkout/sessions: OpenRails prices it from the catalog, for the signed-in user.
+    // POST /billing/v1/me/checkout-sessions: OpenRails prices it from the catalog, for the signed-in user.
     const session = await billing.createCheckoutSession({ priceKey: "premium-monthly" })
     setSessionId(session.id)
   }
@@ -332,7 +328,7 @@ Operator side (you, the merchant):
 - Call one API for admissions, credits, entitlement checks, subscriptions and invoices: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
 Customer side (your users):
-- Apps with channel/content purchase rules route checkout through their own server: verify those rules, then call `Client.CreateCheckoutSession` once. Catalog-only apps can expose the built-in customer checkout route.
+- Apps with channel/content purchase rules route checkout through their own server: verify those rules, then call `Client.CreateCheckoutSession` and hand the session to the buyer's browser. Catalog-only apps can expose the built-in customer mint route.
 - Your frontend calls `/v1/me/*` self-service routes with a short-lived token.
 - Processor webhooks land on OpenRails; it updates entitlements in your database and your app reads them.
 
@@ -347,16 +343,16 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 
 | Operation | Reference contract |
 | --- | --- |
-| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions |
-| `LookupCheckoutSession` | Read-only replay lookup with the original complete checkout request |
+| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey` |
+| `CreateCheckoutAttempt` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
 | `HasEntitlement` / `CheckEntitlements` | Exact grant-backed access; batch maximum 100 keys |
 | `ProductAccess.Check` / `CheckMany` | Product ID or key; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `ListCheckoutRailOptions` / `ListCheckoutRailOptionsByKey` | Explicit ID / key methods |
-| Checkout-options HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
+| `GetCheckoutConfig` | `CheckoutConfigQuery`: a `PriceID` or `PriceKey` lists the options that can sell it |
+| `checkout-config` HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
 | Catalog retrieval | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
-| Accepted sessions, payments, subscriptions and imports | Immutable IDs |
+| Accepted attempts, payments, subscriptions and imports | Immutable IDs |
 | Recurring change-tier/preview and Solana tier-change | Existing ID contract; key selectors tracked separately |
 
 Keys are opaque, including UUID-shaped keys. Move any key previously sent in

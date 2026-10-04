@@ -1,15 +1,12 @@
 package billing
 
-import (
-	"github.com/google/uuid"
-	"time"
-)
+import "time"
 
-// CheckoutRailOption is one way checkout can sell a price now: the PSP is
-// armed and its rail can make this kind of sale (#1078). Driver and
-// PublicConfig are what a browser needs to render it; an empty Driver means no
-// browser flow can execute the option.
-type CheckoutRailOption struct {
+// CheckoutOption is one way checkout can sell a price now: the PSP is armed
+// and its rail can make this kind of sale (#1078). Driver and PublicConfig are
+// what a browser needs to render it; an empty Driver means no browser flow can
+// execute the option.
+type CheckoutOption struct {
 	// Selector is the checkout payment.rail value (the PSP key).
 	Selector string `json:"selector"`
 	PSPID    string `json:"psp_id"`
@@ -29,6 +26,13 @@ type CheckoutRailOption struct {
 	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
+// CheckoutConfigQuery selects the price whose options GetCheckoutConfig
+// lists: at most one of PriceID or PriceKey.
+type CheckoutConfigQuery struct {
+	PriceID  PriceID
+	PriceKey string
+}
+
 // CheckoutConfig lists the merchant's armed PSPs and the public values a
 // browser needs to drive each one. It never contains merchant secrets.
 type CheckoutConfig struct {
@@ -38,6 +42,9 @@ type CheckoutConfig struct {
 	// tokens the merchant accepts, so a host renders wallet options from the
 	// same document it renders card options from.
 	Solana *SolanaCheckoutConfig `json:"solana,omitempty"`
+	// Options are the ways checkout can sell the price the request named, in
+	// routing order; null when it named none.
+	Options []CheckoutOption `json:"options"`
 }
 
 // SolanaCheckoutConfig is the merchant's public Solana acceptance policy.
@@ -87,82 +94,53 @@ type CheckoutPSPConfig struct {
 	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
-// CheckoutPSPTemporarilyUnavailable marks a PSP (or rail option) whose
+// CheckoutPSPTemporarilyUnavailable marks a PSP (or option) whose
 // credentials could not be checked just now; retry after RetryAfter seconds.
 const CheckoutPSPTemporarilyUnavailable = "temporarily_unavailable"
 
+// CheckoutCustomerIdentity is the buyer as the host knows it.
 type CheckoutCustomerIdentity struct {
-	ID            string `json:"id"`
-	VerifiedEmail string `json:"verified_email"`
-	Username      string `json:"username"`
+	ID            CustomerID `json:"id"`
+	VerifiedEmail string     `json:"verified_email"`
+	Username      string     `json:"username"`
 	// ClientIP is the address the customer's request came from, as the host
-	// resolved it behind its trusted proxies. Checkouts and card saves count
-	// declined cards against it, as the customer HTTP routes do; without it a
-	// host's card testers are counted per customer only.
-	ClientIP string `json:"client_ip,omitempty"`
+	// resolved it behind its trusted proxies. Checkouts count declined cards
+	// against it, as the customer HTTP routes do; without it a host's card
+	// testers are counted per customer only.
+	ClientIP string `json:"client_ip"`
 }
 
-// CreateCheckoutSessionRequest creates a purchase for a merchant-owned customer.
-// The server derives one-off versus recurring behavior from the selected price.
-// IdempotencyKey must identify this checkout attempt across retries.
-// The merchant endpoint trusts the host to invoke checkout for a real customer
-// action. Merchant credentials authorize the host; they do not prove customer
-// interaction. Do not use this command as an unattended way to establish a
-// customer-initiated stored-card agreement.
-//
-// A recurring card price is quoted unless Confirm is set: an NMI PaymentToken
-// is saved as the customer's method, and the customer accepts the quote at
-// /v1/me/checkout/{id}/confirm.
-type CreateCheckoutSessionRequest struct {
+// CreateCheckoutAttemptRequest charges one price for a merchant-owned
+// customer now, relaying that customer's pay action: a recurring price is
+// enrolled and charged in this call. The server derives one-off versus
+// recurring from the price. Retries with the same IdempotencyKey never charge
+// twice. Merchant credentials authorize the host; they do not prove customer
+// interaction, so never call this unattended to establish a stored-card
+// agreement. To hand a purchase to the customer instead, create a checkout
+// session.
+type CreateCheckoutAttemptRequest struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
 	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
-	// when they resemble UUIDs. Accepted retries retain the original offer.
-	PriceID  string `json:"price_id,omitzero"`
-	PriceKey string `json:"price_key,omitempty"`
+	// when they resemble ids. Accepted retries retain the original offer.
+	PriceID  PriceID `json:"price_id"`
+	PriceKey string  `json:"price_key"`
 	// Entitlement optionally binds admission to the opaque resource the host
 	// showed. OpenRails verifies the selected product grants this key.
-	Entitlement    string                 `json:"entitlement,omitempty"`
-	OfferKind      OfferKind              `json:"offer_kind,omitempty"`
+	Entitlement    string                 `json:"entitlement"`
+	OfferKind      OfferKind              `json:"offer_kind"`
 	PaymentOptions CheckoutPaymentOptions `json:"payment"`
 	Metadata       map[string]string      `json:"metadata"`
 	IdempotencyKey string                 `json:"-"`
-	SuccessURL     string                 `json:"success_url"` // Required for Stripe hosted checkout
-	CancelURL      string                 `json:"cancel_url"`  // Required for Stripe hosted checkout
-	// Confirm relays the present customer's pay action on the displayed price:
-	// a recurring price is enrolled and charged in this call instead of quoted.
-	// A definite decline creates no subscription and keeps no card saved from
-	// PaymentToken. Retries with the same IdempotencyKey never charge twice.
-	Confirm bool `json:"confirm,omitempty"`
+	// SuccessURL and CancelURL bring the buyer back from a redirect step
+	// (Stripe or CCBill hosted pages); their origins must be one of
+	// Config.ReturnOrigins.
+	SuccessURL string `json:"success_url"`
+	CancelURL  string `json:"cancel_url"`
 }
 
-// CreatePaymentMethodSessionRequest authorizes a nonmonetary card setup.
-// It cannot carry a price or select a purchase/subscription mode.
-type CreatePaymentMethodSessionRequest struct {
-	Customer       CheckoutCustomerIdentity `json:"customer"`
-	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
-	Metadata       map[string]string        `json:"metadata,omitempty"`
-	IdempotencyKey string                   `json:"-"`
-}
-
-// CreateSolanaCancelSessionRequest prepares an existing subscription cancellation.
-type CreateSolanaCancelSessionRequest struct {
-	Customer       CheckoutCustomerIdentity `json:"customer"`
-	SubscriptionID string                   `json:"subscription_id"`
-	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
-	Metadata       map[string]string        `json:"metadata,omitempty"`
-	IdempotencyKey string                   `json:"-"`
-}
-
-// CreateSolanaTierChangeSessionRequest prepares a change to an existing subscription.
-type CreateSolanaTierChangeSessionRequest struct {
-	Customer       CheckoutCustomerIdentity `json:"customer"`
-	SubscriptionID string                   `json:"subscription_id"`
-	NewPriceID     string                   `json:"new_price_id"`
-	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
-	Metadata       map[string]string        `json:"metadata,omitempty"`
-	IdempotencyKey string                   `json:"-"`
-}
-
+// CheckoutPaymentOptions is how an attempt pays: the PSP, and the instrument
+// or wallet. A Client cannot carry a card number: cards are entered on a
+// checkout session.
 type CheckoutPaymentOptions struct {
 	PSPID           string `json:"psp_id,omitzero"`
 	Rail            string `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
@@ -189,51 +167,64 @@ type CheckoutPaymentOptions struct {
 	LastFour   string `json:"last_four"`
 	CardType   string `json:"card_type"`
 	ExpiryDate string `json:"expiry_date"`
-
-	// Card is a new card for a PSP whose card_entry is server. It cannot be
-	// re-encoded, so it is set only by the request that first carried it: a
-	// Client refuses to send one.
-	Card *Card `json:"card,omitempty"`
 }
 
-// CheckoutSession is the durable result of a checkout attempt. Amount is native
-// currency units (micros for fiat), encoded as a decimal string over HTTP;
-// timestamps are RFC3339 instants.
-type CheckoutSession struct {
-	Capture         *CustodianCaptureAction `json:"capture,omitempty"`
-	PaymentMethodID *string                 `json:"payment_method_id,omitempty"`
-	ID              string                  `json:"id"`
-	Status          string                  `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
-	Mode            string                  `json:"mode"`   // "subscription", "one_off"
-	PriceID         *string                 `json:"price_id"`
-	Amount          *int64                  `json:"amount,string"`
-	Currency        *string                 `json:"currency"`
-	PaymentStatus   string                  `json:"payment_status"` // "unpaid", "paid", "no_payment_required"
-	ClientSecret    *string                 `json:"client_secret"`
-	URL             *string                 `json:"url"` // Redirect URL for CCBill/Stripe
-	SubscriptionID  *string                 `json:"subscription_id"`
-	PaymentID       *string                 `json:"payment_id"`
-	ExpiresAt       *time.Time              `json:"expires_at,omitempty"`
-	CreatedAt       time.Time               `json:"created_at"`
-	Metadata        map[string]string       `json:"metadata"`
-	RailData        map[string]any          `json:"rail_data"` // Rail-specific response data
-	// Operation is the accepted card payment; with Status "requires_action"
-	// the customer completes its provider authentication (3-D Secure) in the page.
-	Operation *PaymentOperation `json:"operation,omitempty"`
+// CheckoutAttemptStatus is where an attempt stands. processing: the provider
+// outcome is not known yet; read the attempt again.
+type CheckoutAttemptStatus string
+
+const (
+	CheckoutAttemptCreated        CheckoutAttemptStatus = "created"
+	CheckoutAttemptRequiresAction CheckoutAttemptStatus = "requires_action"
+	CheckoutAttemptProcessing     CheckoutAttemptStatus = "processing"
+	CheckoutAttemptSucceeded      CheckoutAttemptStatus = "succeeded"
+	CheckoutAttemptFailed         CheckoutAttemptStatus = "failed"
+	CheckoutAttemptExpired        CheckoutAttemptStatus = "expired"
+	CheckoutAttemptCanceled       CheckoutAttemptStatus = "canceled"
+)
+
+// CheckoutAttempt is one charge of one price on one PSP (chk_ id). Amount is
+// in the currency's native unit, a decimal string over HTTP. With status
+// requires_action the buyer completes NextAction, or the card payment's
+// Operation authentication (3-D Secure).
+type CheckoutAttempt struct {
+	Object          string                `json:"object"`
+	ID              CheckoutAttemptID     `json:"id"`
+	CustomerID      CustomerID            `json:"customer_id"`
+	Status          CheckoutAttemptStatus `json:"status"`
+	Mode            string                `json:"mode"` // one_off, subscription or payment_method (a card setup)
+	PriceID         *PriceID              `json:"price_id"`
+	Amount          *int64                `json:"amount,string"`
+	Currency        *string               `json:"currency"`
+	PaymentID       *PaymentID            `json:"payment_id"`
+	SubscriptionID  *SubscriptionID       `json:"subscription_id"`
+	PaymentMethodID *PaymentMethodID      `json:"payment_method_id"`
+	NextAction      *NextAction           `json:"next_action"`
+	Operation       *PaymentOperation     `json:"operation"`
 	// Failure explains a definite decline in customer terms.
-	Failure *PaymentFailure `json:"failure,omitempty"`
+	Failure   *PaymentFailure   `json:"failure"`
+	ExpiresAt *time.Time        `json:"expires_at"`
+	CreatedAt time.Time         `json:"created_at"`
+	Metadata  map[string]string `json:"metadata"`
 }
 
-type ConfirmCheckoutSessionRequest struct {
-	CustomerID string         `json:"customer_id"`
-	Payment    ConfirmPayment `json:"payment"`
+// NextAction is the step the buyer takes to finish a payment that requires
+// action. redirect_to_url: open URL (a Stripe or CCBill page) in the top
+// window; it returns to the success URL. solana_pay: show URL (a solana: Solana
+// Pay link) as a QR code or wallet link. solana_sign_transactions: the wallet
+// signs and sends Transactions (base64, unsigned) in order, then the attempt is
+// confirmed with each signature.
+type NextAction struct {
+	Type         string   `json:"type"`
+	URL          *string  `json:"url"`
+	Transactions []string `json:"transactions"`
 }
 
-type ConfirmPayment struct {
-	Capture   *CustodianCaptureReference `json:"capture,omitempty"`
-	Rail      string                     `json:"rail"`      // Must match session rail
-	Signature string                     `json:"signature"` // Solana transaction signature
-	Wallet    string                     `json:"wallet"`    // Solana wallet that signed
+// ConfirmCheckoutAttemptRequest completes a Solana attempt the buyer's wallet
+// signed.
+type ConfirmCheckoutAttemptRequest struct {
+	Signature string `json:"signature"`
+	Wallet    string `json:"wallet"`
 }
 
 type EffectiveTier struct {
@@ -244,34 +235,6 @@ type EffectiveTier struct {
 	ProductID   string `json:"product_id"`
 	ProductKey  string `json:"product_key"`
 }
-
-// CustodianCaptureReference is a vendor session token, not a card or payment
-// authority. It is accepted only by the exact owned setup session that issued it.
-type CustodianCaptureReference struct {
-	CustodianID uuid.UUID `json:"custodian_id"`
-	SessionID   string    `json:"session_id"`
-	Token       string    `json:"token"`
-}
-
-func (CustodianCaptureReference) String() string   { return "[private custodian capture reference]" }
-func (CustodianCaptureReference) GoString() string { return "[private custodian capture reference]" }
-
-// CustodianCaptureAction initializes vendor-owned browser fields. Its scoped
-// authorization is private, short lived, and never a shared cache/log value.
-type CustodianCaptureAction struct {
-	Kind             string    `json:"kind"`
-	CustodianID      uuid.UUID `json:"custodian_id"`
-	SessionID        string    `json:"session_id"`
-	CustomerID       string    `json:"customer_id"`
-	APIBaseURL       string    `json:"api_base_url"`
-	SDKURL           string    `json:"sdk_url"`
-	PublicAPIKey     string    `json:"public_api_key"`
-	SDKAuthorization string    `json:"sdk_authorization"`
-	ExpiresAt        time.Time `json:"expires_at"`
-}
-
-func (CustodianCaptureAction) String() string   { return "[private custodian capture action]" }
-func (CustodianCaptureAction) GoString() string { return "[private custodian capture action]" }
 
 // PaymentFailure is the customer-facing reason a card payment was definitely
 // declined. Reason is provider-neutral (incorrect_cvc, incorrect_zip,

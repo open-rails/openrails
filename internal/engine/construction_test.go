@@ -37,7 +37,6 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		want string
 	}{
 		"merchant without slug":     {with(sandbox, func(c *config.Config) { c.Merchant.DisplayName = "x" }), config.Deps{}, "Merchant.Slug"},
-		"checkout without auth":     {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}} }), config.Deps{}, "Checkout requires"},
 		"customer without merchant": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}} }), config.Deps{Authenticate: authenticate}, "explicit merchant slug"},
 		"customer without verifier": {with(sandbox, func(c *config.Config) {
 			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}}

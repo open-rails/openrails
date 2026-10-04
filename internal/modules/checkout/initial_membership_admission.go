@@ -28,7 +28,7 @@ func ownsInitialMembership(in gen.BillingRailIntent, user string, price uuid.UUI
 	if err != nil {
 		return err
 	}
-	if (p.CheckoutSessionID == nil) != (sessionID == nil) || (sessionID != nil && *p.CheckoutSessionID != *sessionID) {
+	if (p.CheckoutAttemptID == nil) != (sessionID == nil) || (sessionID != nil && *p.CheckoutAttemptID != *sessionID) {
 		return apperr.Conflictf("checkout key belongs to another session binding")
 	}
 	if p.Terms.CustomerID.String() != user || p.Terms.PriceID != price || p.RequestFingerprint != fingerprint {

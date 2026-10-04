@@ -295,7 +295,7 @@ func (w *world) start() {
 	if w.selfService {
 		scope = openrails.CustomerSelfService
 	}
-	httpConfig := &openrails.HTTPConfig{Merchant: true, CustomerRoutes: []openrails.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
+	httpConfig := &openrails.HTTPConfig{Merchant: true, Checkout: &openrails.CheckoutConfig{}, CustomerRoutes: []openrails.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
 	if w.mount != nil {
 		w.mount(httpConfig)
 	}
@@ -329,7 +329,7 @@ func (w *world) start() {
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
-	config, err := local.GetCheckoutConfig(t.Context())
+	config, err := local.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
 	require.NoError(t, err)
 	w.psp = map[string]string{}
 	for _, psp := range config.PSPs {
@@ -698,22 +698,55 @@ func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, metho
 
 func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	session, err := c.w.client[tp].CreateCheckoutSession(c.w.t.Context(), billing.CreateCheckoutSessionRequest{
-		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: c.id}, Entitlement: entitlement, PriceID: priceID,
+	attempt, err := c.w.client[tp].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptRequest{
+		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
 		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSPID: c.w.psp[rail], Rail: rail, PaymentMethodID: method},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(c.w.t, err)
-	quote := unwrap(c.must(http.MethodGet, "/checkout/"+session.ID, "", nil))
-	require.NotNil(c.w.t, quote["membership_quote"], "engine enrollment is quoted: %v", quote)
-	done := unwrap(c.must(http.MethodPost, fmt.Sprintf("/checkout/%s/confirm", session.ID), "", map[string]any{"payment": map[string]string{"rail": rail}}))
-	require.Equal(c.w.t, "succeeded", done["status"], "%v", done)
+	require.Equal(c.w.t, billing.CheckoutAttemptSucceeded, attempt.Status, "%+v", attempt)
 	c.w.settle()
-	sub, ok := done["subscription_id"].(string)
-	require.True(c.w.t, ok, "confirmation names the membership: %v", done)
-	var id billing.SubscriptionID
-	require.NoError(c.w.t, json.Unmarshal([]byte(`"`+sub+`"`), &id))
-	return id
+	require.NotNil(c.w.t, attempt.SubscriptionID, "the attempt names the membership: %+v", attempt)
+	return *attempt.SubscriptionID
+}
+
+// identity is the customer as a host hands it to checkout.
+func (c *customer) identity() billing.CheckoutCustomerIdentity {
+	return billing.CheckoutCustomerIdentity{ID: cid(c.id)}
+}
+
+// cid and pid read test ids as their typed form.
+func cid(id string) billing.CustomerID { return billing.CustomerID(uuid.MustParse(id)) }
+
+func pid(id string) billing.PriceID {
+	parsed, err := billing.ParsePriceID(id)
+	if err != nil {
+		panic(err)
+	}
+	return parsed
+}
+
+// attempt reads a checkout attempt through the merchant route, as JSON.
+func (w *world) attempt(id billing.CheckoutAttemptID) map[string]any {
+	w.t.Helper()
+	status, body := w.staffJSON(http.MethodGet, "/v1/merchant/checkout-attempts/"+id.String(), nil)
+	require.Equal(w.t, http.StatusOK, status, "%v", body)
+	return body
+}
+
+// latestAttempt reads the customer's newest purchase attempt (card setups
+// excluded: they share the frozen clock's timestamp).
+func (w *world) latestAttempt(customerID string) map[string]any {
+	w.t.Helper()
+	var id uuid.UUID
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT id FROM billing.checkout_attempts WHERE customer_id = $1 AND mode <> 'payment_method' ORDER BY created_at DESC, id DESC LIMIT 1`), customerID).Scan(&id))
+	return w.attempt(billing.CheckoutAttemptID(id))
+}
+
+// confirmAttempt confirms a Solana attempt through the merchant route.
+func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (int, map[string]any) {
+	w.t.Helper()
+	return w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts/"+id.String()+"/confirm", map[string]string{"signature": signature})
 }
 
 func (c *customer) entitled(entitlement string) bool {

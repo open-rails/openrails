@@ -60,10 +60,10 @@ func TestPullProviderSummaries(t *testing.T) {
 	require.Equal(t, "none", formatFindingStatusCounts(nil))
 
 	plan := []pullProviderPruneLog{
-		{Provider: "nmi", Result: reconcile.PruneResult{Subscriptions: 2, SubscriptionsSkipped: 1, Payments: 3, CheckoutSessions: 4}},
+		{Provider: "nmi", Result: reconcile.PruneResult{Subscriptions: 2, SubscriptionsSkipped: 1, Payments: 3, CheckoutAttempts: 4}},
 		{Provider: "stripe", Result: reconcile.PruneResult{Payments: 1}},
 	}
-	require.Equal(t, "checkout_sessions would_prune=4; payments would_prune=4; subscriptions would_prune=2 skipped=1", formatPruneCounts(summarizePrune(plan)))
+	require.Equal(t, "checkout_attempts would_prune=4; payments would_prune=4; subscriptions would_prune=2 skipped=1", formatPruneCounts(summarizePrune(plan)))
 	require.Equal(t, 6, prunePlanTotal(plan), "the typed confirmation counts subscriptions and payments, not cascaded dependents")
 	require.False(t, prunePlanApplied(plan))
 

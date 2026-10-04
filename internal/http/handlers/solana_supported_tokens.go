@@ -26,28 +26,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// SupportedTokensQuery: price_id adds each token's quote for that price;
+// wallet adds the wallet's balance of each.
 type SupportedTokensQuery struct {
-	PriceID           string `form:"price_id"`
-	CheckoutSessionID string `form:"checkout_session_id"`
-	Wallet            string `form:"wallet"`
+	PriceID string `form:"price_id"`
+	Wallet  string `form:"wallet"`
 }
 
 type SupportedTokensResponse struct {
 	Tokens []TokenInfo `json:"tokens"`
-}
-
-type SolanaRuntimeConfigResponse struct {
-	Network         string      `json:"network"`
-	Chain           string      `json:"chain"`
-	RPCURL          string      `json:"rpcUrl,omitempty"`
-	ExplorerCluster string      `json:"explorerCluster,omitempty"`
-	PreferredToken  string      `json:"preferredToken"`
-	Tokens          []TokenInfo `json:"tokens"`
-	Features        struct {
-		SolanaPay                       bool `json:"solanaPay"`
-		RecurringSubscriptions          bool `json:"recurringSubscriptions"`
-		SolanaPayRecurringSubscriptions bool `json:"solanaPayRecurringSubscriptions"`
-	} `json:"features"`
 }
 
 // TokenInfo is one Solana token the merchant accepts. Price is the token's
@@ -189,8 +176,6 @@ func GetSupportedTokens(r *httprequest.Request) {
 
 	if query.PriceID != "" {
 		priceAmount, priceCurrency, quoteError = resolvePriceFromID(ctx, r, query.PriceID)
-	} else if query.CheckoutSessionID != "" {
-		priceAmount, priceCurrency, quoteError = resolvePriceFromSession(ctx, r, query.CheckoutSessionID)
 	}
 
 	var balances map[string]uint64
@@ -248,45 +233,6 @@ func GetSupportedTokens(r *httprequest.Request) {
 	}
 
 	r.SuccessJSON(SupportedTokensResponse{Tokens: tokens})
-}
-
-func GetSolanaConfig(r *httprequest.Request) {
-	cfg := r.State.Config
-	if cfg == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
-		return
-	}
-	solanaConf, err := effectiveSolanaRailConfig(r)
-	if err != nil {
-		r.InternalError("Solana configuration unavailable", err)
-		return
-	}
-	if solanaConf == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "Solana configuration missing")
-		return
-	}
-
-	network := normalizeSolanaNetwork(solanaConf.Network)
-	tokens := acceptedSolanaTokens(r, solanaConf)
-
-	resp := SolanaRuntimeConfigResponse{
-		Network: network,
-		Chain:   "solana:" + network,
-		// RPCURL is intentionally empty (#352): there is no rpc_endpoint knob
-		// anymore, and the server-side Helius key must never reach a browser.
-		// Wallets/frontends bring their own RPC.
-		RPCURL:          "",
-		ExplorerCluster: explorerCluster(network),
-		PreferredToken:  solanatokens.PreferredStablecoin,
-		Tokens:          tokens,
-	}
-	resp.Features.SolanaPay = true
-	resp.Features.RecurringSubscriptions = true
-	// Always supported: rebillability is a property of the PRICE (catalog
-	// auto_renew), never merchant config (v2 transaction system).
-	resp.Features.SolanaPayRecurringSubscriptions = true
-
-	r.SuccessJSON(resp)
 }
 
 // acceptedSolanaTokens lists exactly the tokens the merchant accepts (or#881:
@@ -353,15 +299,6 @@ func normalizeSolanaNetwork(network string) string {
 	}
 }
 
-func explorerCluster(network string) string {
-	switch strings.ToLower(strings.TrimSpace(network)) {
-	case "devnet", "testnet":
-		return strings.ToLower(strings.TrimSpace(network))
-	default:
-		return ""
-	}
-}
-
 func normalizeTokenMap(tokens map[string]config.TokenConfig) map[string]config.TokenConfig {
 	normalized := make(map[string]config.TokenConfig, len(tokens))
 	for symbol, token := range tokens {
@@ -391,30 +328,6 @@ func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr 
 	}
 
 	return price.Amount, price.Currency, ""
-}
-
-func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessionIDStr string) (int64, string, string) {
-	if r.State.CheckoutSessionService == nil {
-		return 0, "", "checkout session service unavailable"
-	}
-
-	typedSessionID, err := billing.ParseCheckoutSessionID(sessionIDStr)
-	if err != nil || typedSessionID.IsZero() {
-		return 0, "", fmt.Sprintf("invalid checkout_session_id: %v", err)
-	}
-	sessionID := typedSessionID.UUID()
-
-	user := r.GetUser()
-	if user == nil {
-		return 0, "", "authentication required for checkout_session_id"
-	}
-
-	session, err := r.State.CheckoutSessionService.GetSession(ctx, sessionID, user)
-	if err != nil {
-		return 0, "", fmt.Sprintf("session not found: %v", err)
-	}
-
-	return resolvePriceFromID(ctx, r, session.PriceID.String())
 }
 
 // merchantSolanaRPC arms the ctx merchant's Solana RPC client through the

@@ -95,11 +95,11 @@ SELECT count(*) FROM billing.rail_customer_accounts WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsRailCustomers :exec
 DELETE FROM billing.rail_customer_accounts WHERE merchant_id = $1;
 
--- name: CountMerchantRowsCheckoutSessions :one
-SELECT count(*) FROM billing.checkout_sessions WHERE merchant_id = $1;
+-- name: CountMerchantRowsCheckoutAttempts :one
+SELECT count(*) FROM billing.checkout_attempts WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsCheckoutSessions :exec
-DELETE FROM billing.checkout_sessions WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsCheckoutAttempts :exec
+DELETE FROM billing.checkout_attempts WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsExternalProviderMutationLogs :one
 SELECT count(*) FROM billing.rail_mutation_logs WHERE merchant_id = $1;

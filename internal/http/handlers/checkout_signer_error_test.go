@@ -16,11 +16,11 @@ import (
 // failure of the session.
 func TestCheckoutSignerUnavailableIs503(t *testing.T) {
 	for _, err := range []error{
-		fmt.Errorf("%w: %w", checkout.ErrCheckoutSessionValidation, vault.ErrSignerUnapproved),
-		fmt.Errorf("%w: %w", checkout.ErrCheckoutSessionValidation, vault.ErrNotAuthenticated),
+		fmt.Errorf("%w: %w", checkout.ErrCheckoutAttemptValidation, vault.ErrSignerUnapproved),
+		fmt.Errorf("%w: %w", checkout.ErrCheckoutAttemptValidation, vault.ErrNotAuthenticated),
 	} {
 		r, rec := newTestRequest(http.MethodPost, "/v1/checkout", nil, nil)
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		require.Equal(t, http.StatusServiceUnavailable, rec.Code, err.Error())
 	}
 }

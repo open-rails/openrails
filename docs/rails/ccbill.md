@@ -81,10 +81,9 @@ billed amounts against the catalog (2% tolerance) and reject a
 ### Checkout flow
 
 CCBill is redirect-only and **subscription-only** (one-time purchases are
-rejected). `POST /v1/checkout` (or `/v1/me/checkout`) with
-`payment.rail: "ccbill"` plus a canonical `name_on_card`, `zip`, and ISO-3166
-alpha-2 `country` returns
-`requires_action` with a redirect URL:
+rejected). Paying a checkout session's CCBill option with a canonical
+`name_on_card`, `zip`, and ISO-3166 alpha-2 `country` returns
+`requires_action` with a `redirect_to_url` next action:
 
 ```
 https://api.ccbill.com/wap-frontflex/flexforms/{flex_id}?clientAccnum=…&clientSubacc=…&formName=…&username=…&email=…&reservationId=…&signature=…

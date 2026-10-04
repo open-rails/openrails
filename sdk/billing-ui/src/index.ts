@@ -33,12 +33,10 @@ export {
   canSavePaymentMethod,
   cardSetupDriver,
   checkoutPsps,
-  checkoutRails,
   isCardRail,
   pspConfigSchema,
   savedMethodsFor,
   type CardSetupDriver,
-  type CheckoutRailOffer,
   type PspConfig,
 } from "./psp"
 export {
@@ -74,11 +72,7 @@ export { CheckoutFrame, type CheckoutFrameProps } from "./checkout-frame"
 export type { CheckoutFrameTheme } from "./frame"
 export { CardBrandPlate } from "./components/card-brands"
 export { resolveCardBrand, type CardBrand } from "./lib/card-brands"
-export {
-  createHttpSource,
-  CheckoutSourceError,
-  type CheckoutSource,
-} from "./source"
+export type { CheckoutSource } from "./source"
 export { createFixtureSource, fixtureSession } from "./fixtures"
 export { browserCountry, initialCountry } from "./lib/billing"
 export {
@@ -100,8 +94,9 @@ export type {
   CheckoutPlan,
   CheckoutSession,
   CheckoutSessionStatus,
+  NextAction,
   PaymentFailure,
-  PaymentRailOption,
+  PaymentOption,
   PayRequest,
   PayResult,
   SavedPaymentMethod,
@@ -112,10 +107,11 @@ export {
   checkoutPlanSchema,
   checkoutSessionSchema,
   checkoutSessionStatusSchema,
+  nextActionSchema,
   paymentFailureSchema,
   payRequestSchema,
   payResultSchema,
-  paymentRailOptionSchema,
+  paymentOptionSchema,
   savedPaymentMethodSchema,
   unitDecimalsSchema,
 } from "./types"

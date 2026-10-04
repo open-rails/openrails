@@ -102,7 +102,7 @@ func hostedErrorCode(body map[string]any) string {
 // mint is the signed-in customer starting checkout on their app.
 func (c *customer) mint(body map[string]any) map[string]any {
 	c.w.t.Helper()
-	status, out := c.call(http.MethodPost, "/checkout/sessions", "", body)
+	status, out := c.call(http.MethodPost, "/checkout-sessions", "", body)
 	require.Equal(c.w.t, http.StatusCreated, status, "%v", out)
 	require.True(c.w.t, strings.HasPrefix(out["id"].(string), "ocs_"), "%v", out)
 	require.Len(c.w.t, out["id"], len("ocs_")+64)
@@ -115,6 +115,21 @@ type hostedSession struct {
 	id string
 }
 
+// session is the signed-in customer's own session, as the page drives it.
+func (c *customer) session(body map[string]any) hostedSession {
+	c.w.t.Helper()
+	return hostedSession{w: c.w, id: c.mint(body)["id"].(string)}
+}
+
+// handOver is the merchant handing a purchase to its customer: a session
+// minted server-side through the Client.
+func (w *world) handOver(c *customer, price billing.PriceID) hostedSession {
+	w.t.Helper()
+	link, err := w.client[remote].CreateCheckoutSession(w.t.Context(), billing.CreateCheckoutSessionRequest{Customer: c.identity(), PriceID: price})
+	require.NoError(w.t, err)
+	return hostedSession{w: w, id: link.ID}
+}
+
 func (s hostedSession) read() map[string]any {
 	s.w.t.Helper()
 	status, doc := s.w.guest(http.MethodGet, "/v1/checkout-sessions/"+s.id, nil)
@@ -125,10 +140,9 @@ func (s hostedSession) read() map[string]any {
 // option is the session's option handle for rail.
 func (s hostedSession) option(rail string) string {
 	s.w.t.Helper()
-	for _, raw := range s.read()["rails"].([]any) {
+	for _, raw := range s.read()["options"].([]any) {
 		if option := raw.(map[string]any); option["rail"] == rail {
-			require.NotContains(s.w.t, option, "selector", "the PSP binding stays on the server")
-			require.NotContains(s.w.t, option, "psp_id")
+			require.NotContains(s.w.t, option, "selector", "the engine selector stays on the server")
 			return option["id"].(string)
 		}
 	}
@@ -151,7 +165,7 @@ func (s hostedSession) payCard(c card) (int, map[string]any) {
 func (s hostedSession) attempt() int {
 	s.w.t.Helper()
 	var n int
-	require.NoError(s.w.t, s.w.pool.QueryRow(s.w.t.Context(), s.w.q(`SELECT attempt FROM billing.hosted_checkout_sessions WHERE id_hash = sha256($1::bytea)`), []byte(s.id)).Scan(&n))
+	require.NoError(s.w.t, s.w.pool.QueryRow(s.w.t.Context(), s.w.q(`SELECT attempt FROM billing.checkout_sessions WHERE id_hash = sha256($1::bytea)`), []byte(s.id)).Scan(&n))
 	return n
 }
 
@@ -249,7 +263,7 @@ func TestHostedCheckoutAcrossHosts(t *testing.T) {
 
 	// Only the hash is stored.
 	var row string
-	require.NoError(t, pay.pool.QueryRow(t.Context(), pay.q(`SELECT row_to_json(s)::text FROM billing.hosted_checkout_sessions s`)).Scan(&row))
+	require.NoError(t, pay.pool.QueryRow(t.Context(), pay.q(`SELECT row_to_json(s)::text FROM billing.checkout_sessions s`)).Scan(&row))
 	require.NotContains(t, row, session.id)
 	require.NotContains(t, row, session.id[len("ocs_"):])
 	require.Empty(t, pay.nmi.Unexpected())
@@ -293,7 +307,7 @@ func TestHostedCheckoutDeclineThenRetry(t *testing.T) {
 	// The last attempt ends the session instead of advancing.
 	buyer = app.newCustomer()
 	last := hostedSession{w: pay, id: buyer.mint(map[string]any{"price_id": price.ID})["id"].(string)}
-	_, err := pay.pool.Exec(t.Context(), pay.q(`UPDATE billing.hosted_checkout_sessions SET attempt = 9 WHERE id_hash = sha256($1::bytea)`), []byte(last.id))
+	_, err := pay.pool.Exec(t.Context(), pay.q(`UPDATE billing.checkout_sessions SET attempt = 9 WHERE id_hash = sha256($1::bytea)`), []byte(last.id))
 	require.NoError(t, err)
 	status, over := last.payCard(card{Brand: "visa", Last4: "0002", Decline: "202"})
 	require.Equal(t, http.StatusOK, status, "%v", over)
@@ -346,7 +360,7 @@ func TestHostedCheckoutExpiryAndUnknownIDs(t *testing.T) {
 	require.NoError(t, err)
 	pay.waitJob(res.Job.ID)
 	var rows int
-	require.NoError(t, pay.pool.QueryRow(t.Context(), pay.q(`SELECT count(*) FROM billing.hosted_checkout_sessions`)).Scan(&rows))
+	require.NoError(t, pay.pool.QueryRow(t.Context(), pay.q(`SELECT count(*) FROM billing.checkout_sessions`)).Scan(&rows))
 	require.Equal(t, 1, rows, "the sweep deletes only sessions past their window")
 	require.Equal(t, "created", live.read()["status"])
 }
@@ -372,10 +386,10 @@ func TestHostedCheckoutEmbedOrigins(t *testing.T) {
 
 	// The app also answers on an origin the payment host does not list.
 	unlisted := hostedSession{w: pay, id: buyer.mint(map[string]any{"price_id": price.ID, "success_url": hostedOtherOrigin + "/welcome"})["id"].(string)}
-	require.NotContains(t, unlisted.read(), "embed_origin")
+	require.Nil(t, unlisted.read()["embed_origin"])
 
 	// A return URL is one of the app's own origins.
-	status, out := buyer.call(http.MethodPost, "/checkout/sessions", "", map[string]any{"price_id": price.ID, "success_url": "https://elsewhere.example/welcome"})
+	status, out := buyer.call(http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": price.ID, "success_url": "https://elsewhere.example/welcome"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 }
 
@@ -384,8 +398,8 @@ func TestHostedCheckoutAccountState(t *testing.T) {
 	t.Parallel()
 	var banned sync.Map
 	app, pay := hostedHosts(t, func(d *openrails.Deps) {
-		d.CheckoutCustomer = func(_ context.Context, id string) (billing.CheckoutCustomerIdentity, error) {
-			if _, gone := banned.Load(id); gone {
+		d.CheckoutCustomer = func(_ context.Context, id billing.CustomerID) (billing.CheckoutCustomerIdentity, error) {
+			if _, gone := banned.Load(id.String()); gone {
 				return billing.CheckoutCustomerIdentity{}, openrails.ErrForbidden
 			}
 			return billing.CheckoutCustomerIdentity{ID: id, VerifiedEmail: "buyer@example.test", Username: "buyer"}, nil
@@ -402,7 +416,7 @@ func TestHostedCheckoutAccountState(t *testing.T) {
 	require.Equal(t, "checkout_session_unavailable", hostedErrorCode(out))
 	status, out = session.pay(map[string]any{"option_id": option, "payment_token": pay.nmi.Tokenize(visa), "name_on_card": "Hosted Payer", "country": "US", "zip": "10001"})
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	status, out = buyer.call(http.MethodPost, "/checkout/sessions", "", map[string]any{"price_id": price.ID})
+	status, out = buyer.call(http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": price.ID})
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
 	require.Empty(t, pay.nmi.ledger(""))
 
@@ -421,11 +435,11 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 	for _, tp := range []topology{embedded, remote} {
 		buyer := app.newCustomer()
 		method := buyer.saveCard("nmi", visa)
-		link, err := app.client[tp].CreateHostedCheckoutSession(t.Context(), billing.CreateHostedCheckoutSessionRequest{
-			Customer: billing.CheckoutCustomerIdentity{ID: buyer.id}, PriceKey: price.Key,
+		link, err := app.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceKey: price.Key,
 		})
 		require.NoError(t, err, tp)
-		require.Equal(t, hostedPageURL+"#"+link.ID, link.URL)
+		require.Equal(t, hostedPageURL+"#"+link.ID, *link.URL)
 		session := hostedSession{w: pay, id: link.ID}
 
 		saved := session.read()["saved_methods"].([]any)
@@ -445,8 +459,8 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 		require.True(t, buyer.entitled("content:members"))
 	}
 
-	_, err := app.client[embedded].CreateHostedCheckoutSession(t.Context(), billing.CreateHostedCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: uuid.NewString()}, PriceKey: "no-such-price",
+	_, err := app.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString())}, PriceKey: "no-such-price",
 	})
 	require.ErrorIs(t, err, billing.ErrInvalid)
 }
@@ -466,10 +480,10 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	require.NoError(t, err)
 
 	minted := buyer.mint(map[string]any{"price_key": price.Key})
-	require.NotContains(t, minted, "url", "no payment page: the app renders <Checkout> itself")
+	require.Nil(t, minted["url"], "no payment page: the app renders <Checkout> itself")
 	session := hostedSession{w: w, id: minted["id"].(string)}
 	doc := session.read()
-	require.NotContains(t, doc, "embed_origin")
+	require.Nil(t, doc["embed_origin"])
 	require.Equal(t, false, doc["plan"].(map[string]any)["automatically_renews"])
 
 	status, out := session.payCard(visa)
@@ -480,7 +494,7 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	require.Len(t, w.nmi.ledger(""), 1)
 
 	// Minting needs the signed-in customer.
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/me/checkout/sessions", strings.NewReader(`{"price_key":"`+price.Key+`"}`))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/me/checkout-sessions", strings.NewReader(`{"price_key":"`+price.Key+`"}`))
 	require.NoError(t, err)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
@@ -507,10 +521,10 @@ func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	session := hostedSession{w: w, id: buyer.mint(map[string]any{"price_id": price.ID})["id"].(string)}
 
 	var option string
-	for _, raw := range session.read()["rails"].([]any) {
+	for _, raw := range session.read()["options"].([]any) {
 		if rail := raw.(map[string]any); rail["rail"] == "nmi" {
 			require.Equal(t, "card", rail["driver"], "%v", rail)
-			require.NotContains(t, rail, "public_config", "no gateway key: the page loads no gateway script")
+			require.Nil(t, rail["public_config"], "no gateway key: the page loads no gateway script")
 			option = rail["id"].(string)
 		}
 	}
@@ -545,4 +559,48 @@ func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	saved := session.read()["saved_methods"].([]any)
 	require.Len(t, saved, 1, "the vaulted card is offered on the card option")
 	require.Equal(t, option, saved[0].(map[string]any)["option_id"])
+}
+
+// A Stripe merchant with Elements sells a subscription on the session: the
+// buyer saves a card in Stripe's own fields (the app's billing client) and
+// the session pays with it; an issuer challenge is the session's operation to
+// authenticate.
+func TestCheckoutSessionPaysWithAStripeElementsCard(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.declare = func(psps map[string]openrails.PSPConfig) {
+		account := psps["stripe"]["stripe"]
+		account.Settings = map[string]any{"publishable_key": "pk_test_e2e"}
+		psps["stripe"]["stripe"] = account
+	}
+	w.start()
+	price := w.membership("content:members", 9_990_000)
+	option := w.options(price.Key)["stripe"]
+	require.Equal(t, "stripe_elements", option.Driver)
+	require.Equal(t, "pk_test_e2e", option.PublicConfig["publishable_key"])
+
+	c := w.newCustomer()
+	method := c.saveCard("stripe", visa)
+	session := w.handOver(c, price.ID)
+	saved := session.read()["saved_methods"].([]any)
+	require.Len(t, saved, 1, "%v", saved)
+	require.Equal(t, method, saved[0].(map[string]any)["id"])
+	status, out := session.pay(map[string]any{"option_id": session.option("stripe"), "payment_token": "tok_x"})
+	require.Equal(t, http.StatusUnprocessableEntity, status, "the page enters no Stripe card itself: %v", out)
+	status, out = session.pay(map[string]any{"option_id": session.option("stripe"), "payment_method_id": method})
+	require.Equal(t, http.StatusOK, status, "%v", out)
+	require.Equal(t, "succeeded", out["status"], "%v", out)
+	w.settle()
+	require.True(t, c.entitled("content:members"))
+
+	challenged := w.newCustomer()
+	challenge := challenged.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
+	pending := w.handOver(challenged, price.ID)
+	status, out = pending.pay(map[string]any{"option_id": pending.option("stripe"), "payment_method_id": challenge})
+	require.Equal(t, http.StatusOK, status, "%v", out)
+	require.Equal(t, "requires_action", out["status"], "%v", out)
+	operation := out["operation"].(map[string]any)
+	require.NotEmpty(t, operation["id"])
+	require.Equal(t, operation["id"], pending.read()["operation"].(map[string]any)["id"], "a reload resumes the authentication")
+	require.False(t, challenged.entitled("content:members"))
 }

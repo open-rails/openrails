@@ -8,7 +8,7 @@
 SELECT q.mid AS merchant_id
 FROM (
     (SELECT DISTINCT cs.merchant_id AS mid
-       FROM billing.checkout_sessions cs
+       FROM billing.checkout_attempts cs
       WHERE (sqlc.narg(after)::uuid IS NULL OR cs.merchant_id > sqlc.narg(after)::uuid)
         AND cs.expires_at IS NOT NULL AND cs.expires_at < sqlc.arg(now)::timestamptz
         AND cs.deleted_at IS NULL

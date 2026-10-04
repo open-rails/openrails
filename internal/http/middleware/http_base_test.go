@@ -32,7 +32,7 @@ func TestBodyLimitHTTP(t *testing.T) {
 		{"/billing/v1/webhooks/stripe", "larger-than-eight", true, 413},
 		{"/v1/action", `{}         `, false, 413},
 		{"/v1/action", `{}         `, true, 413},
-		{"/v1/checkout", "12345678", true, 200},
+		{"/v1/me/checkout-sessions", "12345678", true, 200},
 	} {
 		var got []byte
 		calls := 0

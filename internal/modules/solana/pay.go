@@ -126,7 +126,7 @@ func (s *SolanaPayService) Clock() clockwork.Clock {
 // It first checks purchase eligibility to prevent duplicate purchases.
 func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*PayResult, error) {
 	if sessionID == nil || *sessionID == uuid.Nil {
-		return nil, fmt.Errorf("checkout session id is required for solana payments")
+		return nil, fmt.Errorf("checkout attempt id is required for solana payments")
 	}
 	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
 	if tokenSymbol == "" {
@@ -235,7 +235,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	}
 
 	// Build Solana Pay Transfer Request URL. The memo field (#713) stamps the
-	// checkout session id on the wallet-built tx: per the Solana Pay spec the
+	// checkout attempt id on the wallet-built tx: per the Solana Pay spec the
 	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
 	// Discovery hint, never money truth.
 	url := s.buildTransferRequestURL(ctx, recipient, requested, decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))

@@ -49,7 +49,7 @@ type CCBillWebhookService struct {
 	ProfileRepo                  identitydir.UsernameResolver
 	PaymentService               *payments.PaymentService
 	DeduplicationService         *DeduplicationService
-	CheckoutSessionService       webhookCheckoutSessionStore
+	CheckoutAttemptService       webhookCheckoutAttemptStore
 	MoneyService                 *money.MoneyService
 }
 
@@ -586,17 +586,17 @@ func ccbillEventPurchasedAt(ts string) *time.Time {
 	return &p
 }
 
-func (s *CCBillWebhookService) findCCBillCheckoutSession(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutSession, error) {
-	if s.CheckoutSessionService == nil {
+func (s *CCBillWebhookService) findCCBillCheckoutAttempt(ctx context.Context, reservationID string, userID string, priceID uuid.UUID) (*models.CheckoutAttempt, error) {
+	if s.CheckoutAttemptService == nil {
 		return nil, sql.ErrNoRows
 	}
 	if strings.TrimSpace(reservationID) != "" {
-		session, err := s.CheckoutSessionService.FindOpenCCBillReservation(ctx, reservationID, userID, priceID)
+		session, err := s.CheckoutAttemptService.FindOpenCCBillReservation(ctx, reservationID, userID, priceID)
 		if err == nil || !db.IsNotFound(err) {
 			return session, err
 		}
 	}
-	return s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailCCBill)
+	return s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailCCBill)
 }
 
 func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
@@ -663,8 +663,8 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 			}
 		}
 
-		if s.CheckoutSessionService != nil && price != nil {
-			session, err := s.findCCBillCheckoutSession(ctx, data.ReservationID, userID, price.ID)
+		if s.CheckoutAttemptService != nil && price != nil {
+			session, err := s.findCCBillCheckoutAttempt(ctx, data.ReservationID, userID, price.ID)
 			if err != nil {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 					"user_id":        userID,
@@ -676,9 +676,9 @@ func (s *CCBillWebhookService) handleNewSaleFailure(ctx context.Context) error {
 				if message == "" {
 					message = "payment failed"
 				}
-				if err := s.CheckoutSessionService.MarkFailed(ctx, session.ID, message, failureCode); err != nil {
+				if err := s.CheckoutAttemptService.MarkFailed(ctx, session.ID, message, failureCode); err != nil {
 					log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-						"checkout_session_id": session.ID,
+						"checkout_attempt_id": session.ID,
 						"transaction_id":      transactionID,
 					}).Warn("failed to update checkout session from CCBill failure")
 				}

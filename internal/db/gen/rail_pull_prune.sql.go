@@ -475,7 +475,7 @@ const paymentHasProtectedDependents = `-- name: PaymentHasProtectedDependents :o
 SELECT
   EXISTS(SELECT 1 FROM billing.grants WHERE merchant_id = $1::uuid AND payment_id = $2::uuid)
   OR EXISTS(SELECT 1 FROM billing.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = $2::uuid AND r.deleted_at IS NULL)
-  OR EXISTS(SELECT 1 FROM billing.checkout_sessions cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
+  OR EXISTS(SELECT 1 FROM billing.checkout_attempts cs WHERE cs.merchant_id = $1::uuid AND cs.payment_id = $2::uuid AND cs.deleted_at IS NULL)
   AS protected
 `
 
@@ -485,7 +485,7 @@ type PaymentHasProtectedDependentsParams struct {
 }
 
 // A payment is unsafe to remove if it feeds the #514 grant ledger, backs a
-// refund, an admin grant, or a checkout session. Such rows are retracted through
+// refund, an admin grant, or a checkout attempt. Such rows are retracted through
 // convergence (grant revoke), never pruned.
 func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg PaymentHasProtectedDependentsParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, paymentHasProtectedDependents, arg.MerchantID, arg.PaymentID)
@@ -494,9 +494,9 @@ func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg Payment
 	return protected, err
 }
 
-const pruneSoftDeleteCheckoutSessionsBySubscription = `-- name: PruneSoftDeleteCheckoutSessionsBySubscription :execrows
+const pruneSoftDeleteCheckoutAttemptsBySubscription = `-- name: PruneSoftDeleteCheckoutAttemptsBySubscription :execrows
 
-UPDATE billing.checkout_sessions
+UPDATE billing.checkout_attempts
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
@@ -505,7 +505,7 @@ WHERE merchant_id = $3::uuid
   AND deleted_at IS NULL
 `
 
-type PruneSoftDeleteCheckoutSessionsBySubscriptionParams struct {
+type PruneSoftDeleteCheckoutAttemptsBySubscriptionParams struct {
 	Now            time.Time
 	RunID          uuid.UUID
 	MerchantID     uuid.UUID
@@ -513,8 +513,8 @@ type PruneSoftDeleteCheckoutSessionsBySubscriptionParams struct {
 }
 
 // --- or#858 soft delete ------------------------------------------------------
-func (q *Queries) PruneSoftDeleteCheckoutSessionsBySubscription(ctx context.Context, arg PruneSoftDeleteCheckoutSessionsBySubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneSoftDeleteCheckoutSessionsBySubscription,
+func (q *Queries) PruneSoftDeleteCheckoutAttemptsBySubscription(ctx context.Context, arg PruneSoftDeleteCheckoutAttemptsBySubscriptionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeleteCheckoutAttemptsBySubscription,
 		arg.Now,
 		arg.RunID,
 		arg.MerchantID,
@@ -618,20 +618,20 @@ func (q *Queries) PruneSoftDeleteSubscriptionByID(ctx context.Context, arg Prune
 	return result.RowsAffected(), nil
 }
 
-const restoreCheckoutSessionsByDestructiveRun = `-- name: RestoreCheckoutSessionsByDestructiveRun :execrows
-UPDATE billing.checkout_sessions
+const restoreCheckoutAttemptsByDestructiveRun = `-- name: RestoreCheckoutAttemptsByDestructiveRun :execrows
+UPDATE billing.checkout_attempts
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
 `
 
-type RestoreCheckoutSessionsByDestructiveRunParams struct {
+type RestoreCheckoutAttemptsByDestructiveRunParams struct {
 	Now        time.Time
 	MerchantID uuid.UUID
 	RunID      uuid.UUID
 }
 
-func (q *Queries) RestoreCheckoutSessionsByDestructiveRun(ctx context.Context, arg RestoreCheckoutSessionsByDestructiveRunParams) (int64, error) {
-	result, err := q.db.Exec(ctx, restoreCheckoutSessionsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
+func (q *Queries) RestoreCheckoutAttemptsByDestructiveRun(ctx context.Context, arg RestoreCheckoutAttemptsByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreCheckoutAttemptsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
 	if err != nil {
 		return 0, err
 	}

@@ -7,12 +7,12 @@ import { BillingProvider } from "./react/provider"
 import { CheckoutModal } from "./modal"
 import { createFixtureSource, fixtureSession } from "./fixtures"
 import type { CheckoutSource } from "./source"
-import type { PaymentRailOption } from "./types"
+import type { PaymentOption } from "./types"
 
 function checkoutOption(
   rail: "nmi" | "stripe" | "ccbill" | "solana",
   publicConfig?: Record<string, string>
-): PaymentRailOption {
+): PaymentOption {
   const driver =
     rail === "nmi"
       ? "collect_js"
@@ -49,7 +49,7 @@ function ccbillSource(pay: CheckoutSource["pay"]): CheckoutSource {
   return {
     async getSession() {
       return fixtureSession({
-        rails: [checkoutOption("ccbill")],
+        options: [checkoutOption("ccbill")],
       })
     },
     pay,
@@ -95,7 +95,7 @@ describe("Checkout", () => {
             ],
             tax: "12345",
             due_today: undefined,
-            rails: [checkoutOption("nmi")],
+            options: [checkoutOption("nmi")],
             saved_methods: [],
           },
         })}
@@ -122,7 +122,7 @@ describe("Checkout", () => {
               { label: "A", amount: "9223372036854775807" },
               { label: "B", amount: "1" },
             ],
-            rails: [checkoutOption("nmi")],
+            options: [checkoutOption("nmi")],
             saved_methods: [],
           },
         })}
@@ -140,7 +140,7 @@ describe("Checkout", () => {
       <Checkout
         source={createFixtureSource({
           session: {
-            rails: [checkoutOption("nmi")],
+            options: [checkoutOption("nmi")],
             saved_methods: [],
           },
         })}
@@ -186,7 +186,7 @@ describe("Checkout", () => {
       <Checkout
         source={createFixtureSource({
           session: {
-            rails: [checkoutOption("nmi"), checkoutOption("ccbill")],
+            options: [checkoutOption("nmi"), checkoutOption("ccbill")],
             saved_methods: [],
           },
         })}
@@ -241,7 +241,7 @@ describe("Checkout", () => {
           session: {
             status: "blocked",
             failure_message: "This purchase is not available for this account.",
-            rails: [],
+            options: [],
           },
         })}
       />
@@ -260,7 +260,7 @@ describe("Checkout", () => {
       <Checkout
         source={createFixtureSource({
           session: {
-            rails: [
+            options: [
               {
                 id: "option_bad",
                 rail: "nmi",
@@ -373,7 +373,7 @@ describe("Checkout", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [
+          options: [
             checkoutOption("nmi", {
               tokenization_key: "preview_tokenization_key",
               tokenization_url: "preview://collect",
@@ -420,7 +420,7 @@ describe("Checkout", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [
+          options: [
             checkoutOption("nmi", {
               tokenization_key: "preview_tokenization_key",
               tokenization_url: "preview://collect",
@@ -462,7 +462,7 @@ describe("Checkout", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [
+          options: [
             checkoutOption("nmi", {
               tokenization_key: "preview_tokenization_key",
               tokenization_url: "preview://collect",
@@ -515,7 +515,7 @@ describe("Checkout", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [
+          options: [
             checkoutOption("ccbill"),
             checkoutOption("solana", {
               token_symbol: "usdc",
@@ -539,7 +539,7 @@ describe("Checkout", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [checkoutOption("ccbill"), checkoutOption("solana")],
+          options: [checkoutOption("ccbill"), checkoutOption("solana")],
         })
       },
       pay: vi.fn(),
@@ -560,12 +560,12 @@ describe("Checkout", () => {
       "solana:recipient?amount=19.99&spl-token=mint&reference=reference"
     const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
       status: "requires_action",
-      transaction_url: transactionURL,
+      next_action: { type: "solana_pay", url: transactionURL },
     })
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [checkoutOption("solana", { token_symbol: "usd1" })],
+          options: [checkoutOption("solana", { token_symbol: "usd1" })],
         })
       },
       pay,
@@ -606,8 +606,8 @@ describe("Checkout", () => {
       async getSession() {
         return fixtureSession({
           status: "requires_action",
-          transaction_url: transactionURL,
-          rails: [checkoutOption("solana", { token_symbol: "USDC" })],
+          next_action: { type: "solana_pay", url: transactionURL },
+          options: [checkoutOption("solana", { token_symbol: "USDC" })],
         })
       },
       pay,
@@ -629,12 +629,12 @@ describe("Checkout", () => {
     const transactionURL =
       "solana:recipient?amount=5.00&spl-token=mint&reference=reference"
     const created = fixtureSession({
-      rails: [checkoutOption("solana", { token_symbol: "USDC" })],
+      options: [checkoutOption("solana", { token_symbol: "USDC" })],
     })
     const succeeded = fixtureSession({
       status: "succeeded",
       payment_id: "pay_solana",
-      rails: [],
+      options: [],
     })
     const getSession = vi
       .fn<CheckoutSource["getSession"]>()
@@ -642,7 +642,7 @@ describe("Checkout", () => {
       .mockResolvedValueOnce(succeeded)
     const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
       status: "requires_action",
-      transaction_url: transactionURL,
+      next_action: { type: "solana_pay", url: transactionURL },
     })
     const onComplete = vi.fn()
 
@@ -750,7 +750,7 @@ describe("CheckoutModal", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [
+          options: [
             checkoutOption("stripe"),
             checkoutOption("nmi", {
               tokenization_key: "public_test_key",
@@ -823,7 +823,7 @@ describe("CheckoutModal", () => {
     const source: CheckoutSource = {
       async getSession() {
         return fixtureSession({
-          rails: [
+          options: [
             checkoutOption("nmi", {
               tokenization_key: "public_test_key",
               tokenization_url: "https://payments.example.test/collect.js",
@@ -867,7 +867,7 @@ describe("CheckoutModal", () => {
 
   it("uses settled copy in a modal instead of claiming it will redirect", async () => {
     const source = createFixtureSource({
-      session: { rails: [checkoutOption("stripe")] },
+      session: { options: [checkoutOption("stripe")] },
       payResult: { status: "succeeded" },
       payDelayMs: 1,
     })
@@ -889,7 +889,7 @@ describe("accepted processing", () => {
       .fn()
       .mockResolvedValueOnce(fixtureSession())
       .mockResolvedValueOnce(
-        fixtureSession({ status: "processing", expires_at: null })
+        fixtureSession({ status: "processing", expires_at: undefined })
       )
       .mockResolvedValue(
         fixtureSession({ status: "succeeded", payment_id: "pay_verified" })
@@ -986,7 +986,11 @@ describe("accepted processing", () => {
       getSession: vi
         .fn()
         .mockResolvedValueOnce(
-          fixtureSession({ status: "processing", rails: [], expires_at: null })
+          fixtureSession({
+            status: "processing",
+            options: [],
+            expires_at: undefined,
+          })
         )
         .mockResolvedValue(fixtureSession({ status: "failed" })),
       pay: vi.fn(),
@@ -1058,7 +1062,7 @@ describe("one card panel", () => {
           source={{
             getSession: async () =>
               fixtureSession({
-                rails: [{ ...nmiRail, psp_key: "nmi" }],
+                options: [{ ...nmiRail, psp_key: "nmi" }],
                 saved_methods: [],
               }),
             pay,
@@ -1118,7 +1122,7 @@ describe("one card panel", () => {
       <Checkout
         source={{
           getSession: async () => {
-            const session = fixtureSession({ rails: [nmiRail] })
+            const session = fixtureSession({ options: [nmiRail] })
             return {
               ...session,
               saved_methods: session.saved_methods?.map((method) => ({
@@ -1167,7 +1171,7 @@ describe("one card panel", () => {
       <Checkout
         source={{
           getSession: async () =>
-            fixtureSession({ rails: [nmiRail], saved_methods: [] }),
+            fixtureSession({ options: [nmiRail], saved_methods: [] }),
           pay,
         }}
       />
@@ -1190,7 +1194,7 @@ describe("one card panel", () => {
 // page renders plain card inputs, loads no gateway script and posts the card
 // to OpenRails.
 describe("server card entry", () => {
-  const cardRail: PaymentRailOption = {
+  const cardRail: PaymentOption = {
     id: "option_nmi",
     rail: "nmi",
     mode: "subscription",
@@ -1237,7 +1241,7 @@ describe("server card entry", () => {
         <Checkout
           source={{
             getSession: async () =>
-              fixtureSession({ rails: [cardRail], saved_methods: [] }),
+              fixtureSession({ options: [cardRail], saved_methods: [] }),
             pay,
           }}
         />
@@ -1281,7 +1285,7 @@ describe("server card entry", () => {
       <Checkout
         source={{
           getSession: async () =>
-            fixtureSession({ rails: [cardRail], saved_methods: [] }),
+            fixtureSession({ options: [cardRail], saved_methods: [] }),
           pay,
         }}
       />
@@ -1306,7 +1310,7 @@ describe("server card entry", () => {
       <Checkout
         source={{
           getSession: async () =>
-            fixtureSession({ rails: [cardRail], saved_methods: [] }),
+            fixtureSession({ options: [cardRail], saved_methods: [] }),
           pay,
         }}
       />
@@ -1333,7 +1337,7 @@ describe("server card entry", () => {
       <Checkout
         source={{
           getSession: async () =>
-            fixtureSession({ rails: [cardRail], saved_methods: [] }),
+            fixtureSession({ options: [cardRail], saved_methods: [] }),
           pay,
         }}
       />

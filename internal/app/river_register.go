@@ -212,7 +212,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		MoneyService:                 r.MoneyService,
 		NotificationService:          r.NotificationService,
 		RailCustomerService:          r.RailCustomerService,
-		CheckoutSessionService:       r.CheckoutSessionService,
+		CheckoutAttemptService:       r.CheckoutAttemptService,
 	}); err != nil {
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}

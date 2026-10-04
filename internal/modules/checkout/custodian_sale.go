@@ -231,9 +231,9 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		OriginReason:   "checkout one-time sale (custodian-held card)",
 	}
 	// Admitted under the session's lock, like the native sale (#1099).
-	if req.CheckoutSessionID != "" && s.DB != nil {
+	if req.CheckoutAttemptID != "" && s.DB != nil {
 		err = s.DB.MerchantTx(work, func(ctx context.Context, tx pgx.Tx) error {
-			if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutSessionID); err != nil {
+			if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutAttemptID); err != nil {
 				return err
 			}
 			_, err := intents.NewStore(s.DB.NewWithPgxTx(tx)).Enqueue(ctx, params)

@@ -15,15 +15,15 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-type CheckoutSessionRepo struct {
+type CheckoutAttemptRepo struct {
 	db *db.DB
 }
 
-func NewCheckoutSessionRepo(d *db.DB) *CheckoutSessionRepo {
-	return &CheckoutSessionRepo{db: d}
+func NewCheckoutAttemptRepo(d *db.DB) *CheckoutAttemptRepo {
+	return &CheckoutAttemptRepo{db: d}
 }
 
-func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte, err error) {
+func checkoutAttemptJSONB(s *models.CheckoutAttempt) (meta, fields, state []byte, err error) {
 	if meta, err = models.ToJSONB(s.Metadata); err != nil {
 		return nil, nil, nil, err
 	}
@@ -36,7 +36,7 @@ func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte
 	return meta, fields, state, nil
 }
 
-func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
+func (r *CheckoutAttemptRepo) Create(ctx context.Context, session *models.CheckoutAttempt) error {
 	if err := session.ValidateTerms(); err != nil {
 		return err
 	}
@@ -48,27 +48,27 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
 		return err
 	}
-	meta, fields, state, err := checkoutSessionJSONB(session)
+	meta, fields, state, err := checkoutAttemptJSONB(session)
 	if err != nil {
 		return err
 	}
 	var routingReason []byte
 	if session.RoutingReason != nil {
 		if routingReason, err = json.Marshal(session.RoutingReason); err != nil {
-			return fmt.Errorf("encode checkout session routing reason: %w", err)
+			return fmt.Errorf("encode checkout attempt routing reason: %w", err)
 		}
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	// or#893: checkout_sessions.psp_id is NOT NULL. The service refuses an
+	// or#893: checkout_attempts.psp_id is NOT NULL. The service refuses an
 	// unroutable rail before it builds a session; this is the repo's own guard
 	// so the failure names the reason rather than surfacing as a NOT NULL error.
 	if session.PspID == uuid.Nil {
-		return fmt.Errorf("create checkout session %s: %w", session.ID, db.ErrNoPSPInContext)
+		return fmt.Errorf("create checkout attempt %s: %w", session.ID, db.ErrNoPSPInContext)
 	}
-	rows, err := r.db.Gen(ctx).CreateCheckoutSession(ctx, gen.CreateCheckoutSessionParams{
+	rows, err := r.db.Gen(ctx).CreateCheckoutAttempt(ctx, gen.CreateCheckoutAttemptParams{
 		ID:             session.ID,
 		MerchantID:     tid.UUID(),
 		CustomerID:     session.CustomerID,
@@ -100,20 +100,20 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 	return nil
 }
 
-func (r *CheckoutSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CheckoutSession, error) {
+func (r *CheckoutAttemptRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CheckoutAttempt, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
-	row, err := r.db.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
+	row, err := r.db.Gen(ctx).GetCheckoutAttemptByID(ctx, gen.GetCheckoutAttemptByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
-	return models.CheckoutSessionFromGen(row)
+	return models.CheckoutAttemptFromGen(row)
 }
 
-func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.CheckoutSession) error {
+func (r *CheckoutAttemptRepo) Update(ctx context.Context, session *models.CheckoutAttempt) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
@@ -124,14 +124,14 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 	}
 	// Setup bindings and secret erasure have dedicated conditional writes.
 	// Generic checkout progress must not replace accepted capture authority.
-	if session.Mode == models.CheckoutSessionModePaymentMethod {
+	if session.Mode == models.CheckoutAttemptModePaymentMethod {
 		return fmt.Errorf("payment-method setup requires captured completion or expiry")
 	}
-	meta, fields, state, err := checkoutSessionJSONB(session)
+	meta, fields, state, err := checkoutAttemptJSONB(session)
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).UpdateCheckoutSession(ctx, gen.UpdateCheckoutSessionParams{MerchantID: queryMerchant.UUID(),
+	rows, err := r.db.Gen(ctx).UpdateCheckoutAttempt(ctx, gen.UpdateCheckoutAttemptParams{MerchantID: queryMerchant.UUID(),
 		ID:             session.ID,
 		CustomerID:     session.CustomerID,
 		PriceID:        session.PriceID,
@@ -160,20 +160,20 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 	return nil
 }
 
-func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, session *models.CheckoutSession, payer string, now time.Time) error {
+func (r *CheckoutAttemptRepo) BindSolanaTransactionRequest(ctx context.Context, session *models.CheckoutAttempt, payer string, now time.Time) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return queryScopeErr
 	}
 
 	if session == nil {
-		return errors.New("checkout session is nil")
+		return errors.New("checkout attempt is nil")
 	}
 	if session.Reference == nil || strings.TrimSpace(*session.Reference) == "" {
-		return errors.New("checkout session reference is required")
+		return errors.New("checkout attempt reference is required")
 	}
 	if session.RailState == nil {
-		return errors.New("checkout session rail state is required")
+		return errors.New("checkout attempt rail state is required")
 	}
 	ref := strings.TrimSpace(*session.Reference)
 	payer = strings.TrimSpace(payer)
@@ -188,7 +188,7 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).BindSolanaCheckoutSession(ctx, gen.BindSolanaCheckoutSessionParams{MerchantID: queryMerchant.UUID(),
+	rows, err := r.db.Gen(ctx).BindSolanaCheckoutAttempt(ctx, gen.BindSolanaCheckoutAttemptParams{MerchantID: queryMerchant.UUID(),
 		ID:        session.ID,
 		Reference: &ref,
 		RailState: state,
@@ -199,26 +199,26 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 		return err
 	}
 	if rows < 1 {
-		return fmt.Errorf("solana checkout session binding conflict")
+		return fmt.Errorf("solana checkout attempt binding conflict")
 	}
 	return nil
 }
 
-func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference string) (*models.CheckoutSession, error) {
+func (r *CheckoutAttemptRepo) GetByReference(ctx context.Context, reference string) (*models.CheckoutAttempt, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
 
 	ref := strings.TrimSpace(reference)
-	row, err := r.db.Gen(ctx).GetCheckoutSessionByReference(ctx, gen.GetCheckoutSessionByReferenceParams{MerchantID: queryMerchant.UUID(), Reference: &ref})
+	row, err := r.db.Gen(ctx).GetCheckoutAttemptByReference(ctx, gen.GetCheckoutAttemptByReferenceParams{MerchantID: queryMerchant.UUID(), Reference: &ref})
 	if err != nil {
 		return nil, err
 	}
-	return models.CheckoutSessionFromGen(row)
+	return models.CheckoutAttemptFromGen(row)
 }
 
-func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutSession, error) {
+func (r *CheckoutAttemptRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutAttempt, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
@@ -228,7 +228,7 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{MerchantID: queryMerchant.UUID(),
+	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutAttempt(ctx, gen.GetLatestOpenCheckoutAttemptParams{MerchantID: queryMerchant.UUID(),
 		CustomerID: tsid,
 		PriceID:    &priceID,
 		Rail:       string(rail),
@@ -237,5 +237,5 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	return models.CheckoutSessionFromGen(row)
+	return models.CheckoutAttemptFromGen(row)
 }

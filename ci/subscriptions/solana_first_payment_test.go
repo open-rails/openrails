@@ -36,7 +36,7 @@ type solanaShop struct {
 	fake     *solanafake.Node
 	merchant solanago.PrivateKey
 	mint     solanago.PublicKey
-	option   billing.CheckoutRailOption
+	option   billing.CheckoutOption
 	price    string
 	key      string
 }
@@ -83,7 +83,7 @@ func (s *solanaShop) buyer(t *testing.T, returning bool) *solanaBuyer {
 }
 
 type solanaCheckout struct {
-	id        string
+	id        billing.CheckoutAttemptID
 	reference solanago.PublicKey
 	expiresAt time.Time
 	// bundle is the prepared first payment: co-signed by the merchant, awaiting
@@ -94,13 +94,13 @@ type solanaCheckout struct {
 // checkout opens a wallet-connected subscribe checkout for b naming wallet.
 func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.PublicKey) *solanaCheckout {
 	t.Helper()
-	session, err := s.w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: b.id}, PriceID: s.price, IdempotencyKey: "sol-" + uuid.NewString(),
+	session, err := s.w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(b.id)}, PriceID: pid(s.price), IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{Rail: s.option.Selector, PSPID: s.option.PSPID, TokenSymbol: "DUSD", Wallet: wallet.String()},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 	require.NoError(t, err)
-	got := unwrap(b.must(http.MethodGet, "/checkout/"+session.ID, "", nil))
+	got := s.w.attempt(session.ID)
 	require.Equal(t, "requires_action", got["status"], "%v", got)
 	next := got["next_action"].(map[string]any)
 	require.Equal(t, "solana_sign_transactions", next["type"])
@@ -110,16 +110,19 @@ func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.Publ
 	require.NoError(t, err)
 	expires, err := time.Parse(time.RFC3339, got["expires_at"].(string))
 	require.NoError(t, err)
+	var reference string
+	require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT reference FROM billing.checkout_attempts WHERE id = $1`), session.ID.UUID()).Scan(&reference))
 	return &solanaCheckout{
 		id:        session.ID,
-		reference: solanago.MustPublicKeyFromBase58(got["payment"].(map[string]any)["reference"].(string)),
+		reference: solanago.MustPublicKeyFromBase58(reference),
 		expiresAt: expires,
 		bundle:    bundle,
 	}
 }
 
+// confirm is the merchant relaying the signature the buyer's wallet sent.
 func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (int, map[string]any) {
-	return b.call(http.MethodPost, "/checkout/"+c.id+"/confirm", "", map[string]any{"payment": map[string]string{"rail": "solana", "signature": signature}})
+	return b.w.confirmAttempt(c.id, signature)
 }
 
 // requireNothingGranted: no subscription, payment or entitlement, and the
@@ -131,7 +134,7 @@ func (s *solanaShop) requireNothingGranted(t *testing.T, b *solanaBuyer, c *sola
 	require.Empty(t, subs.Data)
 	require.Empty(t, s.w.payments(embedded, b.id))
 	require.False(t, b.entitled(s.key))
-	require.Equal(t, "requires_action", unwrap(b.must(http.MethodGet, "/checkout/"+c.id, "", nil))["status"])
+	require.Equal(t, "requires_action", s.w.attempt(c.id)["status"])
 }
 
 func (s *solanaShop) land(t *testing.T, tx *solanago.Transaction, at time.Time) string {
@@ -230,7 +233,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 
 	var paid struct {
 		buyer   *solanaBuyer
-		session string
+		session billing.CheckoutAttemptID
 		sig     string
 	}
 	t.Run("the prepared first payment activates", func(t *testing.T) {
@@ -351,10 +354,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		c := s.checkout(t, other, other.wallet.PublicKey())
 		d, err := db.NewWithPGXPool(s.w.pool, s.w.schema)
 		require.NoError(t, err)
-		first, err := billing.ParseCheckoutSessionID(paid.session)
-		require.NoError(t, err)
-		second, err := billing.ParseCheckoutSessionID(c.id)
-		require.NoError(t, err)
+		first, second := paid.session, c.id
 		require.NoError(t, d.RunInMerchantScope(t.Context(), s.w.client[embedded].MerchantID(), "solana claim", func(ctx context.Context) error {
 			require.ErrorIs(t, settlement.ClaimCheckout(ctx, d, second.UUID(), paid.sig), settlement.ErrClaimed)
 			require.NoError(t, settlement.ClaimCheckout(ctx, d, first.UUID(), paid.sig), "the same claim repeats")
@@ -364,7 +364,7 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 			return nil
 		}))
 		var def string
-		require.NoError(t, s.w.pool.QueryRow(t.Context(), `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'uq_checkout_sessions_solana_signature'`, s.w.schema).Scan(&def))
+		require.NoError(t, s.w.pool.QueryRow(t.Context(), `SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND indexname = 'uq_checkout_attempts_solana_signature'`, s.w.schema).Scan(&def))
 		require.Contains(t, def, "(transaction_id)")
 		s.requireNothingGranted(t, other, c)
 	})

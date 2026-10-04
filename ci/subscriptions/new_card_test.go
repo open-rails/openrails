@@ -24,15 +24,15 @@ type hostedPay struct {
 	price string
 }
 
-func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*billing.CheckoutSession, error) {
+func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*billing.CheckoutAttempt, error) {
 	h.w.t.Helper()
 	payment.PSPID, payment.Rail = h.w.psp["nmi"], "nmi"
 	if payment.PaymentToken != "" {
 		payment.NameOnCard, payment.Zip, payment.Country = "Hosted Payer", "10001", "US"
 	}
-	return h.w.client[h.tp].CreateCheckoutSession(h.w.t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: h.c.id}, PriceID: h.price, IdempotencyKey: key,
-		PaymentOptions: payment, Confirm: true,
+	return h.w.client[h.tp].CreateCheckoutAttempt(h.w.t.Context(), billing.CreateCheckoutAttemptRequest{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(h.c.id)}, PriceID: pid(h.price), IdempotencyKey: key,
+		PaymentOptions: payment,
 	})
 }
 
@@ -65,7 +65,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 
 			session, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
 			require.NoError(t, err)
-			require.Equal(t, "succeeded", session.Status)
+			require.Equal(t, "succeeded", string(session.Status))
 			require.NotNil(t, session.SubscriptionID)
 			w.settle()
 			require.True(t, h.c.entitled("content:members"))
@@ -73,7 +73,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			require.Len(t, subs, 1)
 			require.Equal(t, "engine", subs[0].CollectionPolicy)
 			require.Equal(t, "active", subs[0].Status)
-			require.Equal(t, *session.SubscriptionID, subs[0].ID.String())
+			require.Equal(t, *session.SubscriptionID, subs[0].ID)
 			methods := h.methods()
 			require.Len(t, methods, 1, "the new card is saved for renewals")
 			require.NotNil(t, subs[0].PaymentMethodID)
@@ -89,7 +89,7 @@ func TestHostedNewCardSubscription(t *testing.T) {
 					again, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
 					if err == nil {
 						require.Equal(t, session.ID, again.ID)
-						require.Equal(t, "succeeded", again.Status)
+						require.Equal(t, "succeeded", string(again.Status))
 					} else {
 						require.ErrorIs(t, err, billing.ErrConflict, "a concurrent duplicate is refused, never charged")
 					}
@@ -126,7 +126,7 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	// The next attempt with another card succeeds.
 	session, err := h.pay("pay-retry", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", session.Status)
+	require.Equal(t, "succeeded", string(session.Status))
 	require.Len(t, h.subscriptions(), 1)
 	require.Len(t, h.methods(), 1)
 }
@@ -141,37 +141,34 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
-			session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-				Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: "saved-" + uuid.NewString(),
-				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method}, Confirm: true,
-				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
+			session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptRequest{
+				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
+				PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp[rail], Rail: rail, PaymentMethodID: method},
+				SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 			})
 			require.NoError(t, err)
-			require.Equal(t, "succeeded", session.Status)
+			require.Equal(t, "succeeded", string(session.Status))
 			w.settle()
 			require.True(t, c.entitled("content:members"))
 		})
 	}
 }
 
-// Without Confirm a token still saves the card and quotes; the signed-in
-// customer accepts at /v1/me/checkout/{id}/confirm.
-func TestHostedNewCardQuoteThenConfirm(t *testing.T) {
+// A purchase the merchant prepares for its customer is handed over as a
+// checkout session (D1): the customer pays it on the page with a new card.
+func TestMerchantHandsOverACheckoutSession(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)
-	session, err := w.client[embedded].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionRequest{
-		Customer: billing.CheckoutCustomerIdentity{ID: c.id}, PriceID: price.ID.String(), IdempotencyKey: "quote-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSPID: w.psp["nmi"], Rail: "nmi", PaymentToken: w.nmi.Tokenize(visa), NameOnCard: "Quoted Payer", Zip: "10001", Country: "US"},
-	})
-	require.NoError(t, err)
-	require.Equal(t, "requires_action", session.Status)
-	require.Empty(t, w.nmi.ledger(""), "a quote charges nothing")
-	done := unwrap(c.must(http.MethodPost, "/checkout/"+session.ID+"/confirm", "", map[string]any{"payment": map[string]string{"rail": "nmi"}}))
+	session := w.handOver(c, price.ID)
+	require.Empty(t, w.nmi.ledger(""), "a handed-over session charges nothing")
+	status, done := session.payCard(visa)
+	require.Equal(t, http.StatusOK, status, "%v", done)
 	require.Equal(t, "succeeded", done["status"], "%v", done)
 	w.settle()
 	require.True(t, c.entitled("content:members"))
+	require.Len(t, w.nmi.ledger(""), 1)
 }
 
 // One-time new-card sales are unchanged.
@@ -186,9 +183,23 @@ func TestHostedNewCardOneTimeSale(t *testing.T) {
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID.String()}
 	session, err := h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", session.Status)
+	require.Equal(t, "succeeded", string(session.Status))
 	w.settle()
 	require.True(t, h.c.entitled("content:post"))
 	require.Empty(t, h.subscriptions())
 	require.Len(t, w.nmi.ledger(""), 1)
+}
+
+// A Stripe card setup is a checkout attempt the merchant can read.
+func TestStripeCardSetupReadsAsAnAttempt(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	method := c.saveCard("stripe", visa)
+	var id uuid.UUID
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.checkout_attempts WHERE customer_id = $1 AND mode = 'payment_method'`), c.id).Scan(&id))
+	got := w.attempt(billing.CheckoutAttemptID(id))
+	require.Equal(t, "payment_method", got["mode"])
+	require.Equal(t, "succeeded", got["status"])
+	require.Equal(t, method, got["payment_method_id"])
 }

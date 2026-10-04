@@ -25,7 +25,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // merchant_id column, IN PURGE ORDER: children before the rows they reference.
 //
 // The order is load-bearing, not cosmetic. prices→products, subscriptions→prices,
-// checkout_sessions→payments and rail_mutation_logs→rail_intents are all
+// checkout_attempts→payments and rail_mutation_logs→rail_intents are all
 // RESTRICT or NO ACTION, so the previous alphabetical-ish order aborted the
 // whole purge (SQLSTATE 23001) for any merchant that owned a product with a
 // price — i.e. every real one. Nothing caught it because the only test seeded a
@@ -38,7 +38,7 @@ var merchantOwnedTables = []string{
 	"notifications", "catalog_drift_events", "payment_attempts", "rebill_cycles", "payment_method_updates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"rail_mutation_logs", "rail_intents",
-	"checkout_sessions", "entitlements", "payments", "subscriptions",
+	"checkout_attempts", "entitlements", "payments", "subscriptions",
 	"money_settings", "payment_methods", "rail_customer_accounts",
 	"prices", "products",
 	// money ledger (#512 hard cut): the single-entry money_blocks/money_transactions
@@ -83,8 +83,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsNotificationQueue(ctx, id)
 	case "rail_customer_accounts":
 		return q.CountMerchantRowsRailCustomers(ctx, id)
-	case "checkout_sessions":
-		return q.CountMerchantRowsCheckoutSessions(ctx, id)
+	case "checkout_attempts":
+		return q.CountMerchantRowsCheckoutAttempts(ctx, id)
 	case "rail_mutation_logs":
 		return q.CountMerchantRowsExternalProviderMutationLogs(ctx, id)
 	case "rail_intents":
@@ -129,8 +129,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
 	case "rail_customer_accounts":
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)
-	case "checkout_sessions":
-		return q.PurgeMerchantRowsCheckoutSessions(ctx, id)
+	case "checkout_attempts":
+		return q.PurgeMerchantRowsCheckoutAttempts(ctx, id)
 	case "rail_mutation_logs":
 		return q.PurgeMerchantRowsExternalProviderMutationLogs(ctx, id)
 	case "rail_intents":

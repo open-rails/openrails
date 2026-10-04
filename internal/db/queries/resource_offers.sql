@@ -52,7 +52,7 @@ SELECT cardinality(sqlc.arg(entitlements)::text[])>0 AND NOT EXISTS (
      AND e.entitlement=wanted.key AND e.end_at IS NULL AND e.start_at<=sqlc.arg(at_time)::timestamptz
      AND e.revoked_at IS NULL AND e.deleted_at IS NULL
  ) AND NOT (sqlc.arg(include_pending)::boolean AND (
-   EXISTS (SELECT 1 FROM billing.checkout_sessions s
+   EXISTS (SELECT 1 FROM billing.checkout_attempts s
     WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.customer_id=sqlc.arg(customer_id)::uuid
       AND s.id<>sqlc.arg(except_session_id)::uuid AND s.mode='one_off' AND s.status<>'succeeded'
       AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))

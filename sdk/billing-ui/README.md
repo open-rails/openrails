@@ -44,8 +44,16 @@ const session = await billing.createCheckoutSession({ priceKey: "pro-monthly" })
 ```
 
 `onComplete` is a hint: confirm access from your own authenticated API before
-granting anything. Pass `successUrl` to return the buyer from a redirect rail
-(CCBill, Stripe hosted); it must be on one of your app's return origins.
+granting anything. Pass `successUrl` to return the buyer from a redirect step
+(CCBill, Stripe hosted); it must be on one of your app's return origins. A
+server that starts checkout itself mints the session with the Go
+`Client.CreateCheckoutSession` and hands the browser its `id` and `url`.
+
+A rail's own step is the pay result's `next_action`: `redirect_to_url` (an
+https page, opened in the top window) or `solana_pay` (a `solana:` link shown
+as a QR code). A card challenge is its `operation`, authenticated in the page.
+Stripe Elements needs the buyer's billing client (`<Checkout>` inside a
+`BillingProvider`): the shared payment page offers token rails only.
 
 The payment host serves `<CheckoutPage>` from one HTML entry at `PageURL`,
 behind its adapter's `CheckoutFramePolicy` (only the sites in
@@ -104,7 +112,7 @@ checkout routes.
 | `listCurrencies()` (`client.currencies` is the pinned copy)                                         | `GET /currencies`                                               |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
 | `changeTier(id, { priceId, idempotencyKey })`                                                       | `POST /me/subscriptions/{id}/change-tier`                       |
-| `getSolanaConfig()`, `listSolanaTokens({ priceId, wallet })`                                        | `GET /solana/config`, `GET /solana/tokens`                      |
+| `getCheckoutConfig()` (PSPs; `solana.network` and tokens), `listSolanaTokens({ priceId, wallet })`  | `GET /checkout-config`, `GET /solana/tokens`                    |
 | `prepareSolanaTierChange(id, newPriceId)`, `confirmSolanaTierChange(id, { signature, newPriceId })` | `POST /me/subscriptions/{id}/solana-tier-change`, `.../confirm` |
 
 ```ts
@@ -132,19 +140,17 @@ through unchanged; the PSP's `flow` and public `config` pick the browser flow
 (Collect.js, native card inputs, Stripe Elements, redirect, wallet). Hosts never branch on a
 provider:
 
-- `checkoutRails(offers)` and `savedMethodsFor(methods, rails)` build a
-  `CheckoutSource`'s `rails` and `saved_methods` (the default card first, pre-selected; paying sends
-  the chosen card's id explicitly).
-  `offers` is OpenRails' `ListCheckoutRailOptions` result, passed through: it
-  lists exactly the armed PSPs whose rail can make this sale (Solana when it is
-  configured, never CCBill for a new subscription), each with its `driver` and
-  `public_config`. An offer without a driver is not rendered.
+- A session's `options` are exactly the armed PSPs whose rail can make this
+  sale (Solana when it is configured, never CCBill for a new subscription),
+  each with its `driver` and `public_config`; `saved_methods` are the buyer's
+  cards on them (the default first, pre-selected; paying sends the chosen
+  card's id explicitly).
   Card rails (`collect_js`, `card`, `stripe_elements`) render one panel: saved cards,
   an inline new card and one Pay/Subscribe button, which is the payer's
   confirmation of the displayed terms. No provider chooser with one rail.
 - Inside a `BillingProvider`, a new card is always saved to the account first
   and the source is paid with `payment_method_id`; `requires_action` results
-  carrying `operation_id` run 3-D Secure in the page. A `failed` result stays
+  carrying an `operation` run 3-D Secure in the page. A `failed` result stays
   on the panel with `failure.message` next to its `field`, so the buyer can
   pick another card; the host gives each new attempt a new idempotency key.
 - Only PSPs with `checkout !== false` (`checkoutPsps`) take new cards; others

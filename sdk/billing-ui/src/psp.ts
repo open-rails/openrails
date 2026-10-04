@@ -1,14 +1,13 @@
-// OpenRails's browser-safe PSP projection (GET /checkout-config, or the host's
-// copy of it). Hosts pass it through unchanged; which browser flow a PSP needs
-// is decided here, never by the host.
+// OpenRails's browser-safe PSP projection (GET /checkout-config). Which
+// browser flow a PSP needs is decided here, never by the host.
 import { z } from "zod"
 
 import type { PaymentMethod } from "./client/types"
-import type { PaymentRailOption, SavedPaymentMethod } from "./types"
+import type { PaymentOption, SavedPaymentMethod } from "./types"
 
 export const pspConfigSchema = z.object({
   psp_id: z.string().min(1),
-  /** Checkout's `payment.rail` selector. */
+  /** The PSP's key. */
   key: z.string().min(1),
   rail: z.string(),
   /** Who holds the card: "psp" or a third-party custodian. */
@@ -25,55 +24,14 @@ export const pspConfigSchema = z.object({
 })
 export type PspConfig = z.infer<typeof pspConfigSchema>
 
-/**
- * One way OpenRails can sell a price now (`ListCheckoutRailOptions`): the PSP
- * is armed and its rail supports the sale. OpenRails decides the browser
- * `driver` and `public_config`; an offer without a driver cannot run here.
- */
-export interface CheckoutRailOffer {
-  selector: string
-  psp_id: string
-  rail: string
-  mode: string
-  driver?: string | null
-  public_config?: Record<string, string> | null
-}
-
-const drivers = new Set<string>([
-  "collect_js",
-  "card",
-  "stripe_elements",
-  "redirect",
-  "solana_pay",
-])
-
-/** The rails this UI can drive, exactly as OpenRails advertised them. */
-export function checkoutRails(
-  offers: readonly CheckoutRailOffer[]
-): PaymentRailOption[] {
-  return offers.flatMap((offer) => {
-    if (!offer.driver || !drivers.has(offer.driver)) return []
-    return [
-      {
-        id: offer.psp_id,
-        rail: offer.rail,
-        mode: offer.mode === "subscription" ? "subscription" : "one_off",
-        driver: offer.driver as PaymentRailOption["driver"],
-        psp_key: offer.selector,
-        ...(offer.public_config ? { public_config: offer.public_config } : {}),
-      },
-    ]
-  })
-}
-
-const cardDrivers = new Set<PaymentRailOption["driver"]>([
+const cardDrivers = new Set<PaymentOption["driver"]>([
   "collect_js",
   "card",
   "stripe_elements",
 ])
 
 /** Whether a rail takes a card in the page (saved or new). */
-export const isCardRail = (rail: PaymentRailOption): boolean =>
+export const isCardRail = (rail: PaymentOption): boolean =>
   cardDrivers.has(rail.driver)
 
 /** PSPs that take new purchases and new cards. */
@@ -83,14 +41,14 @@ export const checkoutPsps = (psps: readonly PspConfig[]): PspConfig[] =>
 /** Saved cards the checkout can charge in place, for the given rails, newest first. */
 export function savedMethodsFor(
   methods: readonly PaymentMethod[],
-  rails: readonly PaymentRailOption[]
+  rails: readonly PaymentOption[]
 ): SavedPaymentMethod[] {
   const recent = [...methods].sort((a, b) =>
     (b.created_at ?? "").localeCompare(a.created_at ?? "")
   )
   return recent.flatMap((method) => {
     const rail = rails.find(
-      (item) => item.id === method.psp_id && isCardRail(item)
+      (item) => (item.psp_id ?? item.id) === method.psp_id && isCardRail(item)
     )
     if (!rail || method.health?.active === false) return []
     return [
@@ -134,9 +92,9 @@ export const canAuthenticatePayment = (psp: PspConfig): boolean =>
   cardSetupDriver(psp) === "stripe_elements"
 
 /** The PSP config behind a checkout rail, for card setup and authentication. */
-export function railPsp(rail: PaymentRailOption): PspConfig {
+export function railPsp(rail: PaymentOption): PspConfig {
   return {
-    psp_id: rail.id,
+    psp_id: rail.psp_id ?? rail.id,
     key: rail.psp_key ?? rail.rail,
     rail: rail.rail,
     custodian: "psp",

@@ -32,19 +32,20 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// Priced checkout refuses operation selectors and malformed saved methods
-// before any service is reached.
+// A checkout attempt sells a price: an operation selector is an unknown
+// field, and a malformed saved method is refused before any service runs.
 func TestPricedCheckoutRejectsBeforeEngine(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
-		{`{"mode":"one_off"}`, "dedicated setup or subscription action"},
-		{`{"subscription_id":"x"}`, "dedicated setup or subscription action"},
-		{`{"new_price_id":"x"}`, "dedicated setup or subscription action"},
+		{`{"mode":"one_off"}`, billing.CodeUnknownField},
+		{`{"subscription_id":"x"}`, billing.CodeUnknownField},
+		{`{"new_price_id":"x"}`, billing.CodeUnknownField},
+		{`{"payment":{"card":{"number":"4111111111111111"}}}`, billing.CodeUnknownField},
 		{`{"payment":{"payment_method_id":"550e8400-e29b-41d4-a716-446655440000"}}`, "invalid payment_method_id"},
 		{`{"payment":{"payment_method_id":"price_550e8400-e29b-41d4-a716-446655440000"}}`, "invalid payment_method_id"},
 		{`{"payment":{"payment_method_id":"pm_00000000-0000-0000-0000-000000000000"}}`, "invalid payment_method_id"},
 	} {
-		r, rec := newTestRequest(http.MethodPost, "/v1/merchant/checkout-sessions", strings.NewReader(tc.body), nil)
-		ServiceCreateCheckoutSession(r)
+		r, rec := newTestRequest(http.MethodPost, "/v1/merchant/checkout-attempts", strings.NewReader(tc.body), nil)
+		ServiceCreateCheckoutAttempt(r)
 		require.Equal(t, http.StatusBadRequest, rec.Code, tc.body)
 		require.Contains(t, rec.Body.String(), tc.want)
 	}
@@ -129,6 +130,10 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 	}
 	require.Nil(t, billingDetailsFromMetadata(map[string]any{"e2e_run_id": "x"}), "no billing details is null")
 
+	for _, alias := range []string{"first_name", "last_name"} {
+		err := httprequest.DecodeStrict([]byte(`{"price_key":"p","payment":{"`+alias+`":"x"}}`), &billing.CreateCheckoutAttemptRequest{})
+		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, alias)
+	}
 	out := PaymentMethodToAPI(&models.PaymentMethod{Rail: "nmi", Card: models.Card{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2099}}, nil, nil, time.Now())
 	require.Equal(t, []any{"visa", "4242", 12, 2099}, []any{*out.Card.Brand, *out.Card.Last4, *out.Card.ExpMonth, *out.Card.ExpYear})
 	require.Nil(t, out.PSPID, "a method with no PSP names none")
@@ -291,15 +296,14 @@ func TestSolanaConfigIsBrowserSafe(t *testing.T) {
 			Network: "devnet", Tokens: map[string]config.TokenConfig{"USDC": {Name: "Dev USDC", Mint: mint}},
 		}}},
 	}
-	r, rec := newTestRequest(http.MethodGet, "/v1/solana/config", nil, rt)
-	GetSolanaConfig(r)
-	require.Equal(t, http.StatusOK, rec.Code)
-	var got SolanaRuntimeConfigResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []any{"devnet", "solana:devnet", "", "devnet", solanatokens.PreferredStablecoin},
-		[]any{got.Network, got.Chain, got.RPCURL, got.ExplorerCluster, got.PreferredToken})
-	require.True(t, got.Features.SolanaPay && got.Features.RecurringSubscriptions && got.Features.SolanaPayRecurringSubscriptions)
+	r, _ := newTestRequest(http.MethodGet, "/v1/checkout-config", nil, rt)
+	got, err := solanaCheckoutConfig(r)
+	require.NoError(t, err)
+	require.Equal(t, []any{"devnet", "solana:devnet", solanatokens.PreferredStablecoin}, []any{got.Network, got.Chain, got.PreferredToken})
 	require.Len(t, got.Tokens, 1)
 	require.Equal(t, []any{"USDC", mint, 6, true, true},
 		[]any{got.Tokens[0].Symbol, got.Tokens[0].Mint, got.Tokens[0].Decimals, got.Tokens[0].Preferred, got.Tokens[0].RecurringEligible})
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, strings.ToLower(string(raw)), "rpc")
 }

@@ -731,10 +731,10 @@ func ClassifyBucket(path, method string) string {
 	}
 }
 
+// isCheckoutPath is a buyer paying: minting a checkout session, paying one,
+// or a wallet's Solana Pay request.
 func isCheckoutPath(path string) bool {
-	return path == "/v1/checkout" || strings.HasPrefix(path, "/v1/checkout/") ||
-		path == "/v1/me/checkout" || strings.HasPrefix(path, "/v1/me/checkout/") ||
-		strings.HasPrefix(path, "/v1/checkout-sessions/")
+	return path == "/v1/me/checkout-sessions" || strings.HasPrefix(path, "/v1/checkout-sessions/") || strings.HasPrefix(path, "/v1/checkout-attempts/")
 }
 
 // cardAttackMode reports whether the request's merchant is under a card-testing
@@ -759,7 +759,7 @@ func effectiveLimit(limit *config.RateLimit) int {
 	return limit.RequestsPerMinute
 }
 
-// Hosted checkout session limits (#1124), per session id per minute: the id is
+// Checkout session limits (#1124), per session id per minute: the id is
 // the credential, so it is limited whatever address presents it. Polling reads
 // every three seconds; a pay is a buyer's click.
 const (
@@ -767,7 +767,7 @@ const (
 	CheckoutSessionPaysPerMinute  = 10
 )
 
-// CheckoutSessionRateLimit limits requests naming one hosted checkout session
+// CheckoutSessionRateLimit limits requests naming one checkout session
 // (the :id path parameter), beside the per-address limits of RateLimitHTTP.
 func CheckoutSessionRateLimit(rt *app.Runtime, bucket string, perMinute int) router.Middleware {
 	store := NewRateLimitStore()
@@ -802,7 +802,7 @@ func CheckoutSessionRateLimit(rt *app.Runtime, bucket string, perMinute int) rou
 	}
 }
 
-// LogPath is r's path for logs. A hosted checkout session id is a bearer
+// LogPath is r's path for logs. A checkout session id is a bearer
 // credential and is never logged.
 func LogPath(r *http.Request) string {
 	path := r.URL.Path

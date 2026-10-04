@@ -22,10 +22,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// StripeMethodSetupResponse is an owned setup resource. No payment, subscription
-// or entitlement exists until a separate priced agreement is confirmed and paid.
-type StripeMethodSetupResponse struct {
-	ID              billing.CheckoutSessionID `json:"id"`
+// PaymentMethodSetup is a card setup: a payment_method checkout attempt the
+// customer owns. No payment, subscription or entitlement exists until a
+// separate priced agreement is confirmed and paid.
+type PaymentMethodSetup struct {
+	ID              billing.CheckoutAttemptID `json:"id"`
 	Status          string                    `json:"status"`
 	SetupIntentID   string                    `json:"setup_intent_id,omitempty"`
 	ClientSecret    string                    `json:"client_secret,omitempty"`
@@ -43,95 +44,95 @@ func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal)
 	}
 	return mid, customer, nil
 }
-func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.UUID, key string, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (StripeMethodSetupResponse, error) {
+func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.UUID, key string, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	mid, customer, err := stripeSetupPrincipal(ctx, principal)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if s == nil || s.SubscriptionService == nil || s.Config == nil || config.IsProviderReadOnly(s.Config) || s.customerStore() == nil || resolver == nil {
-		return StripeMethodSetupResponse{}, errors.New("Stripe method setup unavailable")
+		return PaymentMethodSetup{}, errors.New("Stripe method setup unavailable")
 	}
 	if psp == uuid.Nil || key == "" || len(key) > 255 || strings.TrimSpace(key) != key || cardguard.ContainsPAN(key) {
-		return StripeMethodSetupResponse{}, ErrCheckoutSessionValidation
+		return PaymentMethodSetup{}, ErrCheckoutAttemptValidation
 	}
 	d := s.SubscriptionService.Database()
-	repo := NewCheckoutSessionRepo(d)
+	repo := NewCheckoutAttemptRepo(d)
 	id := captureSessionID(mid, customer, "stripe:"+key)
 	session, err := repo.GetByID(ctx, id)
 	if err == nil {
-		if session.PspID != psp || session.CustomerID != customer || session.Mode != models.CheckoutSessionModePaymentMethod || session.Rail != models.RailStripe {
-			return StripeMethodSetupResponse{}, ErrCheckoutSessionConflict
+		if session.PspID != psp || session.CustomerID != customer || session.Mode != models.CheckoutAttemptModePaymentMethod || session.Rail != models.RailStripe {
+			return PaymentMethodSetup{}, ErrCheckoutAttemptConflict
 		}
-		if session.Status == models.CheckoutSessionStatusCreated {
+		if session.Status == models.CheckoutAttemptStatusCreated {
 			return s.submitStripeMethodSetup(ctx, session, principal, resolver)
 		}
 		return s.StripeMethodSetup(ctx, id, principal, resolver)
 	}
 	if !db.IsNotFound(err) {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	account, err := d.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
 	if err != nil || account.Archived || account.Rail != "stripe" || account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
-		return StripeMethodSetupResponse{}, ErrCheckoutSessionValidation
+		return PaymentMethodSetup{}, ErrCheckoutAttemptValidation
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, mid.UUID(), &psp)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if !found || service == nil {
-		return StripeMethodSetupResponse{}, errors.New("Stripe setup account unavailable")
+		return PaymentMethodSetup{}, errors.New("Stripe setup account unavailable")
 	}
 	// Both mapping and remote customer are scoped to the immutable selected PSP.
 	scoped := db.WithPSPID(ctx, psp)
 	customerRef, err := resolveStripeCustomerWith(scoped, s.customerStore(), service, &UserIdentity{ID: customer.String()})
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if customerRef == "" {
-		return StripeMethodSetupResponse{}, errors.New("Stripe customer mapping unavailable")
+		return PaymentMethodSetup{}, errors.New("Stripe customer mapping unavailable")
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
-	expiry := now.Add(defaultCheckoutSessionTTL)
-	session = &models.CheckoutSession{ID: id, CustomerID: customer, PspID: psp, Mode: models.CheckoutSessionModePaymentMethod, Rail: models.RailStripe, Status: models.CheckoutSessionStatusCreated, ExpiresAt: &expiry, RailState: map[string]any{"kind": "stripe_engine_setup", "customer_ref": customerRef, "consent": "save_for_agreed_off_session_payments_v1"}, CreatedAt: now, UpdatedAt: now}
+	expiry := now.Add(defaultCheckoutAttemptTTL)
+	session = &models.CheckoutAttempt{ID: id, CustomerID: customer, PspID: psp, Mode: models.CheckoutAttemptModePaymentMethod, Rail: models.RailStripe, Status: models.CheckoutAttemptStatusCreated, ExpiresAt: &expiry, RailState: map[string]any{"kind": "stripe_engine_setup", "customer_ref": customerRef, "consent": "save_for_agreed_off_session_payments_v1"}, CreatedAt: now, UpdatedAt: now}
 	if err := repo.Create(ctx, session); err != nil {
 		existing, getErr := repo.GetByID(ctx, id)
 		if getErr != nil || existing.CustomerID != customer || existing.PspID != psp {
-			return StripeMethodSetupResponse{}, err
+			return PaymentMethodSetup{}, err
 		}
 		session = existing
 	}
 	return s.submitStripeMethodSetup(ctx, session, principal, resolver)
 }
-func (s *CheckoutService) submitStripeMethodSetup(ctx context.Context, session *models.CheckoutSession, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (StripeMethodSetupResponse, error) {
+func (s *CheckoutService) submitStripeMethodSetup(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	_, p, err := s.stripeSetupSession(ctx, session.ID, principal)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, p.MerchantID, &p.PSPID)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if !found || service == nil {
-		return StripeMethodSetupResponse{}, ErrCheckoutSessionConflict
+		return PaymentMethodSetup{}, ErrCheckoutAttemptConflict
 	}
 	d := s.SubscriptionService.Database()
 	first, err := d.Gen(ctx).BeginStripeMethodSetup(ctx, gen.BeginStripeMethodSetupParams{MerchantID: p.MerchantID, ID: p.SessionID, Now: s.now().UTC()})
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if first == 1 {
 		result, err := service.CreateEngineSetup(ctx, p)
 		if err != nil {
-			return StripeMethodSetupResponse{ID: billing.CheckoutSessionID(p.SessionID), Status: "processing"}, nil
+			return PaymentMethodSetup{ID: billing.CheckoutAttemptID(p.SessionID), Status: "processing"}, nil
 		}
 		if _, err = d.Gen(ctx).RetainStripeMethodSetup(ctx, gen.RetainStripeMethodSetupParams{MerchantID: p.MerchantID, ID: p.SessionID, Reference: &result.ID, Now: s.now().UTC()}); err != nil {
-			return StripeMethodSetupResponse{}, err
+			return PaymentMethodSetup{}, err
 		}
 	}
 	return s.StripeMethodSetup(ctx, p.SessionID, principal, resolver)
 }
 
-func (s *CheckoutService) stripeSetupSession(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (*models.CheckoutSession, subscriptions.StripeEngineSetupParams, error) {
+func (s *CheckoutService) stripeSetupSession(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (*models.CheckoutAttempt, subscriptions.StripeEngineSetupParams, error) {
 	var params subscriptions.StripeEngineSetupParams
 	mid, customer, err := stripeSetupPrincipal(ctx, principal)
 	if err != nil {
@@ -140,35 +141,35 @@ func (s *CheckoutService) stripeSetupSession(ctx context.Context, id uuid.UUID, 
 	if s == nil || s.SubscriptionService == nil {
 		return nil, params, errors.New("Stripe setup unavailable")
 	}
-	session, err := NewCheckoutSessionRepo(s.SubscriptionService.Database()).GetByID(ctx, id)
-	if err != nil || session.CustomerID != customer || session.Mode != models.CheckoutSessionModePaymentMethod || session.Rail != models.RailStripe || session.RailState["kind"] != "stripe_engine_setup" {
-		return nil, params, ErrCheckoutSessionNotFound
+	session, err := NewCheckoutAttemptRepo(s.SubscriptionService.Database()).GetByID(ctx, id)
+	if err != nil || session.CustomerID != customer || session.Mode != models.CheckoutAttemptModePaymentMethod || session.Rail != models.RailStripe || session.RailState["kind"] != "stripe_engine_setup" {
+		return nil, params, ErrCheckoutAttemptNotFound
 	}
 	ref, ok := session.RailState["customer_ref"].(string)
 	if !ok || ref == "" {
-		return nil, params, ErrCheckoutSessionConflict
+		return nil, params, ErrCheckoutAttemptConflict
 	}
 	params = subscriptions.StripeEngineSetupParams{MerchantID: mid.UUID(), PSPID: session.PspID, CustomerID: customer, SessionID: id, CustomerRef: ref}
 	return session, params, nil
 }
-func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (StripeMethodSetupResponse, error) {
+func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	session, p, err := s.stripeSetupSession(ctx, id, principal)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
-	out := StripeMethodSetupResponse{ID: billing.CheckoutSessionID(id), Status: string(session.Status)}
-	if session.Status == models.CheckoutSessionStatusSucceeded {
+	out := PaymentMethodSetup{ID: billing.CheckoutAttemptID(id), Status: string(session.Status)}
+	if session.Status == models.CheckoutAttemptStatusSucceeded {
 		ref, _ := session.RailState["payment_method_id"].(string)
 		method, err := uuid.Parse(ref)
 		if err != nil {
-			return out, ErrCheckoutSessionConflict
+			return out, ErrCheckoutAttemptConflict
 		}
 		typed := billing.PaymentMethodID(method)
 		out.PaymentMethodID = &typed
 		return out, nil
 	}
 	if session.ExpiresAt == nil || !session.ExpiresAt.After(s.now()) {
-		return out, ErrCheckoutSessionExpired
+		return out, ErrCheckoutAttemptExpired
 	}
 	if resolver == nil {
 		return out, errors.New("Stripe setup resolver unavailable")
@@ -197,46 +198,46 @@ func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, p
 		return out, err
 	}
 	if rows != 1 {
-		return out, ErrCheckoutSessionConflict
+		return out, ErrCheckoutAttemptConflict
 	}
 	out.SetupIntentID = result.ID
 	out.ClientSecret = result.ClientSecret
 	out.Status = result.Status
 	return out, nil
 }
-func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (StripeMethodSetupResponse, error) {
+func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	session, p, err := s.stripeSetupSession(ctx, id, principal)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
-	if session.Status == models.CheckoutSessionStatusSucceeded {
+	if session.Status == models.CheckoutAttemptStatusSucceeded {
 		return s.StripeMethodSetup(ctx, id, principal, resolver)
 	}
 	// Read always recovers/retains the original identity; a browser can provide no
 	// alternate SetupIntent, method, customer, or claimed successful outcome.
 	if _, err = s.StripeMethodSetup(ctx, id, principal, resolver); err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	session, p, err = s.stripeSetupSession(ctx, id, principal)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if session.Reference == nil {
-		return StripeMethodSetupResponse{}, ErrCheckoutSessionPending
+		return PaymentMethodSetup{}, ErrCheckoutAttemptPending
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, p.MerchantID, &p.PSPID)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if !found || service == nil {
-		return StripeMethodSetupResponse{}, ErrCheckoutSessionConflict
+		return PaymentMethodSetup{}, ErrCheckoutAttemptConflict
 	}
 	setup, found, err := service.ReadEngineSetup(ctx, p, *session.Reference)
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	if !found || setup.Status != "succeeded" {
-		return StripeMethodSetupResponse{}, apperr.Conflictf("card setup has not completed")
+		return PaymentMethodSetup{}, apperr.Conflictf("card setup has not completed")
 	}
 	// The confirmed off-session SetupIntent is the customer's recurring
 	// consent for this card: it anchors later merchant-initiated renewals.
@@ -252,13 +253,13 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 			return err
 		}
 		if row.CustomerID != p.CustomerID || row.PspID != p.PSPID || row.Reference == nil || *row.Reference != setup.ID {
-			return ErrCheckoutSessionConflict
+			return ErrCheckoutAttemptConflict
 		}
-		if row.Status == string(models.CheckoutSessionStatusSucceeded) {
+		if row.Status == string(models.CheckoutAttemptStatusSucceeded) {
 			return nil
 		}
-		if row.Status != string(models.CheckoutSessionStatusRequiresAction) || row.ExpiresAt == nil || !row.ExpiresAt.After(s.now()) {
-			return ErrCheckoutSessionExpired
+		if row.Status != string(models.CheckoutAttemptStatusRequiresAction) || row.ExpiresAt == nil || !row.ExpiresAt.After(s.now()) {
+			return ErrCheckoutAttemptExpired
 		}
 		existing, err := q.GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{MerchantID: p.MerchantID, Rail: "stripe", PspID: p.PSPID, RailMethodRef: setup.MethodRef})
 		methodID := uuid.NewSHA1(id, []byte(setup.MethodRef))
@@ -274,12 +275,12 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 					return err
 				}
 				if rows != 1 {
-					return ErrCheckoutSessionConflict
+					return ErrCheckoutAttemptConflict
 				}
 				existing.RailCustomerRef = p.CustomerRef
 			}
 			if existing.CustomerID != p.CustomerID || existing.RailCustomerRef != p.CustomerRef || existing.ParkReason != "" {
-				return ErrCheckoutSessionConflict
+				return ErrCheckoutAttemptConflict
 			}
 			methodID = existing.ID
 			anchor = existing.StoredCredentialRecurringRef == ""
@@ -306,12 +307,12 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 			return err
 		}
 		if rows != 1 {
-			return ErrCheckoutSessionConflict
+			return ErrCheckoutAttemptConflict
 		}
 		return nil
 	})
 	if err != nil {
-		return StripeMethodSetupResponse{}, err
+		return PaymentMethodSetup{}, err
 	}
 	return s.StripeMethodSetup(ctx, id, principal, resolver)
 }

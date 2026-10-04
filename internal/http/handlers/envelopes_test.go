@@ -72,7 +72,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		"metering": writeMeteringError,
 		"refusal":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "request failed") },
 		"checkout": func(r *httprequest.Request, err error) {
-			writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+			writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		},
 		"tier": writeChangeTierError,
 	}
@@ -195,7 +195,7 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 	declined := "Your card was declined. Contact your bank or try a different card."
 	surfaces := map[string]func(*httprequest.Request, error){
 		"checkout": func(r *httprequest.Request, err error) {
-			writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+			writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		},
 		"tier": writeChangeTierError,
 	}
@@ -222,21 +222,21 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 
 	checkoutStatus := map[error]int{
 		fmt.Errorf("sale: %w", checkout.ErrCheckoutProcessing): 409,
-		checkout.ErrCheckoutSessionPending:                     409,
-		checkout.ErrCheckoutSessionConflict:                    409,
-		checkout.ErrCheckoutSessionNotFound:                    404,
-		checkout.ErrCheckoutSessionForbidden:                   403,
-		checkout.ErrCheckoutSessionExpired:                     410,
-		checkout.ErrCheckoutSessionValidation:                  400,
+		checkout.ErrCheckoutAttemptPending:                     409,
+		checkout.ErrCheckoutAttemptConflict:                    409,
+		checkout.ErrCheckoutAttemptNotFound:                    404,
+		checkout.ErrCheckoutAttemptForbidden:                   403,
+		checkout.ErrCheckoutAttemptExpired:                     410,
+		checkout.ErrCheckoutAttemptValidation:                  400,
 		checkout.ErrCheckoutCaptureUnavailable:                 503,
 		fmt.Errorf("x: %w", billing.ErrIdempotencyKeyReused):   409,
 	}
 	for err, status := range checkoutStatus {
-		got := render(t, func(r *httprequest.Request) { writeCheckoutSessionError(r, err, checkoutSessionErrorContext{}) })
+		got := render(t, func(r *httprequest.Request) { writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{}) })
 		require.Equal(t, status, got.Status, "%v", err)
 	}
 	blocked := render(t, func(r *httprequest.Request) {
-		writeCheckoutSessionError(r, &checkout.CardAttemptsBlockedError{RetryAfter: 90 * time.Second}, checkoutSessionErrorContext{})
+		writeCheckoutAttemptError(r, &checkout.CardAttemptsBlockedError{RetryAfter: 90 * time.Second}, checkoutAttemptErrorContext{})
 	})
 	require.Equal(t, []any{429, "card_attempts_blocked"}, []any{blocked.Status, blocked.Code})
 
@@ -278,13 +278,13 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 
 func TestInsufficientUSDCCarriesFundingMetadata(t *testing.T) {
 	got := render(t, func(r *httprequest.Request) {
-		writeCheckoutSessionError(r, &recurring.InsufficientUSDCError{HaveBaseUnits: 250_000, NeedBaseUnits: 1_500_000},
-			checkoutSessionErrorContext{Rail: "solana", Wallet: "11111111111111111111111111111111", CheckoutSessionID: "chk_123"})
+		writeCheckoutAttemptError(r, &recurring.InsufficientUSDCError{HaveBaseUnits: 250_000, NeedBaseUnits: 1_500_000},
+			checkoutAttemptErrorContext{Rail: "solana", Wallet: "11111111111111111111111111111111", CheckoutAttemptID: "chk_123"})
 	})
 	require.Equal(t, []any{402, "insufficient_funds", "usdc_balance"}, []any{got.Status, got.Code, got.param()})
 	require.Equal(t, map[string]any{
 		"asset": "USDC", "network": "solana", "rail": "solana",
-		"wallet": "11111111111111111111111111111111", "checkout_session_id": "chk_123",
+		"wallet": "11111111111111111111111111111111", "checkout_attempt_id": "chk_123",
 		"amount": "1.5", "balance": "0.25", "shortfall": "1.25",
 		"amount_base_units": "1500000", "balance_base_units": "250000", "shortfall_base_units": "1250000",
 	}, got.Metadata["usdc_funding"])

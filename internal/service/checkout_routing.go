@@ -27,7 +27,7 @@ type CheckoutRoutingCandidate struct {
 }
 
 // CheckoutRoutingTrace is a dry run's full decision: what a real session would
-// choose, plus the exact trace it would persist on checkout_sessions.
+// choose, plus the exact trace it would persist on checkout_attempts.
 type CheckoutRoutingTrace struct {
 	Policy     string
 	Rule       *int
@@ -42,7 +42,7 @@ type CheckoutRoutingTrace struct {
 // session. It runs the production decision path, so the answer is what checkout
 // would actually do — not a prediction of it.
 func (s *Service) DryRunCheckoutRouting(ctx context.Context, in CheckoutRoutingDryRun) (*CheckoutRoutingTrace, error) {
-	checkoutSessions, err := s.requireCheckoutSessionService()
+	checkoutAttempts, err := s.requireCheckoutAttemptService()
 	if err != nil {
 		return nil, err
 	}
@@ -54,10 +54,10 @@ func (s *Service) DryRunCheckoutRouting(ctx context.Context, in CheckoutRoutingD
 		return nil, fmt.Errorf("billing service: database unavailable")
 	}
 	var decision *checkout.RoutingDecision
-	var mode models.CheckoutSessionMode
+	var mode models.CheckoutAttemptMode
 	if err := rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
 		var runErr error
-		decision, mode, runErr = checkoutSessions.DryRunRouting(scopedCtx, in.PriceID, in.PriceKey, in.Country, in.Selector)
+		decision, mode, runErr = checkoutAttempts.DryRunRouting(scopedCtx, in.PriceID, in.PriceKey, in.Country, in.Selector)
 		return runErr
 	}); err != nil {
 		return nil, fmt.Errorf("dry run checkout routing: %w", err)

@@ -13,10 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
-// CheckoutRailOption is a locally ready payment-provider choice for a price.
+// CheckoutOption is a locally ready payment-provider choice for a price.
 // Selector is the exact value checkout accepts, PSPID is the provider's stable
 // internal identity, and Rail is the canonical gateway.
-type CheckoutRailOption struct {
+type CheckoutOption struct {
 	Selector string
 	PSPID    uuid.UUID
 	Rail     string
@@ -25,12 +25,12 @@ type CheckoutRailOption struct {
 	Token string
 }
 
-// ListCheckoutRailOptions returns payment providers that this runtime can use
+// ListCheckoutOptions returns payment providers that this runtime can use
 // for new checkout against exactly one price ID or key, in routing order.
 // It performs no remote provider probes and no writes; readiness means the
 // active local account, required credentials, price link, checkout mode, and
 // runtime services are all present.
-func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, priceID, priceKey string) ([]CheckoutRailOption, error) {
+func (s *CheckoutAttemptService) ListCheckoutOptions(ctx context.Context, priceID, priceKey string) ([]CheckoutOption, error) {
 	if err := validateCheckoutPriceSelector(priceID, priceKey); err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, pr
 		return nil, fmt.Errorf("checkout rail options unavailable")
 	}
 	if s.config == nil || config.IsProviderReadOnly(s.config) {
-		return []CheckoutRailOption{}, nil
+		return []CheckoutOption{}, nil
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -57,7 +57,7 @@ func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, pr
 		return nil, fmt.Errorf("resolve checkout price: price not found")
 	}
 	if !price.IsPurchasable() {
-		return []CheckoutRailOption{}, nil
+		return []CheckoutOption{}, nil
 	}
 	product, err := s.productService.GetByID(ctx, price.ProductID)
 	if err != nil {
@@ -67,15 +67,15 @@ func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, pr
 		return nil, fmt.Errorf("resolve checkout product: product not found")
 	}
 	if !product.IsPurchasable() {
-		return []CheckoutRailOption{}, nil
+		return []CheckoutOption{}, nil
 	}
-	return s.listCheckoutRailOptionsForPrice(ctx, price, product)
+	return s.listCheckoutOptionsForPrice(ctx, price, product)
 }
 
-// listCheckoutRailOptionsForPrice is a projection of the routing decision: the
+// listCheckoutOptionsForPrice is a projection of the routing decision: the
 // options a frontend may offer are exactly the candidates routing found
 // eligible, in the order routing would pick them.
-func (s *CheckoutSessionService) listCheckoutRailOptionsForPrice(ctx context.Context, price *models.Price, product *models.Product) ([]CheckoutRailOption, error) {
+func (s *CheckoutAttemptService) listCheckoutOptionsForPrice(ctx context.Context, price *models.Price, product *models.Product) ([]CheckoutOption, error) {
 	mode := checkoutModeForRail(price, "")
 	decision, err := s.Route(ctx, RoutingInput{Price: price, Product: product, Mode: mode})
 	if err != nil && !errors.Is(err, ErrNoRoutableProcessor) {
@@ -90,14 +90,14 @@ func (s *CheckoutSessionService) listCheckoutRailOptionsForPrice(ctx context.Con
 				return nil, fmt.Errorf("resolve checkout rail %s: resolution failed", candidate.Selector)
 			}
 		}
-		return []CheckoutRailOption{}, nil
+		return []CheckoutOption{}, nil
 	}
-	options := make([]CheckoutRailOption, 0, len(eligible))
+	options := make([]CheckoutOption, 0, len(eligible))
 	for _, candidate := range decision.Candidates {
 		if candidate.Skip != "" {
 			continue
 		}
-		options = append(options, CheckoutRailOption{
+		options = append(options, CheckoutOption{
 			Selector: candidate.Selector,
 			PSPID:    candidate.PSPID,
 			Rail:     candidate.Rail,
@@ -129,12 +129,12 @@ func boundSettlementToken(price *models.Price, candidate RoutingCandidate) strin
 	return ""
 }
 
-func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessionMode {
+func checkoutModeForRail(price *models.Price, rail string) models.CheckoutAttemptMode {
 	_ = rail
 	if price != nil && price.AutoRenew {
-		return models.CheckoutSessionModeSubscription
+		return models.CheckoutAttemptModeSubscription
 	}
-	return models.CheckoutSessionModeOneOff
+	return models.CheckoutAttemptModeOneOff
 }
 
 // checkoutRailSkipReason reports why this PSP cannot serve the price under mode,
@@ -142,7 +142,7 @@ func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessio
 // list and routing's fallback classes (or#288) — one place decides, so the
 // advertised list and the routed choice can never disagree. Which sale kinds a
 // rail supports is the rail registry's capability, never a list here (#1078).
-func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.CheckoutSessionMode) string {
+func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.CheckoutAttemptMode) string {
 	price = priceForCheckoutTarget(price, target)
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed
@@ -151,7 +151,7 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 	if _, known := rails.Lookup(rail); !known {
 		return models.CheckoutRoutingSkipUnknownSelector
 	}
-	subscription := mode == models.CheckoutSessionModeSubscription
+	subscription := mode == models.CheckoutAttemptModeSubscription
 	if subscription && (price.Amount <= 0 || price.RecurringCycleHours() == nil) {
 		return models.CheckoutRoutingSkipModeUnsupported
 	}

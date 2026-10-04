@@ -33,8 +33,8 @@ Stripe for the owned resource and never stored in checkout state or payment evid
 
 1. Display explicit consent to save a card for future agreed payments, then POST
    `/v1/me/payment-method-setups` with `{"psp_id":"<uuid>","consent":true}`
-   and a stable `Idempotency-Key` header. The response carries an existing checkout
-   session `id`, `setup_intent_id` and an ephemeral `client_secret`. Repeating the
+   and a stable `Idempotency-Key` header. The response carries a checkout attempt
+   `id`, `setup_intent_id` and an ephemeral `client_secret`. Repeating the
    key preserves the accepted account/customer; changing the account conflicts.
 2. Use Stripe.js Elements with the merchant's publishable key to confirm that
    SetupIntent. Card data goes directly to Stripe. GET
@@ -42,10 +42,9 @@ Stripe for the owned resource and never stored in checkout state or payment evid
    `/confirm` endpoint reads Stripe truth and returns the local `payment_method_id`.
    Confirmation accepts no browser-supplied Stripe/customer/card identity. Setup
    grants no membership, payment or entitlement.
-3. POST `/v1/me/checkout` with subscription mode, local price, selected PSP and the
-   returned local saved-method ID. Display its immutable membership quote, including
-   amount, frequency and recurring permission. POST `/v1/me/checkout/:id/confirm`
-   with `{"payment":{"rail":"stripe"}}` after the customer accepts those terms.
+3. Pay the checkout session (`POST /v1/checkout-sessions/:id/pay`) with the Stripe
+   option and the returned local saved-method ID. The session shows the plan's
+   amount, frequency and recurring permission; paying accepts those terms.
 4. If the original operation needs authentication, GET
    `/v1/me/payment-operations/:id/authentication`. Pass its `client_secret` and
    frozen `provider_payment_method_id` to
@@ -53,10 +52,10 @@ Stripe for the owned resource and never stored in checkout state or payment evid
    Card replacement is a separately authorized saved-method/agreement action.
    POST `/v1/me/payment-operations/:id/authentication/confirm` then runs the existing
    operation verifier; browser success assertions cannot settle money locally.
-5. Read the original checkout for the completed subscription. Renewals use the same
+5. Read the checkout session for the completed subscription. Renewals use the same
    authentication recovery resource with their original operation IDs.
 
-Setup rows are `checkout_sessions.mode=payment_method`, rail `stripe`. The only
+Setup rows are `checkout_attempts.mode=payment_method`, rail `stripe`. The only
 stored binding is customer/account/session plus the original SetupIntent reference;
 completion attaches the exact successful setup's card under a customer/session lock.
 The first paid engine membership captures its PaymentIntent ID as the recurring

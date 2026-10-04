@@ -1,5 +1,21 @@
 # Changelog
 
+## Checkout sessions are the only browser purchase (openrails#1130)
+
+- `createCheckoutSession()` mints at `/me/checkout-sessions` and returns a
+  `CheckoutSessionLink` (`url` null without a payment page).
+- The session document's `rails` is `options` (`PaymentOption`, with the
+  option's `psp_id`); its `transaction_url` and the pay result's
+  `redirect_url`/`transaction_url` are one `next_action`
+  (`redirect_to_url` | `solana_pay`); the pay result's `operation_id` is
+  `operation`. Fields OpenRails sends as null read as `undefined`.
+- Stripe Elements runs on a session inside a `BillingProvider`: the card is
+  saved through the customer's client and the session pays it by id.
+- `getSolanaConfig()` is `getCheckoutConfig()` (`GET /checkout-config`; the
+  network is `solana.network`). `listSolanaTokens` drops `checkoutSessionId`.
+- Removed: `createHttpSource`, `CheckoutSourceError`, `checkoutRails`,
+  `CheckoutRailOffer` (hosts no longer serve sessions).
+
 ## v1 credits, usage and customers (openrails#1130)
 
 - `client.getStatus()` and `BillingStatus` are removed with `/v1/me/status`.

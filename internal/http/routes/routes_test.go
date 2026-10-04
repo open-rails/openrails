@@ -113,8 +113,8 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"PUT /v1/merchant/customers/{customer_id}/credit-limit":                             billing.MerchantCreditsGrant,
 		"PUT /v1/merchant/customers/{customer_id}/trust-level":                              w,
 		"POST /v1/merchant/checkout-sessions":                                               billing.MerchantCheckoutCreate,
-		"POST /v1/merchant/hosted-checkout-sessions":                                        billing.MerchantCheckoutCreate,
-		"GET /v1/merchant/checkout-sessions/{id}":                                           p,
+		"POST /v1/merchant/checkout-attempts":                                               billing.MerchantCheckoutCreate,
+		"GET /v1/merchant/checkout-attempts/{id}":                                           p,
 		"POST /v1/merchant/admissions":                                                      billing.MerchantAdmissionsCreate,
 		"POST /v1/merchant/admissions/{request_id}/capture":                                 billing.MerchantAdmissionsCreate,
 		"GET /v1/merchant/admissions/{request_id}":                                          billing.MerchantUsageRead,
@@ -292,9 +292,9 @@ func TestAdminOperationLimits(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code, "an authorized call reaches its handler")
 }
 
-// Buyer routes: checkout authenticates first; Solana routes exist only for
-// configured rails. A Solana subscription activates only through its checkout,
-// so there is no separate enrollment route.
+// Buyer routes are public or addressed by a checkout session or attempt id;
+// Solana routes exist only for configured rails. A browser buys only through
+// a checkout session.
 func TestUserRoutes(t *testing.T) {
 	inventory := func(providers routesurface.ProviderRoutes) []string {
 		table := &router.Table{}
@@ -302,45 +302,16 @@ func TestUserRoutes(t *testing.T) {
 		return routeKeys(table)
 	}
 	none := inventory(routesurface.ProviderRoutes{})
-	require.Subset(t, none, []string{"GET /v1/products", "GET /v1/prices", "GET /v1/checkout-config", "GET /v1/currencies", "POST /v1/checkout", "POST /v1/checkout/{id}/confirm",
+	require.Subset(t, none, []string{"GET /v1/products", "GET /v1/prices", "GET /v1/checkout-config", "GET /v1/currencies",
 		"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay"})
 	for _, key := range none {
 		require.NotContains(t, key, "solana")
+		require.NotRegexp(t, `/v1/checkout(/|$)`, key, "no engine checkout door for browsers")
 	}
 	oneOff := inventory(routesurface.ProviderRoutes{Solana: true})
-	require.Subset(t, oneOff, []string{"GET /v1/solana/config", "POST /v1/checkout/{id}/solana-pay"})
+	require.Subset(t, oneOff, []string{"GET /v1/solana/tokens", "POST /v1/checkout-attempts/{id}/solana-pay"})
 	for _, key := range inventory(routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}) {
 		require.NotContains(t, key, "/solana/recurring")
-	}
-
-	for _, tc := range []struct {
-		name, token, subject string
-		reaches              bool
-	}{
-		{"anonymous", "", "", false},
-		{"invalid token", "bad", "", false},
-		{"opaque subject", "valid", "user-1", false},
-		{"authenticated reaches checkout", "valid", userA, true},
-	} {
-		calls := 0
-		authn := billingauth.AuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
-			calls++
-			if r.Header.Get("Authorization") != "Bearer valid" {
-				return billingauth.UserContext{}, errors.New("invalid token")
-			}
-			return billingauth.UserContext{UserID: tc.subject}, nil
-		})
-		rt := &app.Runtime{}
-		providers := routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}
-		mux := http.NewServeMux()
-		RegisterUserRoutes(router.NewMux(mux, "/v1", rt), rt, Options{Authenticator: authn, ProviderRoutes: &providers})
-		header := map[string]string{}
-		if tc.token != "" {
-			header["Authorization"] = "Bearer " + tc.token
-		}
-		rec := do(mux, http.MethodPost, "/v1/checkout", header)
-		require.Equal(t, tc.reaches, rec.Code != http.StatusUnauthorized, "%s: %d", tc.name, rec.Code)
-		require.Equal(t, 1, calls, tc.name)
 	}
 }
 

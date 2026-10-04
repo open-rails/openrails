@@ -291,48 +291,12 @@
         ]
       }
     },
-    "/v1/solana/config": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SolanaRuntimeConfigResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-mounted-when": "solana",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:public"
-        ]
-      }
-    },
     "/v1/solana/tokens": {
       "get": {
         "tags": [
           "checkout"
         ],
         "parameters": [
-          {
-            "name": "checkout_session_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "price_id",
             "in": "query",
@@ -377,214 +341,6 @@
         ]
       }
     },
-    "/v1/checkout": {
-      "post": {
-        "tags": [
-          "checkout"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckoutSessionCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "card_requires_https",
-          "catalog_scope_mismatch",
-          "credential_custody_transition_required",
-          "custodian_capture_unavailable",
-          "customer_action_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user",
-          "request"
-        ]
-      }
-    },
-    "/v1/checkout/{id}": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "credential_custody_transition_required",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user"
-        ]
-      }
-    },
-    "/v1/checkout/{id}/confirm": {
-      "post": {
-        "tags": [
-          "checkout"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckoutSessionConfirmRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user",
-          "request"
-        ]
-      }
-    },
     "/v1/checkout-sessions/{id}": {
       "get": {
         "tags": [
@@ -606,7 +362,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HostedCheckoutSession"
+                  "$ref": "#/components/schemas/CheckoutSession"
                 }
               }
             }
@@ -625,7 +381,6 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
-          "custodian_capture_unavailable",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -661,7 +416,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HostedCheckoutPayRequest"
+                "$ref": "#/components/schemas/CheckoutSessionPayRequest"
               }
             }
           }
@@ -672,7 +427,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HostedCheckoutPayResult"
+                  "$ref": "#/components/schemas/CheckoutSessionPayResult"
                 }
               }
             }
@@ -697,7 +452,6 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
-          "custodian_capture_unavailable",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -715,7 +469,7 @@
         ]
       }
     },
-    "/v1/checkout/{id}/solana-pay": {
+    "/v1/checkout-attempts/{id}/solana-pay": {
       "get": {
         "tags": [
           "checkout"
@@ -810,153 +564,16 @@
         ]
       }
     },
-    "/v1/merchant/checkout-sessions": {
+    "/v1/me/checkout-sessions": {
       "post": {
         "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
+          "customer"
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateCheckoutSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:checkout:create",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "card_requires_https",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/checkout-sessions/lookup": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateCheckoutSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:checkout:create",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/hosted-checkout-sessions": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateHostedCheckoutSessionRequest"
+                "$ref": "#/components/schemas/CheckoutSessionMintRequest"
               }
             }
           }
@@ -967,7 +584,123 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HostedCheckoutSessionLink"
+                  "$ref": "#/components/schemas/CheckoutSessionLink"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-mounted-when": "checkout_sessions",
+        "x-openrails-customer-scope": "self_service",
+        "x-openrails-errors": [
+          "authentication_required",
+          "catalog_scope_mismatch",
+          "checkout_offer_unavailable",
+          "checkout_session_unavailable",
+          "customer_action_required",
+          "invalid_param",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/checkout-sessions": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCheckoutSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSessionLink"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:checkout:create",
+        "x-openrails-errors": [
+          "authentication_required",
+          "catalog_scope_mismatch",
+          "checkout_offer_unavailable",
+          "checkout_session_unavailable",
+          "invalid_param",
+          "resource_access_denied",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/checkout-attempts": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCheckoutAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutAttempt"
                 }
               }
             }
@@ -989,9 +722,7 @@
           "card_declined",
           "card_not_saved",
           "catalog_scope_mismatch",
-          "checkout_offer_unavailable",
-          "checkout_session_unavailable",
-          "custodian_capture_unavailable",
+          "checkout_attempt_closed",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -1009,284 +740,7 @@
         ]
       }
     },
-    "/v1/merchant/payment-method-sessions": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePaymentMethodSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:checkout:create",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/solana-cancel-sessions": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSolanaCancelSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:checkout:create",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/solana-tier-change-sessions": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSolanaTierChangeSessionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:checkout:create",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/checkout-sessions/by-key": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "entitlement",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/checkout-sessions/{id}": {
+    "/v1/merchant/checkout-attempts/{id}": {
       "get": {
         "tags": [
           "merchant"
@@ -1299,13 +753,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -1314,7 +761,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
+                  "$ref": "#/components/schemas/CheckoutAttempt"
                 }
               }
             }
@@ -1332,29 +779,17 @@
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
           "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "credential_custody_transition_required",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
           "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
           "resource_access_denied",
-          "resource_conflict",
           "resource_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       }
     },
-    "/v1/merchant/checkout-sessions/{id}/confirm": {
+    "/v1/merchant/checkout-attempts/{id}/confirm": {
       "post": {
         "tags": [
           "merchant"
@@ -1373,7 +808,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConfirmCheckoutSessionRequest"
+                "$ref": "#/components/schemas/ConfirmCheckoutAttemptRequest"
               }
             }
           }
@@ -1384,7 +819,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckoutSession"
+                  "$ref": "#/components/schemas/CheckoutAttempt"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutAttempt"
                 }
               }
             }
@@ -1402,17 +847,8 @@
         "x-openrails-permission": "merchant:checkout:create",
         "x-openrails-errors": [
           "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "credential_custody_transition_required",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
           "resource_access_denied",
           "resource_conflict",
           "resource_not_found",
@@ -1424,7 +860,7 @@
         ]
       }
     },
-    "/v1/merchant/checkout-options": {
+    "/v1/merchant/checkout-config": {
       "get": {
         "tags": [
           "merchant"
@@ -1451,59 +887,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CheckoutRailOption"
-                  }
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:read",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "catalog_scope_mismatch",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/checkout-config": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
                   "$ref": "#/components/schemas/CheckoutConfig"
                 }
               }
@@ -1521,285 +904,13 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/me/checkout": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckoutSessionCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "card_requires_https",
           "catalog_scope_mismatch",
-          "credential_custody_transition_required",
-          "custodian_capture_unavailable",
-          "customer_action_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
           "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
           "resource_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/checkout/sessions": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/HostedCheckoutMintRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HostedCheckoutSessionLink"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-mounted-when": "hosted_checkout",
-        "x-openrails-customer-scope": "self_service",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "catalog_scope_mismatch",
-          "checkout_offer_unavailable",
-          "checkout_session_unavailable",
-          "custodian_capture_unavailable",
-          "customer_action_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/checkout/{id}": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "credential_custody_transition_required",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
-    "/v1/me/checkout/{id}/confirm": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckoutSessionConfirmRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutSessionResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": [
-          "authentication_required",
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
+          "tier:merchant",
           "request"
         ]
       }
@@ -12873,7 +11984,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
+                  "$ref": "#/components/schemas/PaymentMethodSetup"
                 }
               }
             }
@@ -12933,7 +12044,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
+                  "$ref": "#/components/schemas/PaymentMethodSetup"
                 }
               }
             }
@@ -12992,7 +12103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StripeMethodSetupResponse"
+                  "$ref": "#/components/schemas/PaymentMethodSetup"
                 }
               }
             }
@@ -17246,6 +16357,227 @@
           }
         }
       },
+      "CheckoutAttempt": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "canceled",
+              "created",
+              "expired",
+              "failed",
+              "processing",
+              "requires_action",
+              "succeeded"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "price_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subscription_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_method_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentOperation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "customer_id",
+          "status",
+          "mode",
+          "price_id",
+          "amount",
+          "currency",
+          "payment_id",
+          "subscription_id",
+          "payment_method_id",
+          "next_action",
+          "operation",
+          "failure",
+          "expires_at",
+          "created_at",
+          "metadata"
+        ]
+      },
+      "CheckoutAttemptNextAction": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "redirect_to_url": {
+            "$ref": "#/components/schemas/CheckoutAttemptRedirectToURL"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "CheckoutAttemptPaymentResponse": {
+        "type": "object",
+        "properties": {
+          "rail": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "transaction_url": {
+            "type": "string"
+          },
+          "solana_pay_url": {
+            "type": "string"
+          },
+          "redirect_url": {
+            "type": "string"
+          },
+          "transaction_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rail"
+        ]
+      },
+      "CheckoutAttemptRedirectToURL": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "CheckoutConfig": {
         "type": "object",
         "properties": {
@@ -17267,11 +16599,25 @@
           },
           "solana": {
             "$ref": "#/components/schemas/SolanaCheckoutConfig"
+          },
+          "options": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CheckoutOption"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "object",
-          "psps"
+          "psps",
+          "options"
         ]
       },
       "CheckoutCustomerIdentity": {
@@ -17290,6 +16636,44 @@
             "type": "string"
           }
         }
+      },
+      "CheckoutOption": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string"
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "public_config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "retry_after": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selector",
+          "psp_id",
+          "rail",
+          "mode"
+        ]
       },
       "CheckoutPSPConfig": {
         "type": "object",
@@ -17391,49 +16775,8 @@
           },
           "expiry_date": {
             "type": "string"
-          },
-          "card": {
-            "$ref": "#/components/schemas/CardEntry"
           }
         }
-      },
-      "CheckoutRailOption": {
-        "type": "object",
-        "properties": {
-          "selector": {
-            "type": "string"
-          },
-          "psp_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "driver": {
-            "type": "string"
-          },
-          "public_config": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "status": {
-            "type": "string"
-          },
-          "retry_after": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "selector",
-          "psp_id",
-          "rail",
-          "mode"
-        ]
       },
       "CheckoutRoutingCandidateResponse": {
         "type": "object",
@@ -17558,32 +16901,32 @@
       "CheckoutSession": {
         "type": "object",
         "properties": {
-          "capture": {
-            "$ref": "#/components/schemas/CustodianCaptureAction"
-          },
-          "payment_method_id": {
-            "type": "string"
-          },
           "id": {
             "type": "string"
           },
           "status": {
             "type": "string"
           },
-          "mode": {
-            "type": "string"
+          "merchant": {
+            "$ref": "#/components/schemas/CheckoutSessionMerchant"
           },
-          "price_id": {
+          "plan": {
+            "$ref": "#/components/schemas/CheckoutSessionPlan"
+          },
+          "line_items": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CheckoutSessionLineItem"
+                }
               },
               {
                 "type": "null"
               }
             ]
           },
-          "amount": {
+          "tax": {
             "oneOf": [
               {
                 "type": "string",
@@ -17594,43 +16937,57 @@
               }
             ]
           },
-          "currency": {
+          "due_today": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "string",
+                "description": "A number as a decimal string."
               },
               {
                 "type": "null"
               }
             ]
           },
-          "payment_status": {
-            "type": "string"
-          },
-          "client_secret": {
+          "options": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CheckoutSessionOption"
+                }
               },
               {
                 "type": "null"
               }
             ]
           },
-          "url": {
+          "saved_methods": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CheckoutSessionSavedMethod"
+                }
               },
               {
                 "type": "null"
               }
             ]
           },
-          "subscription_id": {
+          "next_action": {
             "oneOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentOperation"
               },
               {
                 "type": "null"
@@ -17647,15 +17004,180 @@
               }
             ]
           },
+          "subscription_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure_message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "success_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "embed_origin": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "merchant",
+          "plan",
+          "line_items",
+          "tax",
+          "due_today",
+          "options",
+          "saved_methods",
+          "next_action",
+          "operation",
+          "payment_id",
+          "subscription_id",
+          "failure_message",
+          "failure",
+          "success_url",
+          "embed_origin",
+          "expires_at"
+        ]
+      },
+      "CheckoutSessionLineItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
           },
-          "created_at": {
+          "sublabel": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "label",
+          "sublabel",
+          "amount"
+        ]
+      },
+      "CheckoutSessionLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "expires_at"
+        ]
+      },
+      "CheckoutSessionMerchant": {
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ]
+      },
+      "CheckoutSessionMintRequest": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "type": "string"
           },
-          "metadata": {
+          "price_key": {
+            "type": "string"
+          },
+          "success_url": {
+            "type": "string"
+          }
+        }
+      },
+      "CheckoutSessionOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "public_config": {
             "oneOf": [
               {
                 "type": "object",
@@ -17667,191 +17189,27 @@
                 "type": "null"
               }
             ]
-          },
-          "rail_data": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {}
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "operation": {
-            "$ref": "#/components/schemas/PaymentOperation"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/PaymentFailure"
           }
         },
         "required": [
           "id",
-          "status",
+          "psp_id",
+          "rail",
           "mode",
-          "price_id",
-          "amount",
-          "currency",
-          "payment_status",
-          "client_secret",
-          "url",
-          "subscription_id",
-          "payment_id",
-          "created_at",
-          "metadata",
-          "rail_data"
+          "driver",
+          "public_config"
         ]
       },
-      "CheckoutSessionConfirmRequest": {
+      "CheckoutSessionPayRequest": {
         "type": "object",
         "properties": {
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutSessionConfirmRequestPayment"
-          }
-        }
-      },
-      "CheckoutSessionConfirmRequestPayment": {
-        "type": "object",
-        "properties": {
-          "capture": {
-            "$ref": "#/components/schemas/CustodianCaptureReference"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "signature": {
-            "type": "string"
-          },
-          "wallet": {
-            "type": "string"
-          }
-        }
-      },
-      "CheckoutSessionCreateRequest": {
-        "type": "object",
-        "properties": {
-          "price_id": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "entitlement": {
-            "type": "string"
-          },
-          "offer_kind": {
-            "type": "string",
-            "enum": [
-              "finite",
-              "permanent",
-              "recurring"
-            ]
-          },
-          "mode": {
-            "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutSessionPaymentParams"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "new_price_id": {
-            "type": "string"
-          },
-          "success_url": {
-            "type": "string"
-          },
-          "cancel_url": {
-            "type": "string"
-          }
-        }
-      },
-      "CheckoutSessionMembershipQuote": {
-        "type": "object",
-        "properties": {
-          "product_name": {
-            "type": "string"
-          },
-          "cycle_hours": {
-            "type": "integer"
-          },
-          "entitlements": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "product_name",
-          "cycle_hours",
-          "entitlements"
-        ]
-      },
-      "CheckoutSessionNextAction": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string"
-          },
-          "redirect_to_url": {
-            "$ref": "#/components/schemas/CheckoutSessionRedirectToURL"
-          },
-          "transactions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "type"
-        ]
-      },
-      "CheckoutSessionPaymentParams": {
-        "type": "object",
-        "properties": {
-          "psp_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "payment_method_id": {
+          "option_id": {
             "type": "string"
           },
           "payment_token": {
             "type": "string"
           },
-          "token_symbol": {
-            "type": "string"
-          },
-          "flow": {
-            "type": "string"
-          },
-          "wallet": {
+          "payment_method_id": {
             "type": "string"
           },
           "email": {
@@ -17875,6 +17233,9 @@
           "country": {
             "type": "string"
           },
+          "token_symbol": {
+            "type": "string"
+          },
           "last_four": {
             "type": "string"
           },
@@ -17889,144 +17250,150 @@
           }
         }
       },
-      "CheckoutSessionPaymentResponse": {
+      "CheckoutSessionPayResult": {
         "type": "object",
         "properties": {
-          "rail": {
-            "type": "string"
-          },
-          "reference": {
-            "type": "string"
-          },
-          "transaction_url": {
-            "type": "string"
-          },
-          "solana_pay_url": {
-            "type": "string"
-          },
-          "redirect_url": {
-            "type": "string"
-          },
-          "transaction_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "rail"
-        ]
-      },
-      "CheckoutSessionRedirectToURL": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        }
-      },
-      "CheckoutSessionResponse": {
-        "type": "object",
-        "properties": {
-          "operation": {
-            "$ref": "#/components/schemas/PaymentOperation"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/PaymentFailure"
-          },
-          "membership_quote": {
-            "$ref": "#/components/schemas/CheckoutSessionMembershipQuote"
-          },
-          "capture": {
-            "$ref": "#/components/schemas/CustodianCaptureAction"
-          },
-          "payment_method_id": {
-            "type": "string"
-          },
-          "object": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
           "status": {
             "type": "string"
           },
-          "mode": {
-            "type": "string"
-          },
-          "price_id": {
+          "next_action": {
             "oneOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/NextAction"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "amount": {
+          "operation": {
             "oneOf": [
               {
-                "type": "string",
-                "description": "A number as a decimal string."
+                "$ref": "#/components/schemas/PaymentOperation"
               },
               {
                 "type": "null"
               }
             ]
-          },
-          "currency": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "url": {
-            "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutSessionPaymentResponse"
           },
           "payment_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "subscription_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
+          "failure_message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "next_action": {
-            "$ref": "#/components/schemas/CheckoutSessionNextAction"
-          },
-          "message": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
+          "failure": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "object",
-          "id",
           "status",
-          "mode",
-          "price_id",
-          "amount",
+          "next_action",
+          "operation",
+          "payment_id",
+          "subscription_id",
+          "failure_message",
+          "failure"
+        ]
+      },
+      "CheckoutSessionPlan": {
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "unit_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "unit_decimals": {
+            "type": "integer"
+          },
+          "period_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "automatically_renews": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "display_name",
+          "unit_amount",
           "currency",
-          "payment",
-          "created_at"
+          "unit_decimals",
+          "period_hours",
+          "automatically_renews"
+        ]
+      },
+      "CheckoutSessionSavedMethod": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "option_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "option_id",
+          "rail",
+          "card"
         ]
       },
       "CollectionPaymentMethod": {
@@ -18062,26 +17429,9 @@
           "kind"
         ]
       },
-      "ConfirmCheckoutSessionRequest": {
+      "ConfirmCheckoutAttemptRequest": {
         "type": "object",
         "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/ConfirmPayment"
-          }
-        }
-      },
-      "ConfirmPayment": {
-        "type": "object",
-        "properties": {
-          "capture": {
-            "$ref": "#/components/schemas/CustodianCaptureReference"
-          },
-          "rail": {
-            "type": "string"
-          },
           "signature": {
             "type": "string"
           },
@@ -18129,7 +17479,7 @@
           "evidence"
         ]
       },
-      "CreateCheckoutSessionRequest": {
+      "CreateCheckoutAttemptRequest": {
         "type": "object",
         "properties": {
           "customer": {
@@ -18173,13 +17523,10 @@
           },
           "cancel_url": {
             "type": "string"
-          },
-          "confirm": {
-            "type": "boolean"
           }
         }
       },
-      "CreateHostedCheckoutSessionRequest": {
+      "CreateCheckoutSessionRequest": {
         "type": "object",
         "properties": {
           "customer": {
@@ -18254,23 +17601,6 @@
           },
           "billing_details": {
             "$ref": "#/components/schemas/BillingDetails"
-          }
-        }
-      },
-      "CreatePaymentMethodSessionRequest": {
-        "type": "object",
-        "properties": {
-          "customer": {
-            "$ref": "#/components/schemas/CheckoutCustomerIdentity"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutPaymentOptions"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
           }
         }
       },
@@ -18426,49 +17756,6 @@
           },
           "archived": {
             "type": "boolean"
-          }
-        }
-      },
-      "CreateSolanaCancelSessionRequest": {
-        "type": "object",
-        "properties": {
-          "customer": {
-            "$ref": "#/components/schemas/CheckoutCustomerIdentity"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutPaymentOptions"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "CreateSolanaTierChangeSessionRequest": {
-        "type": "object",
-        "properties": {
-          "customer": {
-            "$ref": "#/components/schemas/CheckoutCustomerIdentity"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "new_price_id": {
-            "type": "string"
-          },
-          "payment": {
-            "$ref": "#/components/schemas/CheckoutPaymentOptions"
-          },
-          "metadata": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
           }
         }
       },
@@ -18827,64 +18114,6 @@
           "decimals",
           "minor_decimals"
         ]
-      },
-      "CustodianCaptureAction": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string"
-          },
-          "custodian_id": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "api_base_url": {
-            "type": "string"
-          },
-          "sdk_url": {
-            "type": "string"
-          },
-          "public_api_key": {
-            "type": "string"
-          },
-          "sdk_authorization": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "kind",
-          "custodian_id",
-          "session_id",
-          "customer_id",
-          "api_base_url",
-          "sdk_url",
-          "public_api_key",
-          "sdk_authorization",
-          "expires_at"
-        ]
-      },
-      "CustodianCaptureReference": {
-        "type": "object",
-        "properties": {
-          "custodian_id": {
-            "type": "string"
-          },
-          "session_id": {
-            "type": "string"
-          },
-          "token": {
-            "type": "string"
-          }
-        }
       },
       "Customer": {
         "type": "object",
@@ -20077,321 +19306,6 @@
           "occurred_at"
         ]
       },
-      "HostedCheckoutLineItem": {
-        "type": "object",
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "sublabel": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          }
-        },
-        "required": [
-          "label",
-          "amount"
-        ]
-      },
-      "HostedCheckoutMerchant": {
-        "type": "object",
-        "properties": {
-          "display_name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "display_name"
-        ]
-      },
-      "HostedCheckoutMintRequest": {
-        "type": "object",
-        "properties": {
-          "price_id": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "success_url": {
-            "type": "string"
-          }
-        }
-      },
-      "HostedCheckoutPayRequest": {
-        "type": "object",
-        "properties": {
-          "option_id": {
-            "type": "string"
-          },
-          "payment_token": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "name_on_card": {
-            "type": "string"
-          },
-          "address1": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "zip": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
-          },
-          "token_symbol": {
-            "type": "string"
-          },
-          "last_four": {
-            "type": "string"
-          },
-          "card_type": {
-            "type": "string"
-          },
-          "expiry_date": {
-            "type": "string"
-          },
-          "card": {
-            "$ref": "#/components/schemas/CardEntry"
-          }
-        }
-      },
-      "HostedCheckoutPayResult": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string"
-          },
-          "redirect_url": {
-            "type": "string"
-          },
-          "transaction_url": {
-            "type": "string"
-          },
-          "payment_id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "failure_message": {
-            "type": "string"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/PaymentFailure"
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
-      "HostedCheckoutPlan": {
-        "type": "object",
-        "properties": {
-          "display_name": {
-            "type": "string"
-          },
-          "unit_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "unit_decimals": {
-            "type": "integer"
-          },
-          "period_hours": {
-            "type": "integer"
-          },
-          "automatically_renews": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "display_name",
-          "unit_amount",
-          "currency",
-          "unit_decimals",
-          "automatically_renews"
-        ]
-      },
-      "HostedCheckoutRail": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "mode": {
-            "type": "string"
-          },
-          "driver": {
-            "type": "string"
-          },
-          "public_config": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "rail",
-          "mode",
-          "driver"
-        ]
-      },
-      "HostedCheckoutSavedMethod": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "option_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "card": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/CardDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "option_id",
-          "rail",
-          "card"
-        ]
-      },
-      "HostedCheckoutSession": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "merchant": {
-            "$ref": "#/components/schemas/HostedCheckoutMerchant"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/HostedCheckoutPlan"
-          },
-          "line_items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostedCheckoutLineItem"
-            }
-          },
-          "tax": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "due_today": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "rails": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/HostedCheckoutRail"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "saved_methods": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostedCheckoutSavedMethod"
-            }
-          },
-          "transaction_url": {
-            "type": "string"
-          },
-          "payment_id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "failure_message": {
-            "type": "string"
-          },
-          "failure": {
-            "$ref": "#/components/schemas/PaymentFailure"
-          },
-          "success_url": {
-            "type": "string"
-          },
-          "embed_origin": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "status",
-          "merchant",
-          "plan",
-          "rails",
-          "expires_at"
-        ]
-      },
-      "HostedCheckoutSessionLink": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "expires_at"
-        ]
-      },
       "Invoice": {
         "type": "object",
         "properties": {
@@ -21362,6 +20276,42 @@
           "allowance",
           "created_at",
           "updated_at"
+        ]
+      },
+      "NextAction": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transactions": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "url",
+          "transactions"
         ]
       },
       "Notification": {
@@ -22781,6 +21731,30 @@
             "type": "string"
           }
         }
+      },
+      "PaymentMethodSetup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "setup_intent_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          },
+          "payment_method_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
       },
       "PaymentMethodSetupParams": {
         "type": "object",
@@ -25283,68 +24257,6 @@
           "transaction"
         ]
       },
-      "SolanaRuntimeConfigResponse": {
-        "type": "object",
-        "properties": {
-          "network": {
-            "type": "string"
-          },
-          "chain": {
-            "type": "string"
-          },
-          "rpcUrl": {
-            "type": "string"
-          },
-          "explorerCluster": {
-            "type": "string"
-          },
-          "preferredToken": {
-            "type": "string"
-          },
-          "tokens": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/TokenInfo"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "features": {
-            "$ref": "#/components/schemas/SolanaRuntimeConfigResponseFeatures"
-          }
-        },
-        "required": [
-          "network",
-          "chain",
-          "preferredToken",
-          "tokens",
-          "features"
-        ]
-      },
-      "SolanaRuntimeConfigResponseFeatures": {
-        "type": "object",
-        "properties": {
-          "solanaPay": {
-            "type": "boolean"
-          },
-          "recurringSubscriptions": {
-            "type": "boolean"
-          },
-          "solanaPayRecurringSubscriptions": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "solanaPay",
-          "recurringSubscriptions",
-          "solanaPayRecurringSubscriptions"
-        ]
-      },
       "SolanaTierChangeConfirmRequest": {
         "type": "object",
         "properties": {
@@ -25541,30 +24453,6 @@
         },
         "required": [
           "operation"
-        ]
-      },
-      "StripeMethodSetupResponse": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "setup_intent_id": {
-            "type": "string"
-          },
-          "client_secret": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "status"
         ]
       },
       "Subscription": {
@@ -26075,13 +24963,13 @@
             "type": "string"
           },
           "payment": {
-            "$ref": "#/components/schemas/CheckoutSessionPaymentResponse"
+            "$ref": "#/components/schemas/CheckoutAttemptPaymentResponse"
           },
           "subscription_id": {
             "type": "string"
           },
           "next_action": {
-            "$ref": "#/components/schemas/CheckoutSessionNextAction"
+            "$ref": "#/components/schemas/CheckoutAttemptNextAction"
           },
           "message": {
             "type": "string"
@@ -27288,6 +26176,11 @@
       "type": "invalid_request_error",
       "meaning": "Catalog updates over HTTP are disabled in this deployment."
     },
+    "checkout_attempt_closed": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The checkout attempt already completed or was canceled."
+    },
     "checkout_offer_unavailable": {
       "status": 422,
       "type": "invalid_request_error",
@@ -27302,11 +26195,6 @@
       "status": 422,
       "type": "invalid_request_error",
       "meaning": "The checkout request is invalid."
-    },
-    "checkout_session_closed": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The checkout session already completed or was canceled."
     },
     "checkout_session_expired": {
       "status": 410,

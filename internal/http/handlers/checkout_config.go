@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -67,12 +68,45 @@ func GetCheckoutConfig(r *httprequest.Request) {
 	r.SuccessJSON(body)
 }
 
-// ServiceGetCheckoutConfig serves the same document to the shared client for
-// the credential's merchant, without public cache headers.
+// ServiceGetCheckoutConfig serves the same document to the merchant, without
+// public cache headers. With price_id or price_key it also lists the ways
+// checkout can sell that price, each with the browser driver that renders it.
 func ServiceGetCheckoutConfig(r *httprequest.Request) {
-	if body, ok := checkoutConfig(r); ok {
-		r.SuccessJSON(body)
+	body, ok := checkoutConfig(r)
+	if !ok {
+		return
 	}
+	rawID, key := strings.TrimSpace(r.Query("price_id")), r.Query("price_key")
+	if rawID == "" && strings.TrimSpace(key) == "" {
+		r.SuccessJSON(body)
+		return
+	}
+	if rawID != "" && strings.TrimSpace(key) != "" {
+		r.ErrorCode(billing.CodeInvalidParam, "price_id and price_key are exclusive")
+		return
+	}
+	var priceID billing.PriceID
+	if rawID != "" {
+		parsed, err := billing.ParsePriceID(rawID)
+		if err != nil || parsed.IsZero() {
+			r.ErrorCode(billing.CodeInvalidParam, "invalid price_id")
+			return
+		}
+		priceID = parsed
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	options, err := svc.ListCheckoutOptions(r.Request.Context(), priceID, key)
+	if err != nil {
+		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		return
+	}
+	advertiseCheckoutOptions(options, body)
+	body.Options = options
+	r.SuccessJSON(body)
 }
 
 func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, bool) {
@@ -121,8 +155,8 @@ func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope
 
 // advertiseCheckoutOptions attaches to each option the browser driver and
 // public values that render it, from the same armed-PSP projection
-// /checkout-config serves (#1078). Hosts pass options through unchanged.
-func advertiseCheckoutOptions(options []billing.CheckoutRailOption, cfg merchants.PublicCheckoutConfig) {
+// /checkout-config serves (#1078).
+func advertiseCheckoutOptions(options []billing.CheckoutOption, cfg merchants.PublicCheckoutConfig) {
 	byID := make(map[string]merchants.PublicPSPConfig, len(cfg.PSPs))
 	for _, psp := range cfg.PSPs {
 		byID[psp.PSPID] = psp

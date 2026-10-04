@@ -47,7 +47,7 @@ type StripeWebhookService struct {
 	MoneyService                 *money.MoneyService
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
-	CheckoutSessionService       webhookCheckoutSessionStore
+	CheckoutAttemptService       webhookCheckoutAttemptStore
 	Clock                        clockwork.Clock
 	// ConvergeEnqueuer (#684): subscription-state events are wake-up signals —
 	// the handler marks the subscription dirty and the coalesced River job
@@ -696,7 +696,7 @@ func zeroTimePtr(t time.Time) *time.Time {
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context, obj json.RawMessage) error {
-	if s.CheckoutSessionService == nil {
+	if s.CheckoutAttemptService == nil {
 		return nil
 	}
 
@@ -705,7 +705,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
 
-	sessionID := parseCheckoutSessionID(sess.Metadata)
+	sessionID := parseCheckoutAttemptID(sess.Metadata)
 	if sessionID == uuid.Nil {
 		userID := normalize.FirstNonEmpty(sess.Metadata["user_id"], sess.Metadata["userId"], sess.Metadata["uid"])
 		if userID == "" {
@@ -715,7 +715,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		if err != nil {
 			return nil
 		}
-		if session, err := s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
+		if session, err := s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
 			sessionID = session.ID
 		}
 	}
@@ -724,7 +724,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		return nil
 	}
 
-	return s.CheckoutSessionService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutSessionStatusExpired)
+	return s.CheckoutAttemptService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutAttemptStatusExpired)
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Context, obj json.RawMessage) error {
@@ -781,7 +781,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 
 	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		CheckoutSessionID: parseCheckoutSessionID(sess.Metadata),
+		CheckoutAttemptID: parseCheckoutAttemptID(sess.Metadata),
 		UserID:            userID,
 		PriceID:           priceID,
 		Rail:              string(models.RailStripe),
@@ -796,17 +796,17 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		return fmt.Errorf("register purchase: %w", err)
 	}
 
-	if s.CheckoutSessionService != nil {
-		sessionID := parseCheckoutSessionID(sess.Metadata)
+	if s.CheckoutAttemptService != nil {
+		sessionID := parseCheckoutAttemptID(sess.Metadata)
 		if sessionID == uuid.Nil {
-			if session, err := s.CheckoutSessionService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
+			if session, err := s.CheckoutAttemptService.FindOpenByUserPriceRail(ctx, userID, priceID, models.RailStripe); err == nil && session != nil {
 				sessionID = session.ID
 			}
 		}
 		if sessionID != uuid.Nil {
-			if err := s.CheckoutSessionService.MarkSucceeded(ctx, sessionID, result.PaymentID, paymentTransactionID); err != nil {
+			if err := s.CheckoutAttemptService.MarkSucceeded(ctx, sessionID, result.PaymentID, paymentTransactionID); err != nil {
 				log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-					"checkout_session_id": sessionID,
+					"checkout_attempt_id": sessionID,
 					"transaction_id":      paymentTransactionID,
 				}).Warn("failed to update checkout session from stripe checkout")
 			}
@@ -821,28 +821,28 @@ func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx conte
 	if err := json.Unmarshal(obj, &sess); err != nil {
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
-	if s.CheckoutSessionService == nil {
+	if s.CheckoutAttemptService == nil {
 		return nil
 	}
-	sessionID := parseCheckoutSessionID(sess.Metadata)
+	sessionID := parseCheckoutAttemptID(sess.Metadata)
 	if sessionID == uuid.Nil {
 		return nil
 	}
-	if err := s.CheckoutSessionService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutSessionStatusFailed); err != nil {
+	if err := s.CheckoutAttemptService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutAttemptStatusFailed); err != nil {
 		return fmt.Errorf("mark stripe checkout failed: %w", err)
 	}
 	return nil
 }
 
-func parseCheckoutSessionID(metadata map[string]string) uuid.UUID {
+func parseCheckoutAttemptID(metadata map[string]string) uuid.UUID {
 	if metadata == nil {
 		return uuid.Nil
 	}
-	raw := strings.TrimSpace(metadata["checkout_session_id"])
+	raw := strings.TrimSpace(metadata["checkout_attempt_id"])
 	if raw == "" {
 		return uuid.Nil
 	}
-	id, err := billing.ParseCheckoutSessionID(raw)
+	id, err := billing.ParseCheckoutAttemptID(raw)
 	if err != nil {
 		return uuid.Nil
 	}

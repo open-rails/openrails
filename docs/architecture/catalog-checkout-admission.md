@@ -88,7 +88,7 @@ refund, schedule mutation or deployment is part of this qualification.
 
 ## Explicit catalog selectors
 
-`CreateCheckoutSessionRequest` requires exactly one `PriceID` or `PriceKey`.
+`CreateCheckoutAttemptRequest` and `CreateCheckoutSessionRequest` require exactly one `PriceID` or `PriceKey`.
 `PriceID` retains the typed `price_<uuid>` contract. `PriceKey` is always an
 opaque catalog key, even when its text looks like a UUID. This is a hard cut:
 move old keys from `price_id` into `price_key`; do not resolve the key in the
@@ -97,9 +97,9 @@ key to ID under one accepted idempotency key conflicts even if both currently
 resolve to the same offer. Empty new key fields do not alter existing ID-only
 request fingerprints.
 
-`ListCheckoutRailOptions` continues to take an ID;
-`ListCheckoutRailOptionsByKey` takes a key. HTTP checkout-options and routing
-dry-run accept exactly one `price_id` or `price_key`. Catalog `RetrieveByKey`
+`GetCheckoutConfig` takes a `CheckoutConfigQuery` with an ID or a key; HTTP
+`checkout-config` and routing dry-run accept exactly one `price_id` or
+`price_key`. Catalog `RetrieveByKey`
 methods remain explicit. Product-access and price-creation product selectors
 are delivered by the coordinated #1051 product-selector lane. Creation `Key`
 fields still declare a handle; they are not alternate IDs.
@@ -111,7 +111,7 @@ payment, import and accepted-operation coordinates remain immutable IDs.
 
 ## Recovery and qualification evidence
 
-Hosted Stripe dispatch is claimed in the existing session immediately before
+Hosted Stripe dispatch is claimed in the existing attempt immediately before
 HTTP submission, after local validation. A process crash or unknown transport
 result cannot issue another hosted create merely because the provider's
 idempotency retention or the local TTL has elapsed. A known pre-dispatch
@@ -154,15 +154,8 @@ commercial kind and freezes the benefits. PPV uses `permanent`; channel membersh
 uses `recurring`. Membership checks remain host policy; purchased PPV access
 survives the membership's end.
 
-A wrapper first calls `LookupCheckoutSession` with the original complete request.
-It returns a read-only projection of that buyer's accepted session, even after
-host policy/catalog changes, or `ErrNotFound`. A changed request under the same
-key returns `ErrIdempotencyKeyReused`. Only on not-found does the host run its live
-new-purchase policy and call `CreateCheckoutSession`. Lookup performs no provider
-work and does not resume a financial operation. A concurrent creation still
-passes through the existing idempotency and admission locks.
-
-Management-only customer routes expose GET `/me/checkout/:id` and POST
-`/me/checkout/:id/confirm` for an app-admitted session. Generic checkout creation
-remains absent. Confirmation preserves the existing verified interactive-payer
-requirement; merchant credentials cannot impersonate that proof.
+A host replays a purchase by calling `CreateCheckoutAttempt` again with the same
+`Idempotency-Key` and the original complete request: it returns the accepted
+attempt even after host policy or catalog changes. A changed request under the
+same key returns `ErrIdempotencyKeyReused`. Creation passes through the existing
+idempotency and admission locks.
