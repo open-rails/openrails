@@ -178,9 +178,9 @@ var families = map[Family]familySpec{
 		From:     `billing.payments p`,
 		TimeExpr: `p.purchased_at`,
 		DimJoins: map[string]string{
-			"product_id":    `LEFT JOIN billing.prices pr ON pr.id = p.price_id`,
-			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.id = p.price_id`,
-			"rail_account":  `LEFT JOIN billing.psps rma ON rma.id = p.psp_id`,
+			"product_id":    `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
+			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id`,
+			"rail_account":  `LEFT JOIN billing.psps rma ON rma.merchant_id = p.merchant_id AND rma.id = p.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `p.currency`,
@@ -201,9 +201,9 @@ var families = map[Family]familySpec{
 		From:     `billing.subscriptions s`,
 		TimeExpr: `s.started_at`,
 		DimJoins: map[string]string{
-			"currency":      `LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
-			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
-			"rail_account":  `LEFT JOIN billing.psps rma ON rma.id = s.psp_id`,
+			"currency":      `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"billing_cycle": `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"rail_account":  `LEFT JOIN billing.psps rma ON rma.merchant_id = s.merchant_id AND rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,
@@ -224,8 +224,8 @@ var families = map[Family]familySpec{
 		From:     `billing.subscriptions s`,
 		TimeExpr: `s.cancelled_at`,
 		DimJoins: map[string]string{
-			"currency":     `LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
-			"rail_account": `LEFT JOIN billing.psps rma ON rma.id = s.psp_id`,
+			"currency":     `LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
+			"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = s.merchant_id AND rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":     `COALESCE(pr.currency, '')`,
@@ -290,11 +290,11 @@ var families = map[Family]familySpec{
 	},
 	FamSubsSnapshot: {
 		Kind: "snapshot",
-		From: `billing.subscriptions s LEFT JOIN billing.prices pr ON pr.id = s.price_id`,
+		From: `billing.subscriptions s LEFT JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id`,
 		// Interval predicate: sub existed at t.
 		BaseWhere: `s.started_at <= edge.bucket AND (s.ended_at IS NULL OR s.ended_at > edge.bucket)`,
 		DimJoins: map[string]string{
-			"rail_account": `LEFT JOIN billing.psps rma ON rma.id = s.psp_id`,
+			"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = s.merchant_id AND rma.id = s.psp_id`,
 		},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(pr.currency, '')`,
@@ -318,8 +318,8 @@ var families = map[Family]familySpec{
 	FamBalance: {
 		Kind: "balance",
 		From: `billing.ledger_transfers lt
-		JOIN billing.ledger_accounts da ON da.id = lt.debit_account_id
-		JOIN billing.ledger_accounts ca ON ca.id = lt.credit_account_id`,
+		JOIN billing.ledger_accounts da ON da.merchant_id = lt.merchant_id AND da.id = lt.debit_account_id
+		JOIN billing.ledger_accounts ca ON ca.merchant_id = lt.merchant_id AND ca.id = lt.credit_account_id`,
 		TimeExpr: `lt.created_at`,
 		DimExprs: map[string]string{
 			"currency": `lt.currency`,
@@ -347,7 +347,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.payment_attempts a`,
 		TimeExpr: `a.attempted_at`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = a.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = a.merchant_id AND rma.id = a.psp_id`},
 		DimExprs: map[string]string{
 			"currency":      `COALESCE(a.currency, '')`,
 			"rail":          `a.rail`,
@@ -372,7 +372,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     checkoutsFrom,
 		TimeExpr: `ck.started_at`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = ck.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = ck.merchant_id AND rma.id = ck.psp_id`},
 		DimExprs: map[string]string{
 			"currency":     `ck.currency`,
 			"rail":         `ck.rail`,
@@ -385,7 +385,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     rebillCyclesFrom,
 		TimeExpr: `cy.due_at`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = cy.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = cy.merchant_id AND rma.id = cy.psp_id`},
 		DimExprs: map[string]string{
 			"currency":               `cy.currency`,
 			"rail":                   `cy.rail`,
@@ -406,7 +406,7 @@ var families = map[Family]familySpec{
 		Kind:     "flow",
 		From:     `billing.nmi_history_months h`,
 		TimeExpr: `h.month`,
-		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.id = h.psp_id`},
+		DimJoins: map[string]string{"rail_account": `LEFT JOIN billing.psps rma ON rma.merchant_id = h.merchant_id AND rma.id = h.psp_id`},
 		DimExprs: map[string]string{
 			"rail_account": `COALESCE(rma.account_id, 'unknown')`,
 			"nmi_kind":     `h.kind`,

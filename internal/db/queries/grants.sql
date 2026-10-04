@@ -312,7 +312,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.id = sqlc.arg(id)::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
@@ -331,7 +331,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.payment_id = sqlc.arg(payment_id)::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 

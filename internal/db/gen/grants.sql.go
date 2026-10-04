@@ -1588,7 +1588,7 @@ WHERE g.merchant_id = $3::uuid
   AND g.id = $4::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `
@@ -1630,7 +1630,7 @@ WHERE g.merchant_id = $3::uuid
   AND g.payment_id = $4::uuid
   AND g.kind = 'ownership' AND g.event = 'grant'
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING
 `

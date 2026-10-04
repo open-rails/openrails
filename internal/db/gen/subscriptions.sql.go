@@ -235,24 +235,6 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 	return result.RowsAffected(), nil
 }
 
-const deleteSubscription = `-- name: DeleteSubscription :execrows
-DELETE FROM billing.subscriptions WHERE subscriptions.merchant_id = $2::uuid AND id = $1
-  AND deleted_at IS NULL
-`
-
-type DeleteSubscriptionParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSubscription, arg.ID, arg.MerchantID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getActiveSubscriptionByCustomerAt = `-- name: GetActiveSubscriptionByCustomerAt :one
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy FROM billing.subscriptions sub
 WHERE sub.merchant_id = $2::uuid AND sub.customer_id = $1

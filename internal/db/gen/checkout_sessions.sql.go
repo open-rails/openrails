@@ -421,7 +421,7 @@ const createPaymentMethodSetupSession = `-- name: CreatePaymentMethodSetupSessio
 INSERT INTO billing.checkout_sessions
 (id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
 VALUES($1,$2,$3,$4,'payment_method','nmi','created',$5,$6,$7,$8,$8)
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT (merchant_id, id) DO NOTHING
 `
 
 type CreatePaymentMethodSetupSessionParams struct {

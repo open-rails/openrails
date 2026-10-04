@@ -258,8 +258,3 @@ func (s *SubscriptionService) GetByPSPMetadataValue(ctx context.Context, rail, k
 func (s *SubscriptionService) GetActiveSubscriptionsForPSP(ctx context.Context, rail string) ([]*models.Subscription, error) {
 	return s.subscriptionRepo.GetActiveSubscriptionsForPSP(ctx, rail)
 }
-
-// Delete removes a subscription from the database permanently
-func (s *SubscriptionService) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.subscriptionRepo.Delete(ctx, id)
-}

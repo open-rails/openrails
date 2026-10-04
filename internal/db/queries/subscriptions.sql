@@ -99,10 +99,6 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   -- The status-transition audit records this decision's name (0021).
   AND set_config('billing.decision', sqlc.arg(decision)::text, true) IS NOT NULL;
 
--- name: DeleteSubscription :execrows
-DELETE FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
-  AND deleted_at IS NULL;
-
 -- name: GetSubscriptionByID :one
 SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;

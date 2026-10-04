@@ -203,7 +203,7 @@ CREATE TABLE billing.merchant_slug_aliases (
     expires_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT merchant_slug_aliases_pkey PRIMARY KEY (slug),
-    CONSTRAINT merchant_slug_aliases_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+    CONSTRAINT merchant_slug_aliases_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
 );
 COMMENT ON TABLE billing.merchant_slug_aliases IS 'Former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.';
 
@@ -215,7 +215,7 @@ CREATE TABLE billing.merchant_api_host_claims (
     token text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT merchant_api_host_claims_pkey PRIMARY KEY (merchant_id),
-    CONSTRAINT merchant_api_host_claims_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE
+    CONSTRAINT merchant_api_host_claims_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
 );
 COMMENT ON TABLE billing.merchant_api_host_claims IS 'A merchant''s unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.';
 
@@ -224,7 +224,6 @@ COMMENT ON TABLE billing.merchant_api_host_claims IS 'A merchant''s unproven api
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE billing.destructive_action_switch (
-    id uuid DEFAULT uuidv7() NOT NULL,
     singleton boolean DEFAULT true NOT NULL,
     enabled boolean DEFAULT false NOT NULL,
     updated_by text,
@@ -235,15 +234,12 @@ CREATE TABLE billing.destructive_action_switch (
 COMMENT ON TABLE billing.destructive_action_switch IS 'Global by design: instance-level operator kill switch for destructive convergence, not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.';
 
 ALTER TABLE ONLY billing.destructive_action_switch
-    ADD CONSTRAINT destructive_action_switch_pkey PRIMARY KEY (id);
-
-CREATE UNIQUE INDEX uq_destructive_action_switch_singleton ON billing.destructive_action_switch USING btree (singleton);
+    ADD CONSTRAINT destructive_action_switch_pkey PRIMARY KEY (singleton);
 
 INSERT INTO billing.destructive_action_switch (enabled, reason)
 VALUES (false, 'default safe (#836): arm deliberately once the first pull''s findings have been reviewed');
 
 CREATE TABLE billing.merchant_destructive_policy (
-    id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     destructive_actions_enabled boolean DEFAULT true CONSTRAINT merchant_destructive_policy_destructive_actions_enable_not_null NOT NULL,
     enforce_armed_at timestamp with time zone,
@@ -256,9 +252,7 @@ COMMENT ON TABLE billing.merchant_destructive_policy IS 'Per-merchant destructiv
 COMMENT ON COLUMN billing.merchant_destructive_policy.enforce_armed_at IS 'NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.';
 
 ALTER TABLE ONLY billing.merchant_destructive_policy
-    ADD CONSTRAINT merchant_destructive_policy_pkey PRIMARY KEY (id);
-
-CREATE UNIQUE INDEX uq_merchant_destructive_policy_merchant ON billing.merchant_destructive_policy USING btree (merchant_id);
+    ADD CONSTRAINT merchant_destructive_policy_pkey PRIMARY KEY (merchant_id);
 
 ALTER TABLE ONLY billing.merchant_destructive_policy
     ADD CONSTRAINT merchant_destructive_policy_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -288,9 +282,10 @@ BEGIN
         LEFT JOIN (SELECT debit_account_id id,sum(amount) amount FROM billing.ledger_transfers WHERE merchant_id=p_merchant GROUP BY debit_account_id) d ON d.id=a.id
         WHERE a.merchant_id=p_merchant AND (a.credits_posted<>coalesce(c.amount,0) OR a.debits_posted<>coalesce(d.amount,0)))
        OR EXISTS (SELECT currency FROM billing.ledger_accounts WHERE merchant_id=p_merchant GROUP BY currency HAVING sum(credits_posted::numeric-debits_posted::numeric)<>0)
-       OR EXISTS (SELECT 1 FROM billing.ledger_transfers t JOIN billing.ledger_accounts d ON d.id=t.debit_account_id
-           JOIN billing.ledger_accounts c ON c.id=t.credit_account_id WHERE t.merchant_id=p_merchant
-           AND (d.currency<>t.currency OR c.currency<>t.currency OR d.merchant_id<>p_merchant OR c.merchant_id<>p_merchant
+       OR EXISTS (SELECT 1 FROM billing.ledger_transfers t
+           JOIN billing.ledger_accounts d ON d.merchant_id=t.merchant_id AND d.id=t.debit_account_id
+           JOIN billing.ledger_accounts c ON c.merchant_id=t.merchant_id AND c.id=t.credit_account_id WHERE t.merchant_id=p_merchant
+           AND (d.currency<>t.currency OR c.currency<>t.currency
                 OR (d.customer_id IS NOT NULL AND d.customer_id IS DISTINCT FROM t.customer_id)
                 OR (c.customer_id IS NOT NULL AND c.customer_id IS DISTINCT FROM t.customer_id))) THEN
         RAISE EXCEPTION 'billing restore ledger integrity mismatch' USING ERRCODE='23514';
@@ -325,12 +320,15 @@ BEGIN
         FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
             WHERE n.nspname=TG_TABLE_SCHEMA AND c.relkind IN ('r','p')
+              -- Every merchant-scoped table but the directory's own identity rows
+              -- (former names, host claims); a test keeps this list complete.
               AND c.relname = ANY(ARRAY[
                   'account_updater_batches',
                   'admission_denials_hourly',
                   'admission_operations',
                   'billing_policies',
                   'billing_policy_bindings',
+                  'card_attempt_failures',
                   'catalog_applications',
                   'catalog_meters',
                   'catalog_rate_cards',
@@ -343,11 +341,12 @@ BEGIN
                   'customer_invoice_profiles',
                   'customers',
                   'dashboard_configs',
-                  'destructive_action_switch',
                   'destructive_run_before_images',
                   'entitlements',
                   'grants',
                   'host_outbox',
+                  'hosted_checkout_sessions',
+                  'idempotency_keys',
                   'invoice_items',
                   'invoice_payments',
                   'invoices',
@@ -355,17 +354,21 @@ BEGIN
                   'ledger_accounts',
                   'ledger_transfers',
                   'maintenance_runs',
-                  'merchant_configurations',
                   'merchant_configuration_applications',
+                  'merchant_configurations',
                   'merchant_deks',
                   'merchant_destructive_policy',
                   'merchant_secrets',
                   'merchant_webhooks',
-                  'merchants',
                   'metered_rating_watermarks',
                   'money_settings',
+                  'nmi_bulk_checkpoints',
+                  'nmi_history_months',
+                  'nmi_history_reads',
                   'notifications',
                   'operation_authorizations',
+                  'payment_attempts',
+                  'payment_method_updates',
                   'payment_methods',
                   'payments',
                   'price_key_movements',
@@ -380,18 +383,21 @@ BEGIN
                   'rail_intents',
                   'rail_mutation_logs',
                   'rail_refresh_watermarks',
+                  'rebill_cycles',
                   'reconciliation_findings',
                   'reconciliation_state',
                   'reprice_batches',
+                  'solana_pay_receipts',
+                  'solana_pay_references',
                   'solana_subscriptions',
                   'subscription_reprices',
                   'subscription_status_transitions',
+                  'subscription_verifications',
                   'subscriptions',
                   'usage_events',
                   'webhook_events',
                   'webhook_health',
-                  'webhook_health_daily',
-                  'worker_state']::text[])
+                  'webhook_health_daily']::text[])
         LOOP
             EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',TG_TABLE_SCHEMA,item.relname)
                 INTO occupied USING NEW.merchant_id;
@@ -522,7 +528,7 @@ COMMENT ON COLUMN billing.maintenance_runs.expected_rows IS 'The operator-confir
 COMMENT ON COLUMN billing.maintenance_runs.inventory_manifest IS 'Purge row counts, secret names, and omitted resources. Not a backup and never an undo image.';
 COMMENT ON COLUMN billing.maintenance_runs.run_class IS 'Derived from the immutable kind. Child foreign keys include it, so findings can reference only observation runs and stamped rows, intents and before-images only destructive runs.';
 
-ALTER TABLE ONLY billing.maintenance_runs ADD CONSTRAINT maintenance_runs_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY billing.maintenance_runs ADD CONSTRAINT maintenance_runs_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.maintenance_runs ADD CONSTRAINT maintenance_runs_merchant_id_id_class_key UNIQUE (merchant_id,id,run_class);
 
 CREATE INDEX maintenance_runs_merchant_kind_started ON billing.maintenance_runs (merchant_id,kind,started_at DESC);
@@ -561,7 +567,7 @@ COMMENT ON COLUMN billing.destructive_run_before_images.before IS 'to_jsonb(row)
 COMMENT ON COLUMN billing.destructive_run_before_images.restored_at IS 'When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored. Restoring one directly could make it disagree with its grant, which recomputation cannot.';
 
 ALTER TABLE ONLY billing.destructive_run_before_images
-    ADD CONSTRAINT destructive_run_before_images_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT destructive_run_before_images_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE UNIQUE INDEX uq_destructive_run_before_images_identity ON billing.destructive_run_before_images USING btree (merchant_id, destructive_run_id, table_name, row_id);
 
@@ -631,7 +637,7 @@ ALTER TABLE ONLY billing.merchant_configurations
     ADD CONSTRAINT merchant_configurations_pkey PRIMARY KEY (merchant_id);
 
 ALTER TABLE ONLY billing.merchant_configurations
-    ADD CONSTRAINT merchant_configurations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id);
+    ADD CONSTRAINT merchant_configurations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 CREATE TRIGGER lock_merchant_configuration BEFORE INSERT OR UPDATE OR DELETE ON billing.merchant_configurations FOR EACH ROW EXECUTE FUNCTION billing.lock_merchant_configuration_write();
 
@@ -713,9 +719,8 @@ CREATE TABLE billing.merchant_webhooks (
 COMMENT ON TABLE billing.merchant_webhooks IS 'Operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.';
 
 ALTER TABLE ONLY billing.merchant_webhooks
-    ADD CONSTRAINT merchant_webhooks_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT merchant_webhooks_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX merchant_webhooks_merchant_idx ON billing.merchant_webhooks USING btree (merchant_id);
 
 ALTER TABLE ONLY billing.merchant_webhooks
     ADD CONSTRAINT merchant_webhooks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -752,11 +757,10 @@ COMMENT ON COLUMN billing.customers.issuer IS 'Audit/last-seen source issuer for
 ALTER TABLE ONLY billing.customers
     ADD CONSTRAINT customers_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_customers_merchant ON billing.customers USING btree (merchant_id);
 CREATE INDEX idx_customers_id_merchant ON billing.customers USING btree (id, merchant_id);
 
 ALTER TABLE ONLY billing.customers
-    ADD CONSTRAINT customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id);
+    ADD CONSTRAINT customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.customer_invoice_profiles (
     merchant_id uuid NOT NULL,
@@ -843,18 +847,15 @@ COMMENT ON COLUMN billing.custodians.credential_versions IS 'Rotation watermarks
 COMMENT ON COLUMN billing.custodians.archived IS 'Drain-only lifecycle flag, matching psps.archived: true keeps the custodian addressable for instruments it already holds but excludes it from new arrangements.';
 
 ALTER TABLE ONLY billing.custodians
-    ADD CONSTRAINT custodians_pkey PRIMARY KEY (id);
-ALTER TABLE ONLY billing.custodians
-    ADD CONSTRAINT uq_custodians_id_merchant UNIQUE (id, merchant_id);
+    ADD CONSTRAINT custodians_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.custodians
     ADD CONSTRAINT uq_custodians_merchant_id_kind UNIQUE (merchant_id, id, kind);
 
-CREATE INDEX idx_custodians_merchant ON billing.custodians USING btree (merchant_id);
 CREATE UNIQUE INDEX uq_custodians_identity ON billing.custodians USING btree (kind, environment, account_id);
 CREATE UNIQUE INDEX uq_custodians_key ON billing.custodians USING btree (merchant_id, lower(key));
 
 ALTER TABLE ONLY billing.custodians
-    ADD CONSTRAINT custodians_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT custodians_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.psps (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -884,21 +885,18 @@ COMMENT ON COLUMN billing.psps.archived IS 'Drain-only provider-account lifecycl
 COMMENT ON COLUMN billing.psps.custodian_id IS 'The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault). Composite FK: a PSP can only reference ITS OWN merchant''s custodian.';
 
 ALTER TABLE ONLY billing.psps
-    ADD CONSTRAINT psps_pkey PRIMARY KEY (id);
-ALTER TABLE ONLY billing.psps
-    ADD CONSTRAINT psps_merchant_id_id_key UNIQUE (merchant_id, id);
+    ADD CONSTRAINT psps_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.psps
     ADD CONSTRAINT psps_merchant_id_id_rail_key UNIQUE (merchant_id, id, rail);
 
-CREATE INDEX idx_psps_custodian ON billing.psps USING btree (custodian_id) WHERE (custodian_id IS NOT NULL);
-CREATE INDEX idx_psps_merchant ON billing.psps USING btree (merchant_id);
+CREATE INDEX idx_psps_custodian ON billing.psps USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
 CREATE INDEX idx_psps_new_work ON billing.psps USING btree (merchant_id, rail, environment, created_at DESC, id DESC) WHERE (archived = false);
 CREATE UNIQUE INDEX uq_psps_identity ON billing.psps USING btree (rail, environment, account_id);
 
 ALTER TABLE ONLY billing.psps
-    ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES billing.custodians(id, merchant_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.psps
-    ADD CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.rail_customer_accounts (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -914,11 +912,9 @@ COMMENT ON TABLE billing.rail_customer_accounts IS 'Customer <-> rail customer-i
 COMMENT ON COLUMN billing.rail_customer_accounts.psp_id IS 'PSP whose remote customer object this row maps. Required.';
 
 ALTER TABLE ONLY billing.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT rail_customer_accounts_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_rail_customer_accounts_customer ON billing.rail_customer_accounts USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_rail_customer_accounts_merchant_id ON billing.rail_customer_accounts USING btree (merchant_id);
-CREATE INDEX idx_rail_customer_accounts_psp ON billing.rail_customer_accounts USING btree (psp_id);
+CREATE INDEX idx_rail_customer_accounts_psp ON billing.rail_customer_accounts USING btree (merchant_id, psp_id);
 CREATE UNIQUE INDEX uq_rail_customer_accounts_customer_psp ON billing.rail_customer_accounts USING btree (merchant_id, customer_id, rail, psp_id);
 CREATE UNIQUE INDEX uq_rail_customer_accounts_psp_account ON billing.rail_customer_accounts USING btree (merchant_id, rail, psp_id, account_id);
 
@@ -927,7 +923,7 @@ ALTER TABLE ONLY billing.rail_customer_accounts
 ALTER TABLE ONLY billing.rail_customer_accounts
     ADD CONSTRAINT rail_customer_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 -- ---------------------------------------------------------------------------
 -- Catalog
@@ -968,12 +964,12 @@ $$;
 
 -- Catalog ownership is business data within one merchant; it grants no authority.
 CREATE TABLE billing.catalogs (
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     owner_subject text COLLATE "C",
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT catalogs_merchant_id_id_key UNIQUE (merchant_id, id),
+    CONSTRAINT catalogs_pkey PRIMARY KEY (merchant_id, id),
     CONSTRAINT catalogs_owner_subject_nonempty CHECK (owner_subject IS NULL OR owner_subject <> '')
 );
 COMMENT ON TABLE billing.catalogs IS 'Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.';
@@ -1089,13 +1085,10 @@ COMMENT ON COLUMN billing.products.tier_rank IS 'Tier ranking within group. High
 ALTER TABLE ONLY billing.products
     ADD CONSTRAINT products_merchant_key_key UNIQUE (merchant_id, key);
 ALTER TABLE ONLY billing.products
-    ADD CONSTRAINT products_pkey PRIMARY KEY (id);
-ALTER TABLE ONLY billing.products
-    ADD CONSTRAINT products_merchant_id_id_key UNIQUE (merchant_id, id);
+    ADD CONSTRAINT products_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_products_archived ON billing.products USING btree (archived);
 CREATE INDEX idx_products_key ON billing.products USING btree (key);
-CREATE INDEX idx_products_merchant_id ON billing.products USING btree (merchant_id);
 CREATE INDEX idx_products_tier_group ON billing.products USING btree (tier_group) WHERE (tier_group IS NOT NULL);
 CREATE INDEX products_catalog_id ON billing.products(merchant_id,catalog_id);
 CREATE INDEX products_active_entitlements_spec
@@ -1140,6 +1133,7 @@ COMMENT ON TABLE billing.product_archive_operations IS 'Immutable product archiv
 
 CREATE TRIGGER immutable_product_archive_operation BEFORE UPDATE OR DELETE ON billing.product_archive_operations
  FOR EACH ROW EXECUTE FUNCTION billing.guard_product_archive_operation();
+CREATE INDEX product_archive_operations_product_id_idx ON billing.product_archive_operations USING btree (merchant_id, product_id);
 
 CREATE FUNCTION billing.prices_default_key() RETURNS trigger
     LANGUAGE plpgsql
@@ -1201,17 +1195,14 @@ COMMENT ON COLUMN billing.prices.trial_duration_hours IS 'Optional trial first-p
 COMMENT ON COLUMN billing.prices.key IS 'Durable per-merchant-unique handle for this price''s substance-version chain. Immutable identity-wise (the row''s id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see uq_prices_merchant_key_current. Archived rows keep their key as a back-reference to the chain.';
 
 ALTER TABLE ONLY billing.prices
-    ADD CONSTRAINT prices_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT prices_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.prices
-    ADD CONSTRAINT prices_merchant_id_id_key UNIQUE (merchant_id, id);
+    ADD CONSTRAINT unique_prices_product_amount_window UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours);
 ALTER TABLE ONLY billing.prices
-    ADD CONSTRAINT unique_prices_product_amount_window UNIQUE NULLS NOT DISTINCT (product_id, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours);
+    ADD CONSTRAINT prices_merchant_id_id_product_id_key UNIQUE (merchant_id, id, product_id);
 
 CREATE INDEX idx_prices_archived ON billing.prices USING btree (archived);
-CREATE INDEX idx_prices_merchant_id ON billing.prices USING btree (merchant_id);
 CREATE INDEX idx_prices_merchant_key ON billing.prices USING btree (merchant_id, key);
-CREATE INDEX idx_prices_product_id ON billing.prices USING btree (product_id);
-CREATE UNIQUE INDEX uq_prices_id_product_merchant ON billing.prices USING btree (id, product_id, merchant_id);
 CREATE UNIQUE INDEX uq_prices_merchant_key_current ON billing.prices USING btree (merchant_id, key) WHERE (NOT archived);
 
 ALTER TABLE ONLY billing.prices
@@ -1235,10 +1226,10 @@ CREATE TABLE billing.price_key_movements (
 COMMENT ON TABLE billing.price_key_movements IS 'Append-only log of when a price key''s current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).';
 
 ALTER TABLE ONLY billing.price_key_movements
-    ADD CONSTRAINT price_key_movements_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT price_key_movements_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_price_key_movements_key ON billing.price_key_movements USING btree (merchant_id, key, effective_at DESC);
-CREATE INDEX idx_price_key_movements_price ON billing.price_key_movements USING btree (price_id);
+CREATE INDEX idx_price_key_movements_price ON billing.price_key_movements USING btree (merchant_id, price_id);
 
 ALTER TABLE ONLY billing.price_key_movements
     ADD CONSTRAINT price_key_movements_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -1321,7 +1312,7 @@ COMMENT ON TABLE billing.catalog_rate_cards IS 'Rate cards: product usage and fl
 COMMENT ON COLUMN billing.catalog_rate_cards.customer_id IS 'Negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.';
 
 ALTER TABLE ONLY billing.catalog_rate_cards
-    ADD CONSTRAINT catalog_rate_cards_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT catalog_rate_cards_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE UNIQUE INDEX uq_catalog_rate_cards_meter ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NULL));
 CREATE UNIQUE INDEX uq_catalog_rate_cards_payer_meter ON billing.catalog_rate_cards USING btree (merchant_id, customer_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NOT NULL));
@@ -1353,6 +1344,8 @@ CREATE TABLE billing.catalog_applications (
     FOREIGN KEY (merchant_id,catalog_id) REFERENCES billing.catalogs(merchant_id,id) ON DELETE RESTRICT
 );
 COMMENT ON TABLE billing.catalog_applications IS 'Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL.';
+
+CREATE INDEX catalog_applications_catalog_id_idx ON billing.catalog_applications USING btree (merchant_id, catalog_id);
 
 CREATE TRIGGER immutable_catalog_application_receipt BEFORE UPDATE OR DELETE ON billing.catalog_applications FOR EACH ROW EXECUTE FUNCTION billing.guard_catalog_application_receipt();
 
@@ -1491,19 +1484,14 @@ COMMENT ON COLUMN billing.payment_methods.account_updater_checked_at IS 'When th
 COMMENT ON COLUMN billing.payment_methods.is_default IS 'The customer''s default payment method: exactly one per (merchant, customer) with a usable method.';
 
 ALTER TABLE ONLY billing.payment_methods
-    ADD CONSTRAINT payment_methods_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT payment_methods_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
-ALTER TABLE ONLY billing.payment_methods
-    ADD CONSTRAINT payment_methods_merchant_id_id_key UNIQUE (merchant_id, id);
 
 CREATE INDEX idx_payment_methods_custodian_method_ref ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text);
 CREATE INDEX idx_payment_methods_custodian_network_token ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
-CREATE INDEX idx_payment_methods_customer ON billing.payment_methods USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_payment_methods_merchant_id ON billing.payment_methods USING btree (merchant_id);
 CREATE INDEX idx_payment_methods_method_ref ON billing.payment_methods USING btree (rail, rail_method_ref);
 CREATE INDEX idx_payment_methods_psp ON billing.payment_methods USING btree (psp_id);
-CREATE INDEX idx_payment_methods_rail ON billing.payment_methods USING btree (rail);
 CREATE INDEX ix_payment_methods_account_updater_due ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref <> ''::text));
 CREATE INDEX payment_methods_fingerprint_idx ON billing.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint <> ''::text);
 CREATE UNIQUE INDEX uq_payment_methods_psp_instrument ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT;
@@ -1514,9 +1502,9 @@ ALTER TABLE ONLY billing.payment_methods
 ALTER TABLE ONLY billing.payment_methods
     ADD CONSTRAINT payment_methods_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.payment_methods
-    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES billing.custodians(merchant_id, id, kind);
+    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES billing.custodians(merchant_id, id, kind) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.payment_methods
-    ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id);
+    ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TRIGGER guard_provider_cutover_card BEFORE UPDATE OR DELETE ON billing.payment_methods
 FOR EACH ROW EXECUTE FUNCTION billing.guard_provider_cutover_card();
@@ -1538,10 +1526,10 @@ CREATE TABLE billing.payment_method_updates (
     event_ref text NOT NULL,
     at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT payment_method_updates_pkey PRIMARY KEY (id),
-    CONSTRAINT payment_method_updates_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT payment_method_updates_pkey PRIMARY KEY (merchant_id, id),
+    CONSTRAINT payment_method_updates_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT payment_method_updates_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
-    CONSTRAINT payment_method_updates_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id),
+    CONSTRAINT payment_method_updates_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_payment_method_updates_source CHECK (source IN ('nmi_acu', 'bt_account_updater', 'customer')),
     CONSTRAINT chk_payment_method_updates_kind CHECK (kind IN ('updated', 'closed_account', 'contact_customer')),
     CONSTRAINT chk_payment_method_updates_event_ref CHECK (event_ref <> '')
@@ -1550,6 +1538,8 @@ COMMENT ON TABLE billing.payment_method_updates IS 'Changes to a stored card''s 
 
 CREATE UNIQUE INDEX uq_payment_method_updates_event ON billing.payment_method_updates USING btree (merchant_id, source, event_ref, payment_method_id);
 CREATE INDEX idx_payment_method_updates_method ON billing.payment_method_updates USING btree (merchant_id, payment_method_id, at);
+CREATE INDEX payment_method_updates_psp_id_idx ON billing.payment_method_updates USING btree (merchant_id, psp_id);
+CREATE INDEX payment_method_updates_customer_id_idx ON billing.payment_method_updates USING btree (merchant_id, customer_id);
 
 CREATE TABLE billing.custody_migrations (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1582,13 +1572,13 @@ COMMENT ON COLUMN billing.custody_migrations.exported_at IS 'The declared horizo
 COMMENT ON COLUMN billing.custody_migrations.outcome IS 'remapped = an existing instrument changed custody (same payment_method_id, subscriptions untouched); created = the export carried a card with no local instrument and the operator declared its customer.';
 
 ALTER TABLE ONLY billing.custody_migrations
-    ADD CONSTRAINT custody_migrations_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT custody_migrations_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_custody_migrations_batch ON billing.custody_migrations USING btree (merchant_id, batch_id, created_at);
 CREATE UNIQUE INDEX uq_custody_migrations_target ON billing.custody_migrations USING btree (merchant_id, payment_method_id, to_rail_method_ref);
 
 ALTER TABLE ONLY billing.custody_migrations
-    ADD CONSTRAINT custody_migrations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT custody_migrations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.custody_migrations
     ADD CONSTRAINT custody_migrations_payment_method_fk FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE;
 
@@ -1786,30 +1776,25 @@ COMMENT ON COLUMN billing.subscriptions.psp_id IS 'PSP that produced this remote
 COMMENT ON COLUMN billing.subscriptions.deleted_at IS 'Soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.';
 
 ALTER TABLE ONLY billing.subscriptions
-    ADD CONSTRAINT subscriptions_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT subscriptions_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
-ALTER TABLE ONLY billing.subscriptions
-    ADD CONSTRAINT subscriptions_merchant_id_id_key UNIQUE (merchant_id, id);
 
-CREATE INDEX idx_subscriptions_customer ON billing.subscriptions USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_subscriptions_customer_active_created ON billing.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active');
-CREATE INDEX idx_subscriptions_destructive_run ON billing.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+CREATE INDEX idx_subscriptions_customer_active_created ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC) WHERE (status = 'active');
+CREATE INDEX idx_subscriptions_destructive_run ON billing.subscriptions USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_subscriptions_engine_due ON billing.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
 CREATE INDEX idx_subscriptions_due_dunning ON billing.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due') AND (next_retry_at IS NOT NULL));
 CREATE INDEX idx_subscriptions_gateway_order_id ON billing.subscriptions USING btree (merchant_id, rail, ((gateway_response ->> 'order_id'::text))) WHERE ((gateway_response ->> 'order_id'::text) IS NOT NULL);
 CREATE INDEX idx_subscriptions_grace_ends_at ON billing.subscriptions USING btree (grace_ends_at) WHERE (grace_ends_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_merchant_cancelled ON billing.subscriptions USING btree (merchant_id, cancelled_at) WHERE (cancelled_at IS NOT NULL);
 CREATE INDEX idx_subscriptions_merchant_ended ON billing.subscriptions USING btree (merchant_id, ended_at) WHERE (ended_at IS NOT NULL);
-CREATE INDEX idx_subscriptions_merchant_id ON billing.subscriptions USING btree (merchant_id);
 CREATE INDEX idx_subscriptions_merchant_started ON billing.subscriptions USING btree (merchant_id, started_at);
 CREATE INDEX idx_subscriptions_next_retry_at ON billing.subscriptions USING btree (next_retry_at) WHERE (next_retry_at IS NOT NULL);
-CREATE INDEX idx_subscriptions_payment_method_id ON billing.subscriptions USING btree (payment_method_id);
+CREATE INDEX idx_subscriptions_payment_method_id ON billing.subscriptions USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL);
 CREATE INDEX idx_subscriptions_period_overdue ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active');
-CREATE INDEX idx_subscriptions_price_id ON billing.subscriptions USING btree (price_id);
-CREATE INDEX idx_subscriptions_product_id ON billing.subscriptions USING btree (product_id);
-CREATE INDEX idx_subscriptions_psp ON billing.subscriptions USING btree (psp_id);
-CREATE INDEX idx_subscriptions_rail ON billing.subscriptions USING btree (rail);
+CREATE INDEX idx_subscriptions_price_id ON billing.subscriptions USING btree (merchant_id, price_id);
+CREATE INDEX idx_subscriptions_product_id ON billing.subscriptions USING btree (merchant_id, product_id);
+CREATE INDEX idx_subscriptions_psp ON billing.subscriptions USING btree (merchant_id, psp_id);
 CREATE INDEX idx_subscriptions_rail_subscription ON billing.subscriptions USING btree (rail, rail_subscription_id);
 CREATE INDEX idx_subscriptions_status ON billing.subscriptions USING btree (status);
 CREATE UNIQUE INDEX uq_subscriptions_merchant_psp_subscription_id ON billing.subscriptions USING btree (merchant_id, rail, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
@@ -1818,10 +1803,11 @@ CREATE UNIQUE INDEX uq_subscriptions_customer_product_lifecycle ON billing.subsc
     WHERE status IN ('active', 'pending', 'past_due', 'awaiting_method') AND deleted_at IS NULL;
 CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON billing.subscriptions USING btree (merchant_id, customer_id, tier_group)
     WHERE status IN ('active', 'pending', 'past_due', 'awaiting_method', 'unverified') AND tier_group IS NOT NULL AND deleted_at IS NULL;
-CREATE INDEX ix_subscriptions_renewal_by_payment_method ON billing.subscriptions USING btree (payment_method_id, current_period_ends_at)
+CREATE INDEX ix_subscriptions_renewal_by_payment_method ON billing.subscriptions USING btree (merchant_id, payment_method_id, current_period_ends_at)
     WHERE deleted_at IS NULL AND payment_method_id IS NOT NULL AND status IN ('active', 'past_due', 'awaiting_method');
 CREATE INDEX idx_subscriptions_rebill_watch ON billing.subscriptions USING btree (merchant_id, current_period_ends_at)
     WHERE status IN ('active', 'unverified', 'awaiting_method') AND collection_policy IN ('engine', 'nmi_schedule') AND deleted_at IS NULL;
+CREATE INDEX subscriptions_scheduled_price_id_idx ON billing.subscriptions USING btree (merchant_id, scheduled_price_id) WHERE (scheduled_price_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -1834,11 +1820,11 @@ ALTER TABLE ONLY billing.subscriptions
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
 ALTER TABLE ONLY billing.subscriptions
-    ADD CONSTRAINT subscriptions_price_product_merchant_fkey FOREIGN KEY (price_id, product_id, merchant_id) REFERENCES billing.prices(id, product_id, merchant_id);
+    ADD CONSTRAINT subscriptions_price_product_merchant_fkey FOREIGN KEY (merchant_id, price_id, product_id) REFERENCES billing.prices(merchant_id, id, product_id);
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id);
 ALTER TABLE ONLY billing.subscriptions
-    ADD CONSTRAINT subscriptions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id);
+    ADD CONSTRAINT subscriptions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.subscriptions
     ADD CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (merchant_id, scheduled_price_id) REFERENCES billing.prices(merchant_id, id);
 
@@ -1876,15 +1862,15 @@ COMMENT ON TABLE billing.subscription_status_transitions IS 'Append-only subscri
 COMMENT ON COLUMN billing.subscription_status_transitions.cancel_type IS 'The subscription''s cancel_type at transition time (meaningful for to_status=cancelled).';
 
 ALTER TABLE ONLY billing.subscription_status_transitions
-    ADD CONSTRAINT subscription_status_transitions_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT subscription_status_transitions_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_sst_merchant_occurred ON billing.subscription_status_transitions USING btree (merchant_id, occurred_at);
-CREATE INDEX idx_sst_subscription ON billing.subscription_status_transitions USING btree (subscription_id, occurred_at);
+CREATE INDEX idx_sst_subscription ON billing.subscription_status_transitions USING btree (merchant_id, subscription_id, occurred_at);
 
 ALTER TABLE ONLY billing.subscription_status_transitions
     ADD CONSTRAINT sst_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.subscription_status_transitions
-    ADD CONSTRAINT sst_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT sst_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TRIGGER immutable_subscription_status_transitions BEFORE UPDATE OR DELETE ON billing.subscription_status_transitions
 FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
@@ -1926,12 +1912,12 @@ COMMENT ON COLUMN billing.reprice_batches.source_price_id IS 'The retired plan''
 COMMENT ON COLUMN billing.reprice_batches.fallback_policy IS 'Operator''s choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.';
 
 ALTER TABLE ONLY billing.reprice_batches
-    ADD CONSTRAINT reprice_batches_pkey PRIMARY KEY (id);
-ALTER TABLE ONLY billing.reprice_batches
-    ADD CONSTRAINT reprice_batches_merchant_id_id_key UNIQUE (merchant_id, id);
+    ADD CONSTRAINT reprice_batches_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_reprice_batches_merchant ON billing.reprice_batches USING btree (merchant_id, created_at DESC);
 CREATE INDEX idx_reprice_batches_price_key ON billing.reprice_batches USING btree (merchant_id, price_key, created_at DESC) WHERE (price_key IS NOT NULL);
+CREATE INDEX reprice_batches_to_price_id_idx ON billing.reprice_batches USING btree (merchant_id, to_price_id);
+CREATE INDEX reprice_batches_source_price_id_idx ON billing.reprice_batches USING btree (merchant_id, source_price_id) WHERE (source_price_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.reprice_batches
     ADD CONSTRAINT reprice_batches_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -1967,14 +1953,16 @@ COMMENT ON COLUMN billing.subscription_reprices.kind IS '''reprice'' = same-prod
 COMMENT ON COLUMN billing.subscription_reprices.blocked_reason IS 'Why this row could not be auto-scheduled (rail_requires_user_action, missing rail config, rail push failure). Only set when status=blocked.';
 
 ALTER TABLE ONLY billing.subscription_reprices
-    ADD CONSTRAINT subscription_reprices_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT subscription_reprices_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_subscription_reprices_batch ON billing.subscription_reprices USING btree (reprice_batch_id) WHERE (reprice_batch_id IS NOT NULL);
+CREATE INDEX idx_subscription_reprices_batch ON billing.subscription_reprices USING btree (merchant_id, reprice_batch_id) WHERE (reprice_batch_id IS NOT NULL);
 CREATE INDEX idx_subscription_reprices_blocked_plan_change ON billing.subscription_reprices USING btree (merchant_id) WHERE ((status = 'blocked'::text) AND (kind = 'plan_change'::text));
 CREATE INDEX idx_subscription_reprices_due ON billing.subscription_reprices USING btree (effective_at) WHERE (status = 'scheduled'::text);
 CREATE INDEX idx_subscription_reprices_merchant ON billing.subscription_reprices USING btree (merchant_id, created_at DESC);
-CREATE INDEX idx_subscription_reprices_subscription ON billing.subscription_reprices USING btree (subscription_id);
-CREATE UNIQUE INDEX uq_subscription_reprices_one_scheduled ON billing.subscription_reprices USING btree (subscription_id) WHERE (status = 'scheduled'::text);
+CREATE INDEX idx_subscription_reprices_subscription ON billing.subscription_reprices USING btree (merchant_id, subscription_id);
+CREATE UNIQUE INDEX uq_subscription_reprices_one_scheduled ON billing.subscription_reprices USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text);
+CREATE INDEX subscription_reprices_from_price_id_idx ON billing.subscription_reprices USING btree (merchant_id, from_price_id);
+CREATE INDEX subscription_reprices_to_price_id_idx ON billing.subscription_reprices USING btree (merchant_id, to_price_id);
 
 ALTER TABLE ONLY billing.subscription_reprices
     ADD CONSTRAINT subscription_reprices_batch_fk FOREIGN KEY (merchant_id, reprice_batch_id) REFERENCES billing.reprice_batches(merchant_id, id) ON DELETE SET NULL (reprice_batch_id);
@@ -2009,13 +1997,12 @@ CREATE TABLE billing.solana_subscriptions (
 COMMENT ON TABLE billing.solana_subscriptions IS 'On-chain mirror of one Solana subscription: its program accounts, mint and next pull.';
 
 ALTER TABLE ONLY billing.solana_subscriptions
-    ADD CONSTRAINT solana_subscriptions_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT solana_subscriptions_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.solana_subscriptions
     ADD CONSTRAINT solana_subscriptions_subscription_pda_key UNIQUE (subscription_pda);
 
 CREATE INDEX idx_solana_subscriptions_due ON billing.solana_subscriptions USING btree (merchant_id, next_pull_at) WHERE (status = 'active'::text);
-CREATE INDEX idx_solana_subscriptions_merchant_id ON billing.solana_subscriptions USING btree (merchant_id);
-CREATE INDEX idx_solana_subscriptions_subscription_id ON billing.solana_subscriptions USING btree (subscription_id);
+CREATE INDEX idx_solana_subscriptions_subscription_id ON billing.solana_subscriptions USING btree (merchant_id, subscription_id);
 
 ALTER TABLE ONLY billing.solana_subscriptions
     ADD CONSTRAINT solana_subscriptions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -2099,28 +2086,24 @@ COMMENT ON COLUMN billing.payments.deleted_at IS 'Soft delete: set, the row is i
 COMMENT ON COLUMN billing.payments.money_movement IS 'rail|none — positive marker for real money movement at the payment rail. ''rail'' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; ''none'' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = ''none''.';
 
 ALTER TABLE ONLY billing.payments
-    ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT payments_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
-ALTER TABLE ONLY billing.payments
-    ADD CONSTRAINT payments_merchant_id_id_key UNIQUE (merchant_id, id);
 
-CREATE INDEX idx_payments_customer ON billing.payments USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_payments_destructive_run ON billing.payments USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+CREATE INDEX idx_payments_destructive_run ON billing.payments USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_payments_merchant_created ON billing.payments USING btree (merchant_id, created_at DESC);
-CREATE INDEX idx_payments_merchant_id ON billing.payments USING btree (merchant_id);
 CREATE INDEX idx_payments_merchant_purchased ON billing.payments USING btree (merchant_id, purchased_at);
 CREATE INDEX idx_payments_merchant_rail_transaction ON billing.payments USING btree (merchant_id, rail, transaction_id);
 CREATE INDEX idx_payments_metadata_nmi_order ON billing.payments USING btree (merchant_id, ((metadata ->> 'nmi_subscription_order_id'::text))) WHERE ((metadata ->> 'nmi_subscription_order_id'::text) IS NOT NULL);
 CREATE INDEX idx_payments_metadata_stripe_invoice ON billing.payments USING btree (merchant_id, ((metadata ->> 'stripe_invoice_id'::text))) WHERE ((metadata ->> 'stripe_invoice_id'::text) IS NOT NULL);
-CREATE INDEX idx_payments_price_id ON billing.payments USING btree (price_id);
-CREATE INDEX idx_payments_psp ON billing.payments USING btree (psp_id) WHERE (psp_id IS NOT NULL);
+CREATE INDEX idx_payments_price_id ON billing.payments USING btree (merchant_id, price_id);
+CREATE INDEX idx_payments_psp ON billing.payments USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
 CREATE INDEX idx_payments_purchased_at ON billing.payments USING btree (purchased_at);
 CREATE INDEX idx_payments_rail ON billing.payments USING btree (rail);
-CREATE INDEX idx_payments_refunded_payment_id ON billing.payments USING btree (refunded_payment_id);
-CREATE INDEX idx_payments_subscription_id ON billing.payments USING btree (subscription_id);
+CREATE INDEX idx_payments_refunded_payment_id ON billing.payments USING btree (merchant_id, refunded_payment_id) WHERE (refunded_payment_id IS NOT NULL);
+CREATE INDEX idx_payments_subscription_id ON billing.payments USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_payments_merchant_offrail_transaction ON billing.payments USING btree (merchant_id, rail, transaction_id) WHERE ((psp_id IS NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_payments_merchant_psp_transaction ON billing.payments USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((psp_id IS NOT NULL) AND (deleted_at IS NULL));
 
@@ -2133,7 +2116,7 @@ ALTER TABLE ONLY billing.payments
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
 ALTER TABLE ONLY billing.payments
-    ADD CONSTRAINT payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id);
+    ADD CONSTRAINT payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.payments
     ADD CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, refunded_payment_id) REFERENCES billing.payments(merchant_id, customer_id, currency, id);
 ALTER TABLE ONLY billing.payments
@@ -2180,18 +2163,18 @@ COMMENT ON COLUMN billing.checkout_sessions.deleted_at IS 'Soft delete: set, the
 COMMENT ON COLUMN billing.checkout_sessions.routing_reason IS 'Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.';
 
 ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT checkout_sessions_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX checkout_sessions_expires_at_idx ON billing.checkout_sessions USING btree (expires_at);
-CREATE INDEX idx_checkout_sessions_customer ON billing.checkout_sessions USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_checkout_sessions_destructive_run ON billing.checkout_sessions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_checkout_sessions_merchant_id ON billing.checkout_sessions USING btree (merchant_id);
+CREATE INDEX checkout_sessions_customer_id_idx ON billing.checkout_sessions USING btree (merchant_id, customer_id);
+CREATE INDEX idx_checkout_sessions_destructive_run ON billing.checkout_sessions USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_checkout_sessions_payment_id ON billing.checkout_sessions USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
-CREATE INDEX idx_checkout_sessions_psp ON billing.checkout_sessions USING btree (psp_id);
+CREATE INDEX idx_checkout_sessions_psp ON billing.checkout_sessions USING btree (merchant_id, psp_id);
 CREATE INDEX idx_checkout_sessions_subscription_id ON billing.checkout_sessions USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE INDEX ix_checkout_sessions_expirable ON billing.checkout_sessions USING btree (merchant_id, expires_at) WHERE ((expires_at IS NOT NULL) AND (deleted_at IS NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text])));
 CREATE UNIQUE INDEX uq_checkout_sessions_merchant_psp_reference ON billing.checkout_sessions USING btree (merchant_id, rail, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_checkout_sessions_merchant_psp_transaction ON billing.checkout_sessions USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
+CREATE INDEX checkout_sessions_price_id_idx ON billing.checkout_sessions USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_checkout_sessions_solana_signature ON billing.checkout_sessions USING btree (transaction_id)
 WHERE rail = 'solana' AND transaction_id IS NOT NULL AND deleted_at IS NULL;
 
@@ -2206,7 +2189,7 @@ ALTER TABLE ONLY billing.checkout_sessions
 ALTER TABLE ONLY billing.checkout_sessions
     ADD CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id);
 ALTER TABLE ONLY billing.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id);
+    ADD CONSTRAINT checkout_sessions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.checkout_sessions
     ADD CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id);
 
@@ -2224,7 +2207,7 @@ CREATE TABLE billing.hosted_checkout_sessions (
     purge_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT hosted_checkout_sessions_pkey PRIMARY KEY (merchant_id, id_hash),
-    CONSTRAINT hosted_checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT hosted_checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT hosted_checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_hosted_checkout_sessions_id_hash CHECK (octet_length(id_hash) = 32),
     CONSTRAINT chk_hosted_checkout_sessions_attempt CHECK (attempt >= 0),
@@ -2254,7 +2237,7 @@ CREATE TABLE billing.solana_pay_references (
     updated_at timestamp with time zone NOT NULL,
     CONSTRAINT solana_pay_references_pkey PRIMARY KEY (merchant_id, reference),
     CONSTRAINT solana_pay_references_session_key UNIQUE (merchant_id, checkout_session_id),
-    CONSTRAINT solana_pay_references_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT solana_pay_references_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT chk_solana_pay_references_kind CHECK (kind IN ('purchase', 'subscribe', 'lifecycle')),
     CONSTRAINT chk_solana_pay_references_status CHECK (status IN ('pending', 'confirmed', 'expired')),
     CONSTRAINT chk_solana_pay_references_signature CHECK ((status = 'confirmed') = (signature IS NOT NULL)),
@@ -2284,7 +2267,7 @@ CREATE TABLE billing.solana_pay_receipts (
     resolution text,
     created_at timestamp with time zone NOT NULL,
     CONSTRAINT solana_pay_receipts_pkey PRIMARY KEY (merchant_id, reference, signature),
-    CONSTRAINT solana_pay_receipts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT solana_pay_receipts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT chk_solana_pay_receipts_disposition CHECK (
         disposition = 'credited' AND payment_id IS NOT NULL AND (review_reason IS NULL OR review_reason = 'overpaid')
         OR disposition = 'review' AND payment_id IS NULL AND review_reason IN ('already_paid', 'late', 'underpaid', 'session_closed', 'wrong_asset', 'unreadable', 'settle_failed')
@@ -2313,11 +2296,10 @@ CREATE TABLE billing.rebill_cycles (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     missed_at timestamp with time zone,
     miss_reason text,
-    CONSTRAINT rebill_cycles_pkey PRIMARY KEY (id),
-    CONSTRAINT rebill_cycles_merchant_id_key UNIQUE (merchant_id, id),
-    CONSTRAINT rebill_cycles_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT rebill_cycles_pkey PRIMARY KEY (merchant_id, id),
+    CONSTRAINT rebill_cycles_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT rebill_cycles_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
-    CONSTRAINT rebill_cycles_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id),
+    CONSTRAINT rebill_cycles_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_rebill_cycles_owner CHECK (owner IN ('engine', 'nmi_schedule', 'provider')),
     CONSTRAINT chk_rebill_cycles_amount CHECK (amount >= 0),
     CONSTRAINT chk_rebill_cycles_currency CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
@@ -2330,6 +2312,7 @@ COMMENT ON COLUMN billing.rebill_cycles.missed_at IS 'When the cycle passed its 
 CREATE UNIQUE INDEX uq_rebill_cycles_due ON billing.rebill_cycles USING btree (merchant_id, subscription_id, due_at);
 CREATE INDEX idx_rebill_cycles_time ON billing.rebill_cycles USING btree (merchant_id, due_at);
 CREATE INDEX idx_rebill_cycles_psp ON billing.rebill_cycles USING btree (merchant_id, psp_id, due_at);
+CREATE INDEX rebill_cycles_customer_id_idx ON billing.rebill_cycles USING btree (merchant_id, customer_id);
 
 CREATE TABLE billing.payment_attempts (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2369,10 +2352,10 @@ CREATE TABLE billing.payment_attempts (
     issuer_code text,
     issuer_text text,
     enriched_at timestamp with time zone,
-    CONSTRAINT payment_attempts_pkey PRIMARY KEY (id),
-    CONSTRAINT payment_attempts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT payment_attempts_pkey PRIMARY KEY (merchant_id, id),
+    CONSTRAINT payment_attempts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT payment_attempts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id),
-    CONSTRAINT payment_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id),
+    CONSTRAINT payment_attempts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_payment_attempts_kind CHECK (kind IN ('verify', 'initial', 'upgrade', 'rebill', 'dunning_retry', 'customer_retry', 'invoice')),
     CONSTRAINT chk_payment_attempts_owner CHECK (owner IN ('engine', 'nmi_schedule', 'provider', 'none')),
     CONSTRAINT chk_payment_attempts_card_entry CHECK (card_entry IN ('new', 'saved')),
@@ -2414,7 +2397,7 @@ CREATE TABLE billing.card_attempt_failures (
     bucket_at timestamp with time zone NOT NULL,
     failures bigint NOT NULL,
     CONSTRAINT card_attempt_failures_pkey PRIMARY KEY (merchant_id, subject, bucket_at),
-    CONSTRAINT card_attempt_failures_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT card_attempt_failures_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT chk_card_attempt_failures_positive CHECK (failures > 0),
     CONSTRAINT chk_card_attempt_failures_subject CHECK (subject <> '' AND length(subject) <= 200)
 );
@@ -2436,7 +2419,7 @@ CREATE TABLE billing.idempotency_keys (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT idempotency_keys_pkey PRIMARY KEY (merchant_id, operation, idempotency_key),
-    CONSTRAINT idempotency_keys_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE,
+    CONSTRAINT idempotency_keys_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT chk_idempotency_keys_status CHECK (status IN ('processing', 'succeeded', 'failed')),
     CONSTRAINT chk_idempotency_keys_identity CHECK (operation <> '' AND idempotency_key <> ''),
     CONSTRAINT chk_idempotency_keys_result CHECK (status = 'succeeded' OR result IS NULL),
@@ -2490,14 +2473,11 @@ COMMENT ON COLUMN billing.ledger_accounts.credits_posted IS 'Maintained counter:
 COMMENT ON COLUMN billing.ledger_accounts.debits_posted IS 'Maintained counter: posted debits, for O(1) balance reads.';
 
 ALTER TABLE ONLY billing.ledger_accounts
-    ADD CONSTRAINT ledger_accounts_merchant_id_id_key UNIQUE (merchant_id, id);
-ALTER TABLE ONLY billing.ledger_accounts
     ADD CONSTRAINT ledger_accounts_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
 ALTER TABLE ONLY billing.ledger_accounts
-    ADD CONSTRAINT ledger_accounts_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT ledger_accounts_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_ledger_accounts_customer ON billing.ledger_accounts USING btree (customer_id) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_ledger_accounts_merchant_id ON billing.ledger_accounts USING btree (merchant_id);
 CREATE UNIQUE INDEX uq_ledger_accounts_customer ON billing.ledger_accounts USING btree (merchant_id, customer_id, account_type, currency) WHERE (customer_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_ledger_accounts_system ON billing.ledger_accounts USING btree (merchant_id, account_type, currency) WHERE (customer_id IS NULL);
 
@@ -2601,21 +2581,18 @@ COMMENT ON COLUMN billing.ledger_transfers.grant_id IS 'Credit-lot attribution. 
 COMMENT ON COLUMN billing.ledger_transfers.operation IS 'Engine-composed money-operation kind (capture / spend / withdraw / usage:<event_type> / deposit / ...). Part of the idempotency coordinate together with (source, source_id): two different operations sharing a caller key must not alias.';
 
 ALTER TABLE ONLY billing.ledger_transfers
-    ADD CONSTRAINT ledger_transfers_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT ledger_transfers_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.ledger_transfers
     ADD CONSTRAINT ledger_transfers_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
-ALTER TABLE ONLY billing.ledger_transfers
-    ADD CONSTRAINT ledger_transfers_merchant_id_id_key UNIQUE (merchant_id, id);
 
-CREATE INDEX idx_ledger_transfers_credit ON billing.ledger_transfers USING btree (credit_account_id);
+CREATE INDEX idx_ledger_transfers_credit ON billing.ledger_transfers USING btree (merchant_id, credit_account_id);
 CREATE INDEX idx_ledger_transfers_customer ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, created_at DESC) WHERE (customer_id IS NOT NULL);
-CREATE INDEX idx_ledger_transfers_debit ON billing.ledger_transfers USING btree (debit_account_id);
+CREATE INDEX idx_ledger_transfers_debit ON billing.ledger_transfers USING btree (merchant_id, debit_account_id);
 CREATE INDEX idx_ledger_transfers_grant ON billing.ledger_transfers USING btree (merchant_id, grant_id) WHERE (grant_id IS NOT NULL);
 CREATE UNIQUE INDEX idx_ledger_transfers_lot_once ON billing.ledger_transfers USING btree (merchant_id, grant_id, transfer_type) WHERE ((grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'credit_expire'::text, 'credit_revoke'::text])));
 CREATE INDEX idx_ledger_transfers_merchant_created ON billing.ledger_transfers USING btree (merchant_id, created_at);
-CREATE INDEX idx_ledger_transfers_merchant_id ON billing.ledger_transfers USING btree (merchant_id);
 CREATE UNIQUE INDEX idx_ledger_transfers_operation_once ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id) NULLS NOT DISTINCT;
-CREATE INDEX idx_ledger_transfers_source ON billing.ledger_transfers USING btree (merchant_id, source, source_id) WHERE (source IS NOT NULL);
+CREATE INDEX idx_ledger_transfers_source ON billing.ledger_transfers USING btree (merchant_id, source, source_id);
 
 ALTER TABLE ONLY billing.ledger_transfers
     ADD CONSTRAINT ledger_transfers_credit_fk FOREIGN KEY (merchant_id, credit_account_id) REFERENCES billing.ledger_accounts(merchant_id, id);
@@ -2665,24 +2642,20 @@ COMMENT ON COLUMN billing.grants.event IS 'Grant roots a grant; revoke/expire/su
 COMMENT ON COLUMN billing.grants.spec_snapshot IS 'Product entitlements/credits spec captured at issuance so derive-2 (grant->projection) is a pure function and replay is exact + historical.';
 
 ALTER TABLE ONLY billing.grants
-    ADD CONSTRAINT grants_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT grants_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.grants
     ADD CONSTRAINT grants_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
-ALTER TABLE ONLY billing.grants
-    ADD CONSTRAINT grants_merchant_id_id_key UNIQUE (merchant_id, id);
 
 CREATE INDEX idx_grants_credit_customer_currency ON billing.grants USING btree (merchant_id, customer_id, currency, starts_at, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text));
 CREATE INDEX idx_grants_credit_expiry ON billing.grants USING btree (merchant_id, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (ends_at IS NOT NULL));
-CREATE INDEX idx_grants_customer ON billing.grants USING btree (merchant_id, customer_id);
-CREATE INDEX idx_grants_customer_credit_currency ON billing.grants USING btree (merchant_id, customer_id, currency) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text));
 CREATE INDEX idx_grants_customer_kind ON billing.grants USING btree (merchant_id, customer_id, kind) WHERE (event = 'grant'::text);
 CREATE INDEX idx_grants_merchant_credit_created ON billing.grants USING btree (merchant_id, created_at) WHERE (kind = 'credit'::text);
-CREATE INDEX idx_grants_merchant_id ON billing.grants USING btree (merchant_id);
 CREATE INDEX idx_grants_payment_id ON billing.grants USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL);
 CREATE INDEX idx_grants_source ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id <> ''::text);
-CREATE INDEX idx_grants_supersedes ON billing.grants USING btree (supersedes_id) WHERE (supersedes_id IS NOT NULL);
+CREATE INDEX idx_grants_supersedes ON billing.grants USING btree (merchant_id, supersedes_id) WHERE (supersedes_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_grants_credit_deposit_once ON billing.grants USING btree (merchant_id, customer_id, source_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (source_id <> ''::text));
-CREATE UNIQUE INDEX uq_grants_termination ON billing.grants USING btree (supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])));
+CREATE UNIQUE INDEX uq_grants_termination ON billing.grants USING btree (merchant_id, supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])));
+CREATE INDEX grants_product_id_idx ON billing.grants USING btree (merchant_id, product_id) WHERE (product_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.grants
     ADD CONSTRAINT grants_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -2730,19 +2703,18 @@ COMMENT ON COLUMN billing.entitlements.customer_id IS 'The customer this entitle
 
 -- Source-owned intervals may overlap. Reads derive their union by existence.
 ALTER TABLE ONLY billing.entitlements
-    ADD CONSTRAINT entitlements_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT entitlements_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_entitlements_closed_at ON billing.entitlements USING btree (merchant_id, LEAST(COALESCE(end_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE ((end_at IS NOT NULL) OR (revoked_at IS NOT NULL));
-CREATE INDEX idx_entitlements_customer_active_window ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, start_at, end_at) WHERE ((customer_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_destructive_run ON billing.entitlements USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
-CREATE INDEX idx_entitlements_grace_by_subscription_live ON billing.entitlements USING btree (source_id, entitlement, start_at, end_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_grant_id ON billing.entitlements USING btree (grant_id) WHERE (grant_id IS NOT NULL);
+CREATE INDEX idx_entitlements_customer_active_window ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, start_at, end_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_destructive_run ON billing.entitlements USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+CREATE INDEX idx_entitlements_grace_by_subscription_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, start_at, end_at) WHERE ((source_type = 'grace'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_grant_id ON billing.entitlements USING btree (merchant_id, grant_id) WHERE (grant_id IS NOT NULL);
 CREATE INDEX idx_entitlements_live_by_id ON billing.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_merchant_id ON billing.entitlements USING btree (merchant_id);
-CREATE INDEX idx_entitlements_one_off_source_live ON billing.entitlements USING btree (source_id, entitlement) WHERE ((source_type = 'one_off'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_one_off_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'one_off'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE INDEX idx_entitlements_reverse_active ON billing.entitlements USING btree (merchant_id, entitlement, customer_id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL));
-CREATE INDEX idx_entitlements_source ON billing.entitlements USING btree (source_type, source_id) WHERE (source_id IS NOT NULL);
-CREATE INDEX idx_entitlements_subscription_source_live ON billing.entitlements USING btree (source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
+CREATE INDEX idx_entitlements_source ON billing.entitlements USING btree (merchant_id, source_type, source_id);
+CREATE INDEX idx_entitlements_subscription_source_live ON billing.entitlements USING btree (merchant_id, source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_entitlements_grant_feature ON billing.entitlements (merchant_id, grant_id, entitlement)
     WHERE grant_id IS NOT NULL AND deleted_at IS NULL;
 
@@ -2773,7 +2745,7 @@ COMMENT ON COLUMN billing.billing_policies.policy IS 'JSONB policy body: kind, t
 ALTER TABLE ONLY billing.billing_policies
     ADD CONSTRAINT billing_policies_name_key UNIQUE (merchant_id, name);
 ALTER TABLE ONLY billing.billing_policies
-    ADD CONSTRAINT billing_policies_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT billing_policies_pkey PRIMARY KEY (merchant_id, id);
 
 ALTER TABLE ONLY billing.billing_policies
     ADD CONSTRAINT billing_policies_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -2794,12 +2766,12 @@ COMMENT ON TABLE billing.billing_policy_bindings IS 'Which named policy applies 
 COMMENT ON COLUMN billing.billing_policy_bindings.tier IS 'Trust tier this binding applies to. NULL on the customer and default rungs.';
 
 ALTER TABLE ONLY billing.billing_policy_bindings
-    ADD CONSTRAINT billing_policy_bindings_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT billing_policy_bindings_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_billing_policy_bindings_merchant_id ON billing.billing_policy_bindings USING btree (merchant_id);
 CREATE UNIQUE INDEX uq_billing_policy_bindings_customer ON billing.billing_policy_bindings USING btree (merchant_id, customer_id) WHERE (customer_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_billing_policy_bindings_default ON billing.billing_policy_bindings USING btree (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL));
 CREATE UNIQUE INDEX uq_billing_policy_bindings_tier ON billing.billing_policy_bindings USING btree (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL));
+CREATE INDEX billing_policy_bindings_policy_name_idx ON billing.billing_policy_bindings USING btree (merchant_id, policy_name);
 
 ALTER TABLE ONLY billing.billing_policy_bindings
     ADD CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -2831,6 +2803,8 @@ COMMENT ON COLUMN billing.money_settings.credit_limit_amount IS 'Admin-set arrea
 ALTER TABLE ONLY billing.money_settings
     ADD CONSTRAINT money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency);
 
+CREATE INDEX money_settings_collection_payment_method_id_idx ON billing.money_settings USING btree (merchant_id, collection_payment_method_id) WHERE (collection_payment_method_id IS NOT NULL);
+
 ALTER TABLE ONLY billing.money_settings
     ADD CONSTRAINT money_settings_collection_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, collection_payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (collection_payment_method_id);
 ALTER TABLE ONLY billing.money_settings
@@ -2855,7 +2829,7 @@ COMMENT ON COLUMN billing.invoker_spend_limits.scope_key IS 'Immutable scope dis
 COMMENT ON COLUMN billing.invoker_spend_limits.provenance IS 'Opaque caller-supplied provenance reference, e.g. a signed-document digest. Stored verbatim, returned on reads; never interpreted.';
 
 ALTER TABLE ONLY billing.invoker_spend_limits
-    ADD CONSTRAINT invoker_spend_limits_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT invoker_spend_limits_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.invoker_spend_limits
     ADD CONSTRAINT invoker_spend_limits_uniq UNIQUE (merchant_id, customer_id, scope, scope_key);
 
@@ -2892,14 +2866,14 @@ COMMENT ON COLUMN billing.usage_events.pricing_authority IS 'host = amount is fi
 COMMENT ON COLUMN billing.usage_events.resource IS 'Caller-supplied free-form string for what was metered (for example, an endpoint or plan slug). Opaque to OpenRails; nullable, not a FK.';
 
 ALTER TABLE ONLY billing.usage_events
-    ADD CONSTRAINT usage_events_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT usage_events_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_usage_events_customer_time ON billing.usage_events USING btree (customer_id, occurred_at);
 CREATE INDEX idx_usage_events_invoker ON billing.usage_events USING btree (merchant_id, invoker_id, occurred_at DESC);
 CREATE INDEX idx_usage_events_merchant_occurred ON billing.usage_events USING btree (merchant_id, occurred_at);
 CREATE INDEX ix_usage_events_payer_time ON billing.usage_events USING btree (merchant_id, customer_id, occurred_at);
 CREATE INDEX ix_usage_events_payer_type_time ON billing.usage_events USING btree (merchant_id, customer_id, event_type, occurred_at);
 CREATE UNIQUE INDEX uq_usage_events_idem ON billing.usage_events USING btree (merchant_id, customer_id, currency, event_type, source, source_id);
+CREATE INDEX usage_events_ledger_transfer_id_idx ON billing.usage_events USING btree (merchant_id, ledger_transfer_id) WHERE (ledger_transfer_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.usage_events
     ADD CONSTRAINT usage_events_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -3203,13 +3177,11 @@ COMMENT ON COLUMN billing.rail_intents.destructive_run_id IS 'The destructive ru
 COMMENT ON COLUMN billing.rail_intents.custodian_id IS 'The custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant''s custodian.';
 
 ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_pkey PRIMARY KEY (id);
-ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_merchant_id_id_key UNIQUE (merchant_id, id);
+    ADD CONSTRAINT rail_intents_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_rail_intents_actor_created ON billing.rail_intents USING btree (actor, created_at) WHERE (actor IS NOT NULL);
 CREATE INDEX idx_rail_intents_created ON billing.rail_intents USING btree (created_at);
-CREATE INDEX idx_rail_intents_custodian ON billing.rail_intents USING btree (custodian_id) WHERE (custodian_id IS NOT NULL);
+CREATE INDEX idx_rail_intents_custodian ON billing.rail_intents USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
 -- Exact handle lookup serves both pending exclusion and permanent erasure history.
 CREATE INDEX idx_rail_intents_custodian_method_delete ON billing.rail_intents
     (merchant_id, custodian_id, (payload->'instrument'->>'rail_method_ref'))
@@ -3218,12 +3190,11 @@ CREATE INDEX idx_rail_intents_native_vault_delete ON billing.rail_intents
     (merchant_id, psp_id, (payload->>'rail_customer_ref'))
     WHERE intent_type='nmi_vault_delete';
 CREATE INDEX idx_rail_intents_destructive_actor_window ON billing.rail_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]));
-CREATE INDEX idx_rail_intents_destructive_run ON billing.rail_intents USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+CREATE INDEX idx_rail_intents_destructive_run ON billing.rail_intents USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 CREATE INDEX idx_rail_intents_due ON billing.rail_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
 CREATE INDEX idx_rail_intents_merchant_destructive_window ON billing.rail_intents USING btree (merchant_id, origin, created_at, intent_type);
-CREATE INDEX idx_rail_intents_merchant_id ON billing.rail_intents USING btree (merchant_id);
-CREATE INDEX idx_rail_intents_psp ON billing.rail_intents USING btree (psp_id);
-CREATE INDEX idx_rail_intents_subscription ON billing.rail_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
+CREATE INDEX idx_rail_intents_psp ON billing.rail_intents USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
+CREATE INDEX idx_rail_intents_subscription ON billing.rail_intents USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 -- Initial membership identity is frozen in terms, including failed attempts
 -- with no subscription row. Paid agreement lookup must not scan the whole book.
 CREATE INDEX idx_rail_intents_initial_membership_history ON billing.rail_intents
@@ -3243,13 +3214,13 @@ WHERE intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
 ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES billing.custodians(id, merchant_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_intents
     ADD CONSTRAINT rail_intents_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_intents
     ADD CONSTRAINT rail_intents_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_intents
-    ADD CONSTRAINT rail_intents_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id);
+    ADD CONSTRAINT rail_intents_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TRIGGER guard_provider_cutover_intent BEFORE INSERT OR UPDATE OF status ON billing.rail_intents
 FOR EACH ROW EXECUTE FUNCTION billing.guard_provider_cutover_intent();
@@ -3278,20 +3249,20 @@ COMMENT ON COLUMN billing.rail_mutation_logs.evidence IS 'Scrubbed structured me
 COMMENT ON COLUMN billing.rail_mutation_logs.custodian_id IS 'The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.';
 
 ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT rail_mutation_logs_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_rail_mutation_logs_custodian ON billing.rail_mutation_logs USING btree (custodian_id) WHERE (custodian_id IS NOT NULL);
+CREATE INDEX idx_rail_mutation_logs_custodian ON billing.rail_mutation_logs USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL);
 CREATE INDEX idx_rail_mutation_logs_merchant_created ON billing.rail_mutation_logs USING btree (merchant_id, created_at DESC);
-CREATE INDEX idx_rail_mutation_logs_psp ON billing.rail_mutation_logs USING btree (psp_id);
-CREATE INDEX idx_rail_mutation_logs_rail_intent ON billing.rail_mutation_logs USING btree (rail_intent_id) WHERE (rail_intent_id IS NOT NULL);
+CREATE INDEX idx_rail_mutation_logs_psp ON billing.rail_mutation_logs USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
+CREATE INDEX idx_rail_mutation_logs_rail_intent ON billing.rail_mutation_logs USING btree (merchant_id, rail_intent_id) WHERE (rail_intent_id IS NOT NULL);
 CREATE INDEX idx_rail_mutation_logs_rail_phase ON billing.rail_mutation_logs USING btree (rail, phase, created_at DESC);
 
 ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES billing.custodians(id, merchant_id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_mutation_logs_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_mutation_logs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_mutation_logs_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_mutation_logs
     ADD CONSTRAINT rail_mutation_logs_rail_intent_fk FOREIGN KEY (merchant_id, rail_intent_id) REFERENCES billing.rail_intents(merchant_id, id) ON DELETE SET NULL (rail_intent_id);
 
@@ -3318,15 +3289,15 @@ COMMENT ON COLUMN billing.rail_refresh_watermarks.watermark_at IS 'Exclusive low
 ALTER TABLE ONLY billing.rail_refresh_watermarks
     ADD CONSTRAINT rail_refresh_watermarks_identity_key UNIQUE (merchant_id, rail, psp_id, event_domain);
 ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT rail_refresh_watermarks_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_rail_refresh_watermarks_psp ON billing.rail_refresh_watermarks USING btree (psp_id);
+CREATE INDEX idx_rail_refresh_watermarks_psp ON billing.rail_refresh_watermarks USING btree (merchant_id, psp_id);
 CREATE INDEX idx_rail_refresh_watermarks_rail ON billing.rail_refresh_watermarks USING btree (rail, event_domain, watermark_at);
 
 ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_refresh_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_refresh_watermarks_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.webhook_events (
     merchant_id uuid NOT NULL,
@@ -3366,7 +3337,7 @@ ALTER TABLE ONLY billing.webhook_health
     ADD CONSTRAINT webhook_health_pkey PRIMARY KEY (merchant_id, rail);
 
 ALTER TABLE ONLY billing.webhook_health
-    ADD CONSTRAINT webhook_health_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT webhook_health_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.webhook_health_daily (
     merchant_id uuid NOT NULL,
@@ -3382,7 +3353,7 @@ ALTER TABLE ONLY billing.webhook_health_daily
     ADD CONSTRAINT webhook_health_daily_pkey PRIMARY KEY (merchant_id, rail, day_at);
 
 ALTER TABLE ONLY billing.webhook_health_daily
-    ADD CONSTRAINT webhook_health_daily_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT webhook_health_daily_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 CREATE TABLE billing.account_updater_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3406,16 +3377,16 @@ COMMENT ON COLUMN billing.account_updater_batches.job_ref IS 'The custodian-nati
 COMMENT ON COLUMN billing.account_updater_batches.status IS 'pending = assembled, not yet confirmed at the custodian | submitted = the custodian owns it, poll for results | completed = results folded | failed = abandoned (the instruments become due again; nothing is parked on our own malfunction).';
 
 ALTER TABLE ONLY billing.account_updater_batches
-    ADD CONSTRAINT account_updater_batches_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT account_updater_batches_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX ix_account_updater_batches_merchant_status ON billing.account_updater_batches USING btree (merchant_id, status, created_at);
 CREATE UNIQUE INDEX uq_account_updater_batches_job ON billing.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref <> ''::text);
 CREATE UNIQUE INDEX uq_account_updater_batches_open ON billing.account_updater_batches USING btree (merchant_id, custodian_id) WHERE (status = ANY (ARRAY['pending'::text, 'submitted'::text]));
 
 ALTER TABLE ONLY billing.account_updater_batches
-    ADD CONSTRAINT account_updater_batches_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES billing.custodians(id, merchant_id) ON DELETE CASCADE;
+    ADD CONSTRAINT account_updater_batches_custodian_fk FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.account_updater_batches
-    ADD CONSTRAINT account_updater_batches_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT account_updater_batches_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 
 -- A bulk verification read (roster + transactions by date range) resumes from
 -- its last completed transaction page after a crash.
@@ -3427,7 +3398,7 @@ CREATE TABLE billing.nmi_bulk_checkpoints (
     next_page integer DEFAULT 1 NOT NULL,
     started_at timestamp with time zone NOT NULL,
     CONSTRAINT nmi_bulk_checkpoints_pkey PRIMARY KEY (merchant_id, psp_id),
-    CONSTRAINT nmi_bulk_checkpoints_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE CASCADE
+    CONSTRAINT nmi_bulk_checkpoints_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
 );
 COMMENT ON TABLE billing.nmi_bulk_checkpoints IS 'The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.';
 
@@ -3440,7 +3411,7 @@ CREATE TABLE billing.nmi_history_months (
     reason text DEFAULT ''::text NOT NULL,
     authorizations bigint NOT NULL,
     CONSTRAINT nmi_history_months_pkey PRIMARY KEY (merchant_id, psp_id, month, kind, category, reason),
-    CONSTRAINT nmi_history_months_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE CASCADE,
+    CONSTRAINT nmi_history_months_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_nmi_history_months_month CHECK (month = date_trunc('month', month, 'UTC')),
     CONSTRAINT chk_nmi_history_months_kind CHECK (kind IN ('verification', 'one_off_sale', 'scheduled_rebill')),
     CONSTRAINT chk_nmi_history_months_category CHECK (category IN ('approved', 'card_data', 'issuer_soft', 'issuer_hard', 'gateway_rule', 'system_error', 'unknown')),
@@ -3457,7 +3428,7 @@ CREATE TABLE billing.nmi_history_reads (
     psp_id uuid NOT NULL,
     read_at timestamp with time zone NOT NULL,
     CONSTRAINT nmi_history_reads_pkey PRIMARY KEY (merchant_id, psp_id),
-    CONSTRAINT nmi_history_reads_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE CASCADE
+    CONSTRAINT nmi_history_reads_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
 );
 COMMENT ON TABLE billing.nmi_history_reads IS 'When each NMI PSP''s history was last read in full. A PSP with none is backfilled 25 months; later reads start the month before this one.';
 
@@ -3520,13 +3491,10 @@ COMMENT ON COLUMN billing.invoices.billing_contacts IS 'Billing contacts ([{name
 COMMENT ON COLUMN billing.invoices.collection_intent_id IS 'The live invoice_collection operation (rail_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation''s terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.';
 
 ALTER TABLE ONLY billing.invoices
-    ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT invoices_pkey PRIMARY KEY (merchant_id, id);
 ALTER TABLE ONLY billing.invoices
     ADD CONSTRAINT invoices_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
-ALTER TABLE ONLY billing.invoices
-    ADD CONSTRAINT invoices_merchant_id_id_key UNIQUE (merchant_id, id);
 
-CREATE INDEX idx_invoices_customer ON billing.invoices USING btree (customer_id, period_from DESC);
 CREATE INDEX ix_invoices_collection_due ON billing.invoices USING btree (merchant_id, next_collection_attempt_at, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0) AND (collection_method = 'charge_automatically'::text));
 CREATE INDEX ix_invoices_merchant_status_period ON billing.invoices USING btree (merchant_id, status, period_from DESC, id DESC);
 CREATE INDEX ix_invoices_open_due ON billing.invoices USING btree (merchant_id, customer_id, currency, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0));
@@ -3562,7 +3530,7 @@ CREATE TABLE billing.invoice_items (
 COMMENT ON TABLE billing.invoice_items IS 'Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.';
 
 ALTER TABLE ONLY billing.invoice_items
-    ADD CONSTRAINT invoice_items_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT invoice_items_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX ix_invoice_items_invoice ON billing.invoice_items USING btree (merchant_id, invoice_id);
 CREATE INDEX ix_invoice_items_pending ON billing.invoice_items USING btree (merchant_id, customer_id, currency, invoice_at) WHERE ((invoice_id IS NULL) AND (status = 'pending'::text));
@@ -3605,13 +3573,15 @@ COMMENT ON TABLE billing.invoice_payments IS 'Payment attempts and settled payme
 COMMENT ON COLUMN billing.invoice_payments.psp_id IS 'PSP that took this invoice payment attempt. Required on every real rail (invoice_payments_psp_required_on_rail); NULL only for off-rail manual settlement.';
 
 ALTER TABLE ONLY billing.invoice_payments
-    ADD CONSTRAINT invoice_payments_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT invoice_payments_pkey PRIMARY KEY (merchant_id, id);
 
-CREATE INDEX idx_invoice_payments_psp ON billing.invoice_payments USING btree (psp_id) WHERE (psp_id IS NOT NULL);
+CREATE INDEX idx_invoice_payments_psp ON billing.invoice_payments USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
 CREATE INDEX ix_invoice_payments_invoice ON billing.invoice_payments USING btree (merchant_id, invoice_id, created_at DESC);
+CREATE INDEX invoice_payments_customer_id_idx ON billing.invoice_payments USING btree (merchant_id, customer_id);
 CREATE UNIQUE INDEX uq_invoice_payments_ledger_transfer ON billing.invoice_payments USING btree (merchant_id, ledger_transfer_id) WHERE (ledger_transfer_id IS NOT NULL);
 CREATE UNIQUE INDEX uq_invoice_payments_settled_rail_payment ON billing.invoice_payments USING btree (merchant_id, psp_id, rail_payment_id) WHERE ((status = 'settled'::text) AND (psp_id IS NOT NULL) AND (rail_payment_id IS NOT NULL));
 CREATE UNIQUE INDEX ux_invoice_payments_attempt_key ON billing.invoice_payments USING btree (merchant_id, invoice_id, idempotency_key) WHERE (idempotency_key IS NOT NULL);
+CREATE INDEX invoice_payments_payment_method_id_idx ON billing.invoice_payments USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL);
 
 ALTER TABLE ONLY billing.invoice_payments
     ADD CONSTRAINT invoice_payments_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id);
@@ -3624,7 +3594,7 @@ ALTER TABLE ONLY billing.invoice_payments
 ALTER TABLE ONLY billing.invoice_payments
     ADD CONSTRAINT invoice_payments_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id);
 ALTER TABLE ONLY billing.invoice_payments
-    ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id);
+    ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT;
 
 -- ---------------------------------------------------------------------------
 -- Notifications and host events
@@ -3653,12 +3623,11 @@ COMMENT ON TABLE billing.notifications IS 'Recipient-scoped customer and merchan
 COMMENT ON COLUMN billing.notifications.emailed_at IS 'When the notification email was sent; NULL = undelivered (the notification_email_sweep retries).';
 
 ALTER TABLE ONLY billing.notifications
-    ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT notifications_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_notifications_created_at ON billing.notifications USING btree (created_at);
-CREATE INDEX idx_notifications_customer ON billing.notifications USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+CREATE INDEX idx_notifications_customer ON billing.notifications USING btree (merchant_id, customer_id) WHERE (customer_id IS NOT NULL);
 CREATE INDEX idx_notifications_event_type ON billing.notifications USING btree (event_type);
-CREATE INDEX idx_notifications_merchant_id ON billing.notifications USING btree (merchant_id);
 CREATE INDEX notifications_inbox_idx ON billing.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC);
 CREATE INDEX idx_notifications_undelivered ON billing.notifications USING btree (merchant_id, created_at, id) WHERE (recipient_kind = 'customer' AND emailed_at IS NULL);
 CREATE INDEX ix_notifications_retention ON billing.notifications USING btree (merchant_id, created_at);
@@ -3694,7 +3663,7 @@ COMMENT ON COLUMN billing.host_outbox.currency IS 'The transition''s currency. N
 COMMENT ON COLUMN billing.host_outbox.dedupe_key IS 'Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.';
 
 ALTER TABLE ONLY billing.host_outbox
-    ADD CONSTRAINT host_outbox_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT host_outbox_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX ix_host_outbox_delivered ON billing.host_outbox USING btree (merchant_id, delivered_at) WHERE (delivered_at IS NOT NULL);
 CREATE INDEX ix_host_outbox_pending ON billing.host_outbox USING btree (merchant_id, event_type, id) WHERE (delivered_at IS NULL);
@@ -3702,7 +3671,7 @@ CREATE UNIQUE INDEX uq_host_outbox_dedupe ON billing.host_outbox USING btree (me
 CREATE UNIQUE INDEX uq_host_outbox_payment ON billing.host_outbox (merchant_id, payment_id) WHERE payment_id IS NOT NULL;
 
 ALTER TABLE ONLY billing.host_outbox
-    ADD CONSTRAINT host_outbox_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE CASCADE;
+    ADD CONSTRAINT host_outbox_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
 ALTER TABLE ONLY billing.host_outbox
     ADD CONSTRAINT host_outbox_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE;
 
@@ -3711,7 +3680,6 @@ ALTER TABLE ONLY billing.host_outbox
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE billing.reconciliation_state (
-    id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     source_domain text NOT NULL,
     fully_reconciled boolean DEFAULT false NOT NULL,
@@ -3721,9 +3689,7 @@ CREATE TABLE billing.reconciliation_state (
 COMMENT ON TABLE billing.reconciliation_state IS 'Per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.';
 
 ALTER TABLE ONLY billing.reconciliation_state
-    ADD CONSTRAINT reconciliation_state_pkey PRIMARY KEY (id);
-
-CREATE UNIQUE INDEX uq_reconciliation_state_identity ON billing.reconciliation_state USING btree (merchant_id, source_domain);
+    ADD CONSTRAINT reconciliation_state_pkey PRIMARY KEY (merchant_id, source_domain);
 
 ALTER TABLE ONLY billing.reconciliation_state
     ADD CONSTRAINT reconciliation_state_merchant_fk FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT;
@@ -3784,14 +3750,15 @@ COMMENT ON COLUMN billing.reconciliation_findings.notified_at IS 'Last time this
 COMMENT ON COLUMN billing.reconciliation_findings.notified_severity IS 'Severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.';
 
 ALTER TABLE ONLY billing.reconciliation_findings
-    ADD CONSTRAINT reconciliation_findings_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT reconciliation_findings_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_reconciliation_findings_actionable ON billing.reconciliation_findings USING btree (finding_type) WHERE (status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text]));
 CREATE INDEX idx_reconciliation_findings_low_severity_pending_digest ON billing.reconciliation_findings USING btree (merchant_id) WHERE ((status = 'requires_review'::text) AND (severity = 'low'::text) AND (notified_at IS NULL));
-CREATE INDEX idx_reconciliation_findings_merchant_id ON billing.reconciliation_findings USING btree (merchant_id);
 CREATE INDEX idx_reconciliation_findings_requires_review ON billing.reconciliation_findings USING btree (last_seen_at DESC) WHERE (status = 'requires_review'::text);
 CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON billing.reconciliation_findings USING btree (merchant_id, finding_type, subject_key);
 CREATE INDEX idx_reconciliation_findings_open_catalog ON billing.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text));
+CREATE INDEX reconciliation_findings_first_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, first_seen_run) WHERE (first_seen_run IS NOT NULL);
+CREATE INDEX reconciliation_findings_last_seen_run_idx ON billing.reconciliation_findings USING btree (merchant_id, last_seen_run) WHERE (last_seen_run IS NOT NULL);
 
 ALTER TABLE ONLY billing.reconciliation_findings
     ADD CONSTRAINT reconciliation_findings_first_seen_run_fk FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;

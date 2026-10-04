@@ -55,7 +55,7 @@ var excludedTables = map[string]string{
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
 	"credential_publications":         "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
-	"destructive_action_switch":       "id singleton enabled updated_by reason updated_at",
+	"destructive_action_switch":       "singleton enabled updated_by reason updated_at",
 	"worker_state":                    "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
 	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at",
 	"merchant_slug_aliases":           "slug merchant_id expires_at created_at",
@@ -72,7 +72,7 @@ var excludedColumns = map[string]string{
 	"dashboard_configs":               "merchant_id layout updated_at updated_by",
 	"merchant_deks":                   "merchant_id wrapped_dek created_at updated_at",
 	"merchant_secrets":                "merchant_id name value version created_at updated_at",
-	"merchant_destructive_policy":     "id merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
+	"merchant_destructive_policy":     "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
 	"merchant_webhooks":               "id merchant_id name destination_host secret_version format enabled created_at updated_at",
 	"notifications":                   "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at",
 	"rail_mutation_logs":              "id merchant_id rail psp_id rail_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",

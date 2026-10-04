@@ -6,8 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 type auditRow struct {
@@ -52,4 +57,38 @@ func TestLifecycleDecisionsAreAudited(t *testing.T) {
 	}
 	require.True(t, renewed, "the renewal that moved the period is audited: %+v", audit)
 	require.True(t, declined, "the decline is audited: %+v", audit)
+}
+
+// A subscription's lifecycle audit is permanent, and every subscription has
+// one from its first insert. Deleting the subscription, directly or through
+// the merchant purge's per-table statement, is refused by the audit's foreign
+// key (restrict_violation, which the purge reports as retained history). It
+// used to cascade into the audit and fail inside its immutability trigger.
+func TestSubscriptionWithLifecycleAuditIsNeverDeleted(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	e := enroll(t, w, "stripe", embedded)
+	sub := subUUID(e.sub)
+	before := w.transitions(sub)
+	require.NotEmpty(t, before, "the insert itself is audited")
+
+	refused := func(err error) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		require.ErrorAs(t, err, &pgErr)
+		require.Equal(t, "23001", pgErr.Code, pgErr.Message)
+		require.Equal(t, "sst_subscription_fk", pgErr.ConstraintName)
+	}
+	_, err := w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.subscriptions WHERE id = $1::uuid`), sub)
+	refused(err)
+
+	var merchantID string
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT merchant_id::text FROM billing.subscriptions WHERE id = $1::uuid`), sub).Scan(&merchantID))
+	tx, err := w.pool.Begin(t.Context())
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(t.Context()) }()
+	refused(gen.New(db.RewriteDBTX(tx, w.schema)).PurgeMerchantRowsSubscriptions(t.Context(), uuid.MustParse(merchantID)))
+	require.NoError(t, tx.Rollback(t.Context()))
+
+	require.Equal(t, before, w.transitions(sub), "the audit is untouched")
 }

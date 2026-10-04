@@ -250,21 +250,6 @@ func callerName(skip int) string {
 	return fmt.Sprintf("%s:%d", name, line)
 }
 
-func (r *SubscriptionRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return scopeErr
-	}
-	rows, err := r.db.Gen(ctx).DeleteSubscription(ctx, gen.DeleteSubscriptionParams{MerchantID: scopeMerchantID.UUID(), ID: id})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
 // attachSubscriptionRelations stitches Price and PaymentMethod (the bun-era
 // selectWithDetails relations) onto subs; withProduct additionally loads
 // Price.Product (selectWithProduct).

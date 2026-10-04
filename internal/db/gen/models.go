@@ -295,7 +295,6 @@ type BillingDashboardConfig struct {
 
 // Global by design: instance-level operator kill switch for destructive convergence, not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
 type BillingDestructiveActionSwitch struct {
-	ID        uuid.UUID
 	Singleton bool
 	Enabled   bool
 	UpdatedBy *string
@@ -654,7 +653,6 @@ type BillingMerchantDek struct {
 
 // Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
 type BillingMerchantDestructivePolicy struct {
-	ID                        uuid.UUID
 	MerchantID                uuid.UUID
 	DestructiveActionsEnabled bool
 	// NULL = advisory-only pulls for this merchant. Absence of a row is the same as NULL, so a newly onboarded merchant is surveyed before it is enforced.
@@ -1249,7 +1247,6 @@ type BillingReconciliationFinding struct {
 
 // Per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
 type BillingReconciliationState struct {
-	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	SourceDomain    string
 	FullyReconciled bool

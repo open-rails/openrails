@@ -177,60 +177,85 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 }
 
 // On the empty vet database PostgreSQL can choose a merchant index and leave
-// the addressed primary-key equality in Filter. The existing PK index already
-// serves this one-row lookup; CAS guards need no new indexes of their own.
-// Recognize only a direct equality guaranteed by AND, on this scan's single
-// primary-key column. OR, casts/functions of the column, and composite-key
-// fragments cannot establish that bound. Seq-scan findings remain independent.
+// the addressed primary-key equality in Filter. The primary key already serves
+// this one-row lookup; CAS guards need no new indexes of their own. Recognize
+// only direct equalities guaranteed by AND, covering every primary-key column
+// between the scan's index condition (merchant_id, typically) and its Filter.
+// OR, casts/functions of the column, and composite-key fragments cannot
+// establish that bound. Seq-scan findings remain independent.
 func filterPinsPrimaryKey(scan planNode, cat *Catalog) bool {
 	key := cat.PrimaryKeys[scan.RelationName]
-	if len(key) != 1 || !mentions(scan.Filter, key[0]) {
+	if len(key) == 0 {
 		return false
 	}
-	tree, err := pgq.Parse("SELECT 1 WHERE " + scan.Filter)
+	pinned := equalityPinned(scan.Filter, scan)
+	if len(pinned) == 0 {
+		return false
+	}
+	for col := range equalityPinned(scan.IndexCond, scan) {
+		pinned[col] = true
+	}
+	for _, col := range key {
+		if !pinned[col] {
+			return false
+		}
+	}
+	return true
+}
+
+// equalityPinned returns this scan's columns that an AND-ed `col = $n` or
+// `col = literal` pins in an EXPLAIN predicate string.
+func equalityPinned(predicate string, scan planNode) map[string]bool {
+	out := map[string]bool{}
+	if strings.TrimSpace(predicate) == "" {
+		return out
+	}
+	tree, err := pgq.Parse("SELECT 1 WHERE " + predicate)
 	if err != nil || len(tree.Stmts) != 1 {
-		return false
+		return out
 	}
-	var pinned func(*pgq.Node) bool
-	column := func(node *pgq.Node) bool {
+	column := func(node *pgq.Node) string {
 		ref := node.GetColumnRef()
-		if ref == nil || colName(node) != key[0] {
-			return false
+		if ref == nil {
+			return ""
 		}
-		if len(ref.Fields) == 1 {
-			return true
+		switch len(ref.Fields) {
+		case 1:
+			return colName(node)
+		case 2:
+			qualifier := ref.Fields[0].GetString_().GetSval()
+			if (scan.Alias != "" && qualifier == scan.Alias) || (scan.Alias == "" && qualifier == scan.RelationName) {
+				return colName(node)
+			}
 		}
-		if len(ref.Fields) != 2 {
-			return false
-		}
-		qualifier := ref.Fields[0].GetString_().GetSval()
-		if scan.Alias != "" {
-			return qualifier == scan.Alias
-		}
-		return qualifier == scan.RelationName
+		return ""
 	}
-	pinned = func(node *pgq.Node) bool {
+	var walk func(*pgq.Node)
+	walk = func(node *pgq.Node) {
 		if node == nil {
-			return false
+			return
 		}
 		if expr := node.GetBoolExpr(); expr != nil {
-			if expr.Boolop != pgq.BoolExprType_AND_EXPR {
-				return false
-			}
-			for _, arg := range expr.Args {
-				if pinned(arg) {
-					return true
+			if expr.Boolop == pgq.BoolExprType_AND_EXPR {
+				for _, arg := range expr.Args {
+					walk(arg)
 				}
 			}
-			return false
+			return
 		}
 		expr := node.GetAExpr()
 		if expr == nil || expr.Kind != pgq.A_Expr_Kind_AEXPR_OP || opName(expr) != "=" {
-			return false
+			return
 		}
-		return column(expr.Lexpr) && (isParam(expr.Rexpr) || isConst(expr.Rexpr)) || column(expr.Rexpr) && (isParam(expr.Lexpr) || isConst(expr.Lexpr))
+		if c := column(expr.Lexpr); c != "" && (isParam(expr.Rexpr) || isConst(expr.Rexpr)) {
+			out[c] = true
+		}
+		if c := column(expr.Rexpr); c != "" && (isParam(expr.Lexpr) || isConst(expr.Lexpr)) {
+			out[c] = true
+		}
 	}
-	return pinned(tree.Stmts[0].Stmt.GetSelectStmt().WhereClause)
+	walk(tree.Stmts[0].Stmt.GetSelectStmt().WhereClause)
+	return out
 }
 
 // indexCondNarrows reports whether the scan's index condition pins something

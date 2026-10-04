@@ -32,10 +32,6 @@ unindexed-filter ListRailIntents                 # optional admin filter, paged
 unindexed-filter CountRailIntents                # optional admin filter, paged
 unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
 
-# merchant_id IS the primary key: the scan is one row and the residual filter
-# is the compare-and-delete guard, not a lookup.
-unindexed-filter DeleteProvenMerchantAPIHostClaim # merchant_api_host_claims: one claim per merchant
-
 # Transaction-level concurrency fences are executable SQL but cannot be
 # wrapped in EXPLAIN by the query auditor.
 unplannable LockUsageEventsForMeterCorrection # LOCK TABLE closes the meter-correction/report race

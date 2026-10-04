@@ -3295,7 +3295,7 @@ INSERT INTO billing.reconciliation_state (
 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
     fully_reconciled = EXCLUDED.fully_reconciled,
     updated_at = now()
-RETURNING id, merchant_id, source_domain, fully_reconciled, updated_at
+RETURNING merchant_id, source_domain, fully_reconciled, updated_at
 `
 
 type UpsertReconciliationStateParams struct {
@@ -3317,7 +3317,6 @@ func (q *Queries) UpsertReconciliationState(ctx context.Context, arg UpsertRecon
 	row := q.db.QueryRow(ctx, upsertReconciliationState, arg.MerchantID, arg.SourceDomain, arg.FullyReconciled)
 	var i BillingReconciliationState
 	err := row.Scan(
-		&i.ID,
 		&i.MerchantID,
 		&i.SourceDomain,
 		&i.FullyReconciled,

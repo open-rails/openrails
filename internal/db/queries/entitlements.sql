@@ -221,7 +221,7 @@ FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
@@ -350,7 +350,7 @@ FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
@@ -396,7 +396,7 @@ FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'entitlement' AND g.event = 'grant'
   AND g.id IN (SELECT grant_id FROM retracted WHERE grant_id IS NOT NULL)
 ORDER BY g.id
-ON CONFLICT (supersedes_id)
+ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
