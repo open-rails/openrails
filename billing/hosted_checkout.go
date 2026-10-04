@@ -5,12 +5,31 @@ import (
 	"time"
 )
 
-// HostedCheckoutSession is the document a host serves to the openrails-checkout
-// browser package for one hosted checkout session (GET .../checkout/sessions/{id}).
-// Every amount is an int64 decimal string of Plan.Currency's native unit and
-// Plan.UnitDecimals is that currency's registered scale; the browser never
-// assumes one. The host owns the session (its id, expiry and attempt state);
-// OpenRails owns the shape so every host renders the same checkout.
+// CreateHostedCheckoutSessionRequest mints a hosted checkout session: one
+// customer buying one price. Supply exactly one of PriceID or PriceKey.
+type CreateHostedCheckoutSessionRequest struct {
+	Customer CheckoutCustomerIdentity `json:"customer"`
+	PriceID  string                   `json:"price_id,omitzero"`
+	PriceKey string                   `json:"price_key,omitempty"`
+	// SuccessURL is where a redirect rail returns the buyer; its origin must
+	// be one of Config.ReturnOrigins.
+	SuccessURL string `json:"success_url,omitempty"`
+}
+
+// HostedCheckoutSessionLink is a minted session. ID is the bearer credential
+// for reading and paying it: hand it to the buyer's browser only. URL is the
+// payment page for the session (Config.HTTP.Checkout.PageURL#ID), empty when
+// the app renders checkout itself.
+type HostedCheckoutSessionLink struct {
+	ID        string    `json:"id"`
+	URL       string    `json:"url,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// HostedCheckoutSession is one hosted checkout session as the browser reads it
+// (GET /v1/checkout-sessions/{id}). Every amount is an int64 decimal string of
+// Plan.Currency's native unit and Plan.UnitDecimals is that currency's
+// registered scale; the browser never assumes one.
 type HostedCheckoutSession struct {
 	ID       string                 `json:"id"`
 	Status   string                 `json:"status"` // created, requires_action, succeeded, failed, blocked, expired, canceled
@@ -27,8 +46,13 @@ type HostedCheckoutSession struct {
 	PaymentID      string                      `json:"payment_id,omitzero"`
 	SubscriptionID string                      `json:"subscription_id,omitzero"`
 	FailureMessage string                      `json:"failure_message,omitempty"`
+	Failure        *PaymentFailure             `json:"failure,omitempty"`
 	SuccessURL     string                      `json:"success_url,omitempty"`
-	ExpiresAt      time.Time                   `json:"expires_at"`
+	// EmbedOrigin is the origin of the app that minted the session, set when
+	// the serving host lists it in Config.HTTP.Checkout.EmbedOrigins: the only
+	// origin the payment page exchanges frame messages with.
+	EmbedOrigin string    `json:"embed_origin,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 type HostedCheckoutMerchant struct {
@@ -52,9 +76,9 @@ type HostedCheckoutLineItem struct {
 	Amount   int64  `json:"amount,string"`
 }
 
-// HostedCheckoutRail is one payment option the browser can execute. ID is the
-// host's opaque handle for the engine selector; Driver and PublicConfig are
-// copied from the CheckoutRailOption OpenRails advertised.
+// HostedCheckoutRail is one payment option the browser can execute. ID is an
+// opaque handle bound to the PSP at mint; Driver and PublicConfig are the
+// CheckoutRailOption's.
 type HostedCheckoutRail struct {
 	ID           string            `json:"id"`
 	Rail         string            `json:"rail"`
@@ -97,14 +121,16 @@ type HostedCheckoutPayRequest struct {
 	Card *Card `json:"card,omitempty"`
 }
 
-// HostedCheckoutPayResult is the host's answer to a pay request.
+// HostedCheckoutPayResult answers a pay request. Failure explains a definite
+// decline; the buyer may pay again with another instrument.
 type HostedCheckoutPayResult struct {
-	Status         string `json:"status"`
-	RedirectURL    string `json:"redirect_url,omitempty"`
-	TransactionURL string `json:"transaction_url,omitempty"`
-	PaymentID      string `json:"payment_id,omitzero"`
-	SubscriptionID string `json:"subscription_id,omitzero"`
-	FailureMessage string `json:"failure_message,omitempty"`
+	Status         string          `json:"status"`
+	RedirectURL    string          `json:"redirect_url,omitempty"`
+	TransactionURL string          `json:"transaction_url,omitempty"`
+	PaymentID      string          `json:"payment_id,omitzero"`
+	SubscriptionID string          `json:"subscription_id,omitzero"`
+	FailureMessage string          `json:"failure_message,omitempty"`
+	Failure        *PaymentFailure `json:"failure,omitempty"`
 }
 
 // NewHostedCheckoutPlan derives the plan from a catalog product and price and

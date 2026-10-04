@@ -8,6 +8,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -21,9 +23,12 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -261,7 +266,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			"limited_subject": combined.subject.Key,
 			"client_ip":       clientIP,
 			"user_id":         userID,
-			"path":            r.URL.Path,
+			"path":            LogPath(r),
 			"method":          r.Method,
 			"bucket":          bucket,
 		}).Warn("Rate limit exceeded")
@@ -728,7 +733,8 @@ func ClassifyBucket(path, method string) string {
 
 func isCheckoutPath(path string) bool {
 	if path == "/v1/checkout" || strings.HasPrefix(path, "/v1/checkout/") ||
-		path == "/v1/me/checkout" || strings.HasPrefix(path, "/v1/me/checkout/") {
+		path == "/v1/me/checkout" || strings.HasPrefix(path, "/v1/me/checkout/") ||
+		strings.HasPrefix(path, "/v1/checkout-sessions/") {
 		return true
 	}
 
@@ -779,4 +785,62 @@ func isCustomerSubpath(path, suffix string) bool {
 	}
 	tail := rest[idEnd:]
 	return tail == suffix || strings.HasPrefix(tail, suffix+"/")
+}
+
+// Hosted checkout session limits (#1124), per session id per minute: the id is
+// the credential, so it is limited whatever address presents it. Polling reads
+// every three seconds; a pay is a buyer's click.
+const (
+	CheckoutSessionReadsPerMinute = 120
+	CheckoutSessionPaysPerMinute  = 10
+)
+
+// CheckoutSessionRateLimit limits requests naming one hosted checkout session
+// (the :id path parameter), beside the per-address limits of RateLimitHTTP.
+func CheckoutSessionRateLimit(rt *app.Runtime, bucket string, perMinute int) router.Middleware {
+	store := NewRateLimitStore()
+	return func(next router.Handler) router.Handler {
+		return func(r *request.Request) {
+			id := r.Param("id")
+			if rt == nil || rt.Config == nil || rt.Config.RateLimits == nil || !strings.HasPrefix(id, "ocs_") || len(id) > 128 {
+				next(r)
+				return
+			}
+			sum := sha256.Sum256([]byte(id))
+			subject := "ocs:" + hex.EncodeToString(sum[:16])
+			var result rateLimitResult
+			var err error
+			if rt.RedisClient != nil {
+				result, err = redisWindowAllow(r.Request.Context(), rt.RedisClient, subject, bucket, perMinute, time.Minute)
+			}
+			if rt.RedisClient == nil || err != nil {
+				result = store.allowWindow(subject, bucket, perMinute, time.Minute)
+			}
+			if !result.allowed {
+				retryAfter := int(math.Ceil(result.reset.Seconds()))
+				if retryAfter <= 0 {
+					retryAfter = 60
+				}
+				r.SetHeader("Retry-After", strconv.Itoa(retryAfter))
+				r.AbortJSON(http.StatusTooManyRequests, "Rate limit exceeded")
+				return
+			}
+			next(r)
+		}
+	}
+}
+
+// LogPath is r's path for logs. A hosted checkout session id is a bearer
+// credential and is never logged.
+func LogPath(r *http.Request) string {
+	path := r.URL.Path
+	i := strings.Index(path, "/ocs_")
+	if i < 0 {
+		return path
+	}
+	rest := path[i+1:]
+	if j := strings.IndexByte(rest, '/'); j >= 0 {
+		return path[:i] + "/ocs_redacted" + rest[j:]
+	}
+	return path[:i] + "/ocs_redacted"
 }

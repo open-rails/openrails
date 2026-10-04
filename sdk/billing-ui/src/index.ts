@@ -69,6 +69,9 @@ export {
 
 export { Checkout, type CheckoutLayout, type CheckoutProps } from "./checkout"
 export { CheckoutModal, type CheckoutModalProps } from "./modal"
+export { CheckoutPage, type CheckoutPageProps } from "./checkout-page"
+export { CheckoutFrame, type CheckoutFrameProps } from "./checkout-frame"
+export type { CheckoutFrameTheme } from "./frame"
 export { CardBrandPlate } from "./components/card-brands"
 export { resolveCardBrand, type CardBrand } from "./lib/card-brands"
 export {

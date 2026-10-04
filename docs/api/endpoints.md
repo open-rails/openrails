@@ -88,6 +88,8 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
 | POST | `/v1/checkout/{id}/confirm` | bearer | Confirm a Solana session: `{ payment: { rail: "solana", signature, wallet? } }` |
 | GET | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transfer/transaction request for the session (buyer signs; mounted when a Solana rail is configured) |
 | POST | `/v1/checkout/{id}/solana-pay` | none (session-addressed) | Solana Pay transaction-request callback |
+| GET | `/v1/checkout-sessions/{id}` | none (the id is the credential) | Hosted checkout session document ([hosted checkout](commerce.md#hosted-checkout)) |
+| POST | `/v1/checkout-sessions/{id}/pay` | none (the id is the credential) | Pay a hosted checkout session |
 
 `POST /v1/checkout` body:
 
@@ -255,6 +257,7 @@ buyer.
 | POST | `/v1/me/checkout` | Create a checkout session |
 | GET | `/v1/me/checkout/{id}` | Retrieve the caller's checkout session |
 | POST | `/v1/me/checkout/{id}/confirm` | Confirm the caller's Solana checkout session |
+| POST | `/v1/me/checkout/sessions` | Mint a [hosted checkout](commerce.md#hosted-checkout) session: `{price_key \| price_id, success_url?}` → `201 {id, url?, expires_at}` |
 
 ### Customer treasury (`/v1/customers/{customer_id}/*`)
 
@@ -316,6 +319,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/solana-cancel-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription cancellation session |
 | POST | `/v1/merchant/solana-tier-change-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription tier-change session |
 | GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
+| POST | `/v1/merchant/hosted-checkout-sessions` | `merchant:checkout:create` | Mint a hosted checkout session for the supplied customer and price |
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
 | GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for exactly one query price_id or price_key; no provider request |
 | GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant |

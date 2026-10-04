@@ -1,8 +1,8 @@
 // Wire types for the hosted checkout session surface, validated at runtime
 // with zod so a drifting API fails loudly at the boundary instead of rendering
-// garbage. These schemas are the package's only contract with the host
-// backend. OpenRails publishes the same document as Go types
-// (openrails.HostedCheckoutSession) and a canonical fixture
+// garbage. OpenRails serves the session (GET /v1/checkout-sessions/{id}) and
+// publishes the same document as Go types (billing.HostedCheckoutSession) and
+// a canonical fixture
 // (testdata/wire/hosted_checkout_session.json) that src/types.test.ts decodes.
 import { z } from "zod"
 
@@ -154,6 +154,9 @@ export const checkoutSessionSchema = z.object({
   operation: checkoutOperationSchema.nullish(),
   // Present on hosted-page reads so the page host can redirect on success.
   success_url: returnURLSchema.optional(),
+  // The origin of the app that framed the payment page: the only origin the
+  // page exchanges frame messages with.
+  embed_origin: z.string().url().optional(),
   expires_at: z.string().nullish(),
 })
 export type CheckoutSession = z.infer<typeof checkoutSessionSchema>

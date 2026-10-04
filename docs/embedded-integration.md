@@ -328,7 +328,7 @@ if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { retu
 | `HTTPConfig` | Exposed surface |
 |---|---|
 | (always) | Capability discovery and signature-checked provider callbacks |
-| `Checkout` | Products, prices, checkout and checkout config; requires `Authenticate` |
+| `Checkout` | Products, prices, checkout config and [hosted checkout](api/commerce.md#hosted-checkout) sessions; requires `Authenticate`. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page |
 | `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`); `Treasury` adds `/v1/customers` |
 | `MerchantAdmin` | Customer and support management; requires `Authorize` |
 | `Catalog` | Merchant and creator catalog HTTP; requires `Authorize` |

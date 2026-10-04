@@ -1,5 +1,6 @@
 // Command server runs real AuthKit + embedded OpenRails on Postgres for
-// billing-ui's Playwright suite. Test-only: /__test/* creates and seeds users.
+// billing-ui's Playwright suite, with the hosted checkout page (/pay.html) on
+// a second origin. Test-only: /__test/* creates and seeds users.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:4790", "listen address")
 	baseURL := flag.String("base-url", "", "public origin (default http://localhost:<port>)")
+	pageURL := flag.String("page-url", "", "hosted checkout page, on another origin than base-url")
 	dsn := flag.String("dsn", os.Getenv("DATABASE_URL"), "Postgres DSN")
 	static := flag.String("static", "", "directory served at /")
 	lifetime := flag.Duration("lifetime", 30*time.Minute, "exit after this long")
@@ -31,12 +33,12 @@ func main() {
 		}
 		*baseURL = "http://localhost:" + port
 	}
-	if err := run(*addr, *baseURL, *dsn, *static, *lifetime); err != nil {
+	if err := run(*addr, *baseURL, *pageURL, *dsn, *static, *lifetime); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
+func run(addr, baseURL, pageURL, dsn, static string, lifetime time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, lifetime)
@@ -47,7 +49,7 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		return err
 	}
 	defer pool.Close()
-	rt, err := harness.New(ctx, baseURL, dsn, pool, true)
+	rt, err := harness.New(ctx, baseURL, pageURL, dsn, pool, true)
 	if err != nil {
 		return err
 	}
@@ -83,27 +85,6 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		}
 		reply(w, http.StatusCreated, s)
 	})
-	mux.HandleFunc("GET /__test/checkout/{price}", func(w http.ResponseWriter, r *http.Request) {
-		offer, err := rt.CheckoutOffer(r.Context(), r.PathValue("price"))
-		if err != nil {
-			reply(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		reply(w, http.StatusOK, offer)
-	})
-	mux.HandleFunc("POST /__test/checkout/pay", func(w http.ResponseWriter, r *http.Request) {
-		var in harness.CheckoutPay
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		out, err := rt.Pay(r.Context(), in)
-		if err != nil {
-			reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		reply(w, http.StatusOK, out)
-	})
 	mux.HandleFunc("GET /__test/customers/{id}/billing", func(w http.ResponseWriter, r *http.Request) {
 		out, err := rt.CustomerBilling(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -113,7 +94,9 @@ func run(addr, baseURL, dsn, static string, lifetime time.Duration) error {
 		reply(w, http.StatusOK, out)
 	})
 	if static != "" {
-		mux.Handle("GET /", http.FileServer(http.Dir(static)))
+		files := http.FileServer(http.Dir(static))
+		mux.Handle("GET /", files)
+		mux.Handle("GET /pay.html", rt.PaymentPage(files))
 	}
 
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}

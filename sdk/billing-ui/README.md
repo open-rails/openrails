@@ -10,10 +10,11 @@ billing (subscriptions, saved cards, payment history).
 | `@openrails/billing-ui`           | Styled checkout and account components, `BillingUiProvider`, i18n                  |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
 
-The checkout owns the browser payment flow while the host supplies a
-short-lived `CheckoutSource`. Card data is tokenized in NMI-hosted Collect.js
-iframes and never enters the host application, unless the PSP takes cards on
-OpenRails itself (`card_entry: server`, driver `card`).
+The checkout owns the browser payment flow. OpenRails holds the checkout
+session: the signed-in customer mints one for a price, and its `ocs_` id alone
+reads and pays it. Card data is tokenized in NMI-hosted Collect.js iframes and
+never enters the host application, unless the PSP takes cards on OpenRails
+itself (`card_entry: server`, driver `card`).
 
 See [Payment form contract](docs/payment-form-contract.md) for the exact-money
 session document, billing fields, browser-autofill behavior, and the checkout
@@ -26,19 +27,45 @@ OpenRails release `vX.Y.Z` attaches `openrails-billing-ui-X.Y.Z.tgz`.
 pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
 ```
 
+## Checkout
+
 ```tsx
-import { Checkout, createHttpSource } from "@openrails/billing-ui"
+import { createBillingClient } from "@openrails/billing-ui/client"
+import { Checkout, CheckoutFrame } from "@openrails/billing-ui"
 import "@openrails/billing-ui/styles.css"
 
-const source = createHttpSource({
-  baseUrl: "https://merchant.example",
-  sessionId: "ocs_example",
-})
+const billing = createBillingClient({ fetch: auth.authFetch })
+const session = await billing.createCheckoutSession({ priceKey: "pro-monthly" })
 
-export function PaymentPage() {
-  return <Checkout source={source} />
-}
+// A shared payment page (Config.HTTP.Checkout.PageURL) answers with a url:
+<CheckoutFrame url={session.url} theme="dark" onComplete={() => refetchAccess()} />
+// Without one, the app renders the checkout itself:
+<Checkout source={billing.checkoutSource(session.id)} onComplete={() => refetchAccess()} />
 ```
+
+`onComplete` is a hint: confirm access from your own authenticated API before
+granting anything. Pass `successUrl` to return the buyer from a redirect rail
+(CCBill, Stripe hosted); it must be on one of your app's return origins.
+
+The payment host serves `<CheckoutPage>` from one HTML entry at `PageURL`,
+behind its adapter's `CheckoutFramePolicy` (only the sites in
+`Config.HTTP.Checkout.EmbedOrigins` may frame it):
+
+```tsx
+import { BillingUiProvider, CheckoutPage } from "@openrails/billing-ui"
+
+createRoot(root).render(
+  <BillingUiProvider>
+    <CheckoutPage appearance={{ variables: brand }} />
+  </BillingUiProvider>
+)
+```
+
+The page reads the session id from its URL fragment and talks to its frame
+with `postMessage`, origin-checked both ways: page to app `ready`,
+`resize {height}`, `complete {status}` and `redirect {url}` (a nested frame
+cannot navigate the top window, so the app does); app to page
+`init {theme}`. The page messages only the app origin recorded on its session.
 
 ## Account billing
 

@@ -61,7 +61,7 @@ func run(out, dsn string) error {
 		return err
 	}
 	defer pool.Close()
-	rt, err := harness.New(ctx, "http://localhost", dsn, pool, false)
+	rt, err := harness.New(ctx, "http://localhost", "", dsn, pool, false)
 	if err != nil {
 		return err
 	}

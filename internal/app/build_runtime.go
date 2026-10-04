@@ -39,6 +39,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
@@ -347,6 +348,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutSessionService: serviceInstances.CheckoutSessionService,
+		HostedCheckout:         hostedcheckout.NewStore(database),
 		CardAbuseGuard:         cardAbuseGuard,
 		CaptchaStore:           captchaStore,
 		CardFailureLedger:      cardFailureLedger,

@@ -23,6 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -39,6 +40,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/hostedcheckout"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -239,6 +241,12 @@ type Runtime struct {
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutSessionService *checkout.CheckoutSessionService
+	// HostedCheckout stores hosted checkout sessions (#1124).
+	HostedCheckout *hostedcheckout.Store
+	// CheckoutCustomer is the buyer's current identity for a hosted checkout
+	// action; ErrForbidden for one who may no longer buy. Nil uses the
+	// identity given at mint.
+	CheckoutCustomer func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error)
 
 	// CardAbuseGuard escalates repeated card-charge failures to a captcha, and
 	// to a captcha for everyone while the ledger reports an attack (#371). Nil

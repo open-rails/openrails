@@ -160,6 +160,8 @@ type world struct {
 	selfService bool
 	// mount adjusts the mounted HTTP surface before start.
 	mount func(*openrails.HTTPConfig)
+	// deps adjusts the host hooks before start.
+	deps func(*openrails.Deps)
 	// queries records named sqlc statements while counting.
 	queries *queryLog
 
@@ -300,6 +302,9 @@ func (w *world) start() {
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps}
 	deps := hooks(identity)
 	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = pool, stripe, nmi, w.clock
+	if w.deps != nil {
+		w.deps(&deps)
+	}
 	rt, err := openrails.New(t.Context(), *cfg, deps)
 	require.NoError(t, err)
 	w.rt = rt

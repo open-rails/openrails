@@ -119,6 +119,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/merchant/credits/deposit":                                                  p,
 		"PUT /v1/merchant/credit-limit":                                                     permissions.MerchantCreditsGrant,
 		"POST /v1/merchant/checkout-sessions":                                               permissions.MerchantCheckoutCreate,
+		"POST /v1/merchant/hosted-checkout-sessions":                                        permissions.MerchantCheckoutCreate,
 		"GET /v1/merchant/checkout-sessions/{id}":                                           p,
 		"POST /v1/merchant/admissions":                                                      permissions.MerchantAdmissionsCreate,
 		"POST /v1/merchant/admissions/{id}/capture":                                         permissions.MerchantAdmissionsCreate,
@@ -321,7 +322,8 @@ func TestUserRoutes(t *testing.T) {
 		return routeKeys(table)
 	}
 	none := inventory(routesurface.ProviderRoutes{})
-	require.Subset(t, none, []string{"GET /v1/products", "GET /v1/prices", "GET /v1/checkout-config", "GET /v1/currencies", "POST /v1/checkout", "POST /v1/checkout/{id}/confirm"})
+	require.Subset(t, none, []string{"GET /v1/products", "GET /v1/prices", "GET /v1/checkout-config", "GET /v1/currencies", "POST /v1/checkout", "POST /v1/checkout/{id}/confirm",
+		"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay"})
 	for _, key := range none {
 		require.NotContains(t, key, "solana")
 	}

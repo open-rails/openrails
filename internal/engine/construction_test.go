@@ -36,7 +36,7 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		want string
 	}{
 		"merchant without slug":     {with(sandbox, func(c *config.Config) { c.Merchant.DisplayName = "x" }), config.Deps{}, "Merchant.Slug"},
-		"checkout without auth":     {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Checkout: true} }), config.Deps{}, "Checkout requires"},
+		"checkout without auth":     {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}} }), config.Deps{}, "Checkout requires"},
 		"customer without merchant": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}} }), config.Deps{Authenticate: authenticate}, "explicit merchant slug"},
 		"customer without verifier": {with(sandbox, func(c *config.Config) {
 			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Treasury: true}}}
@@ -45,7 +45,7 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		"catalog without authorize":   {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Catalog: true} }), config.Deps{Authenticate: authenticate}, "management surfaces require"},
 		"control plane with groups": {with(sandbox, func(c *config.Config) {
 			c.ControlPlane = &config.ControlPlaneConfig{}
-			c.HTTP = &config.HTTPConfig{Checkout: true}
+			c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}
 		}), config.Deps{}, "may only add CustomerRoutes"},
 		"river schema injection":      {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
 		"river schema host owned":     {with(sandbox, func(c *config.Config) { c.River = config.RiverHostOwned; c.RiverSchema = "jobs" }), config.Deps{}, "applies to managed River"},

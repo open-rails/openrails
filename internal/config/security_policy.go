@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -35,7 +36,8 @@ func (cfg *Config) WebhookSecretOverlapDuration() (time.Duration, error) {
 
 // AllowedReturnOrigins are the exact origins checkout success/cancel and
 // billing-portal return URLs may name (SEC-33): ReturnOrigins, else the origin
-// of PublicBillingBaseURL. Empty refuses every return URL.
+// of PublicBillingBaseURL, then HTTP.Checkout.EmbedOrigins. Empty refuses
+// every return URL.
 func (cfg *Config) AllowedReturnOrigins() []string {
 	if cfg == nil {
 		return nil
@@ -48,6 +50,13 @@ func (cfg *Config) AllowedReturnOrigins() []string {
 	}
 	if len(out) == 0 {
 		if origin, ok := URLOrigin(cfg.PublicBillingBaseURL); ok {
+			out = append(out, origin)
+		}
+	}
+	// The sites framing this host's payment page are where its redirect
+	// rails return the buyer.
+	for _, raw := range cfg.HostedCheckout().EmbedOrigins {
+		if origin, ok := URLOrigin(raw); ok {
 			out = append(out, origin)
 		}
 	}
@@ -71,6 +80,70 @@ func (cfg *Config) ReturnURLAllowed(raw string) bool {
 		}
 	}
 	return false
+}
+
+// HostedCheckout is Config.HTTP.Checkout, zero when checkout is not published.
+func (cfg *Config) HostedCheckout() CheckoutConfig {
+	if cfg == nil || cfg.HTTP == nil || cfg.HTTP.Checkout == nil {
+		return CheckoutConfig{}
+	}
+	return *cfg.HTTP.Checkout
+}
+
+// CheckoutEmbedAllowed reports whether origin may frame the payment page this
+// host serves: one of EmbedOrigins, or the page's own origin.
+func (cfg *Config) CheckoutEmbedAllowed(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	checkout := cfg.HostedCheckout()
+	if page, ok := URLOrigin(checkout.PageURL); ok && page == origin {
+		return true
+	}
+	for _, raw := range checkout.EmbedOrigins {
+		if allowed, ok := URLOrigin(raw); ok && allowed == origin {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckoutFrameAncestors is the Content-Security-Policy of the payment page
+// this host serves: only the host itself and EmbedOrigins may frame it.
+func (cfg *Config) CheckoutFrameAncestors() string {
+	policy := "frame-ancestors 'self'"
+	for _, raw := range cfg.HostedCheckout().EmbedOrigins {
+		if origin, ok := URLOrigin(raw); ok {
+			policy += " " + origin
+		}
+	}
+	return policy
+}
+
+// Validate checks PageURL and EmbedOrigins.
+func (c CheckoutConfig) Validate() error {
+	if raw := strings.TrimSpace(c.PageURL); raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || !webScheme(u) {
+			return fmt.Errorf("PageURL %q must be an absolute https URL (http on loopback) without credentials or a fragment", c.PageURL)
+		}
+	}
+	for _, raw := range c.EmbedOrigins {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Host == "" || u.User != nil || !webScheme(u) || strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("EmbedOrigins %q must be an origin: https://host[:port] (http on loopback)", raw)
+		}
+	}
+	return nil
+}
+
+// webScheme admits https, and http for a loopback host.
+func webScheme(u *url.URL) bool {
+	if u.Scheme == "https" {
+		return true
+	}
+	host := u.Hostname()
+	return u.Scheme == "http" && (host == "localhost" || net.ParseIP(host).IsLoopback())
 }
 
 // URLOrigin returns scheme://host[:port] in lower case for an absolute http(s) URL.

@@ -6,7 +6,7 @@ label, and standards-based autocomplete token.
 
 ## Money
 
-The session document (`GET .../checkout/sessions/{id}`) carries every amount
+The session document (`GET /billing/v1/checkout-sessions/{id}`) carries every amount
 as an exact signed int64 decimal string of `plan.currency`'s native unit, and
 `plan.unit_decimals` is that currency's registered scale:
 
@@ -31,8 +31,8 @@ currency and scale. A JSON number, a decimal point, a value outside int64, or
 a missing `unit_decimals` fails schema validation and the session is
 unavailable; the package never assumes a scale. Hosts take the scale from
 OpenRails' currency registry (`billing.LookupCurrency`, the same table as
-`GET /v1/currencies`) by building the plan with
-`billing.NewHostedCheckoutPlan(product, price)`; the Go shape is
+`GET /v1/currencies`); OpenRails serves the session at
+`GET /v1/checkout-sessions/{id}`; the Go shape is
 `billing.HostedCheckoutSession` and its canonical fixture
 (`testdata/wire/hosted_checkout_session.json`) is decoded by this package's
 tests.

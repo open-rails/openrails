@@ -4,6 +4,7 @@ sql:
     queries: "internal/db/queries"
     schema:
       - "internal/migrate/postgres/0001_schema.up.sql"
+      - "internal/migrate/postgres/0002_hosted_checkout_sessions.up.sql"
       - "internal/db/schema"
     database:
       uri: "${SQLC_DATABASE_URL}"

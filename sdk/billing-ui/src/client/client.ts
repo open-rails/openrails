@@ -1,11 +1,24 @@
 import type { z } from "zod"
 
-import { BillingError, localError, readBillingError } from "./errors"
+import type { CheckoutSource } from "../source"
+import {
+  checkoutSessionSchema,
+  payResultSchema,
+  type PayRequest,
+  type PayResult,
+} from "../types"
+import {
+  BillingError,
+  isBillingError,
+  localError,
+  readBillingError,
+} from "./errors"
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/openrails-routes"
 import {
   billingStatusSchema,
   cardSetupSchema,
   currencyRegistrySchema,
+  hostedCheckoutLinkSchema,
   paymentAuthenticationSchema,
   invoicePageSchema,
   invoiceSchema,
@@ -25,6 +38,7 @@ import {
   type BillingStatus,
   type CardSetup,
   type Currency,
+  type HostedCheckoutLink,
   type PaymentAuthentication,
   type CurrencyScales,
   type Invoice,
@@ -97,6 +111,8 @@ interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   headers?: Record<string, string>
+  /** Sends no bearer: the hosted checkout session id is the credential. */
+  anonymous?: boolean
 }
 
 /** Total wait a GET may spend on its one retry. */
@@ -164,7 +180,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   ): Promise<Response> {
     const headers = new Headers({ Accept: "application/json", ...opts.headers })
     if (opts.body !== undefined) headers.set("Content-Type", "application/json")
-    const token = await options.getToken?.()
+    const token = opts.anonymous ? undefined : await options.getToken?.()
     if (token) headers.set("Authorization", `Bearer ${token}`)
     const lang = options.language?.()
     if (lang) headers.set("Accept-Language", lang)
@@ -571,6 +587,71 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         signal,
       })
       return registry.currencies
+    },
+
+    /**
+     * Mints a hosted checkout session for the signed-in customer and one
+     * price. Render it with `<CheckoutFrame url>` when the session has a
+     * `url`, else with `<Checkout source={client.checkoutSource(id)}>`.
+     * `successUrl` brings the buyer back from a redirect rail; it must be on
+     * one of this app's return origins.
+     */
+    createCheckoutSession(input: {
+      priceKey?: string
+      priceId?: string
+      successUrl?: string
+    }): Promise<HostedCheckoutLink> {
+      if (!input.priceKey === !input.priceId)
+        return Promise.reject(
+          localError(
+            "invalid_request",
+            "Pass exactly one of priceKey or priceId."
+          )
+        )
+      return json(hostedCheckoutLinkSchema, "/me/checkout/sessions", {
+        method: "POST",
+        body: {
+          price_key: input.priceKey,
+          price_id: input.priceId,
+          success_url: input.successUrl,
+        },
+      })
+    },
+
+    /**
+     * Reads and pays one hosted checkout session. The id is the only
+     * credential: no bearer is sent. A refusal the buyer can answer (an
+     * invalid card form, too many attempts) resolves as `failed`; an expired
+     * or unknown session as `expired`.
+     */
+    checkoutSource(sessionId: string): CheckoutSource {
+      const path = `/checkout-sessions/${id(sessionId)}`
+      return {
+        getSession: () =>
+          json(checkoutSessionSchema, path, { anonymous: true }),
+        async pay(request: PayRequest): Promise<PayResult> {
+          try {
+            return await json(payResultSchema, `${path}/pay`, {
+              method: "POST",
+              body: request,
+              anonymous: true,
+            })
+          } catch (err) {
+            if (!isBillingError(err)) throw err
+            switch (err.status) {
+              case 404:
+              case 410:
+                return { status: "expired" }
+              case 403:
+                return { status: "blocked", failure_message: err.message }
+              case 422:
+              case 429:
+                return { status: "failed", failure_message: err.message }
+            }
+            throw err
+          }
+        },
+      }
     },
 
     /** Network and accepted tokens; served only with a Solana PSP. */

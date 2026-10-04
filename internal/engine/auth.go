@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -76,6 +77,35 @@ func integration(deps config.Deps) (*billingauth.Integration, error) {
 		out.RecentSignIn = billingauth.RecentSignInFunc(func(_ context.Context, r *http.Request) error { return recent(r) })
 	}
 	return out, nil
+}
+
+// checkoutCustomer is the hosted checkout account check: the host's hook, else
+// the AuthKit user when customers are AuthKit users.
+func checkoutCustomer(deps config.Deps) func(context.Context, string) (billing.CheckoutCustomerIdentity, error) {
+	if deps.CheckoutCustomer != nil {
+		return deps.CheckoutCustomer
+	}
+	directory, ok := deps.AuthKit.(interface {
+		Users(context.Context, []string) (map[string]iam.User, error)
+	})
+	if !ok || deps.CustomerFor != nil {
+		return nil
+	}
+	return func(ctx context.Context, customerID string) (billing.CheckoutCustomerIdentity, error) {
+		users, err := directory.Users(ctx, []string{customerID})
+		if err != nil {
+			return billing.CheckoutCustomerIdentity{}, err
+		}
+		user, ok := users[customerID]
+		if !ok || user.Ban != nil || user.DeletedAt != nil {
+			return billing.CheckoutCustomerIdentity{}, billingauth.ErrForbidden
+		}
+		out := billing.CheckoutCustomerIdentity{ID: customerID, Username: user.Username}
+		if user.EmailVerified && user.Email != nil {
+			out.VerifiedEmail = *user.Email
+		}
+		return out, nil
+	}
 }
 
 type userDirectoryFuncs struct {

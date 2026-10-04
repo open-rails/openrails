@@ -475,3 +475,16 @@ export type NewCard = NewCardFields &
     | { payment_token: string; card?: never }
     | { card: CardEntry; payment_token?: never }
   )
+
+/**
+ * A minted hosted checkout session. `id` reads and pays it with no other
+ * credential (`client.checkoutSource(id)`); hand it to this customer's
+ * browser only. `url` is the shared payment page (`<CheckoutFrame url>`),
+ * absent when the app renders `<Checkout>` itself.
+ */
+export const hostedCheckoutLinkSchema = z.object({
+  id: z.string().startsWith("ocs_"),
+  url: z.string().url().optional(),
+  expires_at: time,
+})
+export type HostedCheckoutLink = z.infer<typeof hostedCheckoutLinkSchema>

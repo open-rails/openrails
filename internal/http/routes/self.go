@@ -129,6 +129,9 @@ func registerSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	checkout := group.Group("/checkout")
 	if !managementOnly {
 		checkout.Handle(http.MethodPost, "", h(httphandlers.CreateCheckoutSession))
+		if HostedCheckoutPublished(rt) {
+			checkout.Handle(http.MethodPost, "/sessions", h(httphandlers.CreateHostedCheckoutSession))
+		}
 	}
 	checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
 	checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))

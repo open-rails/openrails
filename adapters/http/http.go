@@ -95,3 +95,16 @@ func chiPath(path string) string {
 	}
 	return strings.Join(parts, "/")
 }
+
+// CheckoutFramePolicy wraps the handler serving the hosted checkout page
+// (billing-ui's <CheckoutPage>): only the host and
+// Config.HTTP.Checkout.EmbedOrigins may frame it.
+func CheckoutFramePolicy(client *openrails.Client) func(http.Handler) http.Handler {
+	policy := client.CheckoutFrameAncestors()
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Security-Policy", policy)
+			next.ServeHTTP(w, r)
+		})
+	}
+}

@@ -67,7 +67,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
 		HTTP: &openrails.HTTPConfig{
-			Checkout: true, // products, prices, checkout sessions and processor webhooks
+			Checkout: &openrails.CheckoutConfig{}, // products, prices, hosted checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
 				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
 			},

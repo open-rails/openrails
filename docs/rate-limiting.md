@@ -43,9 +43,11 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 A bucket with no configured limit falls back to the `default` entry; a configured limit ≤ 0
 means 60 rpm.
 
-> The `checkout` bucket covers POSTs under the public `/v1/checkout`, self-service
-> `/v1/me/checkout`, and customer-treasury `/v1/customers/{id}/checkout` route families.
-> Read-only GETs remain in `default`.
+> The `checkout` bucket covers POSTs under the public `/v1/checkout` and
+> `/v1/checkout-sessions`, self-service `/v1/me/checkout`, and customer-treasury
+> `/v1/customers/{id}/checkout` route families. Read-only GETs remain in `default`.
+> A hosted checkout session is also limited per session id, whatever address
+> presents it: 120 reads and 10 pays a minute.
 
 > **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail
 > IPs). The high default absorbs rebill runs and event bursts without 429-ing payment events;
