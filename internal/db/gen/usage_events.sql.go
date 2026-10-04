@@ -122,16 +122,21 @@ const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
 SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
   AND event_type = $3 AND source = $4 AND source_id = $5
+  AND occurred_at >= $7::timestamptz
+  AND occurred_at <= $8::timestamptz
+ORDER BY occurred_at DESC
 LIMIT 1
 `
 
 type GetUsageEventByCoordsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	EventType  string
-	Source     string
-	SourceID   string
-	Currency   string
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	EventType    string
+	Source       string
+	SourceID     string
+	Currency     string
+	OccurredFrom time.Time
+	OccurredTo   time.Time
 }
 
 func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventByCoordsParams) (BillingUsageEvent, error) {
@@ -142,6 +147,8 @@ func (q *Queries) GetUsageEventByCoords(ctx context.Context, arg GetUsageEventBy
 		arg.Source,
 		arg.SourceID,
 		arg.Currency,
+		arg.OccurredFrom,
+		arg.OccurredTo,
 	)
 	var i BillingUsageEvent
 	err := row.Scan(
@@ -193,8 +200,10 @@ type InsertUsageEventParams struct {
 	PricingAuthority string
 }
 
-// billing.usage_events: append-only metered usage (#289), idempotent on
-// (tenant, payer, event_type, source, source_id).
+// billing.usage_events: append-only metered usage, partitioned by month on
+// occurred_at. Every read names a time range. The idempotency coordinate
+// (merchant, payer, currency, event_type, source, source_id) is claimed under
+// the customer spend lock by GetUsageEventByCoords over the ingest window.
 // pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
 func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
 	_, err := q.db.Exec(ctx, insertUsageEvent,

@@ -57,7 +57,7 @@ func TestIndexAvailabilityProbeRejectsMissingPredicateIndex(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		findings := planFindings(q, structure, plan, catalog)
+		findings := planFindings(q, structure, catalog.foldPartitions(plan), catalog)
 		if indexed && len(findings) != 0 {
 			t.Fatalf("usable index was refused: %v", findings)
 		}

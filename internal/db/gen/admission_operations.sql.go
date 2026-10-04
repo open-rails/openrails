@@ -16,16 +16,23 @@ const admissionCaptureTermsMatch = `-- name: AdmissionCaptureTermsMatch :one
 SELECT capture_terms = $1::jsonb AS matches
 FROM billing.admission_operations
 WHERE merchant_id = $2::uuid AND request_id = $3::text
+  AND admitted_at = $4::timestamptz
 `
 
 type AdmissionCaptureTermsMatchParams struct {
 	CaptureTerms []byte
 	MerchantID   uuid.UUID
 	RequestID    string
+	AdmittedAt   time.Time
 }
 
 func (q *Queries) AdmissionCaptureTermsMatch(ctx context.Context, arg AdmissionCaptureTermsMatchParams) (bool, error) {
-	row := q.db.QueryRow(ctx, admissionCaptureTermsMatch, arg.CaptureTerms, arg.MerchantID, arg.RequestID)
+	row := q.db.QueryRow(ctx, admissionCaptureTermsMatch,
+		arg.CaptureTerms,
+		arg.MerchantID,
+		arg.RequestID,
+		arg.AdmittedAt,
+	)
 	var matches bool
 	err := row.Scan(&matches)
 	return matches, err
@@ -77,6 +84,7 @@ const captureAdmissionOperation = `-- name: CaptureAdmissionOperation :one
 UPDATE billing.admission_operations
 SET state = 'captured', capture_terms = $1::jsonb, captured_amount = $2::bigint, captured_at = $3::timestamptz
 WHERE merchant_id = $4::uuid AND request_id = $5::text
+  AND admitted_at = $6::timestamptz
   AND state <> 'captured'
 RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
 `
@@ -87,6 +95,7 @@ type CaptureAdmissionOperationParams struct {
 	AsOf         time.Time
 	MerchantID   uuid.UUID
 	RequestID    string
+	AdmittedAt   time.Time
 }
 
 func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmissionOperationParams) (BillingAdmissionOperation, error) {
@@ -96,6 +105,7 @@ func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmi
 		arg.AsOf,
 		arg.MerchantID,
 		arg.RequestID,
+		arg.AdmittedAt,
 	)
 	var i BillingAdmissionOperation
 	err := row.Scan(
@@ -121,8 +131,9 @@ func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmi
 
 const extendAdmissionOperation = `-- name: ExtendAdmissionOperation :execrows
 UPDATE billing.admission_operations SET expires_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND request_id = $3::text AND state = 'open'
-  AND (expires_at IS NULL OR expires_at > $4::timestamptz)
+WHERE merchant_id = $2::uuid AND request_id = $3::text
+  AND admitted_at = $4::timestamptz AND state = 'open'
+  AND (expires_at IS NULL OR expires_at > $5::timestamptz)
   AND (expires_at IS NULL OR expires_at <= $1::timestamptz)
 `
 
@@ -130,6 +141,7 @@ type ExtendAdmissionOperationParams struct {
 	ExpiresAt  time.Time
 	MerchantID uuid.UUID
 	RequestID  string
+	AdmittedAt time.Time
 	AsOf       time.Time
 }
 
@@ -138,6 +150,7 @@ func (q *Queries) ExtendAdmissionOperation(ctx context.Context, arg ExtendAdmiss
 		arg.ExpiresAt,
 		arg.MerchantID,
 		arg.RequestID,
+		arg.AdmittedAt,
 		arg.AsOf,
 	)
 	if err != nil {
@@ -149,15 +162,19 @@ func (q *Queries) ExtendAdmissionOperation(ctx context.Context, arg ExtendAdmiss
 const getAdmissionOperation = `-- name: GetAdmissionOperation :one
 SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
+  AND admitted_at >= $3::timestamptz
+ORDER BY admitted_at DESC
+LIMIT 1
 `
 
 type GetAdmissionOperationParams struct {
-	MerchantID uuid.UUID
-	RequestID  string
+	MerchantID    uuid.UUID
+	RequestID     string
+	AdmittedSince time.Time
 }
 
 func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOperationParams) (BillingAdmissionOperation, error) {
-	row := q.db.QueryRow(ctx, getAdmissionOperation, arg.MerchantID, arg.RequestID)
+	row := q.db.QueryRow(ctx, getAdmissionOperation, arg.MerchantID, arg.RequestID, arg.AdmittedSince)
 	var i BillingAdmissionOperation
 	err := row.Scan(
 		&i.MerchantID,
@@ -187,23 +204,27 @@ SELECT (COALESCE((SELECT SUM(oa.amount)
      + COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = $1::uuid AND ao.customer_id = $2::uuid AND ao.currency = $3::text AND ao.state = 'open'
-               AND (ao.expires_at IS NULL OR ao.expires_at > $4::timestamptz)), 0))::bigint AS held
+               AND ao.admitted_at >= $4::timestamptz
+               AND ao.expires_at > $5::timestamptz), 0))::bigint AS held
 `
 
 type GetFinancialHeldAmountParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
+	HeldSince  time.Time
 	AsOf       time.Time
 }
 
 // The one financial hold total: open operation authorizations plus open,
 // unexpired admission reservations. GetAdmissionCapacity computes the same sum.
+// A live hold was admitted within the hold lifetime, which is held_since.
 func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHeldAmountParams) (int64, error) {
 	row := q.db.QueryRow(ctx, getFinancialHeldAmount,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
+		arg.HeldSince,
 		arg.AsOf,
 	)
 	var held int64
@@ -221,7 +242,6 @@ INSERT INTO billing.admission_operations (
     $8::timestamptz, $8::timestamptz,
     $9::timestamptz, $10::text[]
 )
-ON CONFLICT (merchant_id, request_id) DO NOTHING
 RETURNING merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
 `
 
@@ -276,16 +296,18 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 const lockAdmissionOperation = `-- name: LockAdmissionOperation :one
 SELECT merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM billing.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
+  AND admitted_at = $3::timestamptz
 FOR UPDATE
 `
 
 type LockAdmissionOperationParams struct {
 	MerchantID uuid.UUID
 	RequestID  string
+	AdmittedAt time.Time
 }
 
 func (q *Queries) LockAdmissionOperation(ctx context.Context, arg LockAdmissionOperationParams) (BillingAdmissionOperation, error) {
-	row := q.db.QueryRow(ctx, lockAdmissionOperation, arg.MerchantID, arg.RequestID)
+	row := q.db.QueryRow(ctx, lockAdmissionOperation, arg.MerchantID, arg.RequestID, arg.AdmittedAt)
 	var i BillingAdmissionOperation
 	err := row.Scan(
 		&i.MerchantID,
@@ -308,20 +330,47 @@ func (q *Queries) LockAdmissionOperation(ctx context.Context, arg LockAdmissionO
 	return i, err
 }
 
+const lockAdmissionRequest = `-- name: LockAdmissionRequest :exec
+
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.admission_request:' || $1::uuid::text || ':' || $2::text, 0))
+`
+
+type LockAdmissionRequestParams struct {
+	MerchantID uuid.UUID
+	RequestID  string
+}
+
+// billing.admission_operations is partitioned by month on admitted_at. A lookup
+// by request id names the retained range; everything after it names the row's
+// own admitted_at, which is one partition.
+// Serializes admission per request id: the partitioned key carries admitted_at,
+// so it cannot refuse the same id admitted twice.
+func (q *Queries) LockAdmissionRequest(ctx context.Context, arg LockAdmissionRequestParams) error {
+	_, err := q.db.Exec(ctx, lockAdmissionRequest, arg.MerchantID, arg.RequestID)
+	return err
+}
+
 const releaseAdmissionOperation = `-- name: ReleaseAdmissionOperation :execrows
 UPDATE billing.admission_operations
 SET state = 'released', released_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND request_id = $3::text AND state = 'open'
+WHERE merchant_id = $2::uuid AND request_id = $3::text
+  AND admitted_at = $4::timestamptz AND state = 'open'
 `
 
 type ReleaseAdmissionOperationParams struct {
 	AsOf       time.Time
 	MerchantID uuid.UUID
 	RequestID  string
+	AdmittedAt time.Time
 }
 
 func (q *Queries) ReleaseAdmissionOperation(ctx context.Context, arg ReleaseAdmissionOperationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseAdmissionOperation, arg.AsOf, arg.MerchantID, arg.RequestID)
+	result, err := q.db.Exec(ctx, releaseAdmissionOperation,
+		arg.AsOf,
+		arg.MerchantID,
+		arg.RequestID,
+		arg.AdmittedAt,
+	)
 	if err != nil {
 		return 0, err
 	}

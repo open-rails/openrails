@@ -104,6 +104,8 @@ func writeMoneyError(r *httprequest.Request, err error, internalMessage string) 
 		r.APIError(api.Coded("credit_grant_unavailable", err.Error()))
 	case errors.Is(err, billingservice.ErrInvalidInvokerSpendLimit):
 		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()))
+	case errors.Is(err, billingservice.ErrUsageOutsideIngestWindow):
+		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("occurred_at"))
 	default:
 		writeRefusal(r, err, internalMessage)
 	}

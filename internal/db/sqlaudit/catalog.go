@@ -18,6 +18,8 @@ type Catalog struct {
 	PartialIndexes map[string]bool       // index name -> a nontrivial predicate restricts membership
 	Columns        map[string][]string   // table -> its column names
 	Tables         map[string]struct{}   // every table in the billing schema
+	PartitionOf    map[string]string     // partition -> its partitioned table
+	PartitionKey   map[string]string     // partitioned table -> its partition key column
 }
 
 const catalogSQL = `
@@ -28,6 +30,17 @@ SELECT c.relname,
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+ WHERE n.nspname = 'billing' AND c.relkind IN ('r', 'p') AND NOT c.relispartition`
+
+// A partition is planned under its own name; the rules reason about its table.
+const partitionsSQL = `
+SELECT c.relname, p.relname, a.attname
+  FROM pg_inherits i
+  JOIN pg_class c ON c.oid = i.inhrelid
+  JOIN pg_class p ON p.oid = i.inhparent
+  JOIN pg_namespace n ON n.oid = p.relnamespace
+  JOIN pg_partitioned_table pt ON pt.partrelid = p.oid
+  JOIN pg_attribute a ON a.attrelid = p.oid AND a.attnum = pt.partattrs[0]
  WHERE n.nspname = 'billing' AND c.relkind = 'r'`
 
 const uniqueKeysSQL = `
@@ -37,7 +50,7 @@ SELECT c.relname, array_agg(a.attname ORDER BY k.ord), i.indisprimary
   JOIN pg_namespace n ON n.oid = c.relnamespace
   CROSS JOIN LATERAL unnest(i.indkey[0:i.indnkeyatts-1]) WITH ORDINALITY AS k(attnum, ord)
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
- WHERE n.nspname = 'billing' AND i.indisunique AND i.indpred IS NULL
+ WHERE n.nspname = 'billing' AND i.indisunique AND i.indpred IS NULL AND NOT c.relispartition
  GROUP BY c.relname, i.indexrelid, i.indisprimary`
 
 const partialIndexesSQL = `
@@ -62,6 +75,8 @@ func LoadCatalog(ctx context.Context, conn *pgx.Conn) (*Catalog, error) {
 		PartialIndexes: map[string]bool{},
 		Columns:        map[string][]string{},
 		Tables:         map[string]struct{}{},
+		PartitionOf:    map[string]string{},
+		PartitionKey:   map[string]string{},
 	}
 	rows, err := conn.Query(ctx, catalogSQL)
 	if err != nil {
@@ -119,7 +134,35 @@ func LoadCatalog(ctx context.Context, conn *pgx.Conn) (*Catalog, error) {
 		}
 		cat.PartialIndexes[name] = true
 	}
-	return cat, prows.Err()
+	if err := prows.Err(); err != nil {
+		return nil, err
+	}
+	parts, err := conn.Query(ctx, partitionsSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer parts.Close()
+	for parts.Next() {
+		var partition, table, key string
+		if err := parts.Scan(&partition, &table, &key); err != nil {
+			return nil, err
+		}
+		cat.PartitionOf[partition] = table
+		cat.PartitionKey[table] = key
+	}
+	return cat, parts.Err()
+}
+
+// foldPartitions renames every partition scan to its table, so the rules see
+// one relation however many partitions the planner expanded it into.
+func (c *Catalog) foldPartitions(n planNode) planNode {
+	if table, ok := c.PartitionOf[n.RelationName]; ok {
+		n.RelationName = table
+	}
+	for i := range n.Plans {
+		n.Plans[i] = c.foldPartitions(n.Plans[i])
+	}
+	return n
 }
 
 // indexedAnywhere reports whether the column is index-backed on any of the

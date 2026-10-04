@@ -61,6 +61,35 @@ FROM (
       WHERE (sqlc.narg(after)::uuid IS NULL OR nh.merchant_id > sqlc.narg(after)::uuid)
         AND nh.month < sqlc.arg(attempt_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT st.merchant_id AS mid
+       FROM billing.subscription_status_transitions st
+      WHERE (sqlc.narg(after)::uuid IS NULL OR st.merchant_id > sqlc.narg(after)::uuid)
+        AND st.occurred_at < sqlc.arg(transition_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT ca.merchant_id AS mid
+       FROM billing.checkout_attempts ca
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ca.merchant_id > sqlc.narg(after)::uuid)
+        AND ca.status = 'expired' AND ca.expires_at < sqlc.arg(checkout_attempt_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT rf.merchant_id AS mid
+       FROM billing.reconciliation_findings rf
+      WHERE (sqlc.narg(after)::uuid IS NULL OR rf.merchant_id > sqlc.narg(after)::uuid)
+        AND rf.resolved_at IS NOT NULL
+        AND GREATEST(rf.resolved_at, rf.last_seen_at) < sqlc.arg(finding_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    -- A run a finding still names is not due: counting it would revisit its
+    -- merchant every pass to delete nothing.
+    (SELECT DISTINCT mr.merchant_id AS mid
+       FROM billing.maintenance_runs mr
+      WHERE (sqlc.narg(after)::uuid IS NULL OR mr.merchant_id > sqlc.narg(after)::uuid)
+        AND mr.kind = 'reconciliation' AND mr.started_at < sqlc.arg(run_cutoff)::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
 LIMIT sqlc.arg(merchant_limit)::int;
@@ -82,3 +111,76 @@ ON CONFLICT (worker_kind) DO UPDATE
         cursor_version = billing.worker_state.cursor_version + 1
     WHERE billing.worker_state.cursor_version
           = sqlc.arg(expected_cursor_version)::bigint;
+
+-- Calendar-driven partition maintenance: neither statement reads a row.
+-- name: EnsureMonthPartitions :one
+SELECT billing.ensure_month_partitions(sqlc.arg(table_name)::name, sqlc.arg(from_at)::timestamptz, sqlc.arg(through_at)::timestamptz)::int AS created;
+
+-- name: DropMonthPartitions :one
+SELECT billing.drop_month_partitions(sqlc.arg(table_name)::name, sqlc.arg(before)::timestamptz)::int AS dropped;
+
+-- name: ListMonthPartitions :many
+SELECT m.partition::text AS partition, m.range_from::timestamptz AS range_from, m.range_to::timestamptz AS range_to
+FROM billing.month_partitions(sqlc.arg(table_name)::name) m;
+
+-- Row retention. Each statement deletes one bounded batch, oldest first, of
+-- one merchant's rows past their period; the cleanup worker loops.
+
+-- Tables that refuse ad-hoc deletes take them only from a transaction that
+-- named the table here, and only for rows past the period their trigger
+-- declares (billing.guard_retention_delete). Their sweeps count the period on
+-- the database clock, the one the trigger reads.
+-- name: DeclareRetentionSweep :exec
+SELECT set_config('openrails.retention', sqlc.arg(table_name)::text, true);
+
+-- name: DeleteSubscriptionTransitionsPastRetention :execrows
+DELETE FROM billing.subscription_status_transitions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT st.id FROM billing.subscription_status_transitions st
+    WHERE st.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND st.occurred_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+    ORDER BY st.occurred_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: DeleteReconciliationRunsPastRetention :execrows
+DELETE FROM billing.maintenance_runs
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT mr.id FROM billing.maintenance_runs mr
+    WHERE mr.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND mr.kind = 'reconciliation'
+      AND mr.started_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
+    ORDER BY mr.started_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- A finding still being seen is kept however long ago it was resolved: an
+-- ignored drift that persists must not come back as new.
+-- name: DeleteResolvedFindingsBefore :execrows
+DELETE FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT rf.id FROM billing.reconciliation_findings rf
+    WHERE rf.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND rf.resolved_at IS NOT NULL
+      AND GREATEST(rf.resolved_at, rf.last_seen_at) < sqlc.arg(cutoff)::timestamptz
+    ORDER BY GREATEST(rf.resolved_at, rf.last_seen_at)
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- Its checkout session, if one still exists, goes with it.
+-- name: DeleteExpiredCheckoutAttemptsBefore :execrows
+DELETE FROM billing.checkout_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT ca.id FROM billing.checkout_attempts ca
+    WHERE ca.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND ca.status = 'expired'
+      AND ca.expires_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY ca.expires_at
+    LIMIT sqlc.arg(row_limit)::int
+);

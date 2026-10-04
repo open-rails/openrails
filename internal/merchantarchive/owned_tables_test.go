@@ -67,7 +67,7 @@ func TestClassifyMapsDatabaseRefusals(t *testing.T) {
 var restoreOccupancyExempt = []string{"merchant_api_host_claims", "merchant_slug_aliases"}
 
 var (
-	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\);`)
+	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)
 	merchantColumn = regexp.MustCompile(`(?m)^\s*merchant_id uuid\b`)
 	restoreList    = regexp.MustCompile(`(?s)FUNCTION billing\.guard_billing_restore_receipt\(\).*?AND c\.relname = ANY\(ARRAY\[(.*?)\]::text\[\]\)`)
 	quoted         = regexp.MustCompile(`'(\w+)'`)

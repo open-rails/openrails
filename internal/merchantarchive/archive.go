@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -18,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
+	"github.com/open-rails/openrails/internal/retention"
 )
 
 type Result struct {
@@ -155,6 +157,12 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		return result, &Error{Code: "merchant_mismatch"}
 	}
 	ctx = merchant.WithID(ctx, id)
+	// Archived rows may be older than anything written here: their months need
+	// partitions before the restore transaction, which must not hold DDL locks.
+	restoreNow := time.Now()
+	if _, err := retention.EnsureRetainedPartitions(ctx, database.GenDirectory(), restoreNow); err != nil {
+		return result, classify(err)
+	}
 	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := scope(ctx, tx, id); err != nil {
 			return err
@@ -188,11 +196,14 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if previousDigest != nil {
 				return nil
 			}
-			args := make([]any, len(values))
+			args := make([]any, len(values), len(values)+1)
 			for i, v := range values {
 				if v != nil {
 					args[i] = *v
 				}
+			}
+			if dropBefore, ok := partitionDropBefore[p.Name]; ok {
+				args = append(args, dropBefore(restoreNow))
 			}
 			_, err := tx.Exec(ctx, insertQuery(p), args...)
 			return err
@@ -251,14 +262,31 @@ func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return nil
 }
 
+// insertQuery inserts one archived row. A partitioned table takes one more
+// parameter, the oldest key it still keeps: a row older than that has no
+// partition, and retention would drop it on the next pass, so it is not
+// restored.
 func insertQuery(p contract.Profile) string {
 	cols, params := make([]string, len(p.Columns)), make([]string, len(p.Columns))
+	keep := ""
 	for i, c := range p.Columns {
 		cols[i] = pgx.Identifier{c.Name}.Sanitize()
 		params[i] = fmt.Sprintf("$%d::text::%s", i+1, c.Type)
+		if key, ok := partitionKeys[p.Name]; ok && c.Name == key {
+			keep = fmt.Sprintf(" WHERE %s >= $%d::timestamptz", params[i], len(p.Columns)+1)
+		}
 	}
-	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(params, ",") + ")"
+	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",") + keep
 }
+
+// partitionKeys and partitionDropBefore index retention.Partitioned by table.
+var partitionKeys, partitionDropBefore = func() (map[string]string, map[string]func(time.Time) time.Time) {
+	keys, drops := map[string]string{}, map[string]func(time.Time) time.Time{}
+	for _, p := range retention.Partitioned {
+		keys[p.Table], drops[p.Table] = p.Key, p.DropBefore
+	}
+	return keys, drops
+}()
 
 func countQuery(p contract.Profile) string {
 	return "SELECT count(*) FROM billing." + p.Name + " t WHERE " + exportWhere(p.Name)

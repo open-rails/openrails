@@ -71,7 +71,7 @@ func Run(ctx context.Context, conn *pgx.Conn, advisor *pgx.Conn, queries []Query
 		if perr != nil {
 			rep.unplannable(q, "EXPLAIN GENERIC_PLAN: "+perr.Error(), allow)
 		} else {
-			findings = append(findings, planFindings(q, st, plan, cat)...)
+			findings = append(findings, planFindings(q, st, cat.foldPartitions(plan), cat)...)
 		}
 
 		if len(findings) == 0 {

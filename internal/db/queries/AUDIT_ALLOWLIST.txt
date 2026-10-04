@@ -6,7 +6,8 @@
 # Longer reasoning per group lives in EXEMPTIONS.md. An entry that stops
 # tripping fails the build as STALE — fix a query and its exemption goes too.
 #
-# Rules: unbounded-many, unscoped-write, seq-scan, unindexed-filter, unplannable.
+# Rules: unbounded-many, unscoped-write, seq-scan, unindexed-filter,
+# unpruned-partition, unplannable.
 # Gate: internal/db/sqlaudit, run by `task sqlc-check` and CI's End-to-end job.
 
 ## PERMANENT
@@ -54,6 +55,23 @@ unbounded-many FleetWeeklyVolume                # operator fleet dashboard: one 
 # The drift pass diffs every open catalog finding against what it observed;
 # the set is bounded by the merchant's catalog and PSPs.
 unbounded-many ListOpenCatalogDriftEvents       # open catalog.* findings: catalog x PSP bounded
+
+# A merchant archive is the merchant's whole retained history: its export, count
+# and in-flight refusal read every partition by definition. An operator action,
+# never a request or a routine job.
+unpruned-partition archive.count.admission_operations        # archive counts every retained admission
+unpruned-partition archive.export.admission_operations       # archive exports every retained admission
+unpruned-partition archive.preflight.admission_operations.13 # archive refuses while any admission is open
+unpruned-partition archive.count.usage_events                # archive counts every retained usage event
+unpruned-partition archive.export.usage_events               # archive exports every retained usage event
+
+# "Has this ever happened" spans every retained month by definition. Each is
+# an index probe per partition (existence, or the newest row), never a scan,
+# and none is on a request's money path.
+unpruned-partition UsageEventsExistForTypes     # meter correction guard: any retained event of these types
+unpruned-partition ListUsageMetersWithCatalog   # console: each meter's newest retained event
+unpruned-partition GetUsageMeterWithCatalog     # console: the meter's newest retained event
+unpruned-partition HasUsageActivity             # default dashboard: any retained usage
 
 ## DEBT
 

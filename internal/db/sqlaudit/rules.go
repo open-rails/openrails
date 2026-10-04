@@ -34,6 +34,10 @@ const (
 	// (openrails-only — host-four has no merchant predicate, so it has no
 	// equivalent.)
 	RuleUnindexedFilter = "unindexed-filter"
+	// RuleUnprunedPartition: a partitioned table is read with no predicate on
+	// its partition key, so every partition is scanned, the ones past retention
+	// and the cold ones included.
+	RuleUnprunedPartition = "unpruned-partition"
 )
 
 type Finding struct {
@@ -133,6 +137,23 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 			Query: q.Name, File: q.File, Rule: RuleSeqScan,
 			Detail: fmt.Sprintf("full scan of %s: no index condition serves a predicate (filter: %s)",
 				n.RelationName, compact(n.Filter)),
+		})
+	})
+
+	unpruned := map[string]bool{}
+	plan.walk(func(n planNode) {
+		key, partitioned := cat.PartitionKey[n.RelationName]
+		// Only scans read: a ModifyTable node names its target, not a read.
+		if !partitioned || unpruned[n.RelationName] || !strings.Contains(n.NodeType, "Scan") {
+			return
+		}
+		if mentions(n.IndexCond, key) || mentions(n.RecheckCond, key) || mentions(n.Filter, key) {
+			return
+		}
+		unpruned[n.RelationName] = true
+		out = append(out, Finding{
+			Query: q.Name, File: q.File, Rule: RuleUnprunedPartition,
+			Detail: fmt.Sprintf("reads %s with no predicate on its partition key %s: every partition is scanned", n.RelationName, key),
 		})
 	})
 

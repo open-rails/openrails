@@ -1,10 +1,23 @@
+-- billing.admission_operations is partitioned by month on admitted_at. A lookup
+-- by request id names the retained range; everything after it names the row's
+-- own admitted_at, which is one partition.
+
+-- Serializes admission per request id: the partitioned key carries admitted_at,
+-- so it cannot refuse the same id admitted twice.
+-- name: LockAdmissionRequest :exec
+SELECT pg_advisory_xact_lock(hashtextextended('openrails.admission_request:' || sqlc.arg(merchant_id)::uuid::text || ':' || sqlc.arg(request_id)::text, 0));
+
 -- name: GetAdmissionOperation :one
 SELECT * FROM billing.admission_operations
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
+  AND admitted_at >= sqlc.arg(admitted_since)::timestamptz
+ORDER BY admitted_at DESC
+LIMIT 1;
 
 -- name: LockAdmissionOperation :one
 SELECT * FROM billing.admission_operations
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
+  AND admitted_at = sqlc.arg(admitted_at)::timestamptz
 FOR UPDATE;
 
 -- name: InsertAdmissionOperation :one
@@ -17,19 +30,20 @@ INSERT INTO billing.admission_operations (
     sqlc.narg(requested_expires_at)::timestamptz, sqlc.narg(requested_expires_at)::timestamptz,
     sqlc.arg(admitted_at)::timestamptz, sqlc.arg(window_keys)::text[]
 )
-ON CONFLICT (merchant_id, request_id) DO NOTHING
 RETURNING *;
 
 -- name: GetFinancialHeldAmount :one
 -- The one financial hold total: open operation authorizations plus open,
 -- unexpired admission reservations. GetAdmissionCapacity computes the same sum.
+-- A live hold was admitted within the hold lifetime, which is held_since.
 SELECT (COALESCE((SELECT SUM(oa.amount)
               FROM billing.operation_authorizations oa
              WHERE oa.merchant_id = sqlc.arg(merchant_id)::uuid AND oa.customer_id = sqlc.arg(customer_id)::uuid AND oa.currency = sqlc.arg(currency)::text AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)
               FROM billing.admission_operations ao
              WHERE ao.merchant_id = sqlc.arg(merchant_id)::uuid AND ao.customer_id = sqlc.arg(customer_id)::uuid AND ao.currency = sqlc.arg(currency)::text AND ao.state = 'open'
-               AND (ao.expires_at IS NULL OR ao.expires_at > sqlc.arg(as_of)::timestamptz)), 0))::bigint AS held;
+               AND ao.admitted_at >= sqlc.arg(held_since)::timestamptz
+               AND ao.expires_at > sqlc.arg(as_of)::timestamptz), 0))::bigint AS held;
 
 -- name: AdmissionWindowUsage :one
 SELECT
@@ -45,22 +59,26 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 -- name: AdmissionCaptureTermsMatch :one
 SELECT capture_terms = sqlc.arg(capture_terms)::jsonb AS matches
 FROM billing.admission_operations
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
+  AND admitted_at = sqlc.arg(admitted_at)::timestamptz;
 
 -- name: CaptureAdmissionOperation :one
 UPDATE billing.admission_operations
 SET state = 'captured', capture_terms = sqlc.arg(capture_terms)::jsonb, captured_amount = sqlc.arg(amount)::bigint, captured_at = sqlc.arg(as_of)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
+  AND admitted_at = sqlc.arg(admitted_at)::timestamptz
   AND state <> 'captured'
 RETURNING *;
 
 -- name: ReleaseAdmissionOperation :execrows
 UPDATE billing.admission_operations
 SET state = 'released', released_at = sqlc.arg(as_of)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text AND state = 'open';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
+  AND admitted_at = sqlc.arg(admitted_at)::timestamptz AND state = 'open';
 
 -- name: ExtendAdmissionOperation :execrows
 UPDATE billing.admission_operations SET expires_at = sqlc.arg(expires_at)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text AND state = 'open'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
+  AND admitted_at = sqlc.arg(admitted_at)::timestamptz AND state = 'open'
   AND (expires_at IS NULL OR expires_at > sqlc.arg(as_of)::timestamptz)
   AND (expires_at IS NULL OR expires_at <= sqlc.arg(expires_at)::timestamptz);

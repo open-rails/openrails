@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
+// One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim. Retention: permanent, never pruned.
 type BillingAccountUpdaterBatch struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -29,7 +29,7 @@ type BillingAccountUpdaterBatch struct {
 	UpdatedAt     time.Time
 }
 
-// Hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.
+// Hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request. Retention: permanent, never pruned.
 type BillingAdmissionDenialsHourly struct {
 	MerchantID   uuid.UUID
 	CustomerID   uuid.UUID
@@ -39,7 +39,7 @@ type BillingAdmissionDenialsHourly struct {
 	UpdatedAt    time.Time
 }
 
-// One row per admitted spend request: its estimated hold until the request is captured or released.
+// One row per admitted spend request: its estimated hold until the request is captured or released. Retention: monthly partitions on admitted_at, dropped once older than the longest spend window plus 30 days.
 type BillingAdmissionOperation struct {
 	MerchantID         uuid.UUID
 	RequestID          string
@@ -50,13 +50,14 @@ type BillingAdmissionOperation struct {
 	Terms              []byte
 	RequestedExpiresAt *time.Time
 	ExpiresAt          *time.Time
-	AdmittedAt         time.Time
-	WindowKeys         []string
-	State              string
-	CaptureTerms       []byte
-	CapturedAmount     *int64
-	CapturedAt         *time.Time
-	ReleasedAt         *time.Time
+	// When the request was admitted; the partition key. request_id is unique per merchant among retained admissions: admission serializes on it, because a partitioned key must carry admitted_at.
+	AdmittedAt     time.Time
+	WindowKeys     []string
+	State          string
+	CaptureTerms   []byte
+	CapturedAmount *int64
+	CapturedAt     *time.Time
+	ReleasedAt     *time.Time
 }
 
 // The merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
@@ -82,7 +83,7 @@ type BillingBillingPolicyBinding struct {
 	UpdatedAt  time.Time
 }
 
-// Card-testing failure counts per merchant, subject and five-minute bucket.
+// Card-testing failure counts per merchant, subject and five-minute bucket. Retention: buckets are deleted once older than the longest card-abuse window.
 type BillingCardAttemptFailure struct {
 	MerchantID uuid.UUID
 	Subject    string
@@ -99,7 +100,7 @@ type BillingCatalog struct {
 	UpdatedAt    time.Time
 }
 
-// Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL.
+// Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL. Retention: permanent, never pruned.
 type BillingCatalogApplication struct {
 	MerchantID      uuid.UUID
 	ApplicationID   string
@@ -146,7 +147,7 @@ type BillingCatalogRateCard struct {
 	CustomerID *uuid.UUID
 }
 
-// One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly.
+// One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: expired attempts are deleted 90 days after expires_at; every other attempt is permanent.
 type BillingCheckoutAttempt struct {
 	ID             uuid.UUID
 	PriceID        *uuid.UUID
@@ -177,7 +178,7 @@ type BillingCheckoutAttempt struct {
 	RoutingReason []byte
 }
 
-// One checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt numbers the current payment attempt and attempt_id is the checkout attempt it created; attempt advances only after that attempt failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it.
+// One checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt numbers the current payment attempt and attempt_id is the checkout attempt it created; attempt advances only after that attempt failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it. Retention: rows are deleted at purge_at, 24 hours after the session expired.
 type BillingCheckoutSession struct {
 	MerchantID uuid.UUID
 	IDHash     []byte
@@ -240,7 +241,7 @@ type BillingCostQualification struct {
 	UpdatedAt                time.Time
 }
 
-// Credential publication receipts. Identities and exact secret references only, never secret values.
+// Credential publication receipts. Identities and exact secret references only, never secret values. Retention: permanent, never pruned.
 type BillingCredentialPublication struct {
 	MerchantID       uuid.UUID
 	OperationID      uuid.UUID
@@ -276,7 +277,7 @@ type BillingCustodian struct {
 	UpdatedAt time.Time
 }
 
-// One row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row.
+// One row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row. Retention: permanent, never pruned.
 type BillingCustodyMigration struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -366,7 +367,7 @@ type BillingDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
-// The row as it stood immediately before a destructive run updated it, so the run can be reversed. A soft-delete stamp reverses deletes; this reverses updates. One image per (run, table, row), pinned to exactly one run.
+// The row as it stood immediately before a destructive run updated it, so the run can be reversed. A soft-delete stamp reverses deletes; this reverses updates. One image per (run, table, row), pinned to exactly one run. Retention: permanent, never pruned.
 type BillingDestructiveRunBeforeImage struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
@@ -402,7 +403,7 @@ type BillingEntitlement struct {
 	DestructiveRunClass *string
 }
 
-// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant.
+// Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.
 type BillingGrant struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -425,7 +426,7 @@ type BillingGrant struct {
 	CreatedAt    time.Time
 }
 
-// Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state.
+// Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -443,7 +444,7 @@ type BillingHostOutbox struct {
 	DedupeKey string
 }
 
-// One claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by retention.
+// One claim per (merchant, operation, key). processing = owned until lease_expires_at, then reclaimable by exactly one caller; succeeded = replay result; failed = reclaimable. token fences a superseded owner; claims counts claims. Rows past expires_at are deleted by retention. Retention: rows are deleted at expires_at.
 type BillingIdempotencyKey struct {
 	MerchantID     uuid.UUID
 	Operation      string
@@ -459,7 +460,7 @@ type BillingIdempotencyKey struct {
 	UpdatedAt      time.Time
 }
 
-// Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.
+// Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements. Retention: permanent, never pruned.
 type BillingInvoice struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -508,7 +509,7 @@ type BillingInvoice struct {
 	CollectionIntentID *uuid.UUID
 }
 
-// Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
+// Pending-accrual workspace: owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items. Retention: permanent, never pruned.
 type BillingInvoiceItem struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -525,7 +526,7 @@ type BillingInvoiceItem struct {
 	UpdatedAt  time.Time
 }
 
-// Payment attempts and settled payments allocated to a specific invoice.
+// Payment attempts and settled payments allocated to a specific invoice. Retention: permanent, never pruned.
 type BillingInvoicePayment struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
@@ -565,7 +566,7 @@ type BillingInvokerSpendLimit struct {
 	Provenance string
 }
 
-// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits).
+// Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -584,7 +585,7 @@ type BillingLedgerAccount struct {
 	CreatedAt    time.Time
 }
 
-// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.
+// Immutable double-entry transfers. Append-only. A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table. Retention: permanent, never pruned.
 type BillingLedgerTransfer struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -609,7 +610,7 @@ type BillingLedgerTransfer struct {
 	Operation string
 }
 
-// Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images.
+// Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images. Retention: reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent.
 type BillingMaintenanceRun struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -680,7 +681,7 @@ type BillingMerchantConfiguration struct {
 	UpdatedAt time.Time
 }
 
-// Immutable replay receipts for merchant configuration applications.
+// Immutable replay receipts for merchant configuration applications. Retention: permanent, never pruned.
 type BillingMerchantConfigurationApplication struct {
 	MerchantID    uuid.UUID
 	ApplicationID string
@@ -741,7 +742,7 @@ type BillingMerchantWebhook struct {
 	UpdatedAt       time.Time
 }
 
-// Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.
+// Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once. Retention: permanent, never pruned.
 type BillingMeteredRatingWatermark struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -781,7 +782,7 @@ type BillingNmiBulkCheckpoint struct {
 	StartedAt  time.Time
 }
 
-// Authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers.
+// Authorizations NMI answered per PSP, month (its first instant, UTC), kind (verification, one_off_sale, scheduled_rebill) and outcome: category approved, or a refusal's category and reason from the one classifier. A read replaces every month it covers. Retention: rows are deleted 25 months (761 days) after their month.
 type BillingNmiHistoryMonth struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
@@ -799,7 +800,7 @@ type BillingNmiHistoryRead struct {
 	ReadAt     time.Time
 }
 
-// Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
+// Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox. Retention: rows are deleted 90 days after created_at once read, 180 days if never read.
 type BillingNotification struct {
 	ID            uuid.UUID
 	EventType     string
@@ -817,7 +818,7 @@ type BillingNotification struct {
 	EmailedAt *time.Time
 }
 
-// Durable financial reservations for exact provider-operation bodies. Open rows reserve amount (in currency, USD for now) against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
+// Durable financial reservations for exact provider-operation bodies. Open rows reserve amount (in currency, USD for now) against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire. Retention: permanent, never pruned.
 type BillingOperationAuthorization struct {
 	OperationID     string
 	MerchantID      uuid.UUID
@@ -846,7 +847,7 @@ type BillingOperationAuthorization struct {
 	SettlementBodyDigest []byte
 }
 
-// Records of all payment transactions (formerly purchases table)
+// Records of all payment transactions. Retention: permanent, never pruned.
 type BillingPayment struct {
 	ID            uuid.UUID
 	PriceID       uuid.UUID
@@ -890,7 +891,7 @@ type BillingPayment struct {
 	MoneyMovement string
 }
 
-// One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved.
+// One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
 type BillingPaymentAttempt struct {
 	ID               uuid.UUID
 	MerchantID       uuid.UUID
@@ -983,7 +984,7 @@ type BillingPaymentMethod struct {
 	UpdatedAt               time.Time
 }
 
-// Changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op.
+// Changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op. Retention: permanent, never pruned.
 type BillingPaymentMethodUpdate struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
@@ -1020,7 +1021,7 @@ type BillingPrice struct {
 	Key string
 }
 
-// Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).
+// Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
 type BillingPriceKeyMovement struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1062,7 +1063,7 @@ type BillingProduct struct {
 	CatalogID  uuid.UUID
 }
 
-// Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance.
+// Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.
 type BillingProductArchiveOperation struct {
 	MerchantID     uuid.UUID
 	ID             uuid.UUID
@@ -1202,7 +1203,7 @@ type BillingPspRefreshWatermark struct {
 	UpdatedAt   time.Time
 }
 
-// One expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id.
+// One expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id. Retention: rows are deleted 25 months (761 days) after due_at, once their attempts are gone.
 type BillingRebillCycle struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1268,7 +1269,7 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
-// Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id.
+// Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id. Retention: permanent, never pruned.
 type BillingRepriceBatch struct {
 	ID                   uuid.UUID
 	MerchantID           uuid.UUID
@@ -1285,7 +1286,7 @@ type BillingRepriceBatch struct {
 	FallbackPolicy string
 }
 
-// Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive.
+// Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
 type BillingSolanaPayReceipt struct {
 	MerchantID        uuid.UUID
 	Reference         string
@@ -1305,7 +1306,7 @@ type BillingSolanaPayReceipt struct {
 	CreatedAt         time.Time
 }
 
-// One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land.
+// One Solana Pay reference per checkout attempt. pending = awaiting a transfer landed by settle_until; confirmed = one signature credited (or mirrored); expired = nothing credited by settle_until. Purchase references stay watched until watch_until so a second or late transfer is recorded, then retention deletes the settled row. seen_until is the newest signature whose older history is fully processed; scan_stack holds the before-cursors of an unfinished walk down the history and scan_below the cursor whose older signatures were just processed, so no signature is ever skipped however many land on the reference; a reference is never collected mid-walk. built_transaction is the one transaction-request tx offered while its blockhash can still land. Retention: settled references are deleted after their 7-day watch window.
 type BillingSolanaPayReference struct {
 	MerchantID        uuid.UUID
 	Reference         string
@@ -1391,7 +1392,7 @@ type BillingSubscription struct {
 	DunningPolicy       []byte
 }
 
-// A scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).
+// A scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle). Retention: permanent, never pruned.
 type BillingSubscriptionReprice struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1412,7 +1413,7 @@ type BillingSubscriptionReprice struct {
 	BlockedReason string
 }
 
-// Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.
+// Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.
 type BillingSubscriptionStatusTransition struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -1437,7 +1438,7 @@ type BillingSubscriptionVerification struct {
 	LastError      *string
 }
 
-// Append-only multi-dimensional metered usage. Source of truth for usage reporting + invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table.
+// Append-only multi-dimensional metered usage. Source of truth for usage reporting + invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was invoiced.
 type BillingUsageEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1457,8 +1458,9 @@ type BillingUsageEvent struct {
 	// host = amount is final host-priced settlement and must not be catalog-rated; catalog = amount is a metered input for catalog rating. Capture writes host, including zero-cost captures; RecordUsage writes host for positive amounts and catalog for zero-cost meter inputs.
 	PricingAuthority string
 	Metadata         []byte
-	OccurredAt       time.Time
-	CreatedAt        time.Time
+	// When the usage happened; the partition key. Accepted only within the ingest window, so every read and the idempotency lookup name a time range.
+	OccurredAt time.Time
+	CreatedAt  time.Time
 }
 
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied.

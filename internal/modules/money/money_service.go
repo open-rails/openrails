@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -234,6 +235,7 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
+	s.db.EnsurePartitions(ctx, s.now())
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		if _, err := q.ReadMerchantSettingsLock(ctx, tenantID); err != nil {
@@ -249,11 +251,13 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
 			return err
 		}
+		now := s.now()
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
 			MerchantID: tenantID,
 			CustomerID: payerID,
 			Currency:   cur,
-			AsOf:       s.now(),
+			AsOf:       now,
+			HeldSince:  now.Add(-retention.AdmissionMaxHold),
 		})
 		if err != nil {
 			return err
@@ -292,11 +296,13 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
 		return AdmissionCapacity{}, err
 	}
+	now := s.now()
 	row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
 		MerchantID: tenantID,
 		CustomerID: payerID,
 		Currency:   cur,
-		AsOf:       s.now(),
+		AsOf:       now,
+		HeldSince:  now.Add(-retention.AdmissionMaxHold),
 	})
 	if err != nil {
 		return AdmissionCapacity{}, err
@@ -731,8 +737,10 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 	}
 	var held int64
 	if found {
+		now := s.now()
 		held, err = q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: s.now(),
+			MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
+			HeldSince: now.Add(-retention.AdmissionMaxHold),
 		})
 		if err != nil {
 			return nil, err

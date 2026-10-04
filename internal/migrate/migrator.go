@@ -10,7 +10,9 @@ import (
 
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/retention"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -60,6 +62,15 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Optio
 	m.WithSchema(schema).WithStrictIntegrity().WithRender(loadMigrations)
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
+	}
+	// Partitions follow the calendar, not the migration chain: a database
+	// migrated months ago still needs this month's.
+	data, err := db.NewWithPGXPool(pool, schema)
+	if err != nil {
+		return err
+	}
+	if _, err := retention.EnsurePartitions(ctx, data.GenDirectory(), time.Now()); err != nil {
+		return fmt.Errorf("openrails: %w", err)
 	}
 	if !opts.HostRiver {
 		if err := runRiverMigrationsPool(ctx, pool, riverSchema); err != nil {

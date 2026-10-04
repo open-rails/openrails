@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
@@ -94,13 +95,13 @@ func clampInt32(v int) int32 {
 
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
-		NotificationSeenRetention:   90 * 24 * time.Hour,
-		NotificationUnseenRetention: 180 * 24 * time.Hour,
+		NotificationSeenRetention:   retention.NotificationsRead,
+		NotificationUnseenRetention: retention.NotificationsUnread,
 		WebhookEventRetention:       webhooks.WebhookEventRetention,
 
-		PaymentSettlementAckedRetention:  30 * 24 * time.Hour,
-		HostLifecycleEventAckedRetention: 30 * 24 * time.Hour,
-		PaymentAttemptRetention:          761 * 24 * time.Hour, // 25 months
+		PaymentSettlementAckedRetention:  retention.DeliveredHostEvents,
+		HostLifecycleEventAckedRetention: retention.DeliveredHostEvents,
+		PaymentAttemptRetention:          retention.PaymentAttempts,
 	}
 }
 
@@ -125,6 +126,10 @@ type CleanupExpiredDataWorker struct {
 	// so a test can force the capped-pass path without seeding hundreds of
 	// merchants; registration never sets it.
 	MerchantBatch int
+	// RowBudget overrides cleanupMerchantRowBudget (0 = the default), so a test
+	// can show a backlog draining over several bounded passes without seeding
+	// tens of thousands of rows; registration never sets it.
+	RowBudget int
 }
 
 func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
@@ -141,6 +146,13 @@ type CleanupResult struct {
 	PaymentAttempts         int64
 	RebillCycles            int64
 	NMIHistoryMonths        int64
+	SubscriptionTransitions int64
+	CheckoutAttempts        int64
+	ReconciliationFindings  int64
+	ReconciliationRuns      int64
+	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
+	PartitionsCreated int
+	PartitionsDropped int
 	// MerchantsBudgetCapped counts merchants whose backlog exceeded one pass's
 	// row budget. Nonzero over many passes = the retention window is losing to
 	// the write rate.
@@ -175,6 +187,12 @@ func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[Clean
 	return err
 }
 
+// Sweep runs one pass and reports what it deleted.
+func (w CleanupExpiredDataWorker) Sweep(ctx context.Context) (CleanupResult, error) {
+	_, result, err := w.sweepPass(ctx)
+	return result, err
+}
+
 // sweepPass is Work's body, returning what the pass actually did: the merchants
 // it visited (the due-work list, in visit order) and the row counts. Work
 // discards both; the scaling tests assert on them, because "only the merchants
@@ -202,6 +220,23 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 
+	directory := w.DB.GenDirectory()
+
+	// Partitioned tables are pruned by the calendar: whole months are created
+	// ahead and dropped behind, and no row is read.
+	if n, err := retention.EnsurePartitions(ctx, directory, now); err != nil {
+		logger.WithError(err).Error("Cleanup: ensure partitions failed")
+		cleanupErr = errors.Join(cleanupErr, err)
+	} else {
+		result.PartitionsCreated = n
+	}
+	if n, err := retention.DropExpiredPartitions(ctx, directory, now); err != nil {
+		logger.WithError(err).Error("Cleanup: drop expired partitions failed")
+		cleanupErr = errors.Join(cleanupErr, err)
+	} else {
+		result.PartitionsDropped = n
+	}
+
 	// Checkout sessions past their reconciliation window (#1124): one
 	// indexed, bounded delete across merchants, so it needs no due-work walk.
 	for range cleanupCheckoutSessionMaxBatches {
@@ -217,7 +252,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		}
 	}
 
-	directory := w.DB.GenDirectory()
 	cursorRow, err := loadSweepCursor(ctx, directory, KindCleanupExpiredData)
 	if err != nil {
 		return nil, result, fmt.Errorf("cleanup expired data: %w", err)
@@ -233,6 +267,10 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			SettlementCutoff:       now.Add(-config.PaymentSettlementAckedRetention),
 			LifecycleCutoff:        now.Add(-config.HostLifecycleEventAckedRetention),
 			AttemptCutoff:          now.Add(-config.PaymentAttemptRetention),
+			TransitionCutoff:       now.Add(-retention.SubscriptionTransitions),
+			CheckoutAttemptCutoff:  now.Add(-retention.ExpiredCheckoutAttempts),
+			FindingCutoff:          now.Add(-retention.ResolvedFindings),
+			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			After:                  after,
 			MerchantLimit:          limit,
 		})
@@ -302,6 +340,12 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"payment_attempts":          result.PaymentAttempts,
 		"rebill_cycles":             result.RebillCycles,
 		"nmi_history_months":        result.NMIHistoryMonths,
+		"subscription_transitions":  result.SubscriptionTransitions,
+		"checkout_attempts":         result.CheckoutAttempts,
+		"reconciliation_findings":   result.ReconciliationFindings,
+		"reconciliation_runs":       result.ReconciliationRuns,
+		"partitions_created":        result.PartitionsCreated,
+		"partitions_dropped":        result.PartitionsDropped,
 	})
 
 	if cleanupErr != nil {
@@ -323,6 +367,10 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 	})
 
 	budget := cleanupMerchantRowBudget
+	if w.RowBudget > 0 {
+		budget = w.RowBudget
+	}
+	rowBudget := budget
 	capped := false
 
 	// sweep loops one retention statement in cleanupDeleteBatch-sized bites
@@ -411,9 +459,48 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
+	// guarded names the table for billing.guard_retention_delete: the one
+	// path that deletes an append-only fact, and only past its period.
+	guarded := func(table string, fn func(ctx context.Context, q *gen.Queries, limit int32) (int64, error)) func(context.Context, *gen.Queries, int32) (int64, error) {
+		return func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+			if err := q.DeclareRetentionSweep(ctx, table); err != nil {
+				return 0, err
+			}
+			return fn(ctx, q, limit)
+		}
+	}
+
+	// 8. Subscription status history.
+	sweep("delete subscription transitions", &result.SubscriptionTransitions, guarded("subscription_status_transitions",
+		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+			return q.DeleteSubscriptionTransitionsPastRetention(ctx, gen.DeleteSubscriptionTransitionsPastRetentionParams{
+				MerchantID: mid, RetentionDays: retention.Days(retention.SubscriptionTransitions), RowLimit: limit,
+			})
+		}))
+
+	// 9. Checkout attempts that expired unpaid.
+	sweep("delete expired checkout attempts", &result.CheckoutAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteExpiredCheckoutAttemptsBefore(ctx, gen.DeleteExpiredCheckoutAttemptsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ExpiredCheckoutAttempts), RowLimit: limit,
+		})
+	})
+
+	// 10. Resolved findings, then the reconciliation runs nothing names any more.
+	sweep("delete resolved findings", &result.ReconciliationFindings, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteResolvedFindingsBefore(ctx, gen.DeleteResolvedFindingsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ResolvedFindings), RowLimit: limit,
+		})
+	})
+	sweep("delete reconciliation runs", &result.ReconciliationRuns, guarded("maintenance_runs",
+		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+			return q.DeleteReconciliationRunsPastRetention(ctx, gen.DeleteReconciliationRunsPastRetentionParams{
+				MerchantID: mid, RetentionDays: retention.Days(retention.ReconciliationRuns), RowLimit: limit,
+			})
+		}))
+
 	if capped {
 		result.MerchantsBudgetCapped++
-		logger.WithField("row_budget", cleanupMerchantRowBudget).
+		logger.WithField("row_budget", rowBudget).
 			Warn("Cleanup: merchant hit this pass's row budget; the rest drains on the next pass")
 	}
 }

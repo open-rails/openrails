@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -45,6 +46,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 	}
 	gate := spendgate.New(s.db)
 	gate.SetClock(s.now)
+	s.db.EnsurePartitions(ctx, s.now())
 	var result *billing.CaptureReceipt
 	err = gate.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.BillingAdmissionOperation) error {
 		replayed := row.State == "captured"
@@ -54,7 +56,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 					Field: "amount", Committed: derefInt(row.CapturedAmount), Retried: amount}
 			}
 			matches, err := d.Gen(ctx).AdmissionCaptureTermsMatch(ctx, gen.AdmissionCaptureTermsMatchParams{
-				MerchantID: row.MerchantID, RequestID: requestID, CaptureTerms: captureTerms,
+				MerchantID: row.MerchantID, RequestID: requestID, AdmittedAt: row.AdmittedAt, CaptureTerms: captureTerms,
 			})
 			if err != nil {
 				return err
@@ -72,7 +74,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 			// Remove this hold before spending, in the same transaction as the ledger.
 			// A late actual after release/expiry still records the original operation.
 			row, err = d.Gen(ctx).CaptureAdmissionOperation(ctx, gen.CaptureAdmissionOperationParams{
-				MerchantID: row.MerchantID, RequestID: requestID, Amount: amount, AsOf: s.now(), CaptureTerms: captureTerms,
+				MerchantID: row.MerchantID, RequestID: requestID, AdmittedAt: row.AdmittedAt, Amount: amount, AsOf: s.now(), CaptureTerms: captureTerms,
 			})
 			if err != nil {
 				return err
@@ -103,6 +105,19 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 				return err
 			}
 			now := s.now()
+			// The coordinate is claimed here, under the customer spend lock.
+			keyFrom, keyTo := usageKeyWindow(now)
+			_, err = d.Gen(ctx).GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
+				MerchantID: row.MerchantID, CustomerID: row.CustomerID, Currency: row.Currency,
+				EventType: u.EventType, Source: u.Source, SourceID: u.SourceID,
+				OccurredFrom: keyFrom, OccurredTo: keyTo,
+			})
+			if err == nil {
+				return fmt.Errorf("%w: capture usage coordinate belongs to another operation", ErrIdempotencyKeyReused)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
 			err = d.Gen(ctx).InsertUsageEvent(ctx, gen.InsertUsageEventParams{
 				ID: uuidutil.NewV7(), MerchantID: row.MerchantID, CustomerID: row.CustomerID,
 				InvokerID: terms.Invoker, Currency: row.Currency, Resource: nilIfEmpty(u.Resource),
