@@ -33,6 +33,7 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		"posture garbage":        {func(c *Config) { c.TestMode = "yes" }, `invalid test_mode "yes"`},
 		"rate limits omitted":    {func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
 		"rate limits host-owned": {func(c *Config) { c.RateLimits, c.RateLimitsDisabled = nil, true }, ""},
+		"per-address ceiling":    {func(c *Config) { c.RateLimits = &RateLimitsConfig{"default": {RequestsPerMinute: 300}} }, "rate_limits.default is not a bucket"},
 		"captcha disabled":       {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, ""},
 		"captcha half pair":      {func(c *Config) { c.Captcha.SecretKey = "secret" }, "BOTH site_key and secret_key"},
 		"captcha unsupported":    {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "unsupported provider"},

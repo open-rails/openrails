@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -369,6 +370,9 @@ func (r *Request) Status(code int) {
 	r.t.WriteJSON(code, nil)
 }
 
+// NoContent answers 204: a DELETE that removed its resource.
+func (r *Request) NoContent() { r.Status(http.StatusNoContent) }
+
 // ShouldBindURI binds path parameters into data and returns the error WITHOUT
 // writing a response.
 func (r *Request) ShouldBindURI(data any) error {
@@ -665,7 +669,7 @@ func (h *httpTransport) WriteJSON(code int, body any) {
 	}
 	h.w.Header().Set("Content-Type", "application/json")
 	h.w.WriteHeader(code)
-	_ = json.NewEncoder(h.w).Encode(body)
+	_ = json.NewEncoder(h.w).Encode(wireform.Of(body))
 }
 
 func (h *httpTransport) AbortJSON(code int, body any) { h.WriteJSON(code, body) }

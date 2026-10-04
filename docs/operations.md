@@ -63,7 +63,7 @@ the opposite direction and never mutates a payment rail.
 ### Merchant secrets
 
 PSP secrets in `push-merchant-config` are seed material, not the runtime
-source of truth. The manifest key is `merchants.<slug>.psps.<psp-key>.<rail>`
+source of truth. The manifest key is `merchants.<slug>.psps.<psp-key>`
 (secret overlays: `merchant_manifest_overlays`); the retired anchors
 (`accounts`, `rail_merchant_accounts`, `provider_accounts`) fail loudly with
 a rename error. The command imports each PSP's secrets under the canonical
@@ -705,9 +705,9 @@ liveness beat rather than from its start.
 
 ### Health endpoints
 
-`GET /health/live` (liveness) and `GET /health/ready` (readiness;
-`?verbose=1` adds per-dependency detail), with K8s aliases `/healthz` /
-`/readyz`. There is no `/health`. Embedded hosts wire the same checks into
+`GET /health/live` (liveness) and `GET /health/ready` (readiness). Both are
+public and carry no dependency detail: a failing check is logged and answers
+503 `service_unavailable`. There is no `/health`, `/healthz` or `/readyz`. Embedded hosts wire the same checks into
 their own handler. Readiness requires Postgres, the merchants service, the River producer and a
 locally managed River worker consumer; Redis, Vault and PSP posture are
 reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. A

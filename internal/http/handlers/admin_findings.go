@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 )
@@ -22,7 +24,7 @@ import (
 
 func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 	if r.State == nil || r.State.DB == nil {
-		r.ErrorJSON(http.StatusInternalServerError, "findings ledger unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "findings ledger unavailable")
 		return nil, false
 	}
 	store := &reconcile.PGStore{DB: r.State.DB}
@@ -32,124 +34,110 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 	return store, true
 }
 
-// findingView is one queue item: the persisted record plus the parsed
-// structured recommendation (nil when the finding has no mechanical fix —
-// approve is unavailable for those).
-type FindingView struct {
-	reconcile.FindingRecord
-	Recommendation *recommend.Recommendation `json:"recommendation,omitempty"`
-}
-
-func newFindingView(rec reconcile.FindingRecord) FindingView {
-	v := FindingView{FindingRecord: rec}
+// findingView is a finding as the merchant API answers it, with its parsed
+// recommendation.
+func findingView(rec reconcile.FindingRecord) billing.Finding {
+	v := billing.Finding{
+		ID: billing.FindingID(rec.ID), Type: string(rec.Type), SubjectKey: rec.SubjectKey, Severity: string(rec.Severity),
+		Status: billing.FindingStatus(rec.Status), Evidence: rec.Evidence, LastSeenAt: rec.LastSeenAt, ResolvedAt: rec.ResolvedAt,
+		Provider: optional(string(rec.Provider)), RecommendedAction: optional(rec.RecommendedAction), Resolution: optional(rec.Resolution),
+		ResolvedBy: optional(rec.ResolvedBy), Notes: optional(rec.Notes), CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
+	}
+	if v.Evidence == nil {
+		v.Evidence = map[string]any{}
+	}
 	if parsed, ok := recommend.FromEvidence(rec.Evidence); ok {
-		v.Recommendation = &parsed
+		out := recommendationView(parsed)
+		v.Recommendation = &out
 	}
 	return v
 }
 
-type FindingsListResponse struct {
-	Items  []FindingView         `json:"items"`
-	Total  int64                 `json:"total"`
-	Limit  int                   `json:"limit"`
-	Offset int                   `json:"offset"`
-	Gauges reconcile.QueueGauges `json:"gauges"`
+func recommendationView(r recommend.Recommendation) billing.FindingRecommendation {
+	out := billing.FindingRecommendation{Action: r.Action, Params: r.Params}
+	for _, alt := range r.Alternatives {
+		out.Alternatives = append(out.Alternatives, recommendationView(alt))
+	}
+	return out
 }
 
-// AdminListFindings lists the operator work list (open findings by default),
-// sorted severity desc then age desc, with the #690 gauge summary.
-//
-// Gauge alert semantics (#690, three error categories): `orphaned_members`
-// (paying without access — MISSING side), `freeloaders` (access without
-// paying — EXCESS side) and `duplicate_coverage` (double-billed) are
-// always-zero error metrics — nonzero for a full sweep cycle (15 min) means
-// the billing state machine is failing (an undelivered paid grant, a broken
-// justification chain, or a double charge that detection re-confirmed).
-// Severity ordering (Paul): taking money wrongly (orphaned, double-billed =
-// critical) outranks giving content away (freeloader = high).
-// `verification_pressure` is a live pressure reading over `unknown` subs past
-// paid-through — nonzero is allowed (fail-open standing access awaiting
-// provider verification), but its max_age_seconds trending UP means the
-// verification machinery (pull/probe/converge) is down. `episodes` is the
-// historical/interval companion: freeloader/orphaned SPANS with total
-// error-days from the migration-067 views (open episodes still accrue;
-// sanctioned freeloader spans — dunning, awaiting verification — are policy
-// and only the `unsanctioned` split indicates failure).
-//
-//	GET /merchant/findings?severity=&finding_type=&status=&limit=&offset=
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// FindingsQuery is the findings list's filters.
+type FindingsQuery struct {
+	Status   string `form:"status"`
+	Severity string `form:"severity"`
+	Type     string `form:"finding_type"`
+}
+
+// AdminListFindings handles GET /v1/merchant/findings: the operator work
+// list, open findings by default, most severe first, then oldest.
 func AdminListFindings(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {
 		return
 	}
-	ctx := r.Request.Context()
-	filter := reconcile.QueueFilter{
-		Severity: strings.TrimSpace(r.Query("severity")),
-		Type:     strings.TrimSpace(r.Query("finding_type")),
-		Status:   strings.TrimSpace(r.Query("status")),
-		Limit:    parseIntDefault(r.Query("limit"), 100),
-		Offset:   parseIntDefault(r.Query("offset"), 0),
-	}
-	items, total, err := store.ListQueueFindings(ctx, filter)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list findings")
+	var q FindingsQuery
+	if !r.BindQuery(&q) {
 		return
 	}
-	gauges, err := store.Gauges(ctx)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to compute finding gauges")
+	page, ok := r.Page()
+	if !ok {
 		return
 	}
-	views := make([]FindingView, 0, len(items))
-	for _, item := range items {
-		views = append(views, newFindingView(item))
-	}
-	r.JSON(http.StatusOK, FindingsListResponse{
-		Items:  views,
-		Total:  total,
-		Limit:  filter.Limit,
-		Offset: filter.Offset,
-		Gauges: gauges,
+	items, err := store.ListQueueFindings(r.Request.Context(), reconcile.QueueFilter{
+		Severity: strings.TrimSpace(q.Severity), Type: strings.TrimSpace(q.Type), Status: strings.TrimSpace(q.Status), Page: page,
 	})
+	if err != nil {
+		writeRefusal(r, err, "list findings failed")
+		return
+	}
+	r.SuccessJSON(pagination.Map(items, findingView))
 }
 
-// AdminGetFinding returns one finding with full evidence + recommendation.
-//
-//	GET /merchant/findings/{id}
+// GetFindingSummary handles GET /v1/merchant/findings/summary: the queue at
+// a glance (#690). OrphanedMembers, Freeloaders and DuplicateCoverage are
+// error metrics, nonzero for a full sweep (15 min) means the billing state
+// machine is failing; VerificationPressure may be nonzero, but its age
+// trending up means verification (pull, probe, converge) is down.
+func GetFindingSummary(r *httprequest.Request) {
+	store, ok := findingsStore(r)
+	if !ok {
+		return
+	}
+	summary, err := store.Gauges(r.Request.Context())
+	if err != nil {
+		r.InternalError("compute finding summary failed", err)
+		return
+	}
+	r.SuccessJSON(summary)
+}
+
+// AdminGetFinding handles GET /v1/merchant/findings/{id}.
 func AdminGetFinding(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {
 		return
 	}
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid finding id")
+	id, ok := pathID(r, billing.ParseFindingID)
+	if !ok {
 		return
 	}
-	finding, err := store.GetFinding(r.Request.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			r.ErrorJSON(http.StatusNotFound, "finding not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load finding")
+	finding, err := store.GetFinding(r.Request.Context(), id.UUID())
+	if errors.Is(err, pgx.ErrNoRows) {
+		r.ErrorCode(billing.CodeResourceNotFound, "")
 		return
 	}
-	r.JSON(http.StatusOK, newFindingView(finding))
-}
-
-type ResolveFindingRequest struct {
-	Outcome string `json:"outcome"`
-	Notes   string `json:"notes"`
-	// RAW on purpose (or#863): plain binding decodes JSON numbers as float64,
-	// and `amount` here is a refund in MICROS heading for a real provider
-	// refund. Decoded through recommend.DecodeParams (UseNumber) instead.
-	OverrideParams json.RawMessage `json:"override_params,omitempty"`
-}
-
-type ResolveFindingResponse struct {
-	Finding   FindingView    `json:"finding"`
-	Execution map[string]any `json:"execution,omitempty"`
+	if err != nil {
+		r.InternalError("load finding failed", err)
+		return
+	}
+	r.SuccessJSON(findingView(finding))
 }
 
 func findingIsOpen(f reconcile.FindingRecord) bool {
@@ -172,65 +160,65 @@ func resolveActorIdentity(r *httprequest.Request) string {
 	return "service-credential"
 }
 
-// AdminResolveFinding resolves ONE finding: approve executes the structured
-// recommendation (params merged with override_params) then marks it
-// fixed/admin_fixed; ignore silences the subject permanently (notes required).
-// Partial execution failure leaves the finding OPEN with the error appended
-// to notes. The next converge/pull sweep re-measures — a fix that didn't take
-// reopens by re-detection, never by trust.
+// AdminResolveFinding resolves one finding: approve runs its recommendation
+// (params merged with override_params) and marks it fixed; ignore silences
+// the subject for good (notes required). A failed run leaves the finding open
+// with the error in its notes; the next sweep re-measures, so a fix that did
+// not take reopens by re-detection.
 //
-//	POST /merchant/findings/{id}/resolve  {outcome, notes, override_params?}
+//	POST /v1/merchant/findings/{id}/resolve
 func AdminResolveFinding(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {
 		return
 	}
 	ctx := r.Request.Context()
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid finding id")
+	id, ok := pathID(r, billing.ParseFindingID)
+	if !ok {
 		return
 	}
-	var req ResolveFindingRequest
+	var req billing.ResolveFindingRequest
 	if !r.BindJSON(&req) {
 		return
 	}
-	outcome := strings.ToLower(strings.TrimSpace(req.Outcome))
-	if outcome != "approve" && outcome != "ignore" {
-		r.ErrorJSON(http.StatusBadRequest, "outcome must be \"approve\" or \"ignore\"")
+	outcome := billing.FindingOutcome(strings.ToLower(strings.TrimSpace(string(req.Outcome))))
+	if outcome != billing.FindingApprove && outcome != billing.FindingIgnore {
+		r.APIError(api.Coded(billing.CodeInvalidParam, `outcome must be "approve" or "ignore"`).WithParam("outcome"))
 		return
 	}
 	notes := strings.TrimSpace(req.Notes)
 
-	finding, err := store.GetFinding(ctx, id)
+	finding, err := store.GetFinding(ctx, id.UUID())
+	if errors.Is(err, pgx.ErrNoRows) {
+		r.ErrorCode(billing.CodeResourceNotFound, "")
+		return
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			r.ErrorJSON(http.StatusNotFound, "finding not found")
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load finding")
+		r.InternalError("load finding failed", err)
 		return
 	}
 	if !findingIsOpen(finding) {
-		// Idempotent no-op: already resolved; report the current state.
-		r.ErrorJSON(http.StatusConflict, "finding already resolved (status="+string(finding.Status)+", resolution="+finding.Resolution+")")
+		r.ErrorCode(billing.CodeResourceConflict, "finding already resolved (status="+string(finding.Status)+", resolution="+finding.Resolution+")")
 		return
 	}
-	if outcome == "ignore" && notes == "" {
-		r.ErrorJSON(http.StatusBadRequest, "notes are required to ignore a finding (permanent silence for this subject)")
+	if outcome == billing.FindingIgnore && notes == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "notes are required to ignore a finding (permanent silence for this subject)").WithParam("notes"))
 		return
 	}
-	execution, status, message := resolveFindingOutcome(r, store, finding, outcome, notes, req.OverrideParams)
+	execution, status, message := resolveFindingOutcome(r, store, finding, string(outcome), notes, req.OverrideParams)
 	if status != http.StatusOK {
 		r.ErrorJSON(status, message)
 		return
 	}
-	updated, err := store.GetFinding(ctx, id)
+	updated, err := store.GetFinding(ctx, id.UUID())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "finding resolved but failed to reload")
+		r.InternalError("finding resolved but failed to reload", err)
 		return
 	}
-	r.JSON(http.StatusOK, ResolveFindingResponse{Finding: newFindingView(updated), Execution: execution})
+	if execution == nil {
+		execution = map[string]any{}
+	}
+	r.SuccessJSON(billing.FindingResolution{Finding: findingView(updated), Execution: execution})
 }
 
 // resolveFinding resolves one open finding; see resolveFindingOutcome.

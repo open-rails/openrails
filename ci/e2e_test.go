@@ -82,13 +82,13 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 	if transport != nil {
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		deps.StripeTransport = transport
-		cfg.Merchant.PSPs = map[string]openrails.PSPConfig{"stripe": {"stripe": {
+		cfg.Merchant.PSPs = map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
 			AccountID: "acct_e2e",
 			Secrets: map[string]string{
 				"secret_key":             "sk_test_e2e",
 				"webhook_signing_secret": "whsec_e2e",
 			},
-		}}}
+		}}
 	}
 	client, err := openrails.New(t.Context(), cfg, deps)
 	require.NoError(t, err)

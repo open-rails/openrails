@@ -165,7 +165,7 @@ func TestGateAuthorizesEachCredentialKind(t *testing.T) {
 		{name: "ambiguous membership", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: credential.ErrMerchantAmbiguous}}, want: want{status: 403, message: "merchant_unresolved"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/settings", nil)
+			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/configuration", nil)
 			for k, v := range tc.header {
 				r.Header.Set(k, v)
 			}
@@ -215,7 +215,7 @@ func TestGateUserSessionMerchantSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			checker := tc.checker
 			gate := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA, Merchant: tc.tokenMerchant}, nil), AdminPermissionChecker: &checker})
-			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/settings", nil)
+			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/configuration", nil)
 			if tc.selector != "" {
 				r.Header.Set(merchant.SelectorHeader, tc.selector)
 			}

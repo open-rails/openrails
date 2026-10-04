@@ -6,9 +6,9 @@ missing metadata; an unchanged startup declaration preserves later API edits and
 archived provider accounts. Snapshot credential reload is separate from metadata
 application and does not persist supplied credentials.
 
-Use the same `Client.MerchantConfiguration` resource in embedded and remote
-applications. `Retrieve` returns redacted settings and an opaque revision. `Apply`
-requires a stable application ID and the revision observed before preparing the
+Use the same Client methods in embedded and remote applications.
+`GetMerchantConfiguration` returns redacted settings and an opaque revision.
+`ApplyMerchantConfiguration` requires a stable application ID and the revision observed before preparing the
 update. It applies atomically. Retrying the identical document returns its original
 receipt even if later updates changed the merchant. Reusing an ID for different
 content or applying against a stale revision fails with a conflict.
@@ -45,9 +45,8 @@ YAML and JSON use the same typed contract. Documents are limited to 1 MiB.
 Unknown or duplicate fields, multiple documents, YAML aliases, anchors, merge
 keys and tags are rejected. The CLI never refreshes the precondition automatically.
 
-Remote execution constructs only a Client. The server must explicitly publish
-merchant configuration routes, and the credential must authorize the selected
-merchant and operation:
+Remote execution constructs only a Client. The credential must authorize the
+selected merchant and operation:
 
 ```sh
 openrails get-merchant-config --server-url https://billing.example --token-file token.txt --merchant shop

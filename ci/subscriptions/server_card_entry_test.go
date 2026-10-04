@@ -46,9 +46,9 @@ func serverEntryWorld(t *testing.T) *world {
 	w := prepareWorld(t, 12)
 	w.selfService = true
 	w.declare = func(psps map[string]openrails.PSPConfig) {
-		account := psps["nmi"]["nmi"]
+		account := psps["nmi"]
 		account.Settings = map[string]any{"card_entry": "server"}
-		psps["nmi"]["nmi"] = account
+		psps["nmi"] = account
 	}
 	w.start()
 	return w

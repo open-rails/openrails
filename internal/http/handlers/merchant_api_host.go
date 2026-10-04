@@ -26,25 +26,22 @@ func apiHostMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
 		return billing.MerchantID{}, false
 	}
 	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "merchant directory service unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "merchant directory service unavailable")
 		return billing.MerchantID{}, false
 	}
 	return mid, true
 }
 
-func apiHostResponse(host string, claim *merchants.APIHostClaim) map[string]any {
-	resp := map[string]any{"api_host": nil, "claim": nil}
+func apiHostResponse(host string, claim *merchants.APIHostClaim) billing.MerchantAPIHost {
+	var out billing.MerchantAPIHost
 	if host != "" {
-		resp["api_host"] = host
+		out.APIHost = &host
 	}
 	if claim != nil {
-		resp["claim"] = map[string]any{
-			"api_host":   claim.APIHost,
-			"created_at": claim.CreatedAt,
-			"dns_record": map[string]string{"type": "TXT", "name": claim.Record(), "value": claim.Token},
-		}
+		out.Claim = &billing.APIHostClaim{APIHost: claim.APIHost, CreatedAt: claim.CreatedAt,
+			DNSRecord: billing.APIHostRecord{Type: "TXT", Name: claim.Record(), Value: claim.Token}}
 	}
-	return resp
+	return out
 }
 
 // writeAPIHostError maps the api_host errors onto their refusals.
@@ -69,7 +66,7 @@ func writeAPIHostError(r *httprequest.Request, err error, claim *merchants.APIHo
 		}
 		refuse(http.StatusConflict, "api_host_unproven", message)
 	case errors.Is(err, merchants.ErrMerchantNotFound):
-		r.ErrorJSON(http.StatusNotFound, "merchant not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "merchant not found")
 	default:
 		r.InternalError("api_host change failed", err)
 	}
@@ -104,9 +101,7 @@ func PutMerchantAPIHost(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
-		APIHost string `json:"api_host"`
-	}
+	var req billing.SetAPIHostRequest
 	if !r.BindJSON(&req) {
 		return
 	}

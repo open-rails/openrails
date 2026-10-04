@@ -54,7 +54,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := bill.GetMerchantSettings(ctx, openrails.ForMerchantID(id)); err != nil {
+		if _, err := bill.GetMerchantConfiguration(ctx, openrails.ForMerchantID(id)); err != nil {
 			return err
 		}
 		log.Printf("merchant %s ready", id)

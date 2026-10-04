@@ -3,44 +3,37 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"net/url"
-	"strconv"
-
-	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// ListHostEvents returns the merchant's host events, oldest first:
-// unacknowledged ones unless options asks for all. Process each idempotently,
-// AcknowledgeHostEvent it, and list again.
-func (c *Client) ListHostEvents(ctx context.Context, options billing.HostEventListOptions, requestOptions ...RequestOption) ([]billing.HostEvent, error) {
-	query := url.Values{}
-	if options.Type != "" {
-		query.Set("type", string(options.Type))
+// ListHostEvents pages the merchant's host events, oldest first. Process each
+// idempotently, AcknowledgeHostEvent it, and list again.
+func (c *Client) ListHostEvents(ctx context.Context, req billing.ListHostEventsRequest, options ...RequestOption) (billing.ListPage[billing.HostEvent], error) {
+	q := cursorQuery(req.PageRequest)
+	if req.Type != "" {
+		q.Set("type", string(req.Type))
 	}
-	if options.Limit != 0 {
-		query.Set("limit", strconv.Itoa(options.Limit))
+	if req.IncludeAcknowledged {
+		q.Set("include_acknowledged", "true")
 	}
-	if options.IncludeAcknowledged {
-		query.Set("include_acknowledged", "true")
+	if !req.PaymentID.IsZero() {
+		q.Set("payment_id", req.PaymentID.String())
 	}
-	if !options.PaymentID.IsZero() {
-		query.Set("payment_id", options.PaymentID.String())
-	}
-	var out []billing.HostEvent
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+query.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out, nil
+	var out billing.ListPage[billing.HostEvent]
+	err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+q.Encode(), nil, &out, options...)
+	return out, err
 }
 
 // AcknowledgeHostEvent is idempotent. Call only after the host's idempotent
 // processing has committed; an unacknowledged event is redelivered.
-func (c *Client) AcknowledgeHostEvent(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) error {
-	event, err := requireUUID("event_id", id)
-	if err != nil {
-		return err
+func (c *Client) AcknowledgeHostEvent(ctx context.Context, id billing.HostEventID, options ...RequestOption) (*billing.HostEvent, error) {
+	if id.IsZero() {
+		return nil, invalidErr("host event id is required")
 	}
-	return c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+event+"/acknowledge", nil, nil, requestOptions...)
+	var out billing.HostEvent
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+id.String()+"/acknowledge", nil, &out, options...); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

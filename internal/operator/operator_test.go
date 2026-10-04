@@ -123,7 +123,7 @@ func TestOperatorWireShapes(t *testing.T) {
 		Volume: []billing.FleetWeeklyVolume{{WeekStart: week, Currency: "USD", Payments: 7, SettledAmount: 495000000}},
 	}, `{"weeks":12,"points":[{"week_start":"2026-09-14T00:00:00Z","new_merchants":2,"active_merchants":5,"canceled_subscriptions":1}],
 		"volume":[{"week_start":"2026-09-14T00:00:00Z","currency":"USD","payments":7,"settled_amount":"495000000"}]}`)
-	roundTrip(t, billing.MerchantRef{ID: id, Slug: "shop"}, `{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","slug":"shop"}`)
+	roundTrip(t, billing.MerchantRef{ID: id, Slug: "shop"}, `{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","slug":"shop","display_name":""}`)
 }
 
 func roundTrip[T any](t *testing.T, value T, want string) {

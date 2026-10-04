@@ -42,14 +42,14 @@ Under `merchants.<slug>.psps` (secrets via YAML overlays; secret-store prefix
 ```yaml
 psps:
   ccbill:               # PSP key — reserved gateway, must be "ccbill"
-    ccbill:             # rail
-      # clientAccnum-clientSubacc, dash-joined:
-      account_id: "999999-0000"
-      secrets:
-        salt: replace-with-ccbill-flexform-salt
-        # Optional pair — declare both or neither:
-        datalink_username: replace-with-ccbill-datalink-username
-        datalink_password: replace-with-ccbill-datalink-password
+    rail: ccbill
+    # clientAccnum-clientSubacc, dash-joined:
+    account_id: "999999-0000"
+    secrets:
+      salt: replace-with-ccbill-flexform-salt
+      # Optional pair — declare both or neither:
+      datalink_username: replace-with-ccbill-datalink-username
+      datalink_password: replace-with-ccbill-datalink-password
 ```
 
 That is the whole surface: no API key, no webhook signing secret (CCBill has

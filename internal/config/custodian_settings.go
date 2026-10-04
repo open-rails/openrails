@@ -13,14 +13,15 @@ import (
 // A custodian is declared ONCE, as an account the merchant holds with a
 // third-party vault:
 //
-//	merchants.<slug>.custodians.<key>.<kind>
+//	merchants.<slug>.custodians.<key>
+//	    kind:       basis_theory
 //	    account_id: <custodian-native tenant id>
 //	    settings:   { public_api_key: …, network_tokens: false }
 //	    secrets:    { api_key: … }
 //
 // and each PSP whose gateway those cards are charged through REFERENCES it:
 //
-//	merchants.<slug>.psps.<key>.<rail>.custodian: <custodian key>
+//	merchants.<slug>.psps.<key>.custodian: <custodian key>
 //
 // Phase 2 kept the whole arrangement inside each PSP's settings map. That was
 // right about where custody hangs and wrong about whose credentials those are:

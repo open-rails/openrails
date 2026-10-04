@@ -50,14 +50,14 @@ merchants:
   local-stack:
     psps:
       mobius:                 # your name for this PSP (any slug)
-        nmi:                  # the rail
-          account_id: "1234567"  # dashboard "Gateway ID"
-          settings:
-            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-            tokenization_key: replace-with-live-nmi-tokenization-key   # public
-          secrets:
-            security_key: replace-with-live-nmi-security-key
-            webhook_signing_secret: replace-with-live-nmi-webhook-secret
+        rail: nmi
+        account_id: "1234567"  # dashboard "Gateway ID"
+        settings:
+          tokenization_url: https://secure.networkmerchants.com/token/Collect.js
+          tokenization_key: replace-with-live-nmi-tokenization-key   # public
+        secrets:
+          security_key: replace-with-live-nmi-security-key
+          webhook_signing_secret: replace-with-live-nmi-webhook-secret
 ```
 
 Store real secret values in Vault (or the encrypted DB store) and overlay them;

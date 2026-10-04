@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/goccy/go-yaml"
@@ -20,7 +19,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
@@ -30,9 +28,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/service"
 )
 
 const DefaultMerchantConfigManifestPath = "/etc/openrails/merchants.yaml"
@@ -137,7 +134,7 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 	}
 	for key := range root {
 		if key != "merchants" {
-			return fmt.Errorf("merchant secret overlay only accepts the merchants.psps.<psp>.<rail>.secrets shape (found %q)", key)
+			return fmt.Errorf("merchant secret overlay only accepts the merchants.<slug>.psps.<psp>.secrets shape (found %q)", key)
 		}
 	}
 	merchants, ok := root["merchants"].(map[string]any)
@@ -159,23 +156,17 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 			return fmt.Errorf("merchant secret overlay merchants.%s.psps must be a mapping", slug)
 		}
 		for psp, rawPSP := range psps {
-			rails, ok := rawPSP.(map[string]any)
+			declared, ok := rawPSP.(map[string]any)
 			if !ok {
 				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s must be a mapping", slug, psp)
 			}
-			for rail, rawRail := range rails {
-				railConfig, ok := rawRail.(map[string]any)
-				if !ok {
-					return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.%s must be a mapping", slug, psp, rail)
+			for key := range declared {
+				if key != "secrets" {
+					return fmt.Errorf("merchant secret overlay cannot set merchants.%s.psps.%s.%s; only secrets are overlayed", slug, psp, key)
 				}
-				for key := range railConfig {
-					if key != "secrets" {
-						return fmt.Errorf("merchant secret overlay cannot set merchants.%s.psps.%s.%s.%s; only secrets are overlayed", slug, psp, rail, key)
-					}
-				}
-				if _, ok := railConfig["secrets"].(map[string]any); !ok {
-					return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.%s.secrets must be a mapping", slug, psp, rail)
-				}
+			}
+			if _, ok := declared["secrets"].(map[string]any); !ok {
+				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.secrets must be a mapping", slug, psp)
 			}
 		}
 	}
@@ -257,97 +248,32 @@ func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDec
 	if strings.TrimSpace(src.APIHost) != "" {
 		dst.APIHost = src.APIHost
 	}
-	MergeMerchantProfileConfig(&dst.Profile, src.Profile)
-	if src.Invoice != nil {
-		if dst.Invoice == nil {
-			dst.Invoice = &config.InvoiceConfig{}
-		}
-		MergeInvoiceConfig(dst.Invoice, src.Invoice)
-	}
-	if len(src.DelegatedInvokerWastedSpendWindows) > 0 {
-		dst.DelegatedInvokerWastedSpendWindows = src.DelegatedInvokerWastedSpendWindows
-	}
-	if len(src.CheckoutRouting) > 0 {
-		dst.CheckoutRouting = src.CheckoutRouting
-	}
 	if len(src.Custodians) > 0 {
 		if dst.Custodians == nil {
 			dst.Custodians = map[string]config.CustodianConfig{}
 		}
-		for key, srcKinds := range src.Custodians {
-			dstKinds := dst.Custodians[key]
-			if dstKinds == nil {
-				dstKinds = config.CustodianConfig{}
-			}
-			for kind, srcEntry := range srcKinds {
-				dstEntry := dstKinds[kind]
-				MergeCustodianAccountConfig(&dstEntry, srcEntry)
-				dstKinds[kind] = dstEntry
-			}
-			dst.Custodians[key] = dstKinds
+		for key, srcEntry := range src.Custodians {
+			dstEntry := dst.Custodians[key]
+			MergeCustodianConfig(&dstEntry, srcEntry)
+			dst.Custodians[key] = dstEntry
 		}
-	}
-	if len(src.BillingPolicies) > 0 {
-		if dst.BillingPolicies == nil {
-			dst.BillingPolicies = map[string]config.BillingPolicyConfig{}
-		}
-		for name, policy := range src.BillingPolicies {
-			dst.BillingPolicies[name] = policy
-		}
-	}
-	if len(src.BillingPolicyBindings) > 0 {
-		dst.BillingPolicyBindings = src.BillingPolicyBindings
 	}
 	if len(src.PSPs) > 0 {
 		if dst.PSPs == nil {
 			dst.PSPs = map[string]config.PSPConfig{}
 		}
-		for key, srcRails := range src.PSPs {
-			dstRails := dst.PSPs[key]
-			if dstRails == nil {
-				dstRails = config.PSPConfig{}
-			}
-			for rail, srcAccount := range srcRails {
-				dstAccount := dstRails[rail]
-				MergeProviderRailAccountConfig(&dstAccount, srcAccount)
-				dstRails[rail] = dstAccount
-			}
-			dst.PSPs[key] = dstRails
+		for key, srcAccount := range src.PSPs {
+			dstAccount := dst.PSPs[key]
+			MergePSPConfig(&dstAccount, srcAccount)
+			dst.PSPs[key] = dstAccount
 		}
 	}
 }
 
-func MergeMerchantProfileConfig(dst *config.MerchantProfileConfig, src config.MerchantProfileConfig) {
-	if strings.TrimSpace(src.DisplayName) != "" {
-		dst.DisplayName = src.DisplayName
+func MergeCustodianConfig(dst *config.CustodianConfig, src config.CustodianConfig) {
+	if strings.TrimSpace(src.Kind) != "" {
+		dst.Kind = src.Kind
 	}
-	if strings.TrimSpace(src.LogoURL) != "" {
-		dst.LogoURL = src.LogoURL
-	}
-	if strings.TrimSpace(src.FromEmail) != "" {
-		dst.FromEmail = src.FromEmail
-	}
-	if strings.TrimSpace(src.SupportURL) != "" {
-		dst.SupportURL = src.SupportURL
-	}
-	if strings.TrimSpace(src.SignupURL) != "" {
-		dst.SignupURL = src.SignupURL
-	}
-}
-
-func MergeInvoiceConfig(dst, src *config.InvoiceConfig) {
-	if src.CollectionThreshold != nil {
-		dst.CollectionThreshold = src.CollectionThreshold
-	}
-	if src.MonthlyFloor != nil {
-		dst.MonthlyFloor = src.MonthlyFloor
-	}
-	if strings.TrimSpace(src.BillingPeriodBoundary) != "" {
-		dst.BillingPeriodBoundary = src.BillingPeriodBoundary
-	}
-}
-
-func MergeCustodianAccountConfig(dst *config.CustodianAccountConfig, src config.CustodianAccountConfig) {
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
 	}
@@ -372,9 +298,9 @@ func MergeCustodianAccountConfig(dst *config.CustodianAccountConfig, src config.
 	}
 }
 
-func MergeProviderRailAccountConfig(dst *config.ProviderRailAccountConfig, src config.ProviderRailAccountConfig) {
-	if strings.TrimSpace(src.LegacyEnvironment) != "" {
-		dst.LegacyEnvironment = src.LegacyEnvironment
+func MergePSPConfig(dst *config.PSPConfig, src config.PSPConfig) {
+	if strings.TrimSpace(string(src.Rail)) != "" {
+		dst.Rail = src.Rail
 	}
 	if strings.TrimSpace(src.AccountID) != "" {
 		dst.AccountID = src.AccountID
@@ -404,27 +330,6 @@ func MergeProviderRailAccountConfig(dst *config.ProviderRailAccountConfig, src c
 			dst.Settings[key] = value
 		}
 	}
-}
-
-// CheckoutRoutingRules projects the manifest rules onto the stored model.
-func CheckoutRoutingRules(in []config.CheckoutRoutingRuleConfig) []models.CheckoutRoutingRule {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]models.CheckoutRoutingRule, 0, len(in))
-	for _, rule := range in {
-		out = append(out, models.CheckoutRoutingRule{
-			Match: models.CheckoutRoutingMatch{
-				Currency: rule.Match.Currency,
-				Product:  rule.Match.Product,
-				Price:    rule.Match.Price,
-				Mode:     rule.Match.Mode,
-				Country:  rule.Match.Country,
-			},
-			Prefer: rule.Prefer,
-		})
-	}
-	return out
 }
 
 // MerchantManifestReconcileOptions selects the apply tier (#527). The default
@@ -469,7 +374,7 @@ type MerchantManifestReconcileOptions struct {
 }
 
 type ManifestProviderIdentityResolver interface {
-	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error)
+	ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.PSPConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error)
 }
 
 type ManifestProviderIdentity struct {
@@ -565,12 +470,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	if found && !req.Options.Overwrite {
 		mt.DisplayName = ""
 		mt.APIHost = ""
-		mt.Profile = config.MerchantProfileConfig{}
-		mt.Invoice = nil
-		mt.DelegatedInvokerWastedSpendWindows = nil
-		mt.CheckoutRouting = nil
-		mt.BillingPolicies = nil
-		mt.BillingPolicyBindings = nil
+		mt.Settings = billing.MerchantSettings{}
 	}
 	if err := ReconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
@@ -602,9 +502,10 @@ func sortedMerchantKeys(in map[string]config.MerchantDeclaration) []string {
 type PspEntry struct {
 	key    string
 	rail   string
-	config config.ProviderRailAccountConfig
+	config config.PSPConfig
 }
 
+// PspEntries are the declared PSPs in key order.
 func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
@@ -613,14 +514,7 @@ func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 	sort.Strings(keys)
 	out := make([]PspEntry, 0, len(in))
 	for _, key := range keys {
-		rails := make([]string, 0, len(in[key]))
-		for rail := range in[key] {
-			rails = append(rails, rail)
-		}
-		sort.Strings(rails)
-		for _, rail := range rails {
-			out = append(out, PspEntry{key: key, rail: rail, config: in[key][rail]})
-		}
+		out = append(out, PspEntry{key: key, rail: string(in[key].Rail), config: in[key]})
 	}
 	return out
 }
@@ -628,9 +522,10 @@ func PspEntries(in map[string]config.PSPConfig) []PspEntry {
 type CustodianEntry struct {
 	key    string
 	kind   string
-	config config.CustodianAccountConfig
+	config config.CustodianConfig
 }
 
+// CustodianEntries are the declared custodians in key order.
 func CustodianEntries(in map[string]config.CustodianConfig) []CustodianEntry {
 	keys := make([]string, 0, len(in))
 	for key := range in {
@@ -639,14 +534,7 @@ func CustodianEntries(in map[string]config.CustodianConfig) []CustodianEntry {
 	sort.Strings(keys)
 	out := make([]CustodianEntry, 0, len(in))
 	for _, key := range keys {
-		kinds := make([]string, 0, len(in[key]))
-		for kind := range in[key] {
-			kinds = append(kinds, kind)
-		}
-		sort.Strings(kinds)
-		for _, kind := range kinds {
-			out = append(out, CustodianEntry{key: key, kind: kind, config: in[key][kind]})
-		}
+		out = append(out, CustodianEntry{key: key, kind: in[key].Kind, config: in[key]})
 	}
 	return out
 }
@@ -835,7 +723,7 @@ func NonNilSettings(in map[string]any) map[string]any {
 // the merchant's declared custodians. An undeclared key is a HARD error: a PSP
 // that means to charge a vault-held card and cannot find the vault must not
 // arm as though its gateway held the card.
-func ResolveManifestCustodianReference(rail string, account config.ProviderRailAccountConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
+func ResolveManifestCustodianReference(rail string, account config.PSPConfig, declared map[string]gen.BillingCustodian) (*uuid.UUID, error) {
 	key := strings.ToLower(strings.TrimSpace(account.Custodian))
 	if key == "" {
 		return nil, nil
@@ -877,71 +765,16 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 			return fmt.Errorf("set api_host %q: %w", host, err)
 		}
 	}
-	// Apply the merchant_configurations payload (#646): profile, invoice/collection
-	// policy, and delegated-invoker abuse windows. Load once, mutate only the
-	// declared parts (omit = leave-as-is), upsert if anything changed.
-	if HasManifestProfile(mt.Profile) || mt.Invoice != nil || len(mt.DelegatedInvokerWastedSpendWindows) > 0 || len(mt.CheckoutRouting) > 0 {
-		store := merchantconfig.NewStore(database)
-		conf, _, err := store.Get(mctx)
-		if err != nil {
-			return fmt.Errorf("load merchant configuration: %w", err)
-		}
-		if HasManifestProfile(mt.Profile) {
-			conf.Profile = models.MerchantProfileConfiguration{
-				DisplayName: strings.TrimSpace(mt.Profile.DisplayName),
-				LogoURL:     strings.TrimSpace(mt.Profile.LogoURL),
-				FromEmail:   strings.TrimSpace(mt.Profile.FromEmail),
-				SupportURL:  strings.TrimSpace(mt.Profile.SupportURL),
-				SignupURL:   strings.TrimSpace(mt.Profile.SignupURL),
-			}
-			if conf.Profile.DisplayName == "" {
-				conf.Profile.DisplayName = strings.TrimSpace(mt.DisplayName)
-			}
-		}
-		if mt.Invoice != nil {
-			if mt.Invoice.CollectionThreshold != nil {
-				conf.InvoiceCollectionThreshold = mt.Invoice.CollectionThreshold
-			}
-			if mt.Invoice.MonthlyFloor != nil {
-				conf.InvoiceMonthlyFloor = mt.Invoice.MonthlyFloor
-			}
-			if b := strings.TrimSpace(mt.Invoice.BillingPeriodBoundary); b != "" {
-				conf.InvoiceBillingBoundary = b
-			}
-			if mt.Invoice.DelinquencyGraceDays != nil {
-				conf.ArrearsGraceDays = mt.Invoice.DelinquencyGraceDays
-			}
-			if mt.Invoice.DelinquencyAmountFloor != nil {
-				conf.ArrearsDelinquencyFloor = mt.Invoice.DelinquencyAmountFloor
-			}
-		}
-		if len(mt.DelegatedInvokerWastedSpendWindows) > 0 {
-			windows := make([]models.BudgetWindowPolicy, 0, len(mt.DelegatedInvokerWastedSpendWindows))
-			for _, w := range mt.DelegatedInvokerWastedSpendWindows {
-				d, err := time.ParseDuration(strings.TrimSpace(w.Window))
-				if err != nil {
-					return fmt.Errorf("delegated_invoker_wasted_spend_windows %q: window: %w", w.Key, err)
-				}
-				windows = append(windows, models.BudgetWindowPolicy{
-					Key:           strings.TrimSpace(w.Key),
-					WindowSeconds: int64(d / time.Second),
-					Limit:         w.Limit,
-					Currency:      strings.TrimSpace(w.Currency),
-				})
-			}
-			conf.DelegatedInvokerWastedSpendWindows = windows
-		}
-		if len(mt.CheckoutRouting) > 0 {
-			// or#288: the declared order IS the policy, so it replaces whole.
-			routing, err := merchantconfig.NormalizeCheckoutRouting(CheckoutRoutingRules(mt.CheckoutRouting))
-			if err != nil {
-				return err
-			}
-			conf.CheckoutRouting = routing
-		}
-		if err := store.Upsert(mctx, conf); err != nil {
-			return fmt.Errorf("upsert merchant configuration: %w", err)
-		}
+	// The declared settings go through the configuration application's merge
+	// and validation: one path for mode 1 and mode 2.
+	settings := mt.Settings
+	if settings.Profile != nil && strings.TrimSpace(settings.Profile.DisplayName) == "" {
+		profile := *settings.Profile
+		profile.DisplayName = strings.TrimSpace(mt.DisplayName)
+		settings.Profile = &profile
+	}
+	if err := service.ApplyDeclaredMerchantSettings(mctx, database, settings); err != nil {
+		return fmt.Errorf("merchant settings: %w", err)
 	}
 
 	// or#880: custodians land FIRST — psps.custodian_id is a foreign key, and
@@ -949,13 +782,6 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 	// than arm as though its gateway held the card.
 	declaredCustodians, err := ReconcileManifestCustodians(ctx, cfg, database, merchantID, mt, secretStore, opts)
 	if err != nil {
-		return err
-	}
-
-	// or#897 billing-policy registry. Policies first: a binding in the same
-	// manifest may name one of them, and the bindings FK refuses a name that does
-	// not exist yet.
-	if err := ReconcileManifestBillingPolicies(mctx, database, mt); err != nil {
 		return err
 	}
 
@@ -986,55 +812,6 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 	return nil
 }
 
-// ReconcileManifestBillingPolicies installs the manifest's declared billing
-// policies and bindings (or#897, mode 1). Every policy goes through the SAME
-// normalizer the config API runs — one validator, two declaration paths — so a
-// manifest that boots cannot hold a policy the API would have refused.
-//
-// The WHOLE document is validated before ANY of it is written: a bad third
-// policy must not leave the first two installed and the merchant enforcing half
-// a decision.
-func ReconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt config.MerchantDeclaration) error {
-	policies, bindings, err := normalizeManifestBillingPolicies(mt)
-	if err != nil {
-		return err
-	}
-	store := admission.NewBillingPolicyStore(database)
-	for _, p := range policies {
-		if err := store.UpsertPolicy(ctx, p.name, p.body); err != nil {
-			return fmt.Errorf("upsert billing policy %q: %w", p.name, err)
-		}
-	}
-	for _, b := range bindings {
-		if err := store.BindPolicy(ctx, identity.CustomerID{}, b.tier, b.name); err != nil {
-			return fmt.Errorf("bind billing policy %q: %w", b.name, err)
-		}
-	}
-	return nil
-}
-
-// ManifestBudgetWindows projects manifest windows (Go duration strings) onto the
-// stored model (seconds). The shared normalizer validates the result.
-func ManifestBudgetWindows(policyName, field string, in []config.BudgetWindowConfig) ([]models.BudgetWindowPolicy, error) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	out := make([]models.BudgetWindowPolicy, 0, len(in))
-	for _, w := range in {
-		d, err := time.ParseDuration(strings.TrimSpace(w.Window))
-		if err != nil {
-			return nil, fmt.Errorf("billing policy %s: %s %q: window: %w", policyName, field, w.Key, err)
-		}
-		out = append(out, models.BudgetWindowPolicy{
-			Key:           strings.TrimSpace(w.Key),
-			WindowSeconds: int64(d / time.Second),
-			Limit:         w.Limit,
-			Currency:      strings.TrimSpace(w.Currency),
-		})
-	}
-	return out, nil
-}
-
 // PruneManifestSecrets deletes secrets held for the merchant that the manifest
 // no longer declares (#527 --prune), reconciling the stored secret set to the
 // file. Names are derived exactly as Put derives them.
@@ -1055,10 +832,7 @@ func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID bi
 	}
 	for _, entry := range PspEntries(mt.PSPs) {
 		rail := NormalizeManifestRail(entry.rail)
-		environment, err := ManifestProviderEnvironment(cfg, entry.config)
-		if err != nil {
-			return err
-		}
+		environment := ManifestProviderEnvironment(cfg)
 		accountID := strings.TrimSpace(entry.config.AccountID)
 		if accountID == "" {
 			if rail != string(models.RailSolana) {
@@ -1103,14 +877,6 @@ func PruneManifestSecrets(ctx context.Context, cfg *config.Config, merchantID bi
 	return nil
 }
 
-func HasManifestProfile(p config.MerchantProfileConfig) bool {
-	return strings.TrimSpace(p.DisplayName) != "" ||
-		strings.TrimSpace(p.LogoURL) != "" ||
-		strings.TrimSpace(p.FromEmail) != "" ||
-		strings.TrimSpace(p.SupportURL) != "" ||
-		strings.TrimSpace(p.SignupURL) != ""
-}
-
 // ResolvedManifestRailAccount is the store/DB-independent front half of a
 // manifest rail-account reconcile: normalized rail, resolved environment,
 // account identity and secret values, fully validated. Shared by the DB
@@ -1124,15 +890,12 @@ type ResolvedManifestRailAccount struct {
 	signerEvidence map[string]string
 }
 
-func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account config.ProviderRailAccountConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (ResolvedManifestRailAccount, error) {
+func ResolveManifestRailAccount(ctx context.Context, cfg *config.Config, rail string, account config.PSPConfig, transit solana.TransitClient, resolver ManifestProviderIdentityResolver) (ResolvedManifestRailAccount, error) {
 	out := ResolvedManifestRailAccount{rail: NormalizeManifestRail(rail)}
 	if out.rail == "" {
 		return out, fmt.Errorf("PSP rail is required")
 	}
-	environment, err := ManifestProviderEnvironment(cfg, account)
-	if err != nil {
-		return out, err
-	}
+	environment := ManifestProviderEnvironment(cfg)
 	out.environment = environment
 	// #711: the Solana runtime knobs live in the account settings block —
 	// validate strictly at push time so a typo'd key/value fails loudly here
@@ -1240,7 +1003,7 @@ func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, me
 	return nil
 }
 
-func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, merchantSlug, localKey, rail string, account config.ProviderRailAccountConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
+func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, merchantSlug, localKey, rail string, account config.PSPConfig, custodianID *uuid.UUID, secretStore merchants.MerchantSecretStore, transit solana.TransitClient, opts MerchantManifestReconcileOptions) error {
 	ra, err := ResolveManifestRailAccount(ctx, cfg, rail, account, transit, opts.IdentityResolver)
 	if err != nil {
 		return err
@@ -1395,7 +1158,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 // evidence plus the derived PSP identity. Solana never needs
 // account_id — the stored DB identity is always the signer public key; a declared
 // value is ignored (warned).
-func ManifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
+func ManifestProviderSignerEvidence(ctx context.Context, rail, accountID string, account config.PSPConfig, secrets ManifestSecretValues, transit solana.TransitClient) (map[string]string, string, error) {
 	if rail == string(models.RailSolana) && strings.TrimSpace(accountID) != "" {
 		log.Warnf("solana PSP: declared account_id %s is ignored; it is always derived from the signer's public key", strings.TrimSpace(accountID))
 		accountID = ""
@@ -1479,13 +1242,9 @@ func SolanaTransitPublicKey(ctx context.Context, transit solana.TransitClient, k
 }
 
 // ManifestProviderEnvironment derives a PSP's environment from deployment
-// posture (#681/#882 — test under test_mode, live otherwise). It is never
-// declared: a manifest that still carries `environment:` fails loudly here.
-func ManifestProviderEnvironment(cfg *config.Config, account config.ProviderRailAccountConfig) (string, error) {
-	if strings.TrimSpace(account.LegacyEnvironment) != "" {
-		return "", fmt.Errorf("psp `environment:` is no longer configurable (#882) — it is derived from test_mode (sandbox => test, live => live); remove the key")
-	}
-	return config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg)), nil
+// posture: test under test_mode, live otherwise. It is never declared.
+func ManifestProviderEnvironment(cfg *config.Config) string {
+	return config.ExpectedProviderEnvironment(cfg != nil && config.IsTestMode(cfg))
 }
 
 // ManifestSolanaNetwork maps a PSP environment onto the Solana network the same
@@ -1568,7 +1327,7 @@ func (v ManifestSecretValues) ResolveIfPresent(key string) (string, bool, error)
 
 type DefaultManifestProviderIdentityResolver struct{}
 
-func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.ProviderRailAccountConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
+func (DefaultManifestProviderIdentityResolver) ResolveManifestPSP(ctx context.Context, cfg *config.Config, rail, environment string, account config.PSPConfig, secrets ManifestSecretValues) (ManifestProviderIdentity, error) {
 	if accountID := strings.TrimSpace(account.AccountID); accountID != "" {
 		return ManifestProviderIdentity{AccountID: accountID}, nil
 	}
@@ -1591,34 +1350,27 @@ func StringPtrIfNotEmpty(v string) *string {
 func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclaration) error {
 	// Validate declarations before identity creation or seed-once suppression.
 	// An existing merchant must not turn malformed input into a successful boot.
-	if _, _, err := normalizeManifestBillingPolicies(mt); err != nil {
-		return err
+	if err := service.ValidateMerchantSettings(mt.Settings); err != nil {
+		return fmt.Errorf("settings: %w", err)
 	}
 	if host := merchants.NormalizeAPIHost(mt.APIHost); host != "" {
 		if err := merchants.ValidateAPIHost(host); err != nil {
 			return err
 		}
 	}
-	if _, err := merchantconfig.NormalizeCheckoutRouting(CheckoutRoutingRules(mt.CheckoutRouting)); err != nil {
-		return err
-	}
-	if _, err := ManifestBudgetWindows("merchant", "delegated_invoker_wasted_spend_windows", mt.DelegatedInvokerWastedSpendWindows); err != nil {
-		return err
-	}
-	for key, psp := range mt.PSPs {
-		for rail, account := range psp {
-			// A CCBill account with inline credentials must sign its FlexForm links.
-			if strings.EqualFold(strings.TrimSpace(rail), string(models.RailCCBill)) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
-				return fmt.Errorf("psps.%s.ccbill.secrets.salt is required", key)
-			}
-			if !strings.EqualFold(strings.TrimSpace(rail), string(models.RailStripe)) {
-				continue
-			}
-			if raw, ok := account.Settings["publishable_key"]; ok {
-				value, _ := raw.(string)
-				if err := config.ValidateStripePublishableKeyPosture(cfg, value); err != nil {
-					return fmt.Errorf("psps.%s.stripe.settings.publishable_key: %w", key, err)
-				}
+	for key, account := range mt.PSPs {
+		rail := NormalizeManifestRail(string(account.Rail))
+		// A CCBill account with inline credentials must sign its FlexForm links.
+		if rail == string(models.RailCCBill) && len(account.Secrets) > 0 && strings.TrimSpace(account.Secrets["salt"]) == "" {
+			return fmt.Errorf("psps.%s.secrets.salt is required", key)
+		}
+		if rail != string(models.RailStripe) {
+			continue
+		}
+		if raw, ok := account.Settings["publishable_key"]; ok {
+			value, _ := raw.(string)
+			if err := config.ValidateStripePublishableKeyPosture(cfg, value); err != nil {
+				return fmt.Errorf("psps.%s.settings.publishable_key: %w", key, err)
 			}
 		}
 	}
@@ -1626,71 +1378,4 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 		return fmt.Errorf("managed provider declarations require explicit Client publication operations; startup metadata and credential custody are separate")
 	}
 	return nil
-}
-
-type manifestBillingPolicy struct {
-	name string
-	body models.BillingPolicy
-}
-
-type manifestBillingBinding struct{ tier, name string }
-
-func normalizeManifestBillingPolicies(mt config.MerchantDeclaration) ([]manifestBillingPolicy, []manifestBillingBinding, error) {
-	names := make([]string, 0, len(mt.BillingPolicies))
-	for name := range mt.BillingPolicies {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	policies := make([]manifestBillingPolicy, 0, len(names))
-	for _, declared := range names {
-		name, err := merchantconfig.NormalizeBillingPolicyName(declared)
-		if err != nil {
-			return nil, nil, err
-		}
-		src := mt.BillingPolicies[declared]
-		spend, err := ManifestBudgetWindows(name, "spend_windows", src.SpendWindows)
-		if err != nil {
-			return nil, nil, err
-		}
-		badSpend, err := ManifestBudgetWindows(name, "bad_spend_windows", src.BadSpendWindows)
-		if err != nil {
-			return nil, nil, err
-		}
-		var rateWindowSeconds int64
-		if raw := strings.TrimSpace(src.AccrualRateWindow); raw != "" {
-			d, perr := time.ParseDuration(raw)
-			if perr != nil {
-				return nil, nil, fmt.Errorf("billing policy %s: accrual_rate_window: %w", name, perr)
-			}
-			rateWindowSeconds = int64(d / time.Second)
-		}
-		body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
-			Kind:                      models.BillingPolicyKind(src.Kind),
-			OutstandingCapAmount:      src.OutstandingCap,
-			SpendWindows:              spend,
-			AccrualRateCapPerHour:     src.AccrualRateCapPerHour,
-			AccrualRateWindowSeconds:  rateWindowSeconds,
-			BadSpendWindows:           badSpend,
-			CollectionThresholdAmount: src.CollectionThreshold,
-			CollectionCycleBoundary:   src.CollectionCycleBoundary,
-			DelinquencyGraceDays:      src.DelinquencyGraceDays,
-			DelinquencyAmountFloor:    src.DelinquencyAmountFloor,
-			PolicyCurrency:            src.PolicyCurrency,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		policies = append(policies, manifestBillingPolicy{name: name, body: body})
-	}
-
-	bindings := make([]manifestBillingBinding, 0, len(mt.BillingPolicyBindings))
-	for i, b := range mt.BillingPolicyBindings {
-		name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(b.Policy, b.Tier, false)
-		if err != nil {
-			return nil, nil, fmt.Errorf("billing_policy_bindings[%d]: %w", i, err)
-		}
-		bindings = append(bindings, manifestBillingBinding{tier: tier, name: name})
-	}
-
-	return policies, bindings, nil
 }

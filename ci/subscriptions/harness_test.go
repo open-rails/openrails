@@ -283,9 +283,9 @@ func (w *world) start() {
 		w.cfg(cfg)
 	}
 	psps := map[string]openrails.PSPConfig{
-		"stripe": {"stripe": {AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}}},
-		"nmi":    {"nmi": {AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}}},
-		"ccbill": {"ccbill": {AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}}},
+		"stripe": {Rail: "stripe", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}},
+		"nmi":    {Rail: "nmi", AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}},
+		"ccbill": {Rail: "ccbill", AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}},
 	}
 	if w.declare != nil {
 		w.declare(psps)
@@ -364,6 +364,18 @@ func (w *world) stop() {
 }
 
 func (w *world) restart() { w.stop(); w.start() }
+
+// applySettings changes the merchant's settings through a configuration
+// application against the current revision.
+func (w *world) applySettings(ctx context.Context, settings billing.MerchantSettings) error {
+	client := w.client[embedded]
+	current, err := client.GetMerchantConfiguration(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.ApplyMerchantConfiguration(ctx, &billing.MerchantConfigurationApplyParams{ApplicationID: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
+	return err
+}
 
 // kill ends the process as SIGKILL does: nothing it was doing gets recorded.
 // The running jobs and in-flight operations are captured at the instant of

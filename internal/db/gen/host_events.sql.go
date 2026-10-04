@@ -38,18 +38,22 @@ SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = $1::uuid
-  AND ($2::text = '' OR h.event_type = $2::text)
-  AND ($3::uuid IS NULL OR h.payment_id = $3::uuid)
-  AND ($4::boolean OR h.delivered_at IS NULL)
+  AND ($2::uuid IS NULL OR h.id = $2::uuid)
+  AND ($3::text = '' OR h.event_type = $3::text)
+  AND ($4::uuid IS NULL OR h.payment_id = $4::uuid)
+  AND ($5::boolean OR h.delivered_at IS NULL)
+  AND ($6::uuid IS NULL OR h.id > $6::uuid)
 ORDER BY h.id
-LIMIT $5::int
+LIMIT $7::int
 `
 
 type ListHostEventsParams struct {
 	MerchantID          uuid.UUID
+	ID                  *uuid.UUID
 	EventType           string
 	PaymentID           *uuid.UUID
 	IncludeAcknowledged bool
+	AfterID             *uuid.UUID
 	RowLimit            int32
 }
 
@@ -76,9 +80,11 @@ type ListHostEventsRow struct {
 func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) ([]ListHostEventsRow, error) {
 	rows, err := q.db.Query(ctx, listHostEvents,
 		arg.MerchantID,
+		arg.ID,
 		arg.EventType,
 		arg.PaymentID,
 		arg.IncludeAcknowledged,
+		arg.AfterID,
 		arg.RowLimit,
 	)
 	if err != nil {

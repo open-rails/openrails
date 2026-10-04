@@ -39,10 +39,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	if err := client.Verify(ctx); err != nil {
-		return err
-	}
-	if _, err := client.GetMerchantSettings(ctx); err != nil {
+	// One authenticated read proves the server, the key and the merchant.
+	if _, err := client.GetMerchantConfiguration(ctx); err != nil {
 		return err
 	}
 	log.Printf("OpenRails server ready for merchant %s", merchantID)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 )
 
 // Severity routes an alert to channels and colors the notification. warning is
@@ -49,43 +50,34 @@ func (f WebhookFormat) valid() bool {
 	return f == FormatGeneric || f == FormatDiscord || f == FormatSlack
 }
 
-// Webhook is the API/domain view of a merchant_webhooks row.
+// Webhook is a merchant_webhooks row with its credential version.
 type Webhook struct {
-	ID              uuid.UUID `json:"id"`
-	MerchantID      uuid.UUID `json:"merchant_id"`
-	Name            string    `json:"name"`
-	DestinationHost string    `json:"destination_host"`
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	Name            string
+	DestinationHost string
 	secretVersion   int
-	Format          WebhookFormat `json:"format"`
-	Enabled         bool          `json:"enabled"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+	Format          WebhookFormat
+	Enabled         bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
-// Notification is the API/domain view of a notifications row.
+// API is the webhook as the merchant API answers it.
+func (w Webhook) API() billing.AlertWebhook {
+	return billing.AlertWebhook{
+		ID: billing.AlertWebhookID(w.ID), Name: w.Name, DestinationHost: w.DestinationHost,
+		Format: billing.AlertWebhookFormat(w.Format), Enabled: w.Enabled, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
+	}
+}
+
+// Notification is a merchant inbox entry being written.
 type Notification struct {
-	ID        uuid.UUID  `json:"id"`
-	Severity  Severity   `json:"severity"`
-	Title     string     `json:"title"`
-	Body      string     `json:"body"`
-	Link      string     `json:"link,omitempty"`
-	Data      any        `json:"data,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	ReadAt    *time.Time `json:"read_at,omitempty"`
-}
-
-// CreateWebhookInput is the POST body for a new webhook sink.
-type CreateWebhookInput struct {
-	Name    string        `json:"name"`
-	URL     string        `json:"url"`
-	Format  WebhookFormat `json:"format"`
-	Enabled *bool         `json:"enabled"`
-}
-
-// RotateWebhookURLInput replaces a destination credential without changing the
-// webhook identity. URL is write-only.
-type RotateWebhookURLInput struct {
-	URL string `json:"url"`
+	Severity Severity
+	Title    string
+	Body     string
+	Link     string
+	Data     any
 }
 
 // Alert is an immediate operational notification, without a configurable rule.

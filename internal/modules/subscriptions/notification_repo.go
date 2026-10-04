@@ -121,17 +121,6 @@ func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, a
 	return err
 }
 
-func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id, customerID uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).MarkNotificationSeen(ctx, gen.MarkNotificationSeenParams{ID: id, CustomerID: customerID})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
 func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
 	data, err := notification.DataJSONB()
 	if err != nil {

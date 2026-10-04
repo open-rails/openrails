@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/operator"
 )
 
@@ -25,8 +26,8 @@ func attachControlPlane(ctx context.Context, a *app.App, cp config.ControlPlaneC
 		CloudflareProxies:            cp.CloudflareProxies,
 		DirectPeerIP:                 auth.DirectPeerIP,
 	}
-	if deps.EmailSender != nil {
-		opts.EmailSender = deps.EmailSender
+	if sender := a.Runtime.EmailSender; sender != nil {
+		opts.EmailSender = email.AuthKitSender{Sender: sender}
 	}
 	if deps.SMSSender != nil {
 		opts.SMSSender = deps.SMSSender

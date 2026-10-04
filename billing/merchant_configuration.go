@@ -1,6 +1,9 @@
 package billing
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // MerchantConfigurationApplyParams is an explicit, replayable metadata update.
 // Omitted fields preserve stored values. Credentials and provider lifecycle
@@ -61,4 +64,40 @@ type MerchantConfigurationState struct {
 	DisplayName string           `json:"display_name"`
 	APIHost     string           `json:"api_host"`
 	Settings    MerchantSettings `json:"settings"`
+}
+
+// MerchantAPIHost is the host the merchant's public routes are served at
+// (null until one is proven) and its open claim, if any.
+type MerchantAPIHost struct {
+	APIHost *string       `json:"api_host"`
+	Claim   *APIHostClaim `json:"claim"`
+}
+
+// APIHostClaim is a host the merchant claimed and has yet to prove: publish
+// DNSRecord, then verify.
+type APIHostClaim struct {
+	APIHost   string        `json:"api_host"`
+	CreatedAt time.Time     `json:"created_at"`
+	DNSRecord APIHostRecord `json:"dns_record"`
+}
+
+// APIHostRecord is the DNS record that proves a claim: a TXT record at Name
+// carrying Value.
+type APIHostRecord struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// SetAPIHostRequest claims APIHost for the merchant; "" releases the host and
+// any claim.
+type SetAPIHostRequest struct {
+	APIHost string `json:"api_host"`
+}
+
+// Capabilities is what this deployment serves: each route group, on or off,
+// and the optional features its configuration enables.
+type Capabilities struct {
+	RouteGroups map[string]bool `json:"route_groups"`
+	Features    map[string]bool `json:"features"`
 }

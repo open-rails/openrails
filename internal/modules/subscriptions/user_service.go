@@ -3,7 +3,6 @@ package subscriptions
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -22,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/query"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -36,9 +34,7 @@ var (
 	ErrSubscriptionNotActive = apperr.New(http.StatusConflict, "subscription_not_active", "subscription is not active")
 	// ErrCancelUnsupportedOnRail refuses a server-side cancel on a rail that has
 	// no cancel operation.
-	ErrCancelUnsupportedOnRail  = apperr.New(http.StatusBadRequest, "cancel_unsupported_on_rail", "cancel operation not supported for this rail")
-	ErrNotificationNotFound     = errors.New("notification not found")
-	ErrNotificationAccessDenied = errors.New("notification does not belong to user")
+	ErrCancelUnsupportedOnRail = apperr.New(http.StatusBadRequest, "cancel_unsupported_on_rail", "cancel operation not supported for this rail")
 
 	// ErrCustomerActionRequired refuses a cancel only the customer can make:
 	// a Solana cancel is an on-chain transaction the customer's wallet signs
@@ -250,37 +246,6 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 		}
 	}
 	return nil
-}
-
-// GetUserNotifications retrieves notifications for a user
-func (s *UserSubscriptionService) GetUserNotifications(ctx context.Context, userID string, queryOpts *query.QueryOptions[GetNotificationsFilters]) ([]*models.NotificationQueue, int64, error) {
-	// Set user filter
-	if queryOpts.Filters.UserID == "" {
-		queryOpts.Filters.UserID = userID
-	}
-
-	notifications, total, err := s.NotificationService.GetNotifications(ctx, *queryOpts)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get notifications: %w", err)
-	}
-	queryOpts.SetTotal(total)
-
-	return notifications, total, nil
-}
-
-// MarkNotificationRead marks a notification as read
-func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, userID string, notificationID uuid.UUID) error {
-	notification, err := s.NotificationService.GetByID(ctx, notificationID)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrNotificationNotFound, err)
-	}
-
-	// Verify the notification belongs to the user
-	if notification.CustomerID.String() != userID {
-		return ErrNotificationAccessDenied
-	}
-
-	return s.NotificationService.MarkAsSeen(ctx, notificationID, notification.CustomerID)
 }
 
 // CancelUserSubscription cancels the member's named subscription at period

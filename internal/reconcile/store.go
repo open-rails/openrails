@@ -7,9 +7,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
 // FindingRecord is a persisted finding (one stable identity row).
@@ -452,27 +454,28 @@ type QueueFilter struct {
 	Severity string
 	Type     string
 	Status   string
-	Limit    int
-	Offset   int
+	Page     billing.PageRequest
 }
 
-// ListQueueFindings returns the operator work list: severity desc (critical
-// first) then age desc (oldest first), paginated, with the unpaginated total.
-func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) ([]FindingRecord, int64, error) {
-	if filter.Limit <= 0 || filter.Limit > 500 {
-		filter.Limit = 100
-	}
-	if filter.Offset < 0 {
-		filter.Offset = 0
-	}
+// ListQueueFindings pages the operator work list: most severe first, then
+// oldest.
+func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) (billing.ListPage[FindingRecord], error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[FindingRecord]{}, err
 	}
-	params := gen.AdminListReconciliationFindingsParams{
-		MerchantID: tid.UUID(),
-		PageLimit:  int64(filter.Limit),
-		PageOffset: int64(filter.Offset),
+	limit, err := pagination.Limit(filter.Page)
+	if err != nil {
+		return billing.ListPage[FindingRecord]{}, err
+	}
+	var after queuePosition
+	present, err := pagination.Decode(filter.Page.Cursor, &after)
+	if err != nil {
+		return billing.ListPage[FindingRecord]{}, err
+	}
+	params := gen.AdminListReconciliationFindingsParams{MerchantID: tid.UUID(), RowLimit: pagination.Fetch(limit)}
+	if present {
+		params.AfterRank, params.AfterAt, params.AfterID = &after.Rank, &after.At, &after.ID
 	}
 	if filter.Status != "" {
 		params.Status = &filter.Status
@@ -485,69 +488,45 @@ func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) ([]
 	}
 	rows, err := s.DB.Gen(ctx).AdminListReconciliationFindings(ctx, params)
 	if err != nil {
-		return nil, 0, err
+		return billing.ListPage[FindingRecord]{}, err
 	}
 	out := make([]FindingRecord, 0, len(rows))
-	var total int64
 	for _, row := range rows {
-		total = row.TotalCount
-		out = append(out, FindingRecordFromRow(row.BillingReconciliationFinding))
+		out = append(out, FindingRecordFromRow(row))
 	}
-	return out, total, nil
+	return pagination.Cut(out, limit, func(f FindingRecord) any {
+		return queuePosition{Rank: severityRank(f.Severity), At: f.CreatedAt, ID: f.ID}
+	}), nil
 }
 
-// QueueGauges is the #690 dashboard header. OrphanedMembers, Freeloaders and
-// DuplicateCoverage are ALWAYS-ZERO error metrics (counts over OPEN findings
-// of the three category type sets); VerificationPressure is a live pressure
-// reading, allowed to be nonzero; Episodes is the historical/interval measure
-// (spans + error-days from the migration-067 views, approximations documented
-// there).
-type QueueGauges struct {
-	OrphanedMembers      int64                `json:"orphaned_members"`
-	Freeloaders          int64                `json:"freeloaders"`
-	DuplicateCoverage    int64                `json:"duplicate_coverage"`
-	VerificationPressure VerificationPressure `json:"verification_pressure"`
-	Episodes             EpisodeTotals        `json:"episodes"`
-	OpenBySeverity       map[string]int64     `json:"open_by_severity"`
-	TotalOpen            int64                `json:"total_open"`
+// queuePosition is the findings queue's keyset: severity rank, then age.
+type queuePosition struct {
+	Rank int32     `json:"r"`
+	At   time.Time `json:"t"`
+	ID   uuid.UUID `json:"i"`
 }
 
-// EpisodeTotals (#690): compact summary of the two episode views — the
-// historical/interval companions to the point-in-time gauges. A freeloader/
-// orphaned episode is a SPAN (access-without-payment / payment-without-access)
-// with open episodes still accruing at now().
-type EpisodeTotals struct {
-	Freeloader FreeloaderEpisodeSummary `json:"freeloader"`
-	Orphaned   EpisodeSummary           `json:"orphaned"`
+// severityRank orders the queue as its query does: critical first.
+func severityRank(s Severity) int32 {
+	switch s {
+	case SeverityCritical:
+		return 0
+	case SeverityHigh:
+		return 1
+	case SeverityMedium:
+		return 2
+	}
+	return 3
 }
 
-// EpisodeSummary: episode count, how many are still open (accruing), and the
-// total error-days across all spans.
-type EpisodeSummary struct {
-	Total     int64   `json:"total"`
-	Open      int64   `json:"open"`
-	TotalDays float64 `json:"total_days"`
-}
-
-// FreeloaderEpisodeSummary adds the `unsanctioned` split: sanctioned_dunning
-// and awaiting_verification spans are POLICY (deliberate unpaid access), never
-// failure — only unsanctioned spans indicate the state machine failed.
-type FreeloaderEpisodeSummary struct {
-	EpisodeSummary
-	Unsanctioned int64 `json:"unsanctioned"`
-}
-
-// VerificationPressure (#690/#691): subscriptions parked `unknown` whose
-// recorded paid-through has passed — fail-open standing access awaiting
-// provider verification. Computed live from the subscriptions table, NOT from
-// findings: it measures drift, not error. MaxAgeSeconds is the age of the
-// oldest lapsed paid-through; the COUNT may legitimately be nonzero, but the
-// max age trending UP means the verification machinery (pull/probe/converge)
-// is down.
-type VerificationPressure struct {
-	Count         int64 `json:"count"`
-	MaxAgeSeconds int64 `json:"max_age_seconds"`
-}
+// QueueGauges is the #690 dashboard header (billing.FindingSummary).
+type (
+	QueueGauges              = billing.FindingSummary
+	EpisodeTotals            = billing.EpisodeTotals
+	EpisodeSummary           = billing.EpisodeSummary
+	FreeloaderEpisodeSummary = billing.FreeloaderEpisodeSummary
+	VerificationPressure     = billing.VerificationPressure
+)
 
 // Gauges folds open-finding counts into the named gauges and reads the live
 // verification pressure.

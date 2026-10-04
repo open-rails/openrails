@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/table"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import type {
-  MerchantSettings,
+  MerchantConfiguration,
   MerchantWebhook,
   WebhookFormat,
 } from "@/lib/api/types"
@@ -51,7 +51,9 @@ import { adminQueries } from "@/lib/queries"
 // --- Page ------------------------------------------------------------------
 
 export function NotificationsTab() {
-  const settingsQuery = useQuery(adminQueries.merchantSettings("Load settings"))
+  const configurationQuery = useQuery(
+    adminQueries.merchantConfiguration("Load settings")
+  )
   const webhooksQuery = useQuery(adminQueries.webhooks())
 
   const hooks = webhooksQuery.data?.data ?? []
@@ -59,9 +61,9 @@ export function NotificationsTab() {
   return (
     <div className="flex flex-col gap-10">
       <NotificationEmailSection
-        key={settingsQuery.data?.alert_email ?? "∅"}
-        settings={settingsQuery.data ?? undefined}
-        loading={settingsQuery.isPending}
+        key={configurationQuery.data?.settings.alert_email ?? "∅"}
+        configuration={configurationQuery.data}
+        loading={configurationQuery.isPending}
       />
       <WebhooksSection webhooks={hooks} loading={webhooksQuery.isPending} />
     </div>
@@ -71,13 +73,13 @@ export function NotificationsTab() {
 // --- Alert email -----------------------------------------------------------
 
 function NotificationEmailSection({
-  settings,
+  configuration,
   loading,
 }: {
-  settings?: MerchantSettings
+  configuration?: MerchantConfiguration
   loading: boolean
 }) {
-  const initial = settings?.alert_email ?? ""
+  const initial = configuration?.settings.alert_email ?? ""
   const queryClient = useQueryClient()
   const updateSettings = useMutation(
     adminMutations.updateMerchantSettings(queryClient)
@@ -86,9 +88,11 @@ function NotificationEmailSection({
     defaultValues: { email: initial },
     onSubmit: async ({ value }) => {
       try {
+        if (!configuration) return
+        // An empty address clears the email channel.
         await updateSettings.mutateAsync({
-          ...(settings ?? {}),
-          alert_email: value.email.trim() || undefined,
+          revision: configuration.revision,
+          settings: { alert_email: value.email.trim() },
         })
         form.reset(value)
         toast.success(

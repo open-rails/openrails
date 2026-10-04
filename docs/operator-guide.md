@@ -91,10 +91,10 @@ OpenRails' workers converge state around that:
 | Worker health check | 5 min | seeds `billing.worker_state`, raises repair alerts when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
-(readiness; `?verbose=1` adds per-dependency detail). Readiness requires only
+(readiness; the failing dependency is logged, never answered). Readiness requires only
 Postgres, the merchants service, the River producer, a locally managed River
 consumer and auth; Redis, Vault and PSP posture are reported as `degraded`
-from cached background state and never fail it. K8s aliases `/healthz` / `/readyz`. A standalone
+from cached background state and never fail it. A standalone
 `run-server --no-workers` process remains live but not ready because it has no
 local job consumer. It still binds its request-side River producers before HTTP
 starts; a separate `run-worker` process contributes both billing and AuthKit
@@ -202,8 +202,8 @@ names a PSP gets that PSP; a request that omits `payment.rail` is routed.
 
 - **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
   serve the price.
-- **Policy**: `checkout_routing` in the merchant manifest (mode 1) or
-  `checkout_routing` on `PUT /v1/merchant/settings` (mode 2). Ordered
+- **Policy**: the `checkout_routing` merchant setting, declared under `settings:`
+  (mode 1) or applied through a configuration application (mode 2). Ordered
   rules, first match wins; each rule's `prefer` list is both the ranking and the
   whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
   `price`, `mode`, `country` — all optional, all AND-ed; a rule with no conditions is the

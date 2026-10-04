@@ -9,10 +9,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-func (c *Client) initResources() {
-	c.MerchantConfiguration = &MerchantConfigurationClient{client: c}
-}
-
 // catalogPath is the catalog the product, price and offer methods act on: the
 // creator's own (ForCatalogOwner) or the merchant's.
 func (c *Client) catalogPath() string {

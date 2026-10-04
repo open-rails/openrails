@@ -1,49 +1,24 @@
 package metrics
 
+import "github.com/open-rails/openrails/billing"
+
 // SchemaDoc is the GET /v1/merchant/metrics/schema payload: the registry as
 // the LLM-legible context document. One source of truth — the same registry
 // drives enforcement, so this cannot drift.
-type SchemaDoc struct {
-	Measures   []SchemaMeasure   `json:"measures"`
-	Dimensions []SchemaDimension `json:"dimensions"`
-	Grains     []string          `json:"grains"`
-	Deferred   []string          `json:"deferred"`
-	Caveats    []string          `json:"caveats"`
-	Examples   []SchemaExample   `json:"examples"`
-	Limits     SchemaLimits      `json:"limits"`
-	QueryShape string            `json:"query_shape"`
-}
+type SchemaDoc = billing.MetricsSchema
 
 // SchemaMeasure is one requestable measure.
-type SchemaMeasure struct {
-	Name        string   `json:"name"`
-	Class       Class    `json:"class"`
-	Unit        string   `json:"unit"`
-	Description string   `json:"description"`
-	Formula     string   `json:"formula"`
-	Dims        []string `json:"dims"`
-	Money       bool     `json:"money,omitempty"`
-}
+type SchemaMeasure = billing.MetricsMeasure
 
 // SchemaDimension is one group-by/filter axis.
-type SchemaDimension struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Values      []string `json:"values,omitempty"`
-}
+type SchemaDimension = billing.MetricsDimension
 
 // SchemaExample pairs a natural-language intent with the query JSON that
 // answers it.
-type SchemaExample struct {
-	Intent string `json:"intent"`
-	Query  Query  `json:"query"`
-}
+type SchemaExample = billing.MetricsExample
 
 // SchemaLimits are the engine clamps.
-type SchemaLimits struct {
-	MaxBuckets int `json:"max_buckets"`
-	MaxLimit   int `json:"max_limit"`
-}
+type SchemaLimits = billing.MetricsLimits
 
 func intp(v int) *int { return &v }
 

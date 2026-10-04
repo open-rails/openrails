@@ -99,8 +99,8 @@ cfg.ControlPlane = &openrails.ControlPlaneConfig{
     },
 }
 var client *openrails.Client
+cfg.SendGrid = &openrails.SendGridConfig{APIKey: key, From: openrails.EmailAddress{Name: "My Brand", Address: "noreply@my-brand.example"}}
 deps := openrails.Deps{
-    EmailSender: sender,
     // openrails-saas shape: the platform merchant's book holds the vault.
     HasVaultedPaymentMethod: func(ctx context.Context, subject string) (bool, error) {
         return client.SubjectHasVaultedPaymentMethod(ctx, platformMerchantID, subject)
@@ -167,25 +167,25 @@ merchants:
     remote_application:            # issuer-as-owner
       issuer: https://myapp.example
       jwks_uri: https://myapp.example/.well-known/jwks.json
-    profile:                       # customer-facing display
-      display_name: MyApp Billing
-      logo_url: https://myapp.example/logo.png
-      from_email: billing@myapp.example
-      support_url: https://myapp.example/support
-    invoice:                       # arrears invoicing policy (amounts in micros)
-      billing_period_boundary: calendar_month
-      collection_threshold: 50_000_000
-      monthly_floor: 1_000_000
-      delinquency_grace_days: 7    # days past due before delinquent (default 14)
+    settings:                      # the configuration API's settings document
+      profile:                     # customer-facing display
+        display_name: MyApp Billing
+        logo_url: https://myapp.example/logo.png
+        from_email: billing@myapp.example
+        support_url: https://myapp.example/support
+      billing_period_boundary: calendar_month   # arrears invoicing (amounts in micros)
+      collection_threshold: 50000000
+      monthly_floor: 1000000
+      arrears_grace_days: 7        # days past due before delinquent (default 14)
     psps:                          # operator-declared rail accounts
       mobius:
-        nmi:
-          account_id: "100001"
-          settings:
-            tokenization_key: replace-with-nmi-tokenization-key
-          secrets:
-            security_key: replace-with-nmi-security-key
-            webhook_signing_secret: replace-with-nmi-webhook-secret
+        rail: nmi
+        account_id: "100001"
+        settings:
+          tokenization_key: replace-with-nmi-tokenization-key
+        secrets:
+          security_key: replace-with-nmi-security-key
+          webhook_signing_secret: replace-with-nmi-webhook-secret
 ```
 
 Per merchant:
@@ -199,18 +199,25 @@ Per merchant:
 - `remote_application` — the host app's issuer (JWKS URI, inline static
   `jwks`, or raw `public_keys`), registered as merchant **owner**: delegated
   tokens signed by that issuer fully administer this one merchant and no other.
-- `profile` — display name, logo, from-email, support/signup URLs.
-- `invoice` — arrears invoicing policy; amounts are micros. Includes the
-  delinquency policy (`delinquency_grace_days`, `delinquency_amount_floor`) —
-  see `docs/arrears-delinquency.md` for what OpenRails enforces (new spend) and
-  what the operator must integrate (existing resources).
-- `delegated_invoker_wasted_spend_windows` — per-invoker windowed spend caps.
-- `psps.<key>.<rail>` — one entry per PSP. `key` is the manifest PSP name
-  catalog `psp_links` and checkout use ("mobius"); the rail nests inside.
-  Fields: `account_id`, `archived`, non-secret `settings`, `secrets`, and
-  (Solana) `signer`. There is NO `environment` (#882) — it is derived from the
-  deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`), so a deployment is
-  all-test or all-live; a manifest still declaring it fails loudly.
+- `settings` — the merchant's settings (`billing.MerchantSettings`), the same
+  document `GET /v1/merchant/configuration` reads and a configuration
+  application changes, with the same names, units and validation
+  ([merchant settings](api/merchant-settings.md)): `profile`, invoicing
+  (`billing_period_boundary`, `collection_threshold`, `monthly_floor`, amounts in
+  micros), the delinquency policy (`arrears_grace_days`,
+  `arrears_delinquency_floor`; see `docs/arrears-delinquency.md`),
+  `checkout_routing`, `dunning_policy`, `billing_policies`,
+  `billing_policy_bindings` and `delegated_invoker_wasted_spend_limits`
+  (windows in seconds). Omitted fields keep their stored values; a declared list
+  replaces the stored one.
+- `psps.<key>` — one entry per PSP. `key` is the manifest PSP name catalog
+  `psp_links` and checkout use ("mobius"). Fields: `rail` (`nmi`, `ccbill`,
+  `stripe`, `solana`), `account_id`, `archived`, `custodian`, non-secret
+  `settings`, `secrets`, and (Solana) `signer`. There is no `environment`: it is
+  derived from the deployment's `test_mode` (sandbox ⇒ `test`, live ⇒ `live`),
+  so a deployment is all-test or all-live.
+- `custodians.<key>` — one entry per card custodian a PSP references. Fields:
+  `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
 
 `account_id` is operator-declared, per rail (never derived from credentials at
 runtime — details in `docs/rails/*.md`):
@@ -233,7 +240,7 @@ may reference the same custodian. See
 ### Secret overlays
 
 Secret values do not belong in the committed YAML. Overlays are YAML documents
-in the manifest's own shape (`merchants.<slug>.psps.<key>.<rail>.secrets.*`),
+in the manifest's own shape (`merchants.<slug>.psps.<key>.secrets.*`),
 merged over the manifest in order (later wins) and strict-parsed with it:
 an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.

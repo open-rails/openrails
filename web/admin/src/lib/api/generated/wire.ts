@@ -6,6 +6,29 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
+export type APIHostClaim = {
+  api_host: string
+  created_at: string
+  dns_record: APIHostRecord
+}
+
+export type APIHostRecord = {
+  type: string
+  name: string
+  value: string
+}
+
+export type APIKey = {
+  id: string
+  name: string
+  role: string
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+  revoked_at: string | null
+}
+
 export type Admission = {
   request_id: string
   customer_id: string
@@ -49,6 +72,16 @@ export type AdmitParams = {
   source?: string
   expires_at?: string
   roles?: string[]
+}
+
+export type AlertWebhook = {
+  id: string
+  name: string
+  destination_host: string
+  format: "discord" | "generic" | "slack"
+  enabled: boolean
+  created_at: string
+  updated_at: string
 }
 
 export type Allowance = {
@@ -118,14 +151,14 @@ export type ArchivedPurchase = {
   detail?: string
 }
 
-export type AskEvidence = {
-  query: Query
-  grain?: string
-  range: RangeOut
-  columns: Column[] | null
-  rows: unknown[][] | null
-  compare_range?: RangeOut
-  compare_rows?: unknown[][]
+export type AskMetricsRequest = {
+  question?: string
+}
+
+export type AskResult = {
+  answer: string
+  evidence: Evidence[] | null
+  drafts?: Draft[]
 }
 
 export type Balance = {
@@ -198,6 +231,11 @@ export type CancelSubscriptionParams = {
   reason?: string
   revoke_access?: boolean
   account_deletion?: boolean
+}
+
+export type Capabilities = {
+  route_groups: Record<string, boolean> | null
+  features: Record<string, boolean> | null
 }
 
 export type CaptureParams = {
@@ -497,21 +535,21 @@ export type CollectionPaymentMethod = {
   payment_method_id: string
 }
 
-export type Column = {
-  name: string
-  kind: string
-  unit?: string
-}
-
 export type ConfirmCheckoutAttemptRequest = {
   signature?: string
   wallet?: string
 }
 
-export type CopilotAskResult = {
-  answer: string
-  evidence: Evidence[] | null
-  drafts?: Draft[]
+export type CreateAPIKeyRequest = {
+  name?: string
+  role?: string
+}
+
+export type CreateAlertWebhookRequest = {
+  name?: string
+  url?: string
+  format?: "discord" | "generic" | "slack"
+  enabled?: boolean | null
 }
 
 export type CreateCheckoutAttemptRequest = {
@@ -542,6 +580,11 @@ export type CreateEntitlementParams = {
 export type CreateInvoicePaymentParams = {
   amount?: string
   reference?: string
+}
+
+export type CreateMerchantRequest = {
+  name?: string
+  display_name?: string
 }
 
 export type CreateOffChannelPaymentParams = {
@@ -628,11 +671,16 @@ export type CreateRepriceBatchParams = {
   acknowledge_short_notice?: boolean
 }
 
-export type CreateWebhookInput = {
-  name?: string
-  url?: string
-  format?: "discord" | "generic" | "slack"
-  enabled?: boolean | null
+export type CreatedAPIKey = {
+  id: string
+  name: string
+  role: string
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+  revoked_at: string | null
+  secret: string
 }
 
 export type CreditGrant = {
@@ -743,15 +791,25 @@ export type CustomerParams = {
 }
 
 export type Dashboard = {
-  widgets: Widget[] | null
+  widgets: DashboardWidget[] | null
   is_default: boolean
-  updated_at?: string
-  updated_by?: string
+  updated_at: string | null
+  updated_by: string | null
 }
 
-export type DashboardAskResult = {
-  answer: string
-  evidence: AskEvidence[] | null
+export type DashboardGrid = {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export type DashboardWidget = {
+  id: string
+  title: string
+  viz: string
+  query: MetricsQuery
+  grid: DashboardGrid
 }
 
 export type DeclaredAdminGrant = {
@@ -947,37 +1005,44 @@ export type ExtendAdmissionParams = {
   expires_at?: string
 }
 
-export type FindingView = {
+export type Finding = {
   id: string
-  tenant_id: string
-  provider?: "ccbill" | "declared" | "nmi" | "solana" | "stripe"
-  finding_type: "pull.cancellation.capped" | "pull.charge.missing" | "pull.dispute.chargeback" | "pull.payment_method.mismatch" | "pull.refund.missing" | "pull.reversal.unlinked" | "pull.subscription.dead" | "pull.subscription.drift" | "pull.subscription.duplicate" | "pull.subscription.evidence_stale" | "pull.subscription.mismatch" | "pull.subscription.missing"
+  finding_type: string
+  provider: string | null
   subject_key: string
-  severity: "critical" | "high" | "low" | "medium"
-  status: "auto_fixed" | "fixed" | "ignored" | "reconcile_required" | "requires_review"
-  requires_review?: boolean
-  recommended_action?: string
-  evidence?: Record<string, unknown>
-  first_seen_run?: string
-  last_seen_run?: string
+  severity: string
+  status: string
+  recommended_action: string | null
+  evidence: Record<string, unknown> | null
+  recommendation: FindingRecommendation | null
   last_seen_at: string
-  resolved_at?: string
-  resolution?: string
-  resolved_by?: string
-  operator_notes?: string
+  resolved_at: string | null
+  resolution: string | null
+  resolved_by: string | null
+  operator_notes: string | null
   created_at: string
   updated_at: string
-  notified_at?: string
-  notified_severity?: string
-  recommendation?: Recommendation
 }
 
-export type FindingsListResponse = {
-  items: FindingView[] | null
-  total: number
-  limit: number
-  offset: number
-  gauges: QueueGauges
+export type FindingRecommendation = {
+  action: string
+  params: Record<string, unknown> | null
+  alternatives: FindingRecommendation[] | null
+}
+
+export type FindingResolution = {
+  finding: Finding
+  execution: Record<string, unknown> | null
+}
+
+export type FindingSummary = {
+  orphaned_members: number
+  freeloaders: number
+  duplicate_coverage: number
+  verification_pressure: VerificationPressure
+  episodes: EpisodeTotals
+  open_by_severity: Record<string, number> | null
+  total_open: number
 }
 
 export type FlatPrice = {
@@ -991,17 +1056,19 @@ export type FreeloaderEpisodeSummary = {
   unsanctioned: number
 }
 
-export type GenerateResult = {
-  query: Query
+export type GenerateWidgetRequest = {
+  prompt?: string
+  base_query?: MetricsQuery | null
+}
+
+export type GeneratedWidget = {
+  query: MetricsQuery
   title: string
   viz: string
 }
 
-export type Grid = {
-  x: number
-  y: number
-  w: number
-  h: number
+export type Health = {
+  status: "ok" | "ready"
 }
 
 export type HostEvent = {
@@ -1009,9 +1076,14 @@ export type HostEvent = {
   merchant_id: string
   type: "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "payment.settled"
   occurred_at: string
-  acknowledged_at?: string
-  payment?: PaymentSettledEvent
-  delinquency?: DelinquencyHostEvent
+  acknowledged_at: string | null
+  payment: PaymentSettledEvent | null
+  delinquency: DelinquencyHostEvent | null
+}
+
+export type InviteTeamMemberRequest = {
+  email?: string
+  role?: string
 }
 
 export type Invoice = {
@@ -1114,6 +1186,11 @@ export type MatrixCell = {
   included?: number
 }
 
+export type MerchantAPIHost = {
+  api_host: string | null
+  claim: APIHostClaim | null
+}
+
 export type MerchantBillingImportResult = {
   merchant_id: string
   digest: string
@@ -1140,6 +1217,21 @@ export type MerchantConfigurationState = {
   display_name: string
   api_host: string
   settings: MerchantSettings
+}
+
+export type MerchantName = {
+  id: string
+  name: string
+}
+
+export type MerchantNotification = {
+  id: string
+  severity: "critical" | "warning"
+  title: string
+  body: string
+  link: string | null
+  created_at: string
+  read_at: string | null
 }
 
 export type MerchantProfileInput = {
@@ -1196,6 +1288,101 @@ export type MeterRateCard = {
   allowance: Allowance | null
   created_at: string
   updated_at: string
+}
+
+export type MetricsAnswer = {
+  answer: string
+  evidence: MetricsEvidence[] | null
+}
+
+export type MetricsColumn = {
+  name: string
+  kind: string
+  unit?: string
+}
+
+export type MetricsDimension = {
+  name: string
+  description: string
+  values?: string[]
+}
+
+export type MetricsEvidence = {
+  query: MetricsQuery
+  grain?: string
+  range: MetricsResultRange
+  columns: MetricsColumn[] | null
+  rows: unknown[][] | null
+  compare_range?: MetricsResultRange
+  compare_rows?: unknown[][]
+}
+
+export type MetricsExample = {
+  intent: string
+  query: MetricsQuery
+}
+
+export type MetricsLimits = {
+  max_buckets: number
+  max_limit: number
+}
+
+export type MetricsMeasure = {
+  name: string
+  class: string
+  unit: string
+  description: string
+  formula: string
+  dims: string[] | null
+  money?: boolean
+}
+
+export type MetricsOrder = {
+  measure?: string
+  dimension?: string
+  dir?: string
+}
+
+export type MetricsQuery = {
+  measures: string[] | null
+  by: string[] | null
+  grain: string
+  range: MetricsRange | null
+  filters: Record<string, string[]> | null
+  order: MetricsOrder[] | null
+  limit: number | null
+  compare: string
+}
+
+export type MetricsRange = {
+  from?: string
+  to?: string
+  last?: string
+}
+
+export type MetricsResult = {
+  grain?: string
+  range: MetricsResultRange
+  columns: MetricsColumn[] | null
+  rows: unknown[][] | null
+  compare_range?: MetricsResultRange
+  compare_rows?: unknown[][]
+}
+
+export type MetricsResultRange = {
+  from: string
+  to: string
+}
+
+export type MetricsSchema = {
+  measures: MetricsMeasure[] | null
+  dimensions: MetricsDimension[] | null
+  grains: string[] | null
+  deferred: string[] | null
+  caveats: string[] | null
+  examples: MetricsExample[] | null
+  limits: MetricsLimits
+  query_shape: string
 }
 
 export type NextAction = {
@@ -1316,12 +1503,6 @@ export type OperationAuthorizationParams = {
   authorization_body_sha256?: string
 }
 
-export type OrderTerm = {
-  measure?: string
-  dimension?: string
-  dir?: string
-}
-
 export type PSP = {
   id: string
   key: string
@@ -1388,16 +1569,6 @@ export type PackagePrice = {
   amount?: string
   package_size?: number
   free_units?: number
-}
-
-export type PathPageOfNotification = {
-  object: string
-  data: Notification[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
 }
 
 export type PathPageOfPlatformMerchantItem = {
@@ -1807,43 +1978,11 @@ export type PurchaseReview = {
   resolved_at?: string
 }
 
-export type Query = {
-  measures: string[] | null
-  by: string[] | null
-  grain: string
-  range: QueryRange | null
-  filters: Record<string, string[]> | null
-  order: OrderTerm[] | null
-  limit: number | null
-  compare: string
-}
-
-export type QueryRange = {
-  from?: string
-  to?: string
-  last?: string
-}
-
-export type QueueGauges = {
-  orphaned_members: number
-  freeloaders: number
-  duplicate_coverage: number
-  verification_pressure: VerificationPressure
-  episodes: EpisodeTotals
-  open_by_severity: Record<string, number> | null
-  total_open: number
-}
-
 export type RailDefinition = {
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   display_name: string
   credential_keys: string[] | null
   setting_keys: string[] | null
-}
-
-export type RangeOut = {
-  from: string
-  to: string
 }
 
 export type RateCard = {
@@ -1900,12 +2039,6 @@ export type RebillCycle = {
   attempts: PaymentAttempt[] | null
 }
 
-export type Recommendation = {
-  action: string
-  params?: Record<string, unknown>
-  alternatives?: Recommendation[]
-}
-
 export type RefundPaymentParams = {
   amount?: string
   full?: boolean
@@ -1915,6 +2048,10 @@ export type RefundPaymentParams = {
 
 export type ReleaseOperationAuthorizationParams = {
   release_reference?: string
+}
+
+export type RenameMerchantRequest = {
+  name?: string
 }
 
 export type ReplacePaymentMethodCardParams = {
@@ -1993,28 +2130,14 @@ export type RepriceOutcome = {
 }
 
 export type ResolveFindingRequest = {
-  outcome?: string
+  outcome?: "approve" | "ignore"
   notes?: string
   override_params?: unknown
-}
-
-export type ResolveFindingResponse = {
-  finding: FindingView
-  execution?: Record<string, unknown>
 }
 
 export type ResolvePurchaseReviewParams = {
   decision?: "dismiss" | "refund"
   notes?: string
-}
-
-export type Result = {
-  grain?: string
-  range: RangeOut
-  columns: Column[] | null
-  rows: unknown[][] | null
-  compare_range?: RangeOut
-  compare_rows?: unknown[][]
 }
 
 export type RetryInvoiceCollectionParams = {
@@ -2029,45 +2152,16 @@ export type RevokeCreditGrantParams = {
   reason?: string
 }
 
-export type RotateWebhookURLInput = {
+export type SetAPIHostRequest = {
+  api_host?: string
+}
+
+export type SetAlertWebhookURLRequest = {
   url?: string
 }
 
-export type SchemaDimension = {
-  name: string
-  description: string
-  values?: string[]
-}
-
-export type SchemaDoc = {
-  measures: SchemaMeasure[] | null
-  dimensions: SchemaDimension[] | null
-  grains: string[] | null
-  deferred: string[] | null
-  caveats: string[] | null
-  examples: SchemaExample[] | null
-  limits: SchemaLimits
-  query_shape: string
-}
-
-export type SchemaExample = {
-  intent: string
-  query: Query
-}
-
-export type SchemaLimits = {
-  max_buckets: number
-  max_limit: number
-}
-
-export type SchemaMeasure = {
-  name: string
-  class: "additive" | "distinct" | "ratio" | "snapshot"
-  unit: string
-  description: string
-  formula: string
-  dims: string[] | null
-  money?: boolean
+export type SetDashboardRequest = {
+  widgets?: DashboardWidget[] | null
 }
 
 export type SetMeterParams = {
@@ -2088,6 +2182,10 @@ export type SetMeterRateCardParams = {
 export type SetRateOverrideParams = {
   price?: RatePrice
   allowance?: Allowance
+}
+
+export type SetTeamRoleRequest = {
+  role?: string
 }
 
 export type SolanaCheckoutConfig = {
@@ -2223,6 +2321,28 @@ export type SupportedTokensResponse = {
   tokens: TokenInfo[] | null
 }
 
+export type TeamInvite = {
+  id: string
+  role: string
+  created_at: string
+  expires_at: string | null
+  redeemed_at: string | null
+  revoked_at: string | null
+}
+
+export type TeamInviteResult = {
+  member: TeamMember | null
+  invite: TeamInvite | null
+  url: string | null
+}
+
+export type TeamMember = {
+  user_id: string
+  email: string | null
+  username: string | null
+  role: string
+}
+
 export type Tier = {
   entitlement: string
   display_name: string
@@ -2309,6 +2429,10 @@ export type TrustLevelParams = {
   trust_level?: string
 }
 
+export type UnreadCount = {
+  unread_count: number
+}
+
 export type UpdatePSPParams = {
   operation_id?: string
   expected_revision?: number
@@ -2384,6 +2508,13 @@ export type UsageRow = {
   dimensions: Record<string, number> | null
 }
 
+export type UserMerchant = {
+  id: string
+  slug: string
+  display_name: string
+  role: string
+}
+
 export type VerificationPressure = {
   count: number
   max_age_seconds: number
@@ -2412,33 +2543,14 @@ export type WastedSpendReport = {
   action: "charged" | "duplicate" | "forgiven" | "ignored" | "invoker_cutoff_tracked"
 }
 
-export type Webhook = {
-  id: string
-  merchant_id: string
-  name: string
-  destination_host: string
-  format: "discord" | "generic" | "slack"
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-export type Widget = {
-  id: string
-  title: string
-  viz: string
-  query: Query
-  grid: Grid
-}
-
-export type WorkerHealthItem = {
+export type WorkerHealth = {
   worker_kind: string
   registered_at: string
-  expected_period_seconds?: number
-  last_success_at?: string
-  last_error_at?: string
-  last_error?: string
+  expected_period_seconds: number | null
+  last_success_at: string | null
+  last_error_at: string | null
+  last_error: string | null
   consecutive_failures: number
-  last_alerted_at?: string
+  last_alerted_at: string | null
   updated_at: string
 }

@@ -56,38 +56,14 @@ type (
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.
 	MerchantDeclaration = config.MerchantDeclaration
-	// PSPConfig is one PSP of MerchantDeclaration.PSPs: a single entry keyed
-	// by its rail.
+	// PSPConfig is one PSP of MerchantDeclaration.PSPs: the merchant's account
+	// on a rail, with its credentials and settings.
 	PSPConfig = config.PSPConfig
-	// ProviderRailAccountConfig is a PSP's account on its rail: the account
-	// ID, credentials and settings.
-	ProviderRailAccountConfig = config.ProviderRailAccountConfig
 	// PSPSignerConfig selects how a Solana PSP signs.
 	PSPSignerConfig = config.PSPSignerConfig
-	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: a
-	// single entry keyed by its kind.
+	// CustodianConfig is one custodian of MerchantDeclaration.Custodians: the
+	// merchant's account with a card custodian.
 	CustodianConfig = config.CustodianConfig
-	// CustodianAccountConfig is the merchant's account with a custodian.
-	CustodianAccountConfig = config.CustodianAccountConfig
-	// MerchantProfileConfig is MerchantDeclaration.Profile: the merchant's
-	// public name, logo and links.
-	MerchantProfileConfig = config.MerchantProfileConfig
-	// InvoiceConfig is MerchantDeclaration.Invoice: when and how accrued
-	// balances are invoiced.
-	InvoiceConfig = config.InvoiceConfig
-	// CheckoutRoutingRuleConfig is one rule of
-	// MerchantDeclaration.CheckoutRouting.
-	CheckoutRoutingRuleConfig = config.CheckoutRoutingRuleConfig
-	// CheckoutRoutingMatchConfig is a routing rule's condition.
-	CheckoutRoutingMatchConfig = config.CheckoutRoutingMatchConfig
-	// BillingPolicyConfig is one named policy of
-	// MerchantDeclaration.BillingPolicies.
-	BillingPolicyConfig = config.BillingPolicyConfig
-	// BillingPolicyBindingConfig binds a trust tier, or the merchant default,
-	// to a billing policy.
-	BillingPolicyBindingConfig = config.BillingPolicyBindingConfig
-	// BudgetWindowConfig is one spend window: a duration and its limit.
-	BudgetWindowConfig = config.BudgetWindowConfig
 
 	// DBConfig is Config.DB: the Postgres connection OpenRails opens when
 	// Deps.Postgres is nil.
@@ -97,8 +73,7 @@ type (
 	RedisConfig = config.RedisConfig
 	// LoggerConfig is Config.Logger: the log level.
 	LoggerConfig = config.LoggerConfig
-	// SendGridConfig is Config.SendGrid: the account billing email is sent
-	// through.
+	// SendGridConfig is Config.SendGrid: the built-in SendGrid sender.
 	SendGridConfig = config.SendGridConfig
 	// RateLimitsConfig is Config.RateLimits: a limit per bucket name.
 	RateLimitsConfig = config.RateLimitsConfig
@@ -129,9 +104,13 @@ type (
 	ProviderCredentialSnapshot = config.ProviderCredentialSnapshot
 	// Cache is Deps.Cache: the store behind OpenRails' shared cache.
 	Cache = cache.Cache
-	// EmailSender is Deps.EmailSender: it delivers the control plane's
-	// AuthKit email.
+	// EmailSender is Deps.EmailSender: it delivers OpenRails' rendered email,
+	// billing and control plane alike.
 	EmailSender = config.EmailSender
+	// Email is one message an EmailSender delivers.
+	Email = config.Email
+	// EmailAddress is a mailbox and its display name.
+	EmailAddress = config.EmailAddress
 	// SMSSender is Deps.SMSSender: it delivers the control plane's AuthKit
 	// text messages.
 	SMSSender = config.SMSSender

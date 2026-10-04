@@ -82,7 +82,7 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 		if err != nil || n == 0 {
 			return err
 		}
-		_, err = st.createNotification(ctx, Notification{
+		err = st.createNotification(ctx, Notification{
 			Severity: alert.Severity, Title: alertTitle(alert), Body: alert.Summary,
 			Link: alert.DashboardLink, Data: alert,
 		})

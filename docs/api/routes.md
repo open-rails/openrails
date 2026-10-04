@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (242), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (238), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -14,13 +14,10 @@ Health, metrics and capability discovery. Only the standalone server serves the 
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/` | public | — | — | 200 untyped |  |
-| GET | `/health/live` | public | — | — | 200 untyped |  |
-| GET | `/health/ready` | public | — | — | 200 untyped |  |
-| GET | `/healthz` | public | — | — | 200 untyped |  |
-| GET | `/readyz` | public | — | — | 200 untyped |  |
+| GET | `/health/live` | public | — | — | 200 `Health` |  |
+| GET | `/health/ready` | public | — | — | 200 `Health` |  |
 | GET | `/metrics` | public | — | — | 200 `text/plain` |  |
-| GET | `/v1/capabilities` | public | — | — | 200 untyped |  |
+| GET | `/v1/capabilities` | public | — | — | 200 `Capabilities` |  |
 
 ## Checkout (public)
 
@@ -75,9 +72,9 @@ A customer acting on its own account.
 | GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `PaymentMethodSetup` | scope `billing_management` |
 | POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `PaymentMethodSetup` | scope `billing_management` |
 | POST | `/v1/me/billing-portal` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
-| GET | `/v1/me/notifications` | customer | — | — | 200 `PathPageOfNotification` | scope `billing_management` |
-| GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 untyped | scope `billing_management` |
-| POST | `/v1/me/notifications/{id}/read` | customer | — | — | 200 `Message` | scope `billing_management` |
+| GET | `/v1/me/notifications` | customer | — | — | 200 `ListPage<Notification>` | scope `billing_management` |
+| GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 `UnreadCount` | scope `billing_management` |
+| POST | `/v1/me/notifications/{id}/read` | customer | — | — | 200 `Notification` | scope `billing_management` |
 
 ## Merchant
 
@@ -108,7 +105,7 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/catalogs` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Catalog>` |  |
 | POST | `/v1/merchant/catalogs` | merchant | `merchant:catalog:update` | `EnsureCatalogParams` | 200 `Catalog` | catalog write |
 | GET | `/v1/merchant/catalogs/{id}` | merchant | `merchant:catalog:read` | — | 200 `Catalog` |  |
-| POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | untyped | 200 `CopilotAskResult` | when `catalog_copilot` |
+| POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | untyped | 200 `AskResult` | when `catalog_copilot` |
 | POST | `/v1/merchant/catalog/copilot/confirm` | merchant | `merchant:catalog:update` | untyped | 200 `Message` | when `catalog_copilot` |
 | POST | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:update` | `CreateProductParams` | 201 `Product` | catalog write |
 | GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Product>` |  |
@@ -217,34 +214,33 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/rails` | merchant | `merchant:psps:read` | — | 200 `ListPage<RailDefinition>` |  |
 | GET | `/v1/merchant/configuration` | merchant | `merchant:settings:read` | — | 200 `MerchantConfigurationState` |  |
 | POST | `/v1/merchant/configuration/applications` | merchant | `merchant:settings:update` | `MerchantConfigurationApplyParams` | 200 `MerchantConfigurationReceipt` |  |
-| GET | `/v1/merchant/settings` | merchant | `merchant:settings:read` | — | 200 `MerchantSettings` |  |
-| PUT | `/v1/merchant/settings` | merchant | `merchant:settings:update` | `MerchantSettings` | 200 `Message` |  |
-| GET | `/v1/merchant/api-host` | merchant | `merchant:settings:read` | — | 200 untyped | when `merchant_directory` |
-| PUT | `/v1/merchant/api-host` | merchant | `merchant:settings:update` | untyped | 200 untyped<br>202 untyped | when `merchant_directory` |
-| POST | `/v1/merchant/api-host/verify` | merchant | `merchant:settings:update` | — | 200 untyped | when `merchant_directory` |
-| GET | `/v1/merchant/webhooks` | merchant | `merchant:settings:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/webhooks` | merchant | `merchant:settings:update` | `CreateWebhookInput` | 201 `Webhook` |  |
-| DELETE | `/v1/merchant/webhooks/{id}` | merchant | `merchant:settings:update` | — | 200 untyped |  |
-| PUT | `/v1/merchant/webhooks/{id}/url` | merchant | `merchant:settings:update` | `RotateWebhookURLInput` | 200 `Webhook` |  |
+| GET | `/v1/merchant/api-host` | merchant | `merchant:settings:read` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
+| PUT | `/v1/merchant/api-host` | merchant | `merchant:settings:update` | `SetAPIHostRequest` | 200 `MerchantAPIHost`<br>202 `MerchantAPIHost` | when `merchant_directory` |
+| POST | `/v1/merchant/api-host/verify` | merchant | `merchant:settings:update` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
+| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:settings:read` | — | 200 `ListPage<AlertWebhook>` |  |
+| POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:settings:update` | `CreateAlertWebhookRequest` | 201 `AlertWebhook` |  |
+| DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:settings:update` | — | 204 — |  |
+| PUT | `/v1/merchant/alert-webhooks/{id}/url` | merchant | `merchant:settings:update` | `SetAlertWebhookURLRequest` | 200 `AlertWebhook` |  |
 | GET | `/v1/merchant/billing-archive` | merchant | `merchant:billing:export` | — | 200 `application/x-ndjson` |  |
 | POST | `/v1/merchant/billing-archive` | merchant | `merchant:billing:import` | `application/x-ndjson` | 200 `MerchantBillingImportResult` |  |
 | POST | `/v1/import/billing` | merchant | `merchant:billing:import` | `DeclaredBilling` | 200 `BillingImportResult` |  |
-| GET | `/v1/merchant/host-events` | merchant | `merchant:host-events:read` | — | 200 `HostEvent[]` |  |
-| POST | `/v1/merchant/host-events/{id}/acknowledge` | merchant | `merchant:host-events:acknowledge` | — | 200 untyped |  |
-| POST | `/v1/merchant/metrics/query` | merchant | `merchant:metrics:read` | — | 200 `Result` |  |
-| GET | `/v1/merchant/metrics/schema` | merchant | `merchant:metrics:read` | — | 200 `SchemaDoc` |  |
+| GET | `/v1/merchant/host-events` | merchant | `merchant:host-events:read` | — | 200 `ListPage<HostEvent>` |  |
+| POST | `/v1/merchant/host-events/{id}/acknowledge` | merchant | `merchant:host-events:acknowledge` | — | 200 `HostEvent` |  |
+| POST | `/v1/merchant/metrics/query` | merchant | `merchant:metrics:read` | `MetricsQuery` | 200 `MetricsResult` |  |
+| GET | `/v1/merchant/metrics/schema` | merchant | `merchant:metrics:read` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/merchant/dashboard` | merchant | `merchant:metrics:read` | — | 200 `Dashboard` |  |
-| PUT | `/v1/merchant/dashboard` | merchant | `merchant:dashboard:update` | — | 200 `Dashboard` |  |
-| GET | `/v1/merchant/notifications` | merchant | `merchant:metrics:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/notifications/unread-count` | merchant | `merchant:metrics:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/notifications/{id}/read` | merchant | `merchant:settings:update` | — | 200 untyped |  |
-| GET | `/v1/merchant/repair-alerts` | merchant | `merchant:repair-alerts:read` | — | 200 `PathPageOfNotification` |  |
-| GET | `/v1/merchant/worker-health` | merchant | `merchant:repair-alerts:read` | — | 200 `WorkerHealthItem[]` |  |
-| GET | `/v1/merchant/findings` | merchant | `merchant:repair-alerts:read` | — | 200 `FindingsListResponse` |  |
-| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:repair-alerts:read` | — | 200 `FindingView` |  |
-| POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:findings:resolve` | `ResolveFindingRequest` | 200 `ResolveFindingResponse` |  |
-| POST | `/v1/merchant/metrics/ask` | merchant | `merchant:metrics:read` | untyped | 200 `DashboardAskResult` | when `metrics_ask` |
-| POST | `/v1/merchant/dashboard/widgets/generate` | merchant | `merchant:dashboard:update` | untyped | 200 `GenerateResult` | when `dashboard_generation` |
+| PUT | `/v1/merchant/dashboard` | merchant | `merchant:dashboard:update` | `SetDashboardRequest` | 200 `Dashboard` |  |
+| GET | `/v1/merchant/notifications` | merchant | `merchant:metrics:read` | — | 200 `ListPage<MerchantNotification>` |  |
+| GET | `/v1/merchant/notifications/unread-count` | merchant | `merchant:metrics:read` | — | 200 `UnreadCount` |  |
+| POST | `/v1/merchant/notifications/{id}/read` | merchant | `merchant:metrics:read` | — | 200 `MerchantNotification` |  |
+| GET | `/v1/merchant/repair-alerts` | merchant | `merchant:repair-alerts:read` | — | 200 `ListPage<Notification>` |  |
+| GET | `/v1/merchant/worker-health` | merchant | `merchant:repair-alerts:read` | — | 200 `ListPage<WorkerHealth>` |  |
+| GET | `/v1/merchant/findings` | merchant | `merchant:repair-alerts:read` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/merchant/findings/summary` | merchant | `merchant:repair-alerts:read` | — | 200 `FindingSummary` |  |
+| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:repair-alerts:read` | — | 200 `Finding` |  |
+| POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:findings:resolve` | `ResolveFindingRequest` | 200 `FindingResolution` |  |
+| POST | `/v1/merchant/metrics/ask` | merchant | `merchant:metrics:read` | `AskMetricsRequest` | 200 `MetricsAnswer` | when `metrics_ask` |
+| POST | `/v1/merchant/dashboard/widgets/generate` | merchant | `merchant:dashboard:update` | `GenerateWidgetRequest` | 200 `GeneratedWidget` | when `dashboard_generation` |
 
 ## Owned catalog (`/v1/catalog`)
 
@@ -272,18 +268,18 @@ Merchant accounts, API keys and the team.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/merchants` | user | — | — | 200 untyped |  |
-| POST | `/v1/merchants` | user | — | untyped | 200 untyped<br>201 untyped | when `merchant_creation` |
-| PUT | `/v1/merchant/name` | merchant | `merchant:settings:update` | untyped | 200 untyped |  |
-| POST | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | untyped | 201 untyped |  |
-| GET | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | — | 200 untyped |  |
-| DELETE | `/v1/merchant/api-keys/{id}` | merchant | `merchant:credentials:manage` | — | 200 untyped |  |
-| GET | `/v1/merchant/team` | merchant | `merchant:members:read` | — | 200 untyped |  |
-| GET | `/v1/merchant/team/invites` | merchant | `merchant:members:read` | — | 200 untyped |  |
-| POST | `/v1/merchant/team/invites` | merchant | `merchant:members:manage` | untyped | 201 untyped |  |
-| DELETE | `/v1/merchant/team/invites/{id}` | merchant | `merchant:members:manage` | — | 200 untyped |  |
-| PATCH | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | untyped | 200 untyped |  |
-| DELETE | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | — | 200 untyped |  |
+| GET | `/v1/merchants` | user | — | — | 200 `ListPage<UserMerchant>` |  |
+| POST | `/v1/merchants` | user | — | `CreateMerchantRequest` | 200 `UserMerchant`<br>201 `UserMerchant` | when `merchant_creation` |
+| PUT | `/v1/merchant/name` | merchant | `merchant:settings:update` | `RenameMerchantRequest` | 200 `MerchantName` |  |
+| POST | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | `CreateAPIKeyRequest` | 201 `CreatedAPIKey` |  |
+| GET | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | — | 200 `ListPage<APIKey>` |  |
+| DELETE | `/v1/merchant/api-keys/{id}` | merchant | `merchant:credentials:manage` | — | 204 — |  |
+| GET | `/v1/merchant/team` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamMember>` |  |
+| GET | `/v1/merchant/team/invites` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamInvite>` |  |
+| POST | `/v1/merchant/team/invites` | merchant | `merchant:members:manage` | `InviteTeamMemberRequest` | 201 `TeamInviteResult` |  |
+| DELETE | `/v1/merchant/team/invites/{id}` | merchant | `merchant:members:manage` | — | 204 — |  |
+| PATCH | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | `SetTeamRoleRequest` | 200 `TeamMember` |  |
+| DELETE | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | — | 204 — |  |
 
 ## Platform (standalone)
 
@@ -291,7 +287,7 @@ The operator tier.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/platform/worker-health` | operator | `root:worker-health:read` | — | 200 `WorkerHealthItem[]` |  |
+| GET | `/v1/platform/worker-health` | operator | `root:worker-health:read` | — | 200 `ListPage<WorkerHealth>` |  |
 | GET | `/v1/platform/merchants` | operator | `root:merchants:read` | — | 200 `PathPageOfPlatformMerchantItem` |  |
 | GET | `/v1/platform/merchants/{id}` | operator | `root:merchants:read` | — | 200 `PlatformMerchantItem` |  |
 | DELETE | `/v1/platform/merchants/{id}` | operator | `root:merchants:delete` | — | 200 `PlatformMerchantItem` |  |

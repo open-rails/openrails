@@ -23,6 +23,7 @@ var inlineSQLAllowed = map[string]string{
 	"internal/merchantarchive/checks.go":  "pg_catalog and per-table checks",
 	"internal/merchants/delete.go":        "information_schema table probe",
 	"internal/migrate/migrator.go":        "River schema bootstrap, pre-schema",
+	"internal/migrate/owner.go":           "pg_catalog ownership handover, DDL",
 	"internal/modules/metrics/":           "SQL compiled from metric definitions",
 	"internal/river/job_liveness.go":      "River table, runtime schema",
 	"internal/river/job_rescue.go":        "River table, runtime schema",

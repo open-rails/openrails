@@ -4,7 +4,6 @@ import {
   api,
   apiResponse,
   type CursorEnvelope,
-  type ListEnvelope,
   type PageRequest,
 } from "./client"
 import type {
@@ -34,8 +33,9 @@ import type {
   AdminSubscription,
   CustomerBillingProfile,
   Finding,
-  FindingsListResponse,
+  FindingsGauges,
   MerchantAPIKey,
+  MerchantConfiguration,
   MerchantNotification,
   MerchantSettings,
   MerchantWebhook,
@@ -623,13 +623,15 @@ export const refreshCatalogDrift = () =>
 export const listFindings = (
   filters: { status?: string; severity?: string },
   limit: number,
-  offset: number,
   signal?: AbortSignal
 ) =>
-  api<FindingsListResponse>("/merchant/findings", {
-    query: { ...filters, limit, offset },
+  api<ListPage<Finding>>("/merchant/findings", {
+    query: { ...filters, limit },
     signal,
   })
+
+export const getFindingSummary = (signal?: AbortSignal) =>
+  api<FindingsGauges>("/merchant/findings/summary", { signal })
 
 export const getFinding = (id: string) =>
   api<Finding>(`/merchant/findings/${id}`)
@@ -644,26 +646,29 @@ export const resolveFinding = (
     { method: "POST", body: { outcome, notes } }
   )
 
-export const listRepairAlerts = (
-  limit: number,
-  offset: number,
-  signal?: AbortSignal
-) =>
-  api<ListEnvelope<RepairAlert>>("/merchant/repair-alerts", {
-    query: { limit, offset },
+export const listRepairAlerts = (limit: number, signal?: AbortSignal) =>
+  api<ListPage<RepairAlert>>("/merchant/repair-alerts", {
+    query: { limit },
     signal,
   })
 
 export const listWorkerHealth = (signal?: AbortSignal) =>
-  api<WorkerHealth[]>("/merchant/worker-health", { signal })
+  api<ListPage<WorkerHealth>>("/merchant/worker-health", { signal })
 
 // --- Settings ---
 
-export const getMerchantSettings = (signal?: AbortSignal) =>
-  api<MerchantSettings>("/merchant/settings", { signal })
+export const getMerchantConfiguration = (signal?: AbortSignal) =>
+  api<MerchantConfiguration>("/merchant/configuration", { signal })
 
-export const putMerchantSettings = (body: MerchantSettings) =>
-  api<{ message: string }>("/merchant/settings", { method: "PUT", body })
+// Changes only the settings it names, against the revision the form read.
+export const applyMerchantSettings = (revision: string, settings: MerchantSettings) =>
+  api<{ application_id: string; revision: string; replayed: boolean }>(
+    "/merchant/configuration/applications",
+    {
+      method: "POST",
+      body: { application_id: crypto.randomUUID(), expected_revision: revision, settings },
+    }
+  )
 
 // A merchant has a handful of PSPs: one page holds them all.
 export const listPSPs = (signal?: AbortSignal) =>
@@ -726,7 +731,7 @@ export const archivePSP = (id: string, allowLast = false) =>
 // --- API keys (#757) ---
 
 export const listApiKeys = (signal?: AbortSignal) =>
-  api<{ data: MerchantAPIKey[] | null }>("/merchant/api-keys", { signal })
+  api<ListPage<MerchantAPIKey>>("/merchant/api-keys", { signal })
 
 export const createApiKey = (name: string, role: string) =>
   api<MintedAPIKey>("/merchant/api-keys", {
@@ -735,18 +740,21 @@ export const createApiKey = (name: string, role: string) =>
   })
 
 export const revokeApiKey = (id: string) =>
-  api<{ revoked: boolean; id: string }>(`/merchant/api-keys/${id}`, {
-    method: "DELETE",
-  })
+  api<void>(`/merchant/api-keys/${id}`, { method: "DELETE" })
 
 // --- Team management (#760) ---
 
 export const listTeam = (signal?: AbortSignal) =>
-  api<{ data: TeamMember[] | null }>("/merchant/team", { signal })
+  api<ListPage<TeamMember>>("/merchant/team", { signal })
 
 export const listTeamInvites = (signal?: AbortSignal) =>
-  api<{ data: TeamInvite[] | null; invites_enabled: boolean }>(
-    "/merchant/team/invites",
+  api<ListPage<TeamInvite>>("/merchant/team/invites", { signal })
+
+// What the deployment serves; features.team_invites says whether an invite
+// can mint a register-and-join link.
+export const getCapabilities = (signal?: AbortSignal) =>
+  api<{ route_groups: Record<string, boolean>; features: Record<string, boolean> }>(
+    "/capabilities",
     { signal }
   )
 
@@ -757,20 +765,16 @@ export const inviteTeamMember = (email: string, role: string) =>
   })
 
 export const revokeTeamInvite = (id: string) =>
-  api<{ revoked: boolean; id: string }>(`/merchant/team/invites/${id}`, {
-    method: "DELETE",
-  })
+  api<void>(`/merchant/team/invites/${id}`, { method: "DELETE" })
 
 export const changeTeamRole = (userId: string, role: string) =>
-  api<{ user_id: string; role: string }>(`/merchant/team/${userId}`, {
+  api<TeamMember>(`/merchant/team/${userId}`, {
     method: "PATCH",
     body: { role },
   })
 
 export const removeTeamMember = (userId: string) =>
-  api<{ removed: boolean; user_id: string }>(`/merchant/team/${userId}`, {
-    method: "DELETE",
-  })
+  api<void>(`/merchant/team/${userId}`, { method: "DELETE" })
 
 export const getCreditLimit = (customerId: string, currency: string) =>
   api<CreditLimit>(
@@ -804,35 +808,34 @@ export interface WebhookRequest {
 }
 
 export const listWebhooks = (signal?: AbortSignal) =>
-  api<{ data: MerchantWebhook[] | null }>("/merchant/webhooks", { signal })
+  api<ListPage<MerchantWebhook>>("/merchant/alert-webhooks", { signal })
 
 export const createWebhook = (body: WebhookRequest) =>
-  api<MerchantWebhook>("/merchant/webhooks", { method: "POST", body })
+  api<MerchantWebhook>("/merchant/alert-webhooks", { method: "POST", body })
 
 export const rotateWebhookURL = (id: string, url: string) =>
-  api<MerchantWebhook>(`/merchant/webhooks/${id}/url`, {
+  api<MerchantWebhook>(`/merchant/alert-webhooks/${id}/url`, {
     method: "PUT",
     body: { url },
   })
 
 export const deleteWebhook = (id: string) =>
-  api<{ deleted: boolean; id: string }>(`/merchant/webhooks/${id}`, {
-    method: "DELETE",
-  })
+  api<void>(`/merchant/alert-webhooks/${id}`, { method: "DELETE" })
 
 // --- Alerting: notifications (in_app store / header bell, #736) ---
 
 export const listNotifications = (unread?: boolean, signal?: AbortSignal) =>
-  api<{ data: MerchantNotification[] | null }>("/merchant/notifications", {
+  api<ListPage<MerchantNotification>>("/merchant/notifications", {
     query: unread !== undefined ? { unread } : undefined,
     signal,
   })
 
 export const markNotificationRead = (id: string) =>
-  api<{ read: boolean; id: string }>(`/merchant/notifications/${id}/read`, {
+  api<MerchantNotification>(`/merchant/notifications/${id}/read`, {
     method: "POST",
-    body: {},
   })
 
 export const getUnreadCount = (signal?: AbortSignal) =>
-  api<{ unread: number }>("/merchant/notifications/unread-count", { signal })
+  api<{ unread_count: number }>("/merchant/notifications/unread-count", {
+    signal,
+  })

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -28,9 +31,45 @@ type merchantSettingsDocument struct {
 	bindings []billing.BillingPolicyBindingInput
 }
 
+// ValidateMerchantSettings checks a settings document as an application of
+// it would, without a database: a declaration that boots holds nothing the
+// configuration API refuses.
+func ValidateMerchantSettings(in billing.MerchantSettings) error {
+	_, err := normalizeMerchantSettings(in)
+	return err
+}
+
+// ApplyDeclaredMerchantSettings applies a startup declaration's settings to
+// the merchant in ctx, merged and validated as a configuration application
+// is: omitted fields keep their stored values.
+func ApplyDeclaredMerchantSettings(ctx context.Context, database *db.DB, settings billing.MerchantSettings) error {
+	if reflect.ValueOf(settings).IsZero() {
+		return nil
+	}
+	s := &Service{rt: &app.Runtime{DB: database}}
+	current, err := s.GetMerchantSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("read merchant settings: %w", err)
+	}
+	return s.SetMerchantSettings(ctx, mergeMerchantSettings(current, settings))
+}
+
+// ReadMerchantSettings reads the settings of the merchant in ctx, as a
+// declaration would carry them.
+func ReadMerchantSettings(ctx context.Context, database *db.DB) (billing.MerchantSettings, error) {
+	return (&Service{rt: &app.Runtime{DB: database}}).GetMerchantSettings(ctx)
+}
+
 // normalizeMerchantSettings validates the complete declaration before any write.
-func (s *Service) normalizeMerchantSettings(ctx context.Context, in billing.MerchantSettings) (merchantSettingsDocument, error) {
+func normalizeMerchantSettings(in billing.MerchantSettings) (merchantSettingsDocument, error) {
 	doc := merchantSettingsDocument{policies: make(map[string]models.BillingPolicy)}
+	if in.Profile != nil {
+		for field, raw := range map[string]string{"logo_url": in.Profile.LogoURL, "support_url": in.Profile.SupportURL, "signup_url": in.Profile.SignupURL} {
+			if raw = strings.TrimSpace(raw); raw != "" && !httpURL(raw) {
+				return doc, fmt.Errorf("profile.%s must be an http or https URL", field)
+			}
+		}
+	}
 	declaredWindows, err := merchantconfig.NormalizeBudgetWindows("merchant settings", "delegated_invoker_wasted_spend_limits", budgetScopeWindowModels(in.DelegatedInvokerWastedSpendLimits))
 	if err != nil {
 		return doc, err
@@ -80,6 +119,11 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in billing.Merc
 	return doc, nil
 }
 
+func httpURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
 // SetMerchantSettings atomically replaces the declarative merchant document.
 // Customer-specific policy bindings remain runtime state. A policy
 // referenced by such a binding cannot be removed by replacing the document.
@@ -89,7 +133,7 @@ func (s *Service) SetMerchantSettings(ctx context.Context, in billing.MerchantSe
 		return err
 	}
 	defer release()
-	doc, err := s.normalizeMerchantSettings(ctx, in)
+	doc, err := normalizeMerchantSettings(in)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidMerchantSettings, err)
 	}

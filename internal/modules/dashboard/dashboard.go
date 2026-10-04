@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
@@ -23,30 +24,13 @@ var VizTypes = []string{"stat", "line", "area", "bar", "donut", "table"}
 
 // Grid is a widget's react-grid-layout position ({i,x,y,w,h} minus the id,
 // which lives on the widget).
-type Grid struct {
-	X int `json:"x"`
-	Y int `json:"y"`
-	W int `json:"w"`
-	H int `json:"h"`
-}
+type Grid = billing.DashboardGrid
 
 // Widget is one dashboard tile: a metrics query, how to draw it, and where.
-type Widget struct {
-	ID    string        `json:"id"`
-	Title string        `json:"title"`
-	Viz   string        `json:"viz"`
-	Query metrics.Query `json:"query"`
-	Grid  Grid          `json:"grid"`
-}
+type Widget = billing.DashboardWidget
 
 // Dashboard is the GET/PUT payload.
-type Dashboard struct {
-	Widgets []Widget `json:"widgets"`
-	// IsDefault marks the seeded template (no saved row yet).
-	IsDefault bool       `json:"is_default"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-	UpdatedBy *string    `json:"updated_by,omitempty"`
-}
+type Dashboard = billing.Dashboard
 
 // MaxWidgets caps a layout; a dashboard is a page, not a database.
 const MaxWidgets = 60

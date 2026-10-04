@@ -75,6 +75,8 @@ type BootstrapOptions struct {
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
 	UserDirectory    billing.UserDirectory
 	UsernameResolver billing.UsernameResolver
+	// EmailSender replaces the sender Config.SendGrid selects.
+	EmailSender config.EmailSender
 
 	ConfiguredMerchant billing.MerchantID
 }
@@ -174,6 +176,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		UsernameResolver: func() billing.UsernameResolver {
 			if opts != nil {
 				return opts.UsernameResolver
+			}
+			return nil
+		}(),
+		EmailSender: func() config.EmailSender {
+			if opts != nil {
+				return opts.EmailSender
 			}
 			return nil
 		}(),

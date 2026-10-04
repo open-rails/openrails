@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -30,11 +31,7 @@ func NewService(database *db.DB) *Service {
 }
 
 // Column describes one result column.
-type Column struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"` // time | dimension | measure
-	Unit string `json:"unit,omitempty"`
-}
+type Column = billing.MetricsColumn
 
 // MoneyCell is a money measure cell: an exact int64 of the row's currency's
 // native units, encoded as a decimal JSON string like every other monetary
@@ -59,23 +56,13 @@ func (c *MoneyCell) UnmarshalJSON(raw []byte) error {
 }
 
 // RangeOut echoes the resolved query window.
-type RangeOut struct {
-	From time.Time `json:"from"`
-	To   time.Time `json:"to"`
-}
+type RangeOut = billing.MetricsResultRange
 
 // Result is the tabular query response: token-lean columns + rows. Leaf
 // measures aggregate exactly (int64; money and counts are bigint sums in SQL),
 // ratios divide after aggregation. A money cell is a MoneyCell, a count an
 // int64, a ratio a float64 (nil when its denominator is zero).
-type Result struct {
-	Grain        string    `json:"grain,omitempty"`
-	Range        RangeOut  `json:"range"`
-	Columns      []Column  `json:"columns"`
-	Rows         [][]any   `json:"rows"`
-	CompareRange *RangeOut `json:"compare_range,omitempty"`
-	CompareRows  [][]any   `json:"compare_rows,omitempty"`
-}
+type Result = billing.MetricsResult
 
 // Execute runs a validated plan and returns the merged tabular result.
 func (s *Service) Execute(ctx context.Context, plan *Plan) (*Result, error) {

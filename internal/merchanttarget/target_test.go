@@ -59,7 +59,7 @@ func TestSelectorFailures(t *testing.T) {
 		{"directory outage", http.Header{merchant.SelectorHeader: {"shop"}}, &directory{err: errors.New("db down")}, 503},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
+			r := httptest.NewRequest("GET", "/v1/merchant/configuration", nil)
 			for k, v := range tc.headers {
 				r.Header[http.CanonicalHeaderKey(k)] = v
 			}
@@ -98,7 +98,7 @@ func TestIDSelectionPresentsTheStoredName(t *testing.T) {
 	id := billing.MerchantID(uuid.New())
 	group := uuid.NewString()
 	d := &directory{m: &merchants.Merchant{ID: id, Slug: "current", Status: merchants.StatusActive, PermissionGroupID: group}}
-	r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
+	r := httptest.NewRequest("GET", "/v1/merchant/configuration", nil)
 	r.Header.Set(merchant.SelectorHeader, "id:"+id.String())
 	target, err := Resolve(r.Context(), r, d, billing.MerchantID{}, "")
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestIDSelectionPresentsTheStoredName(t *testing.T) {
 func TestBindingMismatchRefusedBeforeDirectoryLookup(t *testing.T) {
 	bound, selected := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	d := &directory{}
-	r := httptest.NewRequest("GET", "/v1/merchant/settings", nil)
+	r := httptest.NewRequest("GET", "/v1/merchant/configuration", nil)
 	r.Header.Set(merchant.SelectorHeader, "id:"+selected.String())
 	gate := requireGate(t, func() error { _, err := Resolve(r.Context(), r, d, bound, ""); return err }(), 409)
 	require.Contains(t, gate.Message, bound.String())
@@ -118,7 +118,7 @@ func TestBindingMismatchRefusedBeforeDirectoryLookup(t *testing.T) {
 
 	// A slug that resolves to a different book than the bound one is also refused.
 	d = &directory{m: &merchants.Merchant{ID: selected, Slug: "other", Status: merchants.StatusActive}}
-	r = httptest.NewRequest("GET", "/v1/merchant/settings", nil)
+	r = httptest.NewRequest("GET", "/v1/merchant/configuration", nil)
 	r.Header.Set(merchant.SelectorHeader, "other")
 	_, err := Resolve(r.Context(), r, d, bound, "")
 	requireGate(t, err, 409)

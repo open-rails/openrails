@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -61,6 +62,11 @@ type Config struct {
 	// Schema is the Postgres schema OpenRails' tables live in. Empty is
 	// "billing".
 	Schema string
+	// SchemaOwner is the role Migrate hands the schema and everything in it
+	// to, when the logins OpenRails runs as inherit a shared owner rather than
+	// being the migrating role. The role must exist. Empty: the migrating role
+	// owns what it creates.
+	SchemaOwner string
 	// River selects who runs the job fleet. Zero is RiverManaged.
 	River RiverOwnership
 	// RiverSchema is the managed fleet's schema (default public). A host-owned
@@ -94,7 +100,9 @@ type Config struct {
 	Redis *RedisConfig
 	// Logger sets the log level.
 	Logger *LoggerConfig
-	// SendGrid sends billing email; nil sends none.
+	// SendGrid selects the built-in SendGrid sender for billing and
+	// control-plane email when Deps.EmailSender is nil; with neither, OpenRails
+	// sends no email.
 	SendGrid *SendGridConfig
 	// RateLimits are the per-bucket request limits; nil takes the built-in
 	// defaults.
@@ -726,7 +734,7 @@ type SolanaRailConfig struct {
 // declared custodian: who holds the card, under what tenant identity, and the
 // credentials to detokenize it into a gateway. It is resolved from ONE
 // custodians row and may be shared by every PSP that references it — the
-// gateway credentials themselves stay on the rail block, one source of truth.
+// gateway credentials themselves stay on the PSP, one source of truth.
 type ResolvedCustodian struct {
 	// Key is the merchant's name for this custodian (custodians.key).
 	Key string
@@ -980,9 +988,13 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 	return nil
 }
 
-// RateLimitsConfig maps a bucket name to its limit; "default" covers unlisted
-// buckets.
+// RateLimitsConfig maps a bucket to its limit: subscribe, checkout, webhook
+// or payment. A bucket left out is not limited; other routes never are (a
+// per-address ceiling belongs to the proxy in front of OpenRails).
 type RateLimitsConfig map[string]*RateLimit
+
+// RateLimitBuckets are the buckets RateLimitsConfig may name.
+var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook"}
 
 // Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
 // mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
@@ -1002,10 +1014,12 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeReadOnly: true,
 }
 
-// SendGridConfig is the SendGrid account billing email is sent through. The
-// sender address and display name are each merchant's own.
+// SendGridConfig is the SendGrid account OpenRails' email is sent through.
+// Billing email is sent from the merchant's profile from_email when it has
+// one; From is the deployment's own address, for everything else.
 type SendGridConfig struct {
 	APIKey string
+	From   EmailAddress
 }
 
 // LoggerConfig sets the log level: debug, info, warn or error.
@@ -1118,6 +1132,13 @@ func Validate(cfg *Config) error {
 
 	if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
 		return fmt.Errorf("rate_limits is required unless rate_limits_disabled is explicitly set for a host-owned limiter")
+	}
+	if cfg.RateLimits != nil {
+		for bucket := range *cfg.RateLimits {
+			if !slices.Contains(RateLimitBuckets, bucket) {
+				return fmt.Errorf("rate_limits.%s is not a bucket (%s); a per-address ceiling belongs to the proxy in front of OpenRails", bucket, strings.Join(RateLimitBuckets, ", "))
+			}
+		}
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
@@ -1686,8 +1707,6 @@ func DefaultRateLimits() *RateLimitsConfig {
 		// floor, not the primary control.
 		"webhook": &RateLimit{RequestsPerMinute: 1200},
 		"payment": &RateLimit{RequestsPerMinute: 40},
-		// SPA and NAT friendly: several users behind one address.
-		"default": &RateLimit{RequestsPerMinute: 300},
 	}
 }
 

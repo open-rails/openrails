@@ -1,84 +1,105 @@
 package handlers
 
 import (
-	"net/http"
-	"strconv"
+	"errors"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/query"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
+// MyNotificationsQuery is the customer's notification list query.
+type MyNotificationsQuery struct {
+	Seen *bool `form:"seen"`
+}
+
+// customerScope is the merchant and customer a /me request acts for.
+func customerScope(r *httprequest.Request) (uuid.UUID, uuid.UUID, bool) {
+	merchantID, err := merchant.Require(r.Request.Context())
+	if err != nil {
+		writeRefusal(r, err, "merchant scope required")
+		return uuid.Nil, uuid.Nil, false
+	}
+	customer, err := billing.ParseCustomerID(r.GetUser().ID)
+	if err != nil || customer.IsZero() {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
+		return uuid.Nil, uuid.Nil, false
+	}
+	return merchantID.UUID(), customer.UUID(), true
+}
+
+// GetNotifications handles GET /v1/me/notifications: the customer's
+// notifications, newest first.
 func GetNotifications(r *httprequest.Request) {
-	user := r.GetUser()
-	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-
-	var seen *bool
-	switch r.Request.URL.Query().Get("seen") {
-	case "true":
-		v := true
-		seen = &v
-	case "false":
-		v := false
-		seen = &v
-	}
-
-	q := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
-		Limit:   limit,
-		Offset:  offset,
-		Filters: subscriptions.GetNotificationsFilters{UserID: user.ID, Seen: seen},
-	}
-	items, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve notifications")
+	ctx := r.Request.Context()
+	var query MyNotificationsQuery
+	if !r.BindQuery(&query) {
 		return
 	}
-	r.SuccessJSONPaginated(notificationViews(items), q.TotalItems, limit, offset)
-}
-
-func notificationViews(items []*models.NotificationQueue) []billing.Notification {
-	out := make([]billing.Notification, 0, len(items))
-	for _, n := range items {
-		out = append(out, n.View())
+	page, ok := r.Page()
+	if !ok {
+		return
 	}
-	return out
+	merchantID, customerID, ok := customerScope(r)
+	if !ok {
+		return
+	}
+	notes, err := customerNotificationPage(page, func(afterAt *time.Time, afterID *uuid.UUID, fetch int32) ([]gen.BillingNotification, error) {
+		return r.State.DB.Gen(ctx).ListCustomerNotifications(ctx, gen.ListCustomerNotificationsParams{
+			MerchantID: merchantID, CustomerID: customerID, Seen: query.Seen, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		})
+	})
+	if err != nil {
+		writeRefusal(r, err, "list notifications failed")
+		return
+	}
+	r.SuccessJSON(notes)
 }
 
+// MarkNotificationRead handles POST /v1/me/notifications/{id}/read.
 func MarkNotificationRead(r *httprequest.Request) {
-	user := r.GetUser()
-	id, err := uuid.Parse(r.Param("id"))
+	ctx := r.Request.Context()
+	id, ok := pathID(r, billing.ParseNotificationID)
+	if !ok {
+		return
+	}
+	merchantID, customerID, ok := customerScope(r)
+	if !ok {
+		return
+	}
+	row, err := r.State.DB.Gen(ctx).MarkCustomerNotificationRead(ctx, gen.MarkCustomerNotificationReadParams{MerchantID: merchantID, CustomerID: customerID, ID: id.UUID()})
+	if errors.Is(err, pgx.ErrNoRows) {
+		r.ErrorCode(billing.CodeResourceNotFound, "")
+		return
+	}
 	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "Invalid notification ID")
+		r.InternalError("mark notification read failed", err)
 		return
 	}
-	if err := r.State.UserSubscriptionService.MarkNotificationRead(r.Request.Context(), user.ID, id); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to mark notification read")
+	n, err := models.NotificationFromGen(row)
+	if err != nil {
+		r.InternalError("decode notification failed", err)
 		return
 	}
-	r.SuccessJSONMessage("notification marked as read")
+	r.SuccessJSON(n.View())
 }
 
+// GetUnreadNotificationCount handles GET /v1/me/notifications/unread-count.
 func GetUnreadNotificationCount(r *httprequest.Request) {
-	user := r.GetUser()
-	seen := false
-	q := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
-		Limit:   1,
-		Offset:  0,
-		Filters: subscriptions.GetNotificationsFilters{UserID: user.ID, Seen: &seen},
-	}
-	if _, _, err := r.State.UserSubscriptionService.GetUserNotifications(r.Request.Context(), user.ID, q); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve notifications")
+	ctx := r.Request.Context()
+	merchantID, customerID, ok := customerScope(r)
+	if !ok {
 		return
 	}
-	r.SuccessJSON(map[string]any{"unread_count": q.TotalItems})
+	count, err := r.State.DB.Gen(ctx).CountUnreadCustomerNotifications(ctx, gen.CountUnreadCustomerNotificationsParams{MerchantID: merchantID, CustomerID: customerID})
+	if err != nil {
+		r.InternalError("count unread notifications failed", err)
+		return
+	}
+	r.SuccessJSON(billing.UnreadCount{UnreadCount: count})
 }

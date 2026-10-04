@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -278,8 +279,9 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 		{"subscription_id": victim.sub.String()},
 		{"customer_id": victim.c.id},
 	} {
-		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/findings/"+finding+"/resolve", map[string]any{"outcome": "approve", "notes": "x", "override_params": override})
+		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/findings/fnd_"+finding+"/resolve", map[string]any{"outcome": "approve", "notes": "x", "override_params": override})
 		require.Equal(t, http.StatusBadRequest, status, "%v %v", override, body)
+		require.Contains(t, fmt.Sprint(body), "override_params", "refused for its override, not its id")
 	}
 	w.settle()
 	got, err := w.client[embedded].GetPayment(t.Context(), payment.ID)
@@ -305,10 +307,8 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		rt, err := openrails.New(t.Context(), openrails.Config{
 			Schema: w.schema, River: openrails.RiverHostOwned,
 			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
-			DB: &openrails.DBConfig{URL: w.dsn},
-			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
-				"stripe": {"stripe": {AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}},
-			}},
+			DB:       &openrails.DBConfig{URL: w.dsn},
+			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}}},
 		}, openrails.Deps{Postgres: w.pool, StripeTransport: recorder, Clock: w.clock})
 		if err != nil {
 			t.Logf("refused at construction: %v", err)
@@ -334,8 +334,8 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 	})
 
 	t.Run("merchant-configured Collect.js origin", func(t *testing.T) {
-		psps := map[string]openrails.PSPConfig{"nmi": {"nmi": {AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
-			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}}
+		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
+			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, w.auth, psps)
 		cfg, err := r.client.GetCheckoutConfig(t.Context(), billing.CheckoutConfigQuery{})
 		require.NoError(t, err)

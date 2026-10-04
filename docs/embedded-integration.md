@@ -97,6 +97,7 @@ explicit:
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
 | `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Merchant`, delegated credentials). The in-process Client writes its own catalog without it. A declared `Catalog` stays read-only either way. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
+| `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`), for billing and control-plane mail alike. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.EmailSender`, OpenRails sends no email. |
 
 | Deps field | Meaning |
 |---|---|
@@ -107,7 +108,8 @@ explicit:
 | `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
 | `ConsoleAssets` | A host-built admin console (section 6). |
 | `UserExists`, `UserEmail`, `ResolveUsername` | Optional identity lookups for billing notices and the CCBill username bridge. |
-| `EmailSender`, `SMSSender`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
+| `EmailSender` | Your own sender for all of OpenRails' rendered email, billing and control plane; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
+| `SMSSender`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
 
 Under `Sandbox` every rail routes to its test environment and live credentials
@@ -181,14 +183,18 @@ process, never the age of a live job.
 
 `Config.Merchant` is create-if-missing, reconcile-if-present on every boot,
 before routes or workers can observe it. The fields are the merchant manifest's
-(same shape as `config/merchants_config.example.yaml`):
+(same shape as `config/merchants_config.example.yaml`). `Settings` is the
+`billing.MerchantSettings` document the configuration API reads and applies:
+one shape, one validator, in YAML and over the API.
 
 ```go
 cfg.Merchant = openrails.MerchantDeclaration{
     Slug:        "myapp",
     DisplayName: "My App",
-    Profile: openrails.MerchantProfileConfig{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
-    Invoice: &openrails.InvoiceConfig{BillingPeriodBoundary: "calendar_month"}, // amounts in micros
+    Settings: billing.MerchantSettings{
+        Profile:                &billing.MerchantProfileInput{FromEmail: "billing@myapp.example", SupportURL: "https://myapp.example/support"},
+        InvoiceBillingBoundary: "calendar_month",
+    },
     PSPs: map[string]openrails.PSPConfig{ // PSP key -> rail -> account
         "my-nmi-sandbox": {"nmi": {
             AccountID: "000000", // NMI dashboard "Gateway ID"
@@ -217,7 +223,7 @@ parses one merchant strictly (unknown fields refused); set its `Slug`.
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving
 archived accounts. Deliberate metadata changes use
-`Client.MerchantConfiguration.Apply` with a stable application ID and reviewed
+`Client.ApplyMerchantConfiguration` with a stable application ID and reviewed
 revision. Imported billing facts attributed to a PSP without credentials need
 its identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
 during setup.
@@ -383,7 +389,7 @@ the binary was built with one. See [admin-console.md](admin-console.md).
 ### 7. Calling the engine
 
 ```go
-if err := client.Verify(ctx); err != nil { return err } // fail fast at boot
+if err := client.Ready(ctx); err != nil { return err } // fail fast at boot
 ```
 
 The shared concrete `*openrails.Client`, grouped by job:
@@ -392,7 +398,8 @@ The shared concrete `*openrails.Client`, grouped by job:
 |---|---|
 | Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmission`, `ExtendAdmission`, `ReportWastedSpend` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle), `GetUsage` |
-| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
+| Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
+| Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `HasEntitlement`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `CheckCatalogDrift`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs` |
@@ -456,8 +463,9 @@ selectors require the same operation permission; neither acts as authorization.
 
 A hosted product runs OpenRails' own AuthKit control plane instead of bringing
 its own auth: `Config.ControlPlane` (issuer and keys in `Auth`, `HostedPosture`,
-`MerchantCreation`) with `Deps.EmailSender`/`SMSSender` (AuthKit's
-`adapters/twilio` provides both). `Routes` is then the standalone surface
+`MerchantCreation`). Its AuthKit mail goes through the deployment's one email
+sender (`Config.SendGrid` or `Deps.EmailSender`), rendered; text goes through
+`Deps.SMSSender` (AuthKit's `adapters/twilio` provides one). `Routes` is then the standalone surface
 (billing, AuthKit and the admin console), mounted at the router's root
 (`RoutesRequireRoot`); `HTTP.CustomerRoutes` may add delegated customer
 profiles. Its workers join the same fleet through `RiverJobs`.

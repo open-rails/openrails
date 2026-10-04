@@ -30,7 +30,6 @@ type MerchantTeamManager interface {
 	ListMerchantTeam(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantTeamMember, error)
 	InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor iam.Actor) (controlplane.MerchantTeamInviteResult, error)
 	ListMerchantTeamInvites(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantTeamInvite, error)
-	InvitesEnabled() bool
 	RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error)
 	ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor iam.Actor) error
 	RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor iam.Actor) error
@@ -58,7 +57,7 @@ func MerchantListTeam(svc MerchantTeamManager) func(*httprequest.Request) {
 			teamServiceError(r, err, "failed to list team")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"data": members})
+		r.SuccessJSON(billing.ListPage[billing.TeamMember]{Items: members})
 	}
 }
 
@@ -72,10 +71,7 @@ func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 		if !ok {
 			return
 		}
-		var req struct {
-			Email string `json:"email"`
-			Role  string `json:"role"`
-		}
+		var req billing.InviteTeamMemberRequest
 		if !r.BindJSON(&req) {
 			return
 		}
@@ -125,7 +121,7 @@ func MerchantListTeamInvites(svc MerchantTeamManager) func(*httprequest.Request)
 			teamServiceError(r, err, "failed to list invites")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"data": invites, "invites_enabled": svc.InvitesEnabled()})
+		r.SuccessJSON(billing.ListPage[billing.TeamInvite]{Items: invites})
 	}
 }
 
@@ -152,7 +148,7 @@ func MerchantRevokeTeamInvite(svc MerchantTeamManager) func(*httprequest.Request
 				"no pending invite with that id in this merchant"))
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"revoked": true, "id": id})
+		r.NoContent()
 	}
 }
 
@@ -170,9 +166,7 @@ func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) 
 				"user id is required"))
 			return
 		}
-		var req struct {
-			Role string `json:"role"`
-		}
+		var req billing.SetTeamRoleRequest
 		if !r.BindJSON(&req) {
 			return
 		}
@@ -188,7 +182,18 @@ func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) 
 			teamMutationError(r, err, "failed to change role")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"user_id": userID, "role": role.Name()})
+		members, err := svc.ListMerchantTeam(r.Request.Context(), mid)
+		if err != nil {
+			teamServiceError(r, err, "failed to list team")
+			return
+		}
+		for _, m := range members {
+			if m.UserID == userID {
+				r.SuccessJSON(m)
+				return
+			}
+		}
+		r.ErrorCode(billing.CodeResourceNotFound, "")
 	}
 }
 
@@ -216,7 +221,7 @@ func MerchantRemoveTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 			teamMutationError(r, err, "failed to remove team member")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"removed": true, "user_id": userID})
+		r.NoContent()
 	}
 }
 

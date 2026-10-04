@@ -111,7 +111,6 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/reconcile/cancel_budget.go:ratioOf":                  "remote/local roster-size ratio emitted as an alerting metric, not an amount",
 		"internal/reconcile/cancel_budget.go:Implausible":              "compares two roster COUNTS against the ratio",
 		"internal/reconcile/engine.go:Engine":                          "CircuitBreakerRatio is the roster-size ratio above",
-		"internal/reconcile/store.go:EpisodeSummary":                   "TotalDays is an error-day DURATION total, not an amount",
 		"internal/reconcile/mutations.go:mutationRecordsForFinding":    "decodes rows_affected from evidence — a ROW COUNT",
 
 		// --- Not amounts at all -------------------------------------------

@@ -1,65 +1,59 @@
 package handlers
 
 import (
-	"errors"
-	"net/http"
-	"strconv"
-
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	service "github.com/open-rails/openrails/internal/service"
 )
 
 func writeHostEventError(r *httprequest.Request, err error) {
-	var status *billing.StatusError
-	if errors.As(err, &status) {
-		r.JSON(status.Status, map[string]any{"error": status.ErrorDetails})
-		return
-	}
-	r.ErrorJSON(http.StatusInternalServerError, "host event operation failed")
+	writeRefusal(r, err, "host event operation failed")
 }
 
+// HostEventsQuery is the host event list's filters.
+type HostEventsQuery struct {
+	Type                string `form:"type"`
+	IncludeAcknowledged bool   `form:"include_acknowledged"`
+	PaymentID           string `form:"payment_id"`
+}
+
+// ServiceListHostEvents handles GET /v1/merchant/host-events.
 func ServiceListHostEvents(r *httprequest.Request) {
+	var q HostEventsQuery
+	if !r.BindQuery(&q) {
+		return
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	req := billing.ListHostEventsRequest{PageRequest: page, Type: billing.HostEventType(q.Type), IncludeAcknowledged: q.IncludeAcknowledged}
+	if q.PaymentID != "" {
+		id, err := billing.ParsePaymentID(q.PaymentID)
+		if err != nil || id.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "payment_id is invalid").WithParam("payment_id"))
+			return
+		}
+		req.PaymentID = id
+	}
 	svc, err := service.New(r.State)
 	if err != nil {
 		writeHostEventError(r, err)
 		return
 	}
-	options := billing.HostEventListOptions{Type: billing.HostEventType(r.Query("type"))}
-	if value := r.Query("limit"); value != "" {
-		options.Limit, err = strconv.Atoi(value)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid limit")
-			return
-		}
-	}
-	if value := r.Query("include_acknowledged"); value != "" {
-		options.IncludeAcknowledged, err = strconv.ParseBool(value)
-		if err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid include_acknowledged")
-			return
-		}
-	}
-	if value := r.Query("payment_id"); value != "" {
-		options.PaymentID, err = billing.ParsePaymentID(value)
-		if err != nil || options.PaymentID.IsZero() {
-			r.ErrorJSON(http.StatusBadRequest, "invalid payment_id")
-			return
-		}
-	}
-	events, err := svc.ListHostEvents(r.Request.Context(), options)
+	events, err := svc.ListHostEvents(r.Request.Context(), req)
 	if err != nil {
 		writeHostEventError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, events)
+	r.SuccessJSON(events)
 }
 
+// ServiceAcknowledgeHostEvent handles POST /v1/merchant/host-events/{id}/acknowledge.
 func ServiceAcknowledgeHostEvent(r *httprequest.Request) {
-	id, err := uuid.Parse(r.Param("id"))
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, "invalid host event id")
+	id, ok := pathID(r, billing.ParseHostEventID)
+	if !ok {
 		return
 	}
 	svc, err := service.New(r.State)
@@ -67,9 +61,10 @@ func ServiceAcknowledgeHostEvent(r *httprequest.Request) {
 		writeHostEventError(r, err)
 		return
 	}
-	if err := svc.AcknowledgeHostEvent(r.Request.Context(), id); err != nil {
+	event, err := svc.AcknowledgeHostEvent(r.Request.Context(), id)
+	if err != nil {
 		writeHostEventError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, map[string]bool{"acknowledged": true})
+	r.SuccessJSON(event)
 }

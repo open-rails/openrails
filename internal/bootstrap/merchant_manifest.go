@@ -414,12 +414,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	if found && !req.Options.Overwrite {
 		mt.DisplayName = ""
 		mt.APIHost = ""
-		mt.Profile = MerchantProfileConfig{}
-		mt.Invoice = nil
-		mt.DelegatedInvokerWastedSpendWindows = nil
-		mt.CheckoutRouting = nil
-		mt.BillingPolicies = nil
-		mt.BillingPolicyBindings = nil
+		mt.Settings = billing.MerchantSettings{}
 	}
 	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt.MerchantDeclaration, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
@@ -572,25 +567,9 @@ const DefaultMerchantConfigManifestPath = merchantbootstrap.DefaultMerchantConfi
 
 var validateMerchantSecretOverlay = merchantbootstrap.ValidateMerchantSecretOverlay
 var rejectRenamedMerchantConfigKeys = merchantbootstrap.RejectRenamedMerchantConfigKeys
-var mergeMerchantProfileConfig = merchantbootstrap.MergeMerchantProfileConfig
-var mergeInvoiceConfig = merchantbootstrap.MergeInvoiceConfig
-var mergeCustodianAccountConfig = merchantbootstrap.MergeCustodianAccountConfig
-var mergeProviderRailAccountConfig = merchantbootstrap.MergeProviderRailAccountConfig
 
-type BillingPolicyConfig = config.BillingPolicyConfig
-type BillingPolicyBindingConfig = config.BillingPolicyBindingConfig
-type CheckoutRoutingRuleConfig = config.CheckoutRoutingRuleConfig
-type CheckoutRoutingMatchConfig = config.CheckoutRoutingMatchConfig
-
-var checkoutRoutingRules = merchantbootstrap.CheckoutRoutingRules
-
-type InvoiceConfig = config.InvoiceConfig
-type BudgetWindowConfig = config.BudgetWindowConfig
-type MerchantProfileConfig = config.MerchantProfileConfig
 type PSPConfig = config.PSPConfig
 type CustodianConfig = config.CustodianConfig
-type CustodianAccountConfig = config.CustodianAccountConfig
-type ProviderRailAccountConfig = config.ProviderRailAccountConfig
 type PSPSignerConfig = config.PSPSignerConfig
 type MerchantManifestReconcileOptions = merchantbootstrap.MerchantManifestReconcileOptions
 type ManifestProviderIdentityResolver = merchantbootstrap.ManifestProviderIdentityResolver
@@ -611,10 +590,7 @@ var reconcileManifestCustodians = merchantbootstrap.ReconcileManifestCustodians
 var nonNilSettings = merchantbootstrap.NonNilSettings
 var resolveManifestCustodianReference = merchantbootstrap.ResolveManifestCustodianReference
 var reconcileManifestMerchantConfiguration = merchantbootstrap.ReconcileManifestMerchantConfiguration
-var reconcileManifestBillingPolicies = merchantbootstrap.ReconcileManifestBillingPolicies
-var manifestBudgetWindows = merchantbootstrap.ManifestBudgetWindows
 var pruneManifestSecrets = merchantbootstrap.PruneManifestSecrets
-var hasManifestProfile = merchantbootstrap.HasManifestProfile
 
 type resolvedManifestRailAccount = merchantbootstrap.ResolvedManifestRailAccount
 

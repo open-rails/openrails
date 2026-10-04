@@ -10,7 +10,7 @@ import (
 // for the customer's own; GET /v1/merchant/repair-alerts for the merchant's
 // system_alert rows).
 type Notification struct {
-	ID         uuid.UUID        `json:"id"`
+	ID         NotificationID   `json:"id"`
 	CustomerID string           `json:"customer_id"`
 	EventType  string           `json:"event_type"`
 	Data       NotificationData `json:"data"`

@@ -16,18 +16,18 @@ func TestPSPFromEnv(t *testing.T) {
 		"STRIPE_PUBLISHABLE_KEY": "pk_test_1", "STRIPE_WEBHOOK_SIGNING_SECRET_THIN": "", "STRIPE_UNRELATED": "x",
 	}))
 	require.NoError(t, err)
-	require.Equal(t, PSPConfig{"stripe": {AccountID: "acct_1",
+	require.Equal(t, PSPConfig{Rail: "stripe", AccountID: "acct_1",
 		Secrets:  map[string]string{"secret_key": "sk_test_1", "webhook_signing_secret": "whsec_1"},
-		Settings: map[string]any{"publishable_key": "pk_test_1"}}}, got, "unset optional slots and unknown variables are omitted")
+		Settings: map[string]any{"publishable_key": "pk_test_1"}}, got, "unset optional slots and unknown variables are omitted")
 
 	got, err = PSPFromEnv("nmi-eu", envLookup(map[string]string{
 		"NMI_EU_RAIL": "NMI", "NMI_EU_ACCOUNT_ID": "123", "NMI_EU_SECURITY_KEY": "s", "NMI_EU_WEBHOOK_SIGNING_SECRET": "w",
 		"NMI_EU_TOKENIZATION_KEY": "t", "NMI_EU_ENDPOINT_DEPLOYMENT": "gateway",
 	}))
 	require.NoError(t, err)
-	require.Equal(t, PSPConfig{"nmi": {AccountID: "123",
+	require.Equal(t, PSPConfig{Rail: "nmi", AccountID: "123",
 		Secrets:  map[string]string{"security_key": "s", "webhook_signing_secret": "w"},
-		Settings: map[string]any{"tokenization_key": "t", "endpoint_deployment": "gateway"}}}, got, "the key names the variables; RAIL selects the rail")
+		Settings: map[string]any{"tokenization_key": "t", "endpoint_deployment": "gateway"}}, got, "the key names the variables; RAIL selects the rail")
 
 	for name, tc := range map[string]struct {
 		key  string

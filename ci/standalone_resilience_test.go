@@ -40,8 +40,8 @@ merchants:
     display_name: Standalone
     psps:
       solana:
-        solana:
-          signer: { mode: vault_transit, key: `+transitKey+` }
+        rail: solana
+        signer: { mode: vault_transit, key: `+transitKey+` }
 `), 0o600))
 
 	boot := func() (*openrails.Client, error) {

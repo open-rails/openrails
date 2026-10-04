@@ -92,7 +92,7 @@ func (f *stripeFake) dashboardRefund(chargeID string, amount int64) {
 
 func (w *world) setProviderRefundAccess(policy string) {
 	w.t.Helper()
-	require.NoError(w.t, w.client[embedded].SetMerchantSettings(w.t.Context(), billing.MerchantSettings{ProviderRefundAccess: &policy}))
+	require.NoError(w.t, w.applySettings(w.t.Context(), billing.MerchantSettings{ProviderRefundAccess: &policy}))
 }
 
 // #1080 item 5: a refund made in the provider's own dashboard follows the

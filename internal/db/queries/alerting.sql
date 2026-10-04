@@ -38,15 +38,18 @@ RETURNING *;
 
 -- name: ListMerchantNotifications :many
 SELECT * FROM billing.notifications
-WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant'
   AND (NOT sqlc.arg(unread_only)::boolean OR read_at IS NULL)
-ORDER BY created_at DESC, id
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: MarkMerchantNotificationRead :execrows
+-- name: MarkMerchantNotificationRead :one
 UPDATE billing.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id() AND id = $1;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant' AND id = sqlc.arg(id)::uuid
+RETURNING *;
 
 -- name: CountUnreadMerchantNotifications :one
-SELECT count(*) FROM billing.notifications WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id() AND read_at IS NULL;
+SELECT count(*) FROM billing.notifications
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant' AND read_at IS NULL;

@@ -12,12 +12,12 @@ func TestParseMerchantDeclarationIsStrict(t *testing.T) {
 display_name: Host One
 psps:
   mobius:
-    nmi:
-      account_id: "100001"
-      secrets: {security_key: sk, webhook_signing_secret: whs}
+    rail: nmi
+    account_id: "100001"
+    secrets: {security_key: sk, webhook_signing_secret: whs}
 `))
 	require.NoError(t, err)
-	require.Equal(t, "100001", m.PSPs["mobius"]["nmi"].AccountID)
+	require.Equal(t, "100001", m.PSPs["mobius"].AccountID)
 
 	for doc, want := range map[string]string{
 		"display_name: X\nacounts: {}\n":                "acounts",

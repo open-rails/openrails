@@ -63,21 +63,20 @@ year-old invoice must not turn into a shutoff instruction.
 
 ## Policy (two knobs, both defaulted)
 
-Manifest (mode 1), under the merchant's `invoice:` block:
+Merchant settings, declared under the merchant's `settings:` (mode 1) or
+applied through `POST /v1/merchant/configuration/applications` (mode 2); the
+same names in both:
 
 ```yaml
-invoice:
-  monthly_floor: 1_000_000          # existing: don't bother collecting below this
-  delinquency_grace_days: 7         # or#878: days past due_at before delinquent
-  delinquency_amount_floor: 5_000_000   # optional; defaults to monthly_floor
+settings:
+  monthly_floor: 1000000              # don't bother collecting below this
+  arrears_grace_days: 7               # or#878: days past due_at before delinquent
+  arrears_delinquency_floor: 5000000  # optional; defaults to monthly_floor
 ```
-
-API (mode 2): `PUT /v1/merchant/settings` with `arrears_grace_days` /
-`arrears_delinquency_floor`; `GET /v1/merchant/settings` returns them.
 
 | Knob | Default |
 |---|---|
-| `delinquency_grace_days` | **14**. Deliberately generous: a merchant that never touched this knob has not thought about it, and being late to call someone delinquent costs a few days of accrual while being early costs a customer. `0` is a valid explicit choice — delinquent as soon as it is overdue. |
+| `arrears_grace_days` | **14**. Deliberately generous: a merchant that never touched this knob has not thought about it, and being late to call someone delinquent costs a few days of accrual while being early costs a customer. `0` is a valid explicit choice — delinquent as soon as it is overdue. |
 | `delinquency_amount_floor` | **derived from `monthly_floor`** (itself 1 currency unit). A debt you already declared too small to chase is too small to cut anyone off for. |
 
 Amounts are integers in the currency's native units (micros for USD).

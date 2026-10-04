@@ -25,12 +25,11 @@ import (
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
 	// engine is the in-process engine behind New; nil for NewRemote.
-	engine                *engine.Engine
-	MerchantConfiguration *MerchantConfigurationClient
-	baseURL               string
-	merchantID            billing.MerchantID
-	merchantSlug          string
-	catalogOwner          string
+	engine       *engine.Engine
+	baseURL      string
+	merchantID   billing.MerchantID
+	merchantSlug string
+	catalogOwner string
 	// derived marks a Client made from another (With, ForCatalogOwner): it
 	// shares the engine and transport and does not own their lifecycle.
 	derived bool
@@ -102,7 +101,7 @@ func WithTimeout(d time.Duration) ClientOption {
 }
 
 // NewRemote builds the client for standalone or SaaS HTTP. It validates static
-// configuration without I/O; Verify checks live credentials and reachability.
+// configuration without I/O; Ready checks reachability.
 func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	r := &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
@@ -124,7 +123,6 @@ func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	if r.client == nil {
 		r.client = &http.Client{}
 	}
-	r.initResources()
 	return r, nil
 }
 
@@ -147,7 +145,6 @@ func (c *Client) With(opts ...ClientOption) (*Client, error) {
 	if derived.setupErr != nil {
 		return nil, derived.setupErr
 	}
-	derived.initResources()
 	return &derived, nil
 }
 
@@ -170,15 +167,6 @@ func validateBaseURL(baseURL string) error {
 		return fmt.Errorf("openrails: base URL must not contain credentials, query or fragment")
 	}
 	return nil
-}
-
-// Verify proves the server is reachable and the credential valid with one
-// authenticated read of the merchant settings (so the credential needs
-// merchant:settings:read). Constructors do no I/O; call it at boot to fail
-// fast. A bad credential is billing.ErrUnauthorized; an unreachable server
-// or a 5xx is billing.ErrUnreachable.
-func (c *Client) Verify(ctx context.Context, requestOptions ...RequestOption) error {
-	return c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, nil, requestOptions...)
 }
 
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
@@ -251,20 +239,6 @@ func (c *Client) bearer(ctx context.Context, target CredentialTarget) (string, e
 		return "", fmt.Errorf("openrails: token provider returned empty token")
 	}
 	return strings.TrimSpace(tok), nil
-}
-
-// GetMerchantSettings reads the merchant settings document.
-func (c *Client) GetMerchantSettings(ctx context.Context, requestOptions ...RequestOption) (*billing.MerchantSettings, error) {
-	var out billing.MerchantSettings
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SetMerchantSettings replaces merchant-owned settings in one validated document.
-func (c *Client) SetMerchantSettings(ctx context.Context, settings billing.MerchantSettings, requestOptions ...RequestOption) error {
-	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil, requestOptions...)
 }
 
 // ListEntitlements returns the active entitlements of up to

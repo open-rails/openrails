@@ -4,19 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"math"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
@@ -87,7 +91,7 @@ func defaultChannels(sev Severity) []ChannelRef {
 // --- webhook CRUD ------------------------------------------------------------
 
 // CreateWebhook validates + persists an outbound webhook sink.
-func (s *Service) CreateWebhook(ctx context.Context, in CreateWebhookInput) (Webhook, error) {
+func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebhookRequest) (billing.AlertWebhook, error) {
 	ve := &ValidationError{}
 	if strings.TrimSpace(in.URL) == "" {
 		ve.add("url", "required", "url is required")
@@ -96,7 +100,7 @@ func (s *Service) CreateWebhook(ctx context.Context, in CreateWebhookInput) (Web
 		// internal address turns this endpoint into an SSRF primitive.
 		ve.add("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
 	}
-	format := in.Format
+	format := WebhookFormat(in.Format)
 	if format == "" {
 		format = FormatGeneric
 	} else if !format.valid() {
@@ -104,36 +108,36 @@ func (s *Service) CreateWebhook(ctx context.Context, in CreateWebhookInput) (Web
 			string(FormatGeneric), string(FormatDiscord), string(FormatSlack))
 	}
 	if v := ve.orNil(); v != nil {
-		return Webhook{}, v
+		return billing.AlertWebhook{}, v
 	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
 	if s.store.secrets == nil {
-		return Webhook{}, ErrWebhookCredentialsUnavailable
+		return billing.AlertWebhook{}, ErrWebhookCredentialsUnavailable
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	rawURL := strings.TrimSpace(in.URL)
 	parsed, _ := url.Parse(rawURL)
 	secret, err := s.store.secrets.Put(ctx, mid, merchants.AlertWebhookURLSecretName(id), rawURL)
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	version, err := webhookSecretVersion(secret.Version)
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	webhook, err := s.store.createWebhook(ctx, id, in.Name, strings.ToLower(parsed.Host), version, format, enabled)
 	if err == nil {
-		return webhook, nil
+		return webhook.API(), nil
 	}
 	// A lost database acknowledgement may still have committed. A confirmed
 	// row wins; compensate only a rejected insert, never an unknown outcome.
@@ -141,24 +145,30 @@ func (s *Service) CreateWebhook(ctx context.Context, in CreateWebhookInput) (Web
 	defer cancel()
 	committed, readErr := s.store.getWebhook(checkCtx, id)
 	if readErr == nil {
-		return committed, nil
+		return committed.API(), nil
 	}
 	var rejected *pgconn.PgError
 	if errors.As(err, &rejected) && errors.Is(readErr, pgx.ErrNoRows) {
 		if cleanupErr := s.store.secrets.Delete(checkCtx, mid, merchants.AlertWebhookURLSecretName(id)); cleanupErr != nil {
-			return Webhook{}, errors.Join(err, cleanupErr)
+			return billing.AlertWebhook{}, errors.Join(err, cleanupErr)
 		}
 	}
-	return Webhook{}, err
+	return billing.AlertWebhook{}, err
 }
 
 // ListWebhooks returns the merchant's webhook sinks.
-func (s *Service) ListWebhooks(ctx context.Context) ([]Webhook, error) {
-	return s.store.listWebhooks(ctx)
+func (s *Service) ListWebhooks(ctx context.Context) ([]billing.AlertWebhook, error) {
+	hooks, err := s.store.listWebhooks(ctx)
+	out := make([]billing.AlertWebhook, 0, len(hooks))
+	for _, h := range hooks {
+		out = append(out, h.API())
+	}
+	return out, err
 }
 
 // DeleteWebhook removes a webhook sink; returns false when nothing matched.
-func (s *Service) DeleteWebhook(ctx context.Context, id uuid.UUID) (bool, error) {
+func (s *Service) DeleteWebhook(ctx context.Context, webhookID billing.AlertWebhookID) (bool, error) {
+	id := webhookID.UUID()
 	if s.store.secrets == nil {
 		return false, ErrWebhookCredentialsUnavailable
 	}
@@ -188,63 +198,79 @@ func webhookSecretVersion(version int) (int32, error) {
 	return int32(version), nil
 }
 
-// RotateWebhookURL replaces only the credential, retaining the webhook and all
+// SetWebhookURL replaces only the credential, retaining the webhook and all
 // delivery identity. A failed metadata write leaves delivery fail-closed on the
 // version mismatch; retrying the same URL repairs that pending rotation.
-func (s *Service) RotateWebhookURL(ctx context.Context, id uuid.UUID, in RotateWebhookURLInput) (Webhook, error) {
+func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebhookID, in billing.SetAlertWebhookURLRequest) (billing.AlertWebhook, error) {
+	id := webhookID.UUID()
 	rawURL := strings.TrimSpace(in.URL)
 	if rawURL == "" || s.outbound.ValidateURL(rawURL) != nil {
-		return Webhook{}, singleFieldError("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
+		return billing.AlertWebhook{}, singleFieldError("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
 	}
 	if _, err := s.store.getWebhook(ctx, id); err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	if s.store.secrets == nil {
-		return Webhook{}, ErrWebhookCredentialsUnavailable
+		return billing.AlertWebhook{}, ErrWebhookCredentialsUnavailable
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	secret, err := s.store.secrets.Put(ctx, mid, merchants.AlertWebhookURLSecretName(id), rawURL)
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	version, err := webhookSecretVersion(secret.Version)
 	if err != nil {
-		return Webhook{}, err
+		return billing.AlertWebhook{}, err
 	}
 	parsed, _ := url.Parse(rawURL)
 	webhook, err := s.store.rotateWebhookURL(ctx, id, strings.ToLower(parsed.Host), version)
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return webhook, err
+		return webhook.API(), err
 	}
 	// Never delete a newer winning rotation. A removed resource can be cleaned
 	// by its deterministic name; official creation never reuses a webhook id.
 	if _, readErr := s.store.getWebhook(ctx, id); readErr == nil {
-		return Webhook{}, ErrWebhookRotationConflict
+		return billing.AlertWebhook{}, ErrWebhookRotationConflict
 	} else if !errors.Is(readErr, pgx.ErrNoRows) {
-		return Webhook{}, readErr
+		return billing.AlertWebhook{}, readErr
 	}
 	if cleanupErr := s.store.secrets.Delete(ctx, mid, merchants.AlertWebhookURLSecretName(id)); cleanupErr != nil {
-		return Webhook{}, cleanupErr
+		return billing.AlertWebhook{}, cleanupErr
 	}
-	return Webhook{}, pgx.ErrNoRows
+	return billing.AlertWebhook{}, pgx.ErrNoRows
 }
 
 // --- notifications -----------------------------------------------------------
 
-const notificationListLimit = 100
-
-// ListNotifications returns the bell feed (unreadOnly filters to unread).
-func (s *Service) ListNotifications(ctx context.Context, unreadOnly bool) ([]Notification, error) {
-	return s.store.listNotifications(ctx, unreadOnly, notificationListLimit)
+// ListNotifications pages the merchant's inbox, newest first.
+func (s *Service) ListNotifications(ctx context.Context, req billing.ListMerchantNotificationsRequest) (billing.ListPage[billing.MerchantNotification], error) {
+	limit, err := pagination.Limit(req.PageRequest)
+	if err != nil {
+		return billing.ListPage[billing.MerchantNotification]{}, err
+	}
+	afterAt, afterID, err := pagination.After(req.Cursor)
+	if err != nil {
+		return billing.ListPage[billing.MerchantNotification]{}, err
+	}
+	rows, err := s.store.listNotifications(ctx, req.UnreadOnly, afterAt, afterID, pagination.Fetch(limit))
+	if err != nil {
+		return billing.ListPage[billing.MerchantNotification]{}, err
+	}
+	page := pagination.Cut(rows, limit, func(r gen.BillingNotification) any { return pagination.TimeID{At: r.CreatedAt, ID: r.ID} })
+	return pagination.Map(page, notificationFromRow), nil
 }
 
-// MarkNotificationRead marks one notification read; returns false when nothing matched.
-func (s *Service) MarkNotificationRead(ctx context.Context, id uuid.UUID) (bool, error) {
-	n, err := s.store.markNotificationRead(ctx, id)
-	return n > 0, err
+// MarkNotificationRead marks one notification read and returns it; an
+// unknown id is pgx.ErrNoRows.
+func (s *Service) MarkNotificationRead(ctx context.Context, id billing.NotificationID) (billing.MerchantNotification, error) {
+	row, err := s.store.markNotificationRead(ctx, id.UUID())
+	if err != nil {
+		return billing.MerchantNotification{}, err
+	}
+	return notificationFromRow(row), nil
 }
 
 // UnreadCount is the bell badge count.

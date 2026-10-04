@@ -52,7 +52,7 @@ type Options struct {
 // route bound to one is mounted where the assembly supplies it.
 type External struct {
 	// Meta: the process surface.
-	Banner, Live, Ready, Metrics, Capabilities http.Handler
+	Live, Ready, Metrics, Capabilities http.Handler
 	// Captcha discovery, beside the checkout routes.
 	CaptchaStatus, CaptchaScript http.Handler
 
@@ -175,10 +175,6 @@ func (e *Env) mount(rr router.Router, base string, selected func(Route) bool) {
 		path, ok := strings.CutPrefix(route.Path, base)
 		if !ok {
 			panic("routes: " + route.Key() + " is not under " + base)
-		}
-		if route.Path == "/" {
-			// ServeMux: the exact root, not every unmatched path.
-			path = "/{$}"
 		}
 		rr.Handle(route.Method, path, handler, e.gates(route)...)
 	}

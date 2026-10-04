@@ -39,6 +39,7 @@ db:
   sslmode: disable
 
 schema: billing # every OpenRails table lives here; defaults to 'billing' (env DB_SCHEMA)
+# schema_owner: openrails_app # migrate hands the schema to this existing role
 
 redis:
   addr: localhost:6380
@@ -79,8 +80,13 @@ vault:
   secret_id: ""
   k8s_role: ""
 
-sendgrid:
-  api_key: ""
+# The built-in email sender, for billing and control-plane mail. Billing mail
+# is sent from the merchant's profile from_email when it has one; `from` is the
+# deployment's own address.
+# sendgrid:
+#   api_key: ""
+#   from_address: ""
+#   from_name: ""
 
 rate_limits:
   subscribe:
@@ -91,8 +97,6 @@ rate_limits:
     requests_per_minute: 1200
   payment:
     requests_per_minute: 40
-  default:
-    requests_per_minute: 300
 
 # Exact origins checkout success/cancel and billing-portal return URLs may
 # name. Empty allows only the origin of public_billing_base_url.

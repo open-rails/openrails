@@ -63,20 +63,27 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	payer := customer.ID
 	invoker := "app:" + in.Run
 
-	if err := client.SetMerchantSettings(ctx, billing.MerchantSettings{
-		BillingPolicies: []billing.BillingPolicyInput{{
-			Name: "app_window", Kind: "window_spend_cap",
-			SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 50_000}},
-		}},
-		BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "app_window", Tier: "app"}},
+	current, err := client.GetMerchantConfiguration(ctx)
+	if err != nil {
+		return r, fmt.Errorf("read configuration: %w", err)
+	}
+	if _, err := client.ApplyMerchantConfiguration(ctx, &billing.MerchantConfigurationApplyParams{
+		ApplicationID: "billingapp-" + in.Run, ExpectedRevision: &current.Revision,
+		Settings: &billing.MerchantSettings{
+			BillingPolicies: []billing.BillingPolicyInput{{
+				Name: "app_window", Kind: "window_spend_cap",
+				SpendWindows: []billing.BudgetWindow{{Key: "hourly", WindowSeconds: 3600, Limit: 50_000}},
+			}},
+			BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "app_window", Tier: "app"}},
+		},
 	}); err != nil {
 		return r, fmt.Errorf("set policy: %w", err)
 	}
-	settings, err := client.GetMerchantSettings(ctx)
+	applied, err := client.GetMerchantConfiguration(ctx)
 	if err != nil {
 		return r, fmt.Errorf("read policy: %w", err)
 	}
-	for _, policy := range settings.BillingPolicies {
+	for _, policy := range applied.Settings.BillingPolicies {
 		if policy.Name == "app_window" {
 			r.PolicyWindows = len(policy.SpendWindows)
 		}

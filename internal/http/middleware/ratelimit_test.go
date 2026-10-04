@@ -104,14 +104,14 @@ func TestClassifyBucket(t *testing.T) {
 		{"POST", "/v1/me/checkout-sessions", "checkout"},
 		{"POST", "/billing/v1/checkout-sessions/ocs_1/pay", "checkout"},
 		{"POST", "/v1/checkout-attempts/chk_1/solana-pay", "checkout"},
-		{"GET", "/v1/checkout-sessions/ocs_1", "default"},
-		{"POST", "/v1/checkout-config", "default"},
-		{"POST", "/v1/merchant/checkout-attempts", "default"},
+		{"GET", "/v1/checkout-sessions/ocs_1", ""},
+		{"POST", "/v1/checkout-config", ""},
+		{"POST", "/v1/merchant/checkout-attempts", ""},
 		{"POST", "/v1/me/payment-methods", "payment-methods"},
-		{"POST", "/v1/customers/customer_123/checkout", "default"},
+		{"POST", "/v1/customers/customer_123/checkout", ""},
 		{"POST", "/v1/me/subscriptions/sub_123/cancel", "subscriptions"},
 		{"delete", "/billing/v1/me/subscriptions/sub_123", "subscriptions"},
-		{"GET", "/v1/me/subscriptions/sub_123", "default"},
+		{"GET", "/v1/me/subscriptions/sub_123", ""},
 	} {
 		require.Equal(t, tc.want, ClassifyBucket(tc.path, tc.method), "%s %s", tc.method, tc.path)
 	}
@@ -137,7 +137,7 @@ func TestRateLimitSubjects(t *testing.T) {
 		{"untrusted forwarded header is ignored", nil, []call{{path: "/v1/me/checkout-sessions", ip: lb, xff: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: lb, xff: b, want: 429}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
+			limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
 			auth := billingauth.AuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
 				if u := r.Header.Get("X-Test-User"); u != "" {
 					return billingauth.UserContext{UserID: u}, nil
@@ -195,7 +195,7 @@ func TestRateLimitPayloadCaps(t *testing.T) {
 // protected buckets; solving it clears the challenge and resets the counters.
 func TestCaptchaEscalation(t *testing.T) {
 	v := &stubVerifier{valid: "good"}
-	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 1}, "webhook": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 1}}
+	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 1}, "webhook": {RequestsPerMinute: 1}}
 	h := engine(newDeps(limits, captchaOn, v), okHandler())
 	const ip = "203.0.113.72"
 	for _, c := range []call{
@@ -226,7 +226,7 @@ func TestCaptchaEscalation(t *testing.T) {
 func TestCaptchaChallenges(t *testing.T) {
 	ctx := context.Background()
 	const ip, user = "203.0.113.47", "22222222-2222-2222-2222-222222222222"
-	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}, "default": {RequestsPerMinute: 60}}
+	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 10}, "payment": {RequestsPerMinute: 60}}
 
 	t.Run("solve clears every subject and resets its counters", func(t *testing.T) {
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
@@ -318,7 +318,7 @@ func TestRateLimitStoreIsBounded(t *testing.T) {
 		require.Equal(t, i <= 10, res.allowed, "request %d", i)
 		require.Equal(t, max(10-i, 0), res.remaining)
 	}
-	require.True(t, s.Allow("ip:a", "default", &config.RateLimit{}).allowed, "a zero limit defaults to 60/min")
+	require.True(t, s.Allow("ip:a", "checkout", &config.RateLimit{}).allowed, "a zero limit defaults to 60/min")
 }
 
 // A host-mounted prefix keeps the host URL for auth while policy classifies the
@@ -326,7 +326,7 @@ func TestRateLimitStoreIsBounded(t *testing.T) {
 func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 	limits := config.RateLimitsConfig{
 		"checkout": {RequestsPerMinute: 1}, "payment": {RequestsPerMinute: 2},
-		"webhook": {RequestsPerMinute: 3}, "default": {RequestsPerMinute: 60},
+		"webhook": {RequestsPerMinute: 3},
 	}
 	for _, tc := range []struct {
 		canonical, actual, bucket, limit string
@@ -358,7 +358,7 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 // A checkout session id is limited whatever address presents it, and
 // never reaches a log line.
 func TestCheckoutAttemptRateLimit(t *testing.T) {
-	limits := config.RateLimitsConfig{"default": {RequestsPerMinute: 1000}}
+	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1000}}
 	rt := &app.Runtime{Config: &config.Config{RateLimits: &limits}}
 	table := &router.Table{}
 	router.NewMux(table, "", rt).Handle(http.MethodGet, "/v1/checkout-sessions/:id", func(r *request.Request) { r.SuccessJSON(map[string]string{}) },

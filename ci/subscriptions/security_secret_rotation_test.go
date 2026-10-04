@@ -16,7 +16,7 @@ import (
 // overlap expiry when expires is non-zero.
 func declarePrevious(rail, old string, expires time.Time) func(map[string]openrails.PSPConfig) {
 	return func(psps map[string]openrails.PSPConfig) {
-		account := psps[rail][rail]
+		account := psps[rail]
 		account.Secrets["webhook_signing_secret_previous"] = old
 		if !expires.IsZero() {
 			settings := map[string]any{"webhook_overlap_expires_at": expires.Format(time.RFC3339)}
@@ -25,7 +25,7 @@ func declarePrevious(rail, old string, expires time.Time) func(map[string]openra
 			}
 			account.Settings = settings
 		}
-		psps[rail][rail] = account
+		psps[rail] = account
 	}
 }
 

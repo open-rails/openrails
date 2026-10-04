@@ -33,22 +33,18 @@ func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotif
 	return count, err
 }
 
-const countRepairAlerts = `-- name: CountRepairAlerts :one
-SELECT count(*) FROM billing.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
-  AND nq.event_type = $2
-  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
-  AND ($3::boolean IS NULL OR (nq.read_at IS NOT NULL) = $3::boolean)
+const countUnreadCustomerNotifications = `-- name: CountUnreadCustomerNotifications :one
+SELECT count(*) FROM billing.notifications
+WHERE merchant_id = $1::uuid AND recipient_kind = 'customer' AND customer_id = $2::uuid AND read_at IS NULL
 `
 
-type CountRepairAlertsParams struct {
+type CountUnreadCustomerNotificationsParams struct {
+	MerchantID uuid.UUID
 	CustomerID uuid.UUID
-	EventType  string
-	Seen       *bool
 }
 
-func (q *Queries) CountRepairAlerts(ctx context.Context, arg CountRepairAlertsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRepairAlerts, arg.CustomerID, arg.EventType, arg.Seen)
+func (q *Queries) CountUnreadCustomerNotifications(ctx context.Context, arg CountUnreadCustomerNotificationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnreadCustomerNotifications, arg.MerchantID, arg.CustomerID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -217,6 +213,66 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Billin
 	return i, err
 }
 
+const listCustomerNotifications = `-- name: ListCustomerNotifications :many
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+WHERE nq.merchant_id = $1::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = $2::uuid
+  AND ($3::boolean IS NULL OR (nq.read_at IS NOT NULL) = $3::boolean)
+  AND ($4::timestamptz IS NULL OR (nq.created_at, nq.id) < ($4::timestamptz, $5::uuid))
+ORDER BY nq.created_at DESC, nq.id DESC
+LIMIT $6::int
+`
+
+type ListCustomerNotificationsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Seen       *bool
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+// A customer's own notifications, newest first.
+func (q *Queries) ListCustomerNotifications(ctx context.Context, arg ListCustomerNotificationsParams) ([]BillingNotification, error) {
+	rows, err := q.db.Query(ctx, listCustomerNotifications,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Seen,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingNotification
+	for rows.Next() {
+		var i BillingNotification
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Data,
+			&i.RecipientKind,
+			&i.ReadAt,
+			&i.Severity,
+			&i.Title,
+			&i.Body,
+			&i.Link,
+			&i.CreatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EmailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotificationsByCustomer = `-- name: ListNotificationsByCustomer :many
 SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
 WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
@@ -317,29 +373,34 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 
 const listRepairAlerts = `-- name: ListRepairAlerts :many
 SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
-  AND nq.event_type = $2
+WHERE nq.merchant_id = $1::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = $2::uuid
+  AND nq.event_type = $3::text
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
-  AND ($5::boolean IS NULL OR (nq.read_at IS NOT NULL) = $5::boolean)
-ORDER BY nq.created_at DESC
-LIMIT $3::int OFFSET $4::int
+  AND ($4::boolean IS NULL OR (nq.read_at IS NOT NULL) = $4::boolean)
+  AND ($5::timestamptz IS NULL OR (nq.created_at, nq.id) < ($5::timestamptz, $6::uuid))
+ORDER BY nq.created_at DESC, nq.id DESC
+LIMIT $7::int
 `
 
 type ListRepairAlertsParams struct {
+	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	EventType  string
-	Column3    int32
-	Column4    int32
 	Seen       *bool
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
 }
 
 func (q *Queries) ListRepairAlerts(ctx context.Context, arg ListRepairAlertsParams) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listRepairAlerts,
+		arg.MerchantID,
 		arg.CustomerID,
 		arg.EventType,
-		arg.Column3,
-		arg.Column4,
 		arg.Seen,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -430,6 +491,39 @@ func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUnde
 	return items, nil
 }
 
+const markCustomerNotificationRead = `-- name: MarkCustomerNotificationRead :one
+UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
+WHERE merchant_id = $1::uuid AND recipient_kind = 'customer' AND customer_id = $2::uuid AND id = $3::uuid
+RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
+`
+
+type MarkCustomerNotificationReadParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkCustomerNotificationRead(ctx context.Context, arg MarkCustomerNotificationReadParams) (BillingNotification, error) {
+	row := q.db.QueryRow(ctx, markCustomerNotificationRead, arg.MerchantID, arg.CustomerID, arg.ID)
+	var i BillingNotification
+	err := row.Scan(
+		&i.ID,
+		&i.EventType,
+		&i.Data,
+		&i.RecipientKind,
+		&i.ReadAt,
+		&i.Severity,
+		&i.Title,
+		&i.Body,
+		&i.Link,
+		&i.CreatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.EmailedAt,
+	)
+	return i, err
+}
+
 const markNotificationEmailed = `-- name: MarkNotificationEmailed :execrows
 UPDATE billing.notifications
 SET emailed_at = $2::timestamptz
@@ -443,25 +537,6 @@ type MarkNotificationEmailedParams struct {
 
 func (q *Queries) MarkNotificationEmailed(ctx context.Context, arg MarkNotificationEmailedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markNotificationEmailed, arg.ID, arg.EmailedAt)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const markNotificationSeen = `-- name: MarkNotificationSeen :execrows
-UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
-WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id()
-  AND id = $1::uuid AND customer_id = $2::uuid
-`
-
-type MarkNotificationSeenParams struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-}
-
-func (q *Queries) MarkNotificationSeen(ctx context.Context, arg MarkNotificationSeenParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markNotificationSeen, arg.ID, arg.CustomerID)
 	if err != nil {
 		return 0, err
 	}

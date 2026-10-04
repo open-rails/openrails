@@ -3,11 +3,14 @@
 package subscriptions_test
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -210,4 +213,63 @@ func TestWebhookSilenceAlerts(t *testing.T) {
 	w.seedAttempts(c.id, charge("nmi", "webhook", 1, w.clock.Now()))
 	w.converge()
 	require.Empty(t, w.findings("life.webhooks.silent"), "webhooks resumed")
+}
+
+// A critical finding emails the merchant's alert address through the
+// deployment's one EmailSender, from the merchant's own address.
+func TestCriticalFindingEmailsThroughTheOneSender(t *testing.T) {
+	t.Parallel()
+	mail := &mailbox{}
+	w := prepareWorld(t, 12)
+	w.deps = func(d *openrails.Deps) { d.EmailSender = mail }
+	w.start()
+	w.armDestructive()
+	alertTo, from := "ops@merchant.test", "billing@merchant.test"
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{AlertEmail: &alertTo, Profile: &billing.MerchantProfileInput{FromEmail: from}}))
+
+	c := w.newCustomer()
+	attempt := attemptSeed{psp: w.psp["nmi"].UUID().String(), rail: "nmi", kind: "initial", owner: "engine", cardEntry: "new", at: w.clock.Now()}
+	approved, refused := attempt, attempt
+	approved.category, approved.n = "approved", 60
+	refused.category, refused.reason, refused.code, refused.n = "system_error", "merchant_configuration_error", "410", 1
+	w.seedAttempts(c.id, approved)
+	w.seedAttempts(c.id, refused)
+	// The scheduled sweep, which notifies, finds the refused account.
+	res, err := w.jobs.Insert(t.Context(), convergeSweep{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	w.waitJob(res.Job.ID)
+	require.Equal(t, "critical", w.findings("life.payments.system_errors")[0].severity)
+
+	require.Eventually(t, func() bool { return len(mail.all()) > 0 }, 10*time.Second, 50*time.Millisecond)
+	sent := mail.all()[0]
+	require.Equal(t, alertTo, sent.To)
+	require.Equal(t, from, sent.From.Address)
+	require.Nil(t, sent.Auth, "billing mail carries no AuthKit message")
+	require.NotEmpty(t, sent.Subject)
+	require.NotEmpty(t, sent.Text)
+}
+
+type convergeSweep struct{}
+
+func (convergeSweep) Kind() string { return "openrails.converge_sweep" }
+
+// mailbox is an EmailSender that keeps what it is given.
+type mailbox struct {
+	mu   sync.Mutex
+	sent []openrails.Email
+}
+
+func (m *mailbox) Send(_ context.Context, e openrails.Email) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = append(m.sent, e)
+	return nil
+}
+
+func (*mailbox) CheckHealth(context.Context) error { return nil }
+
+func (m *mailbox) all() []openrails.Email {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]openrails.Email(nil), m.sent...)
 }

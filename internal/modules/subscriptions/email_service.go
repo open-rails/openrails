@@ -4,13 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
-	"github.com/sendgrid/rest"
-	"github.com/sendgrid/sendgrid-go"
-	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -28,17 +24,14 @@ import (
 
 var errUserEmailUnavailable = errors.New("user email unavailable")
 
-// sendTimeout bounds one SendGrid call, so a hung provider never stalls the
-// webhook or lifecycle path that sends the email.
+// sendTimeout bounds one send, so a hung provider never stalls the webhook or
+// lifecycle path that sends the email.
 const sendTimeout = 10 * time.Second
 
-// EmailService handles all email notifications including subscription-related emails.
-// It wraps the SendGrid SDK and has domain knowledge for building subscription/payment emails.
+// EmailService renders billing email (subscription, payment and receipt
+// notices) and hands it to the deployment's email sender, from the merchant.
 type EmailService struct {
-	// request is the immutable mail-send template; each send copies it, so
-	// concurrent sends never share a body.
-	request      *rest.Request
-	http         *rest.Client
+	mail         config.EmailSender
 	profileStore *merchantconfig.Store
 	clock        clockwork.Clock
 
@@ -62,26 +55,10 @@ type OneOffPurchaseEmailData struct {
 	IsPremium     bool
 }
 
-// NewEmailService wires the SendGrid SDK into the billing domain service.
+// NewEmailService renders billing email for sender; a nil sender sends none.
 // Sender info is merchant-scoped and loaded from merchant_configurations.
-func NewEmailService(sendgridCfg *config.SendGridConfig, profileStore *merchantconfig.Store, clocks ...clockwork.Clock) (*EmailService, error) {
-	if sendgridCfg == nil {
-		return nil, fmt.Errorf("sendgrid configuration not provided")
-	}
-
-	apiKey := strings.TrimSpace(sendgridCfg.APIKey)
-	if apiKey == "" {
-		return nil, fmt.Errorf("sendgrid api_key is required")
-	}
-
-	request := sendgrid.GetRequest(apiKey, "/v3/mail/send", "")
-	request.Method = rest.Post
-	return &EmailService{
-		request:      &request,
-		http:         &rest.Client{HTTPClient: &http.Client{Timeout: sendTimeout}},
-		profileStore: profileStore,
-		clock:        timeutil.FirstClock(clocks...),
-	}, nil
+func NewEmailService(sender config.EmailSender, profileStore *merchantconfig.Store, clocks ...clockwork.Clock) *EmailService {
+	return &EmailService{mail: sender, profileStore: profileStore, clock: timeutil.FirstClock(clocks...)}
 }
 
 func (s *EmailService) SetClock(c clockwork.Clock) {
@@ -125,7 +102,7 @@ func (s *EmailService) now() time.Time {
 
 // IsEnabled returns true when delivery is possible.
 func (s *EmailService) IsEnabled() bool {
-	return s != nil && s.request != nil
+	return s != nil && s.mail != nil
 }
 
 // SendEmail sends a basic email using the configured provider.
@@ -134,24 +111,14 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, htmlContent, 
 		log.WithContext(ctx).Debug("email service disabled - skipping send")
 		return nil
 	}
-	from, err := s.sender(ctx)
-	if err != nil {
-		return err
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	// A merchant without a from_email sends from the deployment's address.
+	from := config.EmailAddress{Name: s.storeName(ctx), Address: strings.TrimSpace(s.merchantProfile(ctx).FromEmail)}
+	if err := s.mail.Send(ctx, config.Email{From: from, To: to, Subject: subject, Text: plainContent, HTML: htmlContent}); err != nil {
+		return fmt.Errorf("send email: %w", err)
 	}
-
-	toMail := mail.NewEmail("", to)
-	msg := mail.NewSingleEmail(from, subject, toMail, plainContent, htmlContent)
-
-	return s.send(ctx, msg)
-}
-
-func (s *EmailService) sender(ctx context.Context) (*mail.Email, error) {
-	profile := s.merchantProfile(ctx)
-	fromEmail := strings.TrimSpace(profile.FromEmail)
-	if fromEmail == "" {
-		return nil, fmt.Errorf("merchant profile from_email is required when sending email")
-	}
-	return mail.NewEmail(s.storeName(ctx), fromEmail), nil
+	return nil
 }
 
 func (s *EmailService) merchantProfile(ctx context.Context) models.MerchantProfileConfiguration {
@@ -244,31 +211,6 @@ func (s *EmailService) SendEntitlementExpiration(ctx context.Context, userEmail,
 	return s.SendEmail(ctx, userEmail, subject, htmlContent, plainContent)
 }
 
-// SendTemplatedEmail sends a template-based email using the configured provider.
-func (s *EmailService) SendTemplatedEmail(ctx context.Context, to, templateID string, templateData map[string]any) error {
-	if !s.IsEnabled() {
-		log.WithContext(ctx).WithField("template_id", templateID).Debug("email service disabled - skipping templated send")
-		return nil
-	}
-
-	toMail := mail.NewEmail("", to)
-	msg := mail.NewV3Mail()
-	from, err := s.sender(ctx)
-	if err != nil {
-		return err
-	}
-	msg.SetFrom(from)
-	msg.SetTemplateID(templateID)
-	personalization := mail.NewPersonalization()
-	personalization.AddTos(toMail)
-	for key, value := range templateData {
-		personalization.SetDynamicTemplateData(key, value)
-	}
-	msg.AddPersonalizations(personalization)
-
-	return s.send(ctx, msg)
-}
-
 // SendOneOffPurchaseReceipt sends a receipt for a one-off purchase (e.g., Solana payment).
 func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOffPurchaseEmailData) error {
 	if !s.IsEnabled() {
@@ -333,23 +275,6 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 	`, messageIntro, productName, amountLine, issuedAt, storeName)
 
 	return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
-}
-
-func (s *EmailService) send(ctx context.Context, msg *mail.SGMailV3) error {
-	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-	request := *s.request
-	request.Body = mail.GetRequestBody(msg)
-	res, err := s.http.SendWithContext(ctx, request)
-	if err != nil {
-		return fmt.Errorf("sendgrid email send failed: %w", err)
-	}
-	if res.StatusCode >= 400 {
-		return fmt.Errorf("sendgrid api error: status %d, body: %s", res.StatusCode, res.Body)
-	}
-
-	log.WithContext(ctx).WithField("status", res.StatusCode).Debug("email sent successfully via sendgrid")
-	return nil
 }
 
 // ============================================================================

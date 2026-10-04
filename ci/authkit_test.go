@@ -76,7 +76,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, findings(viewerKey["secret"].(string)))
 	w = call(t, handler, session, http.MethodDelete, "/v1/merchant/api-keys/"+viewerKey["id"].(string), shop, nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	require.Equal(t, http.StatusUnauthorized, findings(viewerKey["secret"].(string)), "a revoked key authenticates nothing")
 
 	w = call(t, handler, session, http.MethodPost, "/v1/merchant/team/invites", shop, map[string]string{"email": uniqueName("nobody") + "@e2e.test", "role": "viewer"})

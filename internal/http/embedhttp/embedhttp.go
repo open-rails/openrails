@@ -197,7 +197,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if !providerRoutes.Webhooks {
 		advertise = withoutRouteSet(advertise, RouteSetWebhooks)
 	}
-	capabilities := buildCapabilities(advertise, providerRoutes)
+	capabilities := buildCapabilities(s.Runtime, advertise, providerRoutes)
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}

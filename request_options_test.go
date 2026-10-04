@@ -76,7 +76,9 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 		{"nil options ignored", "/v1", "alpha", "", "Bearer slug:alpha", []RequestOption{nil}},
 	}
 	calls := map[string]func(opts []RequestOption) (string, error){
-		"GET /merchant/settings": func(o []RequestOption) (string, error) { return http.MethodGet, client.Verify(t.Context(), o...) },
+		"GET /merchant/configuration": func(o []RequestOption) (string, error) {
+			return http.MethodGet, readConfiguration(client, t.Context(), o...)
+		},
 		"POST /merchant/catalog/applications": func(o []RequestOption) (string, error) {
 			_, err := client.ApplyCatalog(t.Context(), catalogApplication(), o...)
 			return http.MethodPost, err
@@ -105,10 +107,10 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}, WithMerchantID(id), WithCredentialProvider(targetCredential))
 	require.Equal(t, id, byID.MerchantID())
-	require.NoError(t, byID.Verify(t.Context()))
-	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/settings", "", id.String(), "Bearer id:" + id.String()}, <-seen)
-	require.NoError(t, byID.Verify(t.Context(), WithMerchant("bravo")))
-	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/settings", "bravo", "", "Bearer slug:bravo"}, <-seen)
+	require.NoError(t, readConfiguration(byID, t.Context()))
+	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/configuration", "", id.String(), "Bearer id:" + id.String()}, <-seen)
+	require.NoError(t, readConfiguration(byID, t.Context(), WithMerchant("bravo")))
+	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/configuration", "bravo", "", "Bearer slug:bravo"}, <-seen)
 }
 
 func TestInvalidMerchantSelectionFailsBeforeCredentialMint(t *testing.T) {
@@ -129,7 +131,7 @@ func TestInvalidMerchantSelectionFailsBeforeCredentialMint(t *testing.T) {
 		"invalid then ok":  {WithMerchant("a b"), WithMerchant("alpha")},
 		"only nil options": {nil, nil},
 	} {
-		err := client.Verify(t.Context(), options...)
+		err := readConfiguration(client, t.Context(), options...)
 		require.ErrorIs(t, err, billing.ErrInvalid, name)
 		var status *billing.StatusError
 		require.ErrorAs(t, err, &status, name)
@@ -146,7 +148,7 @@ func TestCredentialFailureNeverFallsBack(t *testing.T) {
 	} {
 		client := newTestRemote(t, func(http.ResponseWriter, *http.Request) { t.Error("request sent without a minted credential") },
 			WithAPIKey("broader-host-key"), WithCredentialProvider(provider))
-		err := client.Verify(t.Context(), WithMerchant("restricted"))
+		err := readConfiguration(client, t.Context(), WithMerchant("restricted"))
 		require.Error(t, err, name)
 		if name == "error" {
 			require.ErrorIs(t, err, failure)
@@ -164,12 +166,12 @@ func TestAmbientMerchantAssertion(t *testing.T) {
 		require.Equal(t, "id:"+id.String(), r.Header.Get(merchant.SelectorHeader))
 		_, _ = w.Write([]byte(`{}`))
 	})
-	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), other), ForMerchantID(id)), billing.ErrConflict)
-	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), id)), billing.ErrInvalid, "slug default with an ambient ID")
-	require.ErrorIs(t, client.Verify(merchant.WithID(t.Context(), id), WithMerchant("alpha")), billing.ErrInvalid)
+	require.ErrorIs(t, readConfiguration(client, merchant.WithID(t.Context(), other), ForMerchantID(id)), billing.ErrConflict)
+	require.ErrorIs(t, readConfiguration(client, merchant.WithID(t.Context(), id)), billing.ErrInvalid, "slug default with an ambient ID")
+	require.ErrorIs(t, readConfiguration(client, merchant.WithID(t.Context(), id), WithMerchant("alpha")), billing.ErrInvalid)
 	require.Zero(t, calls.Load())
-	require.NoError(t, client.Verify(merchant.WithID(t.Context(), id), ForMerchantID(id)))
-	require.NoError(t, client.Verify(merchant.WithID(t.Context(), billing.MerchantID{}), ForMerchantID(id)), "a zero ambient ID asserts nothing")
+	require.NoError(t, readConfiguration(client, merchant.WithID(t.Context(), id), ForMerchantID(id)))
+	require.NoError(t, readConfiguration(client, merchant.WithID(t.Context(), billing.MerchantID{}), ForMerchantID(id)), "a zero ambient ID asserts nothing")
 	require.EqualValues(t, 2, calls.Load())
 }
 
@@ -196,7 +198,7 @@ func TestExtraHeadersCannotDuplicateSelectionOrAuthority(t *testing.T) {
 		if byID {
 			option = ForMerchantID(id)
 		}
-		require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/merchant/settings", nil, nil, extra, option))
+		require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/merchant/configuration", nil, nil, extra, option))
 		require.True(t, reflect.DeepEqual(extra, original), "request mutated the caller's header map")
 	}
 }
@@ -215,7 +217,7 @@ func TestCatalogOwnerViewIsCatalogOnly(t *testing.T) {
 	require.NoError(t, err)
 
 	var denied *billing.StatusError
-	require.ErrorAs(t, owner.Verify(t.Context()), &denied)
+	require.ErrorAs(t, readConfiguration(owner, t.Context()), &denied)
 	require.Equal(t, http.StatusForbidden, denied.Status)
 	_, err = owner.ApplyCatalog(t.Context(), catalogApplication())
 	require.ErrorIs(t, err, billing.ErrDenied)
@@ -258,4 +260,10 @@ func TestConcurrentSelectionDoesNotContaminate(t *testing.T) {
 	wg.Wait()
 	require.EqualValues(t, 64, requests.Load())
 	require.Equal(t, "alpha", client.merchantSlug)
+}
+
+// readConfiguration is one authenticated merchant read.
+func readConfiguration(c *Client, ctx context.Context, options ...RequestOption) error {
+	_, err := c.GetMerchantConfiguration(ctx, options...)
+	return err
 }

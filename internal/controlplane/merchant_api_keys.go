@@ -10,7 +10,6 @@ import (
 	"errors"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/open-rails/authkit/iam"
 
@@ -25,16 +24,7 @@ var ErrUnknownMerchantRole = errors.New("controlplane: unknown merchant role")
 // self-serve surface. The secret exists only in the mint response; Prefix is
 // the non-secret leading token part ("openrails_st_<lookup id>") a holder can
 // match against a stored credential.
-type MerchantAPIKey struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Role       string     `json:"role"`
-	Prefix     string     `json:"prefix"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-}
+type MerchantAPIKey = billing.APIKey
 
 // MintMerchantAPIKey mints a key under the merchant's group holding role, as
 // actor: AuthKit requires merchant:credentials:manage and coverage of the

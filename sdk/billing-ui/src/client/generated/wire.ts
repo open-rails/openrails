@@ -32,6 +32,11 @@ export type BillingDetails = {
   address: BillingAddress | null
 }
 
+export type Capabilities = {
+  route_groups: Record<string, boolean> | null
+  features: Record<string, boolean> | null
+}
+
 export type CardDetails = {
   brand: string | null
   last4: string | null
@@ -253,6 +258,10 @@ export type EntitlementRecord = {
   updated_at: string
 }
 
+export type Health = {
+  status: "ok" | "ready"
+}
+
 export type Invoice = {
   id: string
   customer_id: string
@@ -327,10 +336,6 @@ export type InvoicePayment = {
   settled_at: string | null
 }
 
-export type Message = {
-  message: string
-}
-
 export type NextAction = {
   type: string
   url: string | null
@@ -401,16 +406,6 @@ export type PSPLinkState = {
   sync_status: "drifted" | "in_sync" | "missing" | "never_synced" | "sync_disabled" | "unknown"
   drift: DriftField[] | null
   message: string
-}
-
-export type PathPageOfNotification = {
-  object: string
-  data: Notification[] | null
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-  url: string
 }
 
 export type PayInvoiceParams = {
@@ -738,6 +733,10 @@ export type TokenQuote = {
   fx_currency: string
   quoted_at: string
   expires_at: string
+}
+
+export type UnreadCount = {
+  unread_count: number
 }
 
 export type UpdateSubscriptionPaymentMethodParams = {

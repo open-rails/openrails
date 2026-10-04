@@ -92,4 +92,5 @@ server failures; use `errors.As` to distinguish an actual server response from a
 lost response. The client does not automatically retry financial operations.
 
 Construction validates static configuration without making a request.
-`client.Verify(ctx)` checks live authentication and reachability.
+`client.Ready(ctx)` checks reachability; any authenticated call, such as
+`client.GetMerchantConfiguration(ctx)`, proves the credential.

@@ -6,35 +6,6 @@
     "description": "OpenRails' HTTP API, from the API root: a standalone server serves it at /, an embedded host beneath its mount (usually /billing). Generated from the route catalog (internal/http/routes) by `go run ./scripts/contracts -write`; do not edit."
   },
   "paths": {
-    "/": {
-      "get": {
-        "tags": [
-          "meta"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:public"
-        ]
-      }
-    },
     "/health/live": {
       "get": {
         "tags": [
@@ -46,8 +17,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Health"
                 }
               }
             }
@@ -69,23 +39,13 @@
         "tags": [
           "meta"
         ],
-        "parameters": [
-          {
-            "name": "verbose",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Health"
                 }
               }
             }
@@ -99,79 +59,8 @@
         "x-openrails-errors": [
           "service_unavailable"
         ],
-        "x-openrails-error-sets": [
-          "tier:public",
-          "request"
-        ]
-      }
-    },
-    "/healthz": {
-      "get": {
-        "tags": [
-          "meta"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:public"
-        ]
-      }
-    },
-    "/readyz": {
-      "get": {
-        "tags": [
-          "meta"
-        ],
-        "parameters": [
-          {
-            "name": "verbose",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:public",
-          "request"
         ]
       }
     },
@@ -214,8 +103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/Capabilities"
                 }
               }
             }
@@ -2256,7 +2144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CopilotAskResult"
+                  "$ref": "#/components/schemas/AskResult"
                 }
               }
             }
@@ -11783,82 +11671,6 @@
         ]
       }
     },
-    "/v1/merchant/settings": {
-      "get": {
-        "tags": [
-          "merchant"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantSettings"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:settings:read",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      },
-      "put": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MerchantSettings"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:settings:update",
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/merchant/api-host": {
       "get": {
         "tags": [
@@ -11870,8 +11682,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/MerchantAPIHost"
                 }
               }
             }
@@ -11905,8 +11716,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/SetAPIHostRequest"
               }
             }
           }
@@ -11917,8 +11727,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/MerchantAPIHost"
                 }
               }
             }
@@ -11928,8 +11737,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/MerchantAPIHost"
                 }
               }
             }
@@ -11971,8 +11779,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/MerchantAPIHost"
                 }
               }
             }
@@ -12002,7 +11809,7 @@
         ]
       }
     },
-    "/v1/merchant/webhooks": {
+    "/v1/merchant/alert-webhooks": {
       "get": {
         "tags": [
           "merchant"
@@ -12014,7 +11821,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AlertWebhook"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12045,7 +11869,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateWebhookInput"
+                "$ref": "#/components/schemas/CreateAlertWebhookRequest"
               }
             }
           }
@@ -12056,7 +11880,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Webhook"
+                  "$ref": "#/components/schemas/AlertWebhook"
                 }
               }
             }
@@ -12073,7 +11897,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:settings:update",
         "x-openrails-errors": [
-          "resource_not_found",
           "service_unavailable",
           "webhook_invalid"
         ],
@@ -12083,7 +11906,7 @@
         ]
       }
     },
-    "/v1/merchant/webhooks/{id}": {
+    "/v1/merchant/alert-webhooks/{id}": {
       "delete": {
         "tags": [
           "merchant"
@@ -12099,16 +11922,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -12122,6 +11937,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:settings:update",
         "x-openrails-errors": [
+          "invalid_param",
           "resource_not_found",
           "service_unavailable"
         ],
@@ -12130,7 +11946,7 @@
         ]
       }
     },
-    "/v1/merchant/webhooks/{id}/url": {
+    "/v1/merchant/alert-webhooks/{id}/url": {
       "put": {
         "tags": [
           "merchant"
@@ -12149,7 +11965,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RotateWebhookURLInput"
+                "$ref": "#/components/schemas/SetAlertWebhookURLRequest"
               }
             }
           }
@@ -12160,7 +11976,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Webhook"
+                  "$ref": "#/components/schemas/AlertWebhook"
                 }
               }
             }
@@ -12177,6 +11993,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:settings:update",
         "x-openrails-errors": [
+          "invalid_param",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable",
@@ -12333,7 +12150,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserMerchant"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12363,8 +12197,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/CreateMerchantRequest"
               }
             }
           }
@@ -12375,8 +12208,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/UserMerchant"
                 }
               }
             }
@@ -12386,8 +12218,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/UserMerchant"
                 }
               }
             }
@@ -12428,8 +12259,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/RenameMerchantRequest"
               }
             }
           }
@@ -12440,8 +12270,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/MerchantName"
                 }
               }
             }
@@ -12480,8 +12309,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/CreateAPIKeyRequest"
               }
             }
           }
@@ -12492,8 +12320,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/CreatedAPIKey"
                 }
               }
             }
@@ -12533,7 +12360,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/APIKey"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12573,16 +12417,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -12618,7 +12454,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TeamMember"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12654,7 +12507,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TeamInvite"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12685,8 +12555,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/InviteTeamMemberRequest"
               }
             }
           }
@@ -12697,8 +12566,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/TeamInviteResult"
                 }
               }
             }
@@ -12745,16 +12613,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -12797,8 +12657,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/SetTeamRoleRequest"
               }
             }
           }
@@ -12809,8 +12668,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/TeamMember"
                 }
               }
             }
@@ -12856,16 +12714,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
-                }
-              }
-            }
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -12898,10 +12748,17 @@
         ],
         "parameters": [
           {
-            "name": "include_acknowledged",
+            "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "include_acknowledged",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -12932,10 +12789,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/HostEvent"
-                  }
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/HostEvent"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -12952,7 +12824,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:host-events:read",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_cursor",
+          "invalid_host_event_request"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -12981,8 +12854,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/HostEvent"
                 }
               }
             }
@@ -12999,6 +12871,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:host-events:acknowledge",
         "x-openrails-errors": [
+          "host_event_not_found",
           "invalid_param"
         ],
         "x-openrails-error-sets": [
@@ -13011,13 +12884,22 @@
         "tags": [
           "merchant"
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricsQuery"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/MetricsResult"
                 }
               }
             }
@@ -13038,7 +12920,8 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -13053,7 +12936,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SchemaDoc"
+                  "$ref": "#/components/schemas/MetricsSchema"
                 }
               }
             }
@@ -13113,6 +12996,15 @@
         "tags": [
           "merchant"
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDashboardRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -13140,7 +13032,8 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -13151,10 +13044,24 @@
         ],
         "parameters": [
           {
-            "name": "unread",
+            "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -13165,7 +13072,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "description": "Not yet typed."
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MerchantNotification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -13182,6 +13106,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:metrics:read",
         "x-openrails-errors": [
+          "invalid_cursor",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -13201,8 +13126,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/UnreadCount"
                 }
               }
             }
@@ -13247,8 +13171,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/MerchantNotification"
                 }
               }
             }
@@ -13263,8 +13186,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:settings:update",
+        "x-openrails-permission": "merchant:metrics:read",
         "x-openrails-errors": [
+          "invalid_param",
           "resource_not_found",
           "service_unavailable"
         ],
@@ -13280,14 +13204,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -13297,7 +13221,7 @@
             "name": "seen",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "boolean"
             }
           }
         ],
@@ -13307,7 +13231,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfNotification"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Notification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -13323,7 +13265,9 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:repair-alerts:read",
-        "x-openrails-errors": null,
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
@@ -13341,10 +13285,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/WorkerHealthItem"
-                  }
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WorkerHealth"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -13373,6 +13332,13 @@
         ],
         "parameters": [
           {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "finding_type",
             "in": "query",
             "schema": {
@@ -13381,13 +13347,6 @@
           },
           {
             "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -13414,7 +13373,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FindingsListResponse"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Finding"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -13430,10 +13407,48 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:repair-alerts:read",
-        "x-openrails-errors": null,
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
+        ]
+      }
+    },
+    "/v1/merchant/findings/summary": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingSummary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:repair-alerts:read",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
         ]
       }
     },
@@ -13458,7 +13473,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FindingView"
+                  "$ref": "#/components/schemas/Finding"
                 }
               }
             }
@@ -13476,7 +13491,8 @@
         "x-openrails-permission": "merchant:repair-alerts:read",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found"
+          "resource_not_found",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -13513,7 +13529,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResolveFindingResponse"
+                  "$ref": "#/components/schemas/FindingResolution"
                 }
               }
             }
@@ -13534,7 +13550,8 @@
           "provider_cancel_held",
           "rebill_terms_committed",
           "resource_conflict",
-          "resource_not_found"
+          "resource_not_found",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -13549,14 +13566,14 @@
         ],
         "parameters": [
           {
-            "name": "limit",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "integer"
+              "type": "string"
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
             "schema": {
               "type": "integer"
@@ -13566,7 +13583,7 @@
             "name": "seen",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "boolean"
             }
           }
         ],
@@ -13576,7 +13593,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PathPageOfNotification"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Notification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -13592,7 +13627,9 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
-        "x-openrails-errors": null,
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
         "x-openrails-error-sets": [
           "tier:customer",
           "request"
@@ -13610,8 +13647,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "description": "Not yet typed."
+                  "$ref": "#/components/schemas/UnreadCount"
                 }
               }
             }
@@ -13654,7 +13690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Notification"
                 }
               }
             }
@@ -13671,7 +13707,8 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "invalid_param"
+          "invalid_param",
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer"
@@ -13687,8 +13724,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/AskMetricsRequest"
               }
             }
           }
@@ -13699,7 +13735,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DashboardAskResult"
+                  "$ref": "#/components/schemas/MetricsAnswer"
                 }
               }
             }
@@ -13736,8 +13772,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "description": "Not yet typed."
+                "$ref": "#/components/schemas/GenerateWidgetRequest"
               }
             }
           }
@@ -13748,7 +13783,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenerateResult"
+                  "$ref": "#/components/schemas/GeneratedWidget"
                 }
               }
             }
@@ -13788,10 +13823,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/WorkerHealthItem"
-                  }
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WorkerHealth"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -14066,6 +14116,109 @@
   },
   "components": {
     "schemas": {
+      "APIHostClaim": {
+        "type": "object",
+        "properties": {
+          "api_host": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dns_record": {
+            "$ref": "#/components/schemas/APIHostRecord"
+          }
+        },
+        "required": [
+          "api_host",
+          "created_at",
+          "dns_record"
+        ]
+      },
+      "APIHostRecord": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "value"
+        ]
+      },
+      "APIKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "prefix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "revoked_at"
+        ]
+      },
       "Admission": {
         "type": "object",
         "properties": {
@@ -14304,6 +14457,48 @@
             }
           }
         }
+      },
+      "AlertWebhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "destination_host": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "discord",
+              "generic",
+              "slack"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "destination_host",
+          "format",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ]
       },
       "Allowance": {
         "type": "object",
@@ -14677,24 +14872,26 @@
           "outcome"
         ]
       },
-      "AskEvidence": {
+      "AskMetricsRequest": {
         "type": "object",
         "properties": {
-          "query": {
-            "$ref": "#/components/schemas/Query"
-          },
-          "grain": {
+          "question": {
+            "type": "string"
+          }
+        }
+      },
+      "AskResult": {
+        "type": "object",
+        "properties": {
+          "answer": {
             "type": "string"
           },
-          "range": {
-            "$ref": "#/components/schemas/RangeOut"
-          },
-          "columns": {
+          "evidence": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/Column"
+                  "$ref": "#/components/schemas/Evidence"
                 }
               },
               {
@@ -14702,36 +14899,16 @@
               }
             ]
           },
-          "rows": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "array",
-                  "items": {}
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "compare_range": {
-            "$ref": "#/components/schemas/RangeOut"
-          },
-          "compare_rows": {
+          "drafts": {
             "type": "array",
             "items": {
-              "type": "array",
-              "items": {}
+              "$ref": "#/components/schemas/Draft"
             }
           }
         },
         "required": [
-          "query",
-          "range",
-          "columns",
-          "rows"
+          "answer",
+          "evidence"
         ]
       },
       "Balance": {
@@ -15084,6 +15261,41 @@
             "type": "boolean"
           }
         }
+      },
+      "Capabilities": {
+        "type": "object",
+        "properties": {
+          "route_groups": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "features": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "route_groups",
+          "features"
+        ]
       },
       "CaptureParams": {
         "type": "object",
@@ -16397,24 +16609,6 @@
           "payment_method_id"
         ]
       },
-      "Column": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "unit": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "kind"
-        ]
-      },
       "ConfirmCheckoutAttemptRequest": {
         "type": "object",
         "properties": {
@@ -16426,36 +16620,45 @@
           }
         }
       },
-      "CopilotAskResult": {
+      "CreateAPIKeyRequest": {
         "type": "object",
         "properties": {
-          "answer": {
+          "name": {
             "type": "string"
           },
-          "evidence": {
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateAlertWebhookRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "discord",
+              "generic",
+              "slack"
+            ]
+          },
+          "enabled": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Evidence"
-                }
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ]
-          },
-          "drafts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Draft"
-            }
           }
-        },
-        "required": [
-          "answer",
-          "evidence"
-        ]
+        }
       },
       "CreateCheckoutAttemptRequest": {
         "type": "object",
@@ -16558,6 +16761,17 @@
             "description": "A number as a decimal string."
           },
           "reference": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateMerchantRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "display_name": {
             "type": "string"
           }
         }
@@ -16847,34 +17061,73 @@
           }
         }
       },
-      "CreateWebhookInput": {
+      "CreatedAPIKey": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
-          "url": {
+          "role": {
             "type": "string"
           },
-          "format": {
-            "type": "string",
-            "enum": [
-              "discord",
-              "generic",
-              "slack"
-            ]
+          "prefix": {
+            "type": "string"
           },
-          "enabled": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
             "oneOf": [
               {
-                "type": "boolean"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secret": {
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "prefix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "revoked_at",
+          "secret"
+        ]
       },
       "CreditGrant": {
         "type": "object",
@@ -17397,7 +17650,7 @@
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/Widget"
+                  "$ref": "#/components/schemas/DashboardWidget"
                 }
               },
               {
@@ -17409,31 +17662,20 @@
             "type": "boolean"
           },
           "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_by": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "widgets",
-          "is_default"
-        ]
-      },
-      "DashboardAskResult": {
-        "type": "object",
-        "properties": {
-          "answer": {
-            "type": "string"
-          },
-          "evidence": {
             "oneOf": [
               {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/AskEvidence"
-                }
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_by": {
+            "oneOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -17442,8 +17684,60 @@
           }
         },
         "required": [
-          "answer",
-          "evidence"
+          "widgets",
+          "is_default",
+          "updated_at",
+          "updated_by"
+        ]
+      },
+      "DashboardGrid": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "type": "integer"
+          },
+          "y": {
+            "type": "integer"
+          },
+          "w": {
+            "type": "integer"
+          },
+          "h": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "w",
+          "h"
+        ]
+      },
+      "DashboardWidget": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "viz": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/MetricsQuery"
+          },
+          "grid": {
+            "$ref": "#/components/schemas/DashboardGrid"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "viz",
+          "query",
+          "grid"
         ]
       },
       "DeclaredAdminGrant": {
@@ -18143,96 +18437,109 @@
           }
         }
       },
-      "FindingView": {
+      "Finding": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "tenant_id": {
+          "finding_type": {
             "type": "string"
           },
           "provider": {
-            "type": "string",
-            "enum": [
-              "ccbill",
-              "declared",
-              "nmi",
-              "solana",
-              "stripe"
-            ]
-          },
-          "finding_type": {
-            "type": "string",
-            "enum": [
-              "pull.cancellation.capped",
-              "pull.charge.missing",
-              "pull.dispute.chargeback",
-              "pull.payment_method.mismatch",
-              "pull.refund.missing",
-              "pull.reversal.unlinked",
-              "pull.subscription.dead",
-              "pull.subscription.drift",
-              "pull.subscription.duplicate",
-              "pull.subscription.evidence_stale",
-              "pull.subscription.mismatch",
-              "pull.subscription.missing"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "subject_key": {
             "type": "string"
           },
           "severity": {
-            "type": "string",
-            "enum": [
-              "critical",
-              "high",
-              "low",
-              "medium"
-            ]
+            "type": "string"
           },
           "status": {
-            "type": "string",
-            "enum": [
-              "auto_fixed",
-              "fixed",
-              "ignored",
-              "reconcile_required",
-              "requires_review"
-            ]
-          },
-          "requires_review": {
-            "type": "boolean"
+            "type": "string"
           },
           "recommended_action": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "evidence": {
-            "type": "object",
-            "additionalProperties": {}
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "first_seen_run": {
-            "type": "string"
-          },
-          "last_seen_run": {
-            "type": "string"
+          "recommendation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FindingRecommendation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_seen_at": {
             "type": "string",
             "format": "date-time"
           },
           "resolved_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resolution": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resolved_by": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "operator_notes": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -18241,39 +18548,111 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "notified_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "notified_severity": {
-            "type": "string"
-          },
-          "recommendation": {
-            "$ref": "#/components/schemas/Recommendation"
           }
         },
         "required": [
           "id",
-          "tenant_id",
           "finding_type",
+          "provider",
           "subject_key",
           "severity",
           "status",
+          "recommended_action",
+          "evidence",
+          "recommendation",
           "last_seen_at",
+          "resolved_at",
+          "resolution",
+          "resolved_by",
+          "operator_notes",
           "created_at",
           "updated_at"
         ]
       },
-      "FindingsListResponse": {
+      "FindingRecommendation": {
         "type": "object",
         "properties": {
-          "items": {
+          "action": {
+            "type": "string"
+          },
+          "params": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "alternatives": {
             "oneOf": [
               {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/FindingView"
+                  "$ref": "#/components/schemas/FindingRecommendation"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "params",
+          "alternatives"
+        ]
+      },
+      "FindingResolution": {
+        "type": "object",
+        "properties": {
+          "finding": {
+            "$ref": "#/components/schemas/Finding"
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "finding",
+          "execution"
+        ]
+      },
+      "FindingSummary": {
+        "type": "object",
+        "properties": {
+          "orphaned_members": {
+            "type": "integer"
+          },
+          "freeloaders": {
+            "type": "integer"
+          },
+          "duplicate_coverage": {
+            "type": "integer"
+          },
+          "verification_pressure": {
+            "$ref": "#/components/schemas/VerificationPressure"
+          },
+          "episodes": {
+            "$ref": "#/components/schemas/EpisodeTotals"
+          },
+          "open_by_severity": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
                 }
               },
               {
@@ -18281,25 +18660,18 @@
               }
             ]
           },
-          "total": {
+          "total_open": {
             "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "gauges": {
-            "$ref": "#/components/schemas/QueueGauges"
           }
         },
         "required": [
-          "items",
-          "total",
-          "limit",
-          "offset",
-          "gauges"
+          "orphaned_members",
+          "freeloaders",
+          "duplicate_coverage",
+          "verification_pressure",
+          "episodes",
+          "open_by_severity",
+          "total_open"
         ]
       },
       "FlatPrice": {
@@ -18334,11 +18706,29 @@
           "unsanctioned"
         ]
       },
-      "GenerateResult": {
+      "GenerateWidgetRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "base_query": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsQuery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "GeneratedWidget": {
         "type": "object",
         "properties": {
           "query": {
-            "$ref": "#/components/schemas/Query"
+            "$ref": "#/components/schemas/MetricsQuery"
           },
           "title": {
             "type": "string"
@@ -18353,27 +18743,19 @@
           "viz"
         ]
       },
-      "Grid": {
+      "Health": {
         "type": "object",
         "properties": {
-          "x": {
-            "type": "integer"
-          },
-          "y": {
-            "type": "integer"
-          },
-          "w": {
-            "type": "integer"
-          },
-          "h": {
-            "type": "integer"
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "ready"
+            ]
           }
         },
         "required": [
-          "x",
-          "y",
-          "w",
-          "h"
+          "status"
         ]
       },
       "HostEvent": {
@@ -18399,22 +18781,57 @@
             "format": "date-time"
           },
           "acknowledged_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "payment": {
-            "$ref": "#/components/schemas/PaymentSettledEvent"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentSettledEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "delinquency": {
-            "$ref": "#/components/schemas/DelinquencyHostEvent"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DelinquencyHostEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "id",
           "merchant_id",
           "type",
-          "occurred_at"
+          "occurred_at",
+          "acknowledged_at",
+          "payment",
+          "delinquency"
         ]
+      },
+      "InviteTeamMemberRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        }
       },
       "Invoice": {
         "type": "object",
@@ -19048,6 +19465,35 @@
           "unit_amount"
         ]
       },
+      "MerchantAPIHost": {
+        "type": "object",
+        "properties": {
+          "api_host": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claim": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/APIHostClaim"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "api_host",
+          "claim"
+        ]
+      },
       "MerchantBillingImportResult": {
         "type": "object",
         "properties": {
@@ -19139,6 +19585,76 @@
           "display_name",
           "api_host",
           "settings"
+        ]
+      },
+      "MerchantName": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "MerchantNotification": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "warning"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "link": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "read_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "title",
+          "body",
+          "link",
+          "created_at",
+          "read_at"
         ]
       },
       "MerchantProfileInput": {
@@ -19386,6 +19902,494 @@
           "allowance",
           "created_at",
           "updated_at"
+        ]
+      },
+      "MetricsAnswer": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "evidence": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsEvidence"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "answer",
+          "evidence"
+        ]
+      },
+      "MetricsColumn": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ]
+      },
+      "MetricsDimension": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ]
+      },
+      "MetricsEvidence": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/MetricsQuery"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "range": {
+            "$ref": "#/components/schemas/MetricsResultRange"
+          },
+          "columns": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsColumn"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {}
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compare_range": {
+            "$ref": "#/components/schemas/MetricsResultRange"
+          },
+          "compare_rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {}
+            }
+          }
+        },
+        "required": [
+          "query",
+          "range",
+          "columns",
+          "rows"
+        ]
+      },
+      "MetricsExample": {
+        "type": "object",
+        "properties": {
+          "intent": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/MetricsQuery"
+          }
+        },
+        "required": [
+          "intent",
+          "query"
+        ]
+      },
+      "MetricsLimits": {
+        "type": "object",
+        "properties": {
+          "max_buckets": {
+            "type": "integer"
+          },
+          "max_limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_buckets",
+          "max_limit"
+        ]
+      },
+      "MetricsMeasure": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "class": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "formula": {
+            "type": "string"
+          },
+          "dims": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "money": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "class",
+          "unit",
+          "description",
+          "formula",
+          "dims"
+        ]
+      },
+      "MetricsOrder": {
+        "type": "object",
+        "properties": {
+          "measure": {
+            "type": "string"
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          }
+        }
+      },
+      "MetricsQuery": {
+        "type": "object",
+        "properties": {
+          "measures": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grain": {
+            "type": "string"
+          },
+          "range": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MetricsRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filters": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsOrder"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compare": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "measures",
+          "by",
+          "grain",
+          "range",
+          "filters",
+          "order",
+          "limit",
+          "compare"
+        ]
+      },
+      "MetricsRange": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "last": {
+            "type": "string"
+          }
+        }
+      },
+      "MetricsResult": {
+        "type": "object",
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "range": {
+            "$ref": "#/components/schemas/MetricsResultRange"
+          },
+          "columns": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsColumn"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {}
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compare_range": {
+            "$ref": "#/components/schemas/MetricsResultRange"
+          },
+          "compare_rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {}
+            }
+          }
+        },
+        "required": [
+          "range",
+          "columns",
+          "rows"
+        ]
+      },
+      "MetricsResultRange": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ]
+      },
+      "MetricsSchema": {
+        "type": "object",
+        "properties": {
+          "measures": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsMeasure"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dimensions": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsDimension"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grains": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deferred": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "caveats": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "examples": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetricsExample"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limits": {
+            "$ref": "#/components/schemas/MetricsLimits"
+          },
+          "query_shape": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "measures",
+          "dimensions",
+          "grains",
+          "deferred",
+          "caveats",
+          "examples",
+          "limits",
+          "query_shape"
         ]
       },
       "NextAction": {
@@ -19908,20 +20912,6 @@
           }
         }
       },
-      "OrderTerm": {
-        "type": "object",
-        "properties": {
-          "measure": {
-            "type": "string"
-          },
-          "dimension": {
-            "type": "string"
-          },
-          "dir": {
-            "type": "string"
-          }
-        }
-      },
       "PSP": {
         "type": "object",
         "properties": {
@@ -20269,51 +21259,6 @@
             "type": "integer"
           }
         }
-      },
-      "PathPageOfNotification": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "type": "string"
-          },
-          "data": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Notification"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "offset": {
-            "type": "integer"
-          },
-          "has_more": {
-            "type": "boolean"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object",
-          "data",
-          "total",
-          "limit",
-          "offset",
-          "has_more",
-          "url"
-        ]
       },
       "PathPageOfPlatformMerchantItem": {
         "type": "object",
@@ -22273,161 +23218,6 @@
           "created_at"
         ]
       },
-      "Query": {
-        "type": "object",
-        "properties": {
-          "measures": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "by": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/QueryRange"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "filters": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "order": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/OrderTerm"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "limit": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "compare": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "measures",
-          "by",
-          "grain",
-          "range",
-          "filters",
-          "order",
-          "limit",
-          "compare"
-        ]
-      },
-      "QueryRange": {
-        "type": "object",
-        "properties": {
-          "from": {
-            "type": "string"
-          },
-          "to": {
-            "type": "string"
-          },
-          "last": {
-            "type": "string"
-          }
-        }
-      },
-      "QueueGauges": {
-        "type": "object",
-        "properties": {
-          "orphaned_members": {
-            "type": "integer"
-          },
-          "freeloaders": {
-            "type": "integer"
-          },
-          "duplicate_coverage": {
-            "type": "integer"
-          },
-          "verification_pressure": {
-            "$ref": "#/components/schemas/VerificationPressure"
-          },
-          "episodes": {
-            "$ref": "#/components/schemas/EpisodeTotals"
-          },
-          "open_by_severity": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "integer"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total_open": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "orphaned_members",
-          "freeloaders",
-          "duplicate_coverage",
-          "verification_pressure",
-          "episodes",
-          "open_by_severity",
-          "total_open"
-        ]
-      },
       "RailDefinition": {
         "type": "object",
         "properties": {
@@ -22475,23 +23265,6 @@
           "display_name",
           "credential_keys",
           "setting_keys"
-        ]
-      },
-      "RangeOut": {
-        "type": "object",
-        "properties": {
-          "from": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "to": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "from",
-          "to"
         ]
       },
       "RateCard": {
@@ -22740,27 +23513,6 @@
           "attempts"
         ]
       },
-      "Recommendation": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "params": {
-            "type": "object",
-            "additionalProperties": {}
-          },
-          "alternatives": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Recommendation"
-            }
-          }
-        },
-        "required": [
-          "action"
-        ]
-      },
       "RefundPaymentParams": {
         "type": "object",
         "properties": {
@@ -22783,6 +23535,14 @@
         "type": "object",
         "properties": {
           "release_reference": {
+            "type": "string"
+          }
+        }
+      },
+      "RenameMerchantRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
             "type": "string"
           }
         }
@@ -23159,28 +23919,17 @@
         "type": "object",
         "properties": {
           "outcome": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "approve",
+              "ignore"
+            ]
           },
           "notes": {
             "type": "string"
           },
           "override_params": {}
         }
-      },
-      "ResolveFindingResponse": {
-        "type": "object",
-        "properties": {
-          "finding": {
-            "$ref": "#/components/schemas/FindingView"
-          },
-          "execution": {
-            "type": "object",
-            "additionalProperties": {}
-          }
-        },
-        "required": [
-          "finding"
-        ]
       },
       "ResolvePurchaseReviewParams": {
         "type": "object",
@@ -23196,59 +23945,6 @@
             "type": "string"
           }
         }
-      },
-      "Result": {
-        "type": "object",
-        "properties": {
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "$ref": "#/components/schemas/RangeOut"
-          },
-          "columns": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/Column"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rows": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "array",
-                  "items": {}
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "compare_range": {
-            "$ref": "#/components/schemas/RangeOut"
-          },
-          "compare_rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          }
-        },
-        "required": [
-          "range",
-          "columns",
-          "rows"
-        ]
       },
       "RetryInvoiceCollectionParams": {
         "type": "object",
@@ -23274,7 +23970,15 @@
           }
         }
       },
-      "RotateWebhookURLInput": {
+      "SetAPIHostRequest": {
+        "type": "object",
+        "properties": {
+          "api_host": {
+            "type": "string"
+          }
+        }
+      },
+      "SetAlertWebhookURLRequest": {
         "type": "object",
         "properties": {
           "url": {
@@ -23282,205 +23986,23 @@
           }
         }
       },
-      "SchemaDimension": {
+      "SetDashboardRequest": {
         "type": "object",
         "properties": {
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "values": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+          "widgets": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DashboardWidget"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        },
-        "required": [
-          "name",
-          "description"
-        ]
-      },
-      "SchemaDoc": {
-        "type": "object",
-        "properties": {
-          "measures": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SchemaMeasure"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "dimensions": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SchemaDimension"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "grains": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "deferred": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caveats": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "examples": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SchemaExample"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "limits": {
-            "$ref": "#/components/schemas/SchemaLimits"
-          },
-          "query_shape": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "measures",
-          "dimensions",
-          "grains",
-          "deferred",
-          "caveats",
-          "examples",
-          "limits",
-          "query_shape"
-        ]
-      },
-      "SchemaExample": {
-        "type": "object",
-        "properties": {
-          "intent": {
-            "type": "string"
-          },
-          "query": {
-            "$ref": "#/components/schemas/Query"
-          }
-        },
-        "required": [
-          "intent",
-          "query"
-        ]
-      },
-      "SchemaLimits": {
-        "type": "object",
-        "properties": {
-          "max_buckets": {
-            "type": "integer"
-          },
-          "max_limit": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "max_buckets",
-          "max_limit"
-        ]
-      },
-      "SchemaMeasure": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "class": {
-            "type": "string",
-            "enum": [
-              "additive",
-              "distinct",
-              "ratio",
-              "snapshot"
-            ]
-          },
-          "unit": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "formula": {
-            "type": "string"
-          },
-          "dims": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "money": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "name",
-          "class",
-          "unit",
-          "description",
-          "formula",
-          "dims"
-        ]
+        }
       },
       "SetMeterParams": {
         "type": "object",
@@ -23544,6 +24066,14 @@
           },
           "allowance": {
             "$ref": "#/components/schemas/Allowance"
+          }
+        }
+      },
+      "SetTeamRoleRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
           }
         }
       },
@@ -24157,6 +24687,139 @@
           "tokens"
         ]
       },
+      "TeamInvite": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "redeemed_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "created_at",
+          "expires_at",
+          "redeemed_at",
+          "revoked_at"
+        ]
+      },
+      "TeamInviteResult": {
+        "type": "object",
+        "properties": {
+          "member": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamMember"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invite": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamInvite"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "member",
+          "invite",
+          "url"
+        ]
+      },
+      "TeamMember": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "email": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "username": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "username",
+          "role"
+        ]
+      },
       "Tier": {
         "type": "object",
         "properties": {
@@ -24450,6 +25113,17 @@
             "type": "string"
           }
         }
+      },
+      "UnreadCount": {
+        "type": "object",
+        "properties": {
+          "unread_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread_count"
+        ]
       },
       "UpdatePSPParams": {
         "type": "object",
@@ -24836,6 +25510,29 @@
           "dimensions"
         ]
       },
+      "UserMerchant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "display_name",
+          "role"
+        ]
+      },
       "VerificationPressure": {
         "type": "object",
         "properties": {
@@ -24969,80 +25666,7 @@
           "action"
         ]
       },
-      "Webhook": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "merchant_id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "destination_host": {
-            "type": "string"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "discord",
-              "generic",
-              "slack"
-            ]
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "merchant_id",
-          "name",
-          "destination_host",
-          "format",
-          "enabled",
-          "created_at",
-          "updated_at"
-        ]
-      },
-      "Widget": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "viz": {
-            "type": "string"
-          },
-          "query": {
-            "$ref": "#/components/schemas/Query"
-          },
-          "grid": {
-            "$ref": "#/components/schemas/Grid"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "viz",
-          "query",
-          "grid"
-        ]
-      },
-      "WorkerHealthItem": {
+      "WorkerHealth": {
         "type": "object",
         "properties": {
           "worker_kind": {
@@ -25053,25 +25677,60 @@
             "format": "date-time"
           },
           "expected_period_seconds": {
-            "type": "integer"
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_success_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_error_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_error": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "consecutive_failures": {
             "type": "integer"
           },
           "last_alerted_at": {
-            "type": "string",
-            "format": "date-time"
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "type": "string",
@@ -25081,7 +25740,12 @@
         "required": [
           "worker_kind",
           "registered_at",
+          "expected_period_seconds",
+          "last_success_at",
+          "last_error_at",
+          "last_error",
           "consecutive_failures",
+          "last_alerted_at",
           "updated_at"
         ]
       },

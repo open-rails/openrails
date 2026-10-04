@@ -1,80 +1,77 @@
 package handlers
 
 import (
-	"math"
-	"net/http"
-	"strconv"
-	"strings"
+	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/pagination"
 )
 
-const defaultAdminOperationsLimit = 50
-
-func adminOperationsPagination(r *httprequest.Request) (int, int) {
-	limit, _ := strconv.Atoi(r.Request.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 200 {
-		limit = defaultAdminOperationsLimit
-	}
-	offset, _ := strconv.Atoi(r.Request.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	} else if offset > math.MaxInt32 {
-		offset = math.MaxInt32
-	}
-	return limit, offset
+// RepairAlertsQuery is the repair alert list's query.
+type RepairAlertsQuery struct {
+	Seen *bool `form:"seen"`
 }
 
+// GetAdminRepairAlerts handles GET /v1/merchant/repair-alerts: ledger repairs
+// that need the merchant, newest first.
 func GetAdminRepairAlerts(r *httprequest.Request) {
 	ctx := r.Request.Context()
-	limit, offset := adminOperationsPagination(r)
+	var query RepairAlertsQuery
+	if !r.BindQuery(&query) {
+		return
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "merchant scope required")
+		writeRefusal(r, err, "merchant scope required")
 		return
 	}
-	tsid := db.SystemCustomerID(merchantID.UUID())
-
-	var seen *bool
-	seenParam := strings.ToLower(strings.TrimSpace(r.Request.URL.Query().Get("seen")))
-	if seenParam == "true" || seenParam == "false" {
-		v := seenParam == "true"
-		seen = &v
-	}
-
-	q := r.State.DB.Gen(ctx)
-	total, err := q.CountRepairAlerts(ctx, gen.CountRepairAlertsParams{
-		CustomerID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
+	notes, err := customerNotificationPage(page, func(afterAt *time.Time, afterID *uuid.UUID, fetch int32) ([]gen.BillingNotification, error) {
+		return r.State.DB.Gen(ctx).ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
+			MerchantID: merchantID.UUID(), CustomerID: db.SystemCustomerID(merchantID.UUID()), EventType: string(models.NotificationSystemAlert),
+			Seen: query.Seen, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		})
 	})
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to count repair alerts")
+		writeRefusal(r, err, "list repair alerts failed")
 		return
 	}
-	limit32, _ := safecast.Convert[int32](limit)
-	offset32, _ := safecast.Convert[int32](offset)
-	rows, err := q.ListRepairAlerts(ctx, gen.ListRepairAlertsParams{
-		CustomerID: tsid, EventType: string(models.NotificationSystemAlert), Seen: seen,
-		Column3: limit32, Column4: offset32,
-	})
+	r.SuccessJSON(notes)
+}
+
+// customerNotificationPage runs a keyset notification query for one page.
+func customerNotificationPage(page billing.PageRequest, fetch func(*time.Time, *uuid.UUID, int32) ([]gen.BillingNotification, error)) (billing.ListPage[billing.Notification], error) {
+	limit, err := pagination.Limit(page)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve repair alerts")
-		return
+		return billing.ListPage[billing.Notification]{}, err
 	}
-	items := make([]*models.NotificationQueue, 0, len(rows))
-	for _, row := range rows {
-		m, merr := models.NotificationFromGen(row)
-		if merr != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "failed to decode repair alerts")
-			return
+	afterAt, afterID, err := pagination.After(page.Cursor)
+	if err != nil {
+		return billing.ListPage[billing.Notification]{}, err
+	}
+	rows, err := fetch(afterAt, afterID, pagination.Fetch(limit))
+	if err != nil {
+		return billing.ListPage[billing.Notification]{}, err
+	}
+	cut := pagination.Cut(rows, limit, func(n gen.BillingNotification) any { return pagination.TimeID{At: n.CreatedAt, ID: n.ID} })
+	out := billing.ListPage[billing.Notification]{Next: cut.Next, Items: make([]billing.Notification, 0, len(cut.Items))}
+	for _, row := range cut.Items {
+		n, err := models.NotificationFromGen(row)
+		if err != nil {
+			return billing.ListPage[billing.Notification]{}, err
 		}
-		items = append(items, m)
+		out.Items = append(out.Items, n.View())
 	}
-	r.SuccessJSONPaginated(notificationViews(items), total, limit, offset)
+	return out, nil
 }
 
 // #528: GetAdminProviderIntents (the #358 provider-intent ledger debug view) was

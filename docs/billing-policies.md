@@ -62,30 +62,30 @@ infer.
 
 ## Declaring
 
-Manifest (mode 1), under the merchant:
+Merchant settings, under the merchant's `settings:` in a manifest (mode 1):
 
 ```yaml
-billing_policies:
-  api_line:
-    kind: outstanding_cap
-    outstanding_cap: 200_000_000        # micros — $200
-  cloud_monthly:
-    kind: window_spend_cap
-    spend_windows:
-      - key: monthly
-        window: 720h
-        limit: 2_000_000_000            # micros — $2000
-  cloud_quota:
-    kind: accrual_rate_cap
-    accrual_rate_cap_per_hour: 10_000_000   # micros/hour — $10/hour deployed
-    accrual_rate_window: 15m                # measurement lookback (default 1h)
-billing_policy_bindings:
-  - policy: api_line                    # merchant default (no tier)
-  - policy: cloud_monthly
-    tier: cloud
+settings:
+  billing_policies:
+    - name: api_line
+      kind: outstanding_cap
+      outstanding_cap_amount: 200000000      # micros — $200
+    - name: cloud_monthly
+      kind: window_spend_cap
+      spend_windows:
+        - { key: monthly, window_seconds: 2592000, limit: 2000000000 }   # $2000
+    - name: cloud_quota
+      kind: accrual_rate_cap
+      accrual_rate_cap_per_hour: 10000000    # micros/hour — $10/hour deployed
+      accrual_rate_window_seconds: 900       # measurement lookback (default 3600)
+  billing_policy_bindings:
+    - policy: api_line                       # merchant default (no tier)
+    - policy: cloud_monthly
+      tier: cloud
 ```
 
-API (mode 2), `PUT /v1/merchant/settings`:
+The same settings through the API (mode 2), as the `settings` of
+`POST /v1/merchant/configuration/applications`:
 
 ```json
 {
@@ -107,8 +107,8 @@ policy the API would have refused. Each kind accepts only its own limit: putting
 ignored field.
 
 Customer assignments use a separate runtime resource in both manifest and API
-mode. They are excluded from `GET /v1/merchant/settings`; replacing that
-merchant document preserves them. Removing a policy that is still assigned to a
+mode. They are not part of the merchant settings; changing the settings
+preserves them. Removing a policy that is still assigned to a
 customer is refused. `customer_id` is not accepted in a declaration binding.
 
 ### Assigning a customer

@@ -62,8 +62,8 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 		seen.Store(r.Method + " " + r.URL.Path + " " + r.Header.Get("Authorization") + " " + r.Header.Get("Accept"))
 		_, _ = w.Write([]byte(`{}`))
 	}, WithAPIKey(" sk-test "))
-	require.NoError(t, client.Verify(t.Context()))
-	require.Equal(t, "GET /v1/merchant/settings Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
+	require.NoError(t, readConfiguration(client, t.Context()))
+	require.Equal(t, "GET /v1/merchant/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
 }
 
 func TestClientDecodesTheErrorEnvelope(t *testing.T) {
@@ -121,7 +121,7 @@ func TestClientDecodesTheErrorEnvelope(t *testing.T) {
 				w.WriteHeader(tc.resp.status)
 				_, _ = w.Write([]byte(tc.resp.body))
 			})
-			_, err := client.GetMerchantSettings(t.Context())
+			_, err := client.GetMerchantConfiguration(t.Context())
 			var status *billing.StatusError
 			require.ErrorAs(t, err, &status)
 			require.Equal(t, tc.resp.status, status.Status)
@@ -151,7 +151,7 @@ func TestPaymentFailureCrossesTheClient(t *testing.T) {
 		w.WriteHeader(http.StatusPaymentRequired)
 		_, _ = w.Write([]byte(`{"error":{"type":"card_error","code":"card_declined","message":"x","metadata":{"failure":{"reason":"expired_card","message":"Card expired","field":"exp"}}}}`))
 	})
-	_, err := client.GetMerchantSettings(t.Context())
+	_, err := client.GetMerchantConfiguration(t.Context())
 	require.ErrorIs(t, err, billing.ErrCardDeclined)
 	failure, ok := billing.PaymentFailureFrom(err)
 	require.True(t, ok)
@@ -174,7 +174,7 @@ func TestClientTransportFailuresAreUnreachable(t *testing.T) {
 	for name, body := range bodies {
 		t.Run(name, func(t *testing.T) {
 			client := newTestRemote(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
-			_, err := client.GetMerchantSettings(t.Context())
+			_, err := client.GetMerchantConfiguration(t.Context())
 			require.ErrorIs(t, err, billing.ErrUnreachable)
 			var status *billing.StatusError
 			require.False(t, errors.As(err, &status))
@@ -184,21 +184,21 @@ func TestClientTransportFailuresAreUnreachable(t *testing.T) {
 	client := newTestRemote(t, func(http.ResponseWriter, *http.Request) { t.Error("request sent on a finished context") }, counting)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := client.Verify(ctx)
+	err := readConfiguration(client, ctx)
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorIs(t, err, billing.ErrUnreachable)
 	var status *billing.StatusError
 	require.False(t, errors.As(err, &status))
 	expired, cancelExpired := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancelExpired()
-	require.ErrorIs(t, client.Verify(expired), context.DeadlineExceeded)
+	require.ErrorIs(t, readConfiguration(client, expired), context.DeadlineExceeded)
 	require.Zero(t, minted.Load(), "a finished context mints no credential")
 
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
 	closed, err := NewRemote(server.URL, WithAPIKey("k"), WithDefaultMerchant("fixture"))
 	require.NoError(t, err)
-	require.ErrorIs(t, closed.Verify(t.Context()), billing.ErrUnreachable)
+	require.ErrorIs(t, readConfiguration(closed, t.Context()), billing.ErrUnreachable)
 }
 
 func TestClientDeadlineOwnership(t *testing.T) {
@@ -249,7 +249,7 @@ func TestClientDeadlineOwnership(t *testing.T) {
 			client, err := NewRemote("https://openrails.test", WithAPIKey("k"), WithDefaultMerchant("fixture"),
 				WithHTTPClient(&http.Client{Transport: transport}), WithTimeout(tc.timeout))
 			require.NoError(t, err)
-			err = client.Verify(ctx)
+			err = readConfiguration(client, ctx)
 			require.True(t, called)
 			if tc.wantErr == nil {
 				require.NoError(t, err)

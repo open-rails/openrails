@@ -34,7 +34,7 @@ func identityAuth(id billingauth.Identity, calls *int) *billingauth.Integration 
 }
 
 func TestCapabilities(t *testing.T) {
-	h := CapabilitiesHandler([]RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true})
+	h := CapabilitiesHandler(nil, []RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true}, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/capabilities", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -43,11 +43,12 @@ func TestCapabilities(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
 	require.Len(t, caps.RouteGroups, len(AllRouteSets), "every known group is reported")
 	for _, rs := range AllRouteSets {
-		require.Equal(t, rs == RouteSetCheckout || rs == RouteSetCustomer || rs == RouteSetWebhooks, caps.RouteGroups[rs], rs)
+		require.Equal(t, rs == RouteSetCheckout || rs == RouteSetCustomer || rs == RouteSetWebhooks, caps.RouteGroups[string(rs)], rs)
 	}
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "provider_credential_writes": false,
+		"api_host": false, "catalog_copilot": false, "metrics_ask": false, "dashboard_generation": false,
 	}, caps.Features)
 
 	req := httptest.NewRequest(http.MethodGet, "/billing/v1/capabilities", nil)
@@ -65,8 +66,8 @@ func TestCapabilities(t *testing.T) {
 		{config.CustomerBillingManagement, false, true},
 		{config.CustomerSubscriptionManagement, false, true},
 	} {
-		caps := configuredCapabilities(config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Scope: tc.scope}}}, routesurface.AllProviderRoutes())
-		require.True(t, caps.RouteGroups[RouteSetCustomer])
+		caps := configuredCapabilities(nil, config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Scope: tc.scope}}}, routesurface.AllProviderRoutes())
+		require.True(t, caps.RouteGroups[string(RouteSetCustomer)])
 		require.Equal(t, tc.portal, caps.Features["stripe_billing_portal"], tc.scope)
 		require.Equal(t, tc.solana, caps.Features["solana_subscription_management"], tc.scope)
 		require.False(t, caps.Features["provider_credential_writes"], "credential writes need the merchant group")

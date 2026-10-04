@@ -201,7 +201,7 @@ func TestMerchantRenameRoute(t *testing.T) {
 	next := uniqueName("shop")
 	w := rename(shop, next)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.JSONEq(t, `{"id":"`+m.MerchantID.String()+`","slug":"`+next+`"}`, w.Body.String())
+	require.JSONEq(t, `{"id":"`+m.MerchantID.String()+`","name":"`+next+`"}`, w.Body.String())
 	w = rename(shop, uniqueName("shop"))
 	require.Equal(t, http.StatusTooManyRequests, w.Code, "the former name still selects the merchant; the interval refuses: %s", w.Body.String())
 	require.NotEmpty(t, w.Header().Get("Retry-After"))

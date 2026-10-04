@@ -41,13 +41,10 @@ func TestUserMerchantsListing(t *testing.T) {
 	list := func(token string) []billing.UserMerchant {
 		w := call(t, handler, token, http.MethodGet, "/v1/merchants", "", nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body struct {
-			Object string                 `json:"object"`
-			Data   []billing.UserMerchant `json:"data"`
-		}
+		var body billing.ListPage[billing.UserMerchant]
 		require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
-		require.Equal(t, "list", body.Object)
-		return body.Data
+		require.Empty(t, body.Next, "one page")
+		return body.Items
 	}
 	require.Equal(t, []billing.UserMerchant{
 		{ID: mine.MerchantID, Slug: own, DisplayName: "Own Shop", Role: "owner"},

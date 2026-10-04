@@ -13,7 +13,7 @@ import (
 // parameters, never SQL.
 
 // Class is a measure's aggregation class.
-type Class string
+type Class = billing.MetricsClass
 
 const (
 	ClassAdditive Class = "additive" // SUM/COUNT over the grain
@@ -501,12 +501,12 @@ var Measures = []Measure{
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
 	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "sum of refunded amounts (native currency units, positive), from refund mirror rows",
-		Formula:     "SUM(-amount) over reversal_kind='refund' mirror rows",
+		Formula:     "SUM(amount) of refunds",
 		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'refund'), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "sum of chargeback amounts (native currency units, positive), net of won disputes",
-		Formula:     "SUM(-amount) over reversal_kind IN ('chargeback','dispute_reversal') mirror rows",
+		Formula:     "SUM(amount) of chargebacks and dispute reversals",
 		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IN ('chargeback','dispute_reversal')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	// --- payments: additive counts -------------------------------------------
@@ -517,18 +517,18 @@ var Measures = []Measure{
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "token_type", "attempt_kind", "discount_code"}},
 	{Name: "refund_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
 		Description: "count of refunds issued",
-		Formula:     "COUNT(reversal_kind='refund' mirror rows)",
+		Formula:     "COUNT(refunds)",
 		Expr:        `COUNT(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'refund')`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	{Name: "chargeback_count", Class: ClassAdditive, Family: FamPayments, Unit: "count",
 		Description: "count of chargebacks/disputes received",
-		Formula:     "COUNT(reversal_kind='chargeback' mirror rows)",
+		Formula:     "COUNT(chargebacks)",
 		Expr:        `COUNT(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'chargeback')`,
 		Dims:        []string{"currency", "rail", "psp", "stream", "product_id", "price_id", "card_brand"}},
 	// --- payments: distinct ---------------------------------------------------
 	{Name: "unique_rebilled_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count",
 		Description: "distinct customers successfully rebilled (settled renewal payments) in the bucket",
-		Formula:     "COUNT(DISTINCT customer_id) over settled attempt_kind='renewal' payments",
+		Formula:     "COUNT(DISTINCT customers) over settled renewal payments",
 		Expr:        `COUNT(DISTINCT p.customer_id) FILTER (WHERE ` + saleSettled + ` AND p.attempt_kind = 'renewal')`,
 		Dims:        []string{"currency", "rail", "psp"}},
 	{Name: "paying_customers", Class: ClassDistinct, Family: FamPayments, Unit: "count", Internal: true,
@@ -546,7 +546,7 @@ var Measures = []Measure{
 	// --- subscriptions: flow ----------------------------------------------------
 	{Name: "new_subscriptions", Class: ClassAdditive, Family: FamSubsNew, Unit: "count",
 		Description: "subscriptions started in the bucket (excludes never-activated pending)",
-		Formula:     "COUNT(subs with started_at in bucket, status <> pending)",
+		Formula:     "COUNT(subscriptions started in the bucket, not pending)",
 		// or#893: `failed` left the lifecycle enum, and naming a label the type
 		// no longer has is a runtime cast error, not a no-op predicate. A
 		// subscription whose first charge failed is past_due or canceled; only
@@ -555,7 +555,7 @@ var Measures = []Measure{
 		Dims: []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "subscriber_type"}},
 	{Name: "cancellations", Class: ClassAdditive, Family: FamSubsCanceled, Unit: "count",
 		Description: "subscriptions canceled in the bucket, by cancel_type",
-		Formula:     "COUNT(subs with canceled_at in bucket)",
+		Formula:     "COUNT(subscriptions canceled in the bucket)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "cancel_type"}},
 	{Name: "ended_membership_days", Class: ClassAdditive, Family: FamSubsEnded, Unit: "days", Internal: true,
@@ -566,7 +566,7 @@ var Measures = []Measure{
 		Dims: []string{"rail", "product_id", "price_id", "cancel_type"}},
 	{Name: "avg_membership_duration_days", Class: ClassRatio, Unit: "days", Num: "ended_membership_days", Den: "ended_subscriptions",
 		Description: "average started->ended lifetime (days) of subs that ENDED in the bucket; survivors not counted (censoring)",
-		Formula:     "SUM(ended_at - started_at) / COUNT(subs ended in bucket)",
+		Formula:     "SUM(lifetime) / COUNT(subscriptions ended in the bucket)",
 		Dims:        []string{"rail", "product_id", "price_id", "cancel_type"}},
 	{Name: "subscriptions_at_period_start", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count", Internal: true,
 		SnapshotAtPeriodStart: true,
@@ -579,7 +579,7 @@ var Measures = []Measure{
 	// --- attempts (#1116): every authorization a PSP answered --------------------
 	{Name: "attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
 		Description: "authorizations a PSP answered: card verifications, sales, rebills and retries",
-		Formula:     "COUNT(payment_attempts)",
+		Formula:     "COUNT(payment attempts)",
 		Expr:        `COUNT(*)`,
 		Dims:        attemptDims},
 	{Name: "approved_attempts", Class: ClassAdditive, Family: FamAttempts, Unit: "count",
@@ -634,7 +634,7 @@ var Measures = []Measure{
 	// --- rebill cycles (#1116): cohort by the period that came due ---------------
 	{Name: "rebills_due", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
 		Description: "rebill cycles: paid periods that came due in the bucket and were attempted or recorded missed",
-		Formula:     "COUNT(rebill_cycles)",
+		Formula:     "COUNT(rebill cycles)",
 		Expr:        `COUNT(*)`,
 		Dims:        cycleDims},
 	{Name: "rebills_open", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
@@ -649,7 +649,7 @@ var Measures = []Measure{
 		Dims:        cycleDims},
 	{Name: "rebill_first_failures", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
 		Description: "cycles whose rebill failed: the first attempt declined or errored, or no attempt happened (missed)",
-		Formula:     "COUNT(cycles with first_outcome in (declined, error, missed))",
+		Formula:     "COUNT(cycles whose first_outcome is declined, error or missed)",
 		Expr:        `COUNT(*) FILTER (WHERE cy.first_failed)`,
 		Dims:        cycleDims},
 	{Name: "rebill_first_failure_rate", Class: ClassRatio, Unit: "ratio", Num: "rebill_first_failures", Den: "rebills_attempted",
@@ -658,7 +658,7 @@ var Measures = []Measure{
 		Dims:        cycleDims},
 	{Name: "rebills_missed", Class: ClassAdditive, Family: FamRebillCycles, Unit: "count",
 		Description: "cycles whose rebill never happened by its owner's deadline, by miss_reason",
-		Formula:     "COUNT(cycles with missed_at)",
+		Formula:     "COUNT(missed cycles)",
 		Expr:        `COUNT(*) FILTER (WHERE cy.missed_at IS NOT NULL)`,
 		Dims:        cycleDims},
 	{Name: "rebill_missed_rate", Class: ClassRatio, Unit: "ratio", Num: "rebills_missed", Den: "rebills_due",
@@ -697,7 +697,7 @@ var Measures = []Measure{
 	// --- NMI history (#1120): NMI's own authorizations, by month ------------------
 	{Name: "nmi_history_authorizations", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
 		Description: "authorizations NMI answered, read daily from its transaction history: card verifications, one-off sales and NMI-scheduled rebills, whoever sent them; dated by month",
-		Formula:     "SUM(nmi_history_months.authorizations)",
+		Formula:     "SUM(authorizations in NMI's history)",
 		Expr:        `COALESCE(SUM(h.authorizations), 0)::bigint`,
 		Dims:        nmiHistDims},
 	{Name: "nmi_history_approved", Class: ClassAdditive, Family: FamNMIHistory, Unit: "count",
@@ -737,17 +737,17 @@ var Measures = []Measure{
 		Dims:        []string{"currency", "product_id"}},
 	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
 		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold",
-		Formula:     "SUM(usage_events.amount)",
+		Formula:     "SUM(amount) of usage events",
 		Expr:        `COALESCE(SUM(ue.amount), 0)::bigint`,
 		Dims:        []string{"currency", "payer", "sku", "rate_card"}},
 	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count",
 		Description: "count of metered usage events (raw volume; per-dimension token counts live host-side)",
-		Formula:     "COUNT(usage_events)",
+		Formula:     "COUNT(usage events)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"currency", "payer", "sku", "rate_card"}},
 	{Name: "active_payers", Class: ClassDistinct, Family: FamUsage, Unit: "count",
 		Description: "distinct payers with any usage in the bucket (the API platform's WAU/MAU)",
-		Formula:     "COUNT(DISTINCT customer_id) over usage events",
+		Formula:     "COUNT(DISTINCT customers) over usage events",
 		Expr:        `COUNT(DISTINCT ue.customer_id)`,
 		Dims:        []string{"currency", "sku", "rate_card"}},
 	{Name: "credit_utilization", Class: ClassRatio, Unit: "ratio", Money: true, Num: "usage_revenue", Den: "credits_sold",
@@ -762,34 +762,34 @@ var Measures = []Measure{
 	// --- snapshots ------------------------------------------------------------------
 	{Name: "subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
 		Description: "subscriptions existing at t (interval reconstruction); filter/group by status for active/past_due/pending views",
-		Formula:     "COUNT(subs with started_at <= t < ended_at)",
+		Formula:     "COUNT(subscriptions started at or before t and not ended)",
 		Expr:        `COUNT(s.id)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}},
 	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "money",
 		Description: "monthly-normalized recurring price of auto-renew subs existing at t; group by status to split healthy vs in-dunning",
-		Formula:     "SUM(monthly_normalized(price)) over auto-renew subs at t",
+		Formula:     "SUM(monthly-normalized price) over auto-renewing subscriptions at t",
 		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE pr.auto_renew), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle", "status"}},
 	{Name: "billable_subscriptions", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
 		Description: "subs at t projected to keep billing: auto-renew price, non-terminal status, not canceled/scheduled for deletion",
-		Formula:     "COUNT(subs at t with auto_renew AND status IN (pending,active,past_due,unknown) AND canceled_at IS NULL AND deletion_scheduled_at IS NULL)",
+		Formula:     "COUNT(auto-renewing subscriptions at t that are pending, active, past_due or unknown, not canceled and not scheduled for deletion)",
 		Expr:        `COUNT(s.id) FILTER (WHERE pr.auto_renew AND s.status IN ('pending','active','past_due','unknown') AND s.canceled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle"}},
 	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count",
 		Description: "distinct customers holding a live entitlement at t (includes timed/comped access, not just subscribers)",
-		Formula:     "COUNT(DISTINCT customer_id) over entitlement windows covering t",
+		Formula:     "COUNT(DISTINCT customers) with an entitlement at t",
 		Expr:        `COUNT(DISTINCT e.customer_id)`,
 		Dims:        []string{"entitlement"}},
 	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "unconsumed prepaid credit (deferred revenue) at t: net customer_balance across the ledger",
-		Formula:     "SUM(credits - debits) of customer_balance accounts from transfers before t",
+		Formula:     "SUM(customer balances) at t",
 		Expr: `COALESCE(SUM(
 			CASE WHEN ca.account_type = 'customer_balance' THEN lt.amount ELSE 0 END
 			- CASE WHEN da.account_type = 'customer_balance' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
 	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "arrears accounts receivable at t: accrued-but-unpaid usage debt",
-		Formula:     "SUM(debits - credits) of arrears_liability accounts from transfers before t",
+		Formula:     "SUM(arrears owed) at t",
 		Expr: `COALESCE(SUM(
 			CASE WHEN da.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END
 			- CASE WHEN ca.account_type = 'arrears_liability' THEN lt.amount ELSE 0 END), 0)::bigint`,
@@ -801,7 +801,7 @@ var Measures = []Measure{
 	// --- webhook health (#786) --------------------------------------------------------
 	{Name: "webhook_silence_age_seconds", Class: ClassSnapshot, Family: FamWebhookHealth, Unit: "seconds",
 		Description: "seconds since the last signature-VERIFIED inbound webhook per PSP at t (since tracking began when none was ever accepted); rejects never advance it",
-		Formula:     "t - COALESCE(last_accepted_at, created_at) per (merchant, PSP)",
+		Formula:     "t - the last accepted webhook (or the PSP's creation), per PSP",
 		Expr:        `MAX(GREATEST(EXTRACT(EPOCH FROM (edge.bucket - COALESCE(wh.last_accepted_at, wh.created_at))), 0))::float8`,
 		Dims:        []string{"rail", "psp"}},
 	{Name: "webhook_rejects", Class: ClassAdditive, Family: FamWebhookDaily, Unit: "count",

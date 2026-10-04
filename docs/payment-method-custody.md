@@ -72,29 +72,29 @@ merchants:
   acme:
     psps:
       mobius-bt:
-        nmi:
-          account_id: "7654322"          # the NMI gateway id — the PSP still charges
-          custodian: bt                  # ← the reference
-          secrets:
-            security_key: <NMI security key>
+        rail: nmi
+        account_id: "7654322"          # the NMI gateway id — the PSP still charges
+        custodian: bt                  # ← the reference
+        secrets:
+          security_key: <NMI security key>
       mobius-bt-backup:
-        nmi:
-          account_id: "7654323"
-          custodian: bt                  # same vault, second gateway
-          secrets:
-            security_key: <NMI security key>
+        rail: nmi
+        account_id: "7654323"
+        custodian: bt                  # same vault, second gateway
+        secrets:
+          security_key: <NMI security key>
 
     custodians:
       bt:
-        basis_theory:
-          account_id: <BT tenant id>     # the custodian-native tenant identity
-          settings:
-            public_api_key: <BT public application key>   # checkout-page config
-            network_tokens: false
-            account_updater: false                        # batch account updater add-on
-            account_updater_lookahead_days: 14            # optional; default 14
-          secrets:
-            api_key: <BT private application key>         # the only custodial secret
+        kind: basis_theory
+        account_id: <BT tenant id>     # the custodian-native tenant identity
+        settings:
+          public_api_key: <BT public application key>   # checkout-page config
+          network_tokens: false
+          account_updater: false                        # batch account updater add-on
+          account_updater_lookahead_days: 14            # optional; default 14
+        secrets:
+          api_key: <BT private application key>         # the only custodial secret
 ```
 
 `custodians.<key>.<kind>` is to a custodian what `psps.<key>.<rail>` is to a

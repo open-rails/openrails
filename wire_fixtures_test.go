@@ -80,7 +80,7 @@ func canonicalWireFixtures() map[string]any {
 		},
 		"subscription.json": subscriptionFixtureValue(when, priceFixtureValue, card),
 		"notification.json": billing.Notification{
-			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: (customerFixture).String(), EventType: "subscription_reprice_scheduled", CreatedAt: when,
+			ID: billing.NotificationID(uuid.MustParse("77777777-7777-4777-8777-777777777777")), CustomerID: (customerFixture).String(), EventType: "subscription_reprice_scheduled", CreatedAt: when,
 			Data: billing.NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: (priceFixture).String(), ToPriceID: (scheduledPriceFixture).String(), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
 		},
 		"price.json": priceFixtureValue,
@@ -210,7 +210,7 @@ func TestErrorEnvelopeFixtureThroughClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.GetMerchantSettings(context.Background())
+	_, err = client.GetMerchantConfiguration(context.Background())
 	var status *billing.StatusError
 	if !errors.As(err, &status) || !errors.Is(err, billing.ErrIdempotencyKeyReused) || !errors.Is(err, billing.ErrConflict) {
 		t.Fatalf("unexpected error %v", err)

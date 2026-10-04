@@ -241,26 +241,8 @@ export async function collectCursorPages<T>(
   }
 }
 
-// Offset envelope of the lists not yet on cursor pages.
-export interface ListEnvelope<T> {
-  object: "list"
-  data: T[]
-  total: number
-  limit: number
-  offset: number
-  has_more: boolean
-}
-
 // The cursor list envelope: next_cursor is null on the last page.
 export interface CursorEnvelope<T> {
   data: T[]
   next_cursor: string | null
-}
-
-// Catalog/findings-style envelope ({items,...} instead of {data,...}).
-export interface ItemsEnvelope<T> {
-  items: T[]
-  total: number
-  limit: number
-  offset: number
 }
