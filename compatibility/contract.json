@@ -2027,6 +2027,7 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/db/models/catalog_drift_event.go": {
+      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
