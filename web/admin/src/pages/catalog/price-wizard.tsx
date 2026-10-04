@@ -88,12 +88,13 @@ export function PriceChangeWizard({
   const changePrice = useMutation(adminMutations.changePrice(queryClient))
   const affectedCount =
     previewPriceChange.data?.matched ?? draft?.affected_count ?? null
-  const { data: merchantSettings } = useQuery({
-    ...adminQueries.merchantSettings(),
+  const { data: configuration } = useQuery({
+    ...adminQueries.merchantConfiguration(),
     enabled: open,
   })
   const noticeWindowDays =
-    merchantSettings?.reprice_notice_window_days ?? DEFAULT_NOTICE_WINDOW_DAYS
+    configuration?.settings.reprice_notice_window_days ??
+    DEFAULT_NOTICE_WINDOW_DAYS
 
   const [now] = React.useState(() => new Date())
   const form = useForm({

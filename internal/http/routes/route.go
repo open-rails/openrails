@@ -169,6 +169,9 @@ type Param struct {
 func text(name string) Param    { return Param{Name: name, Kind: "string"} }
 func integer(name string) Param { return Param{Name: name, Kind: "integer", Checked: true} }
 
+// pageParams are a cursor-paged list's query: Request.Page reads them.
+var pageParams = []Param{text("cursor"), integer("limit")}
+
 // params lists a route's query parameters, sorted by name.
 func params(parts ...any) []Param {
 	var out []Param

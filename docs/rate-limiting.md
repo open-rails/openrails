@@ -38,14 +38,14 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
 | `captcha` | — | unlimited | `/v1/captcha/status`, `/v1/captcha/client.js` |
-| `default` | `default` | 300 | everything else |
 
-A bucket with no configured limit falls back to the `default` entry; a configured limit ≤ 0
-means 60 rpm.
+Every other route is unlimited here: a generic per-address ceiling belongs to the proxy in front
+of OpenRails (Traefik). A bucket left out of `rate_limits` is not limited, any other key refuses
+boot, and a configured limit ≤ 0 means 60 rpm.
 
 > The `checkout` bucket covers POSTs to `/v1/me/checkout-sessions` and under
-> `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs remain in
-> `default`. A checkout session is also limited per session id, whatever address
+> `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs are not
+> limited. A checkout session is also limited per session id, whatever address
 > presents it: 120 reads and 10 pays a minute.
 
 > **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail
@@ -57,7 +57,7 @@ means 60 rpm.
 
 Before any counting, a declared `Content-Length` over the bucket ceiling is rejected with `413`
 (+ `Retry-After: 60`); the body is also wrapped in `MaxBytesReader` so chunked uploads are capped
-on read. Ceilings: `checkout`/`subscriptions`/`payment-methods` 64 KiB, `default` 1 MiB.
+on read. Ceilings: `checkout`/`subscriptions`/`payment-methods` 64 KiB; every other route has the 1 MiB request body limit.
 Webhooks are deliberately absent — the handler enforces per-rail caps (CCBill 16 KiB, NMI 64 KiB,
 Basis Theory 64 KiB, Stripe 256 KiB).
 

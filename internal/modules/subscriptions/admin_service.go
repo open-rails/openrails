@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/query"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -401,16 +400,6 @@ func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Cont
 		}
 		return nil
 	})
-}
-
-// GetAllNotifications retrieves all notifications with filtering (admin)
-func (s *AdminSubscriptionService) GetAllNotifications(ctx context.Context, queryOpts *query.QueryOptions[GetNotificationsFilters]) ([]*models.NotificationQueue, int64, error) {
-	notifications, total, err := s.NotificationService.GetNotifications(ctx, *queryOpts)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get notifications: %w", err)
-	}
-
-	return notifications, total, nil
 }
 
 // SendManualNotification sends a manual notification (admin)

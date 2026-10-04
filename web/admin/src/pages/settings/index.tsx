@@ -124,20 +124,26 @@ export function SettingsPage() {
 
 function MerchantSettingsTab() {
   const { data, isPending: loading } = useQuery(
-    adminQueries.merchantSettings("Load settings")
+    adminQueries.merchantConfiguration("Load settings")
   )
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
+  if (loading || !data)
+    return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
     <div className="grid gap-10">
-      <MerchantProfileForm initial={data?.profile} />
-      <RepriceNoticeWindowForm initial={data?.reprice_notice_window_days} />
+      <MerchantProfileForm revision={data.revision} initial={data.settings.profile} />
+      <RepriceNoticeWindowForm
+        revision={data.revision}
+        initial={data.settings.reprice_notice_window_days}
+      />
     </div>
   )
 }
 
 function MerchantProfileForm({
+  revision,
   initial,
 }: {
+  revision: string
   initial?: {
     display_name?: string
     from_email?: string
@@ -160,11 +166,14 @@ function MerchantProfileForm({
     onSubmit: async ({ value }) => {
       try {
         await updateSettings.mutateAsync({
-          profile: {
-            display_name: value.displayName || undefined,
-            from_email: value.fromEmail || undefined,
-            support_url: value.supportURL || undefined,
-            logo_url: value.logoURL || undefined,
+          revision,
+          settings: {
+            profile: {
+              display_name: value.displayName || undefined,
+              from_email: value.fromEmail || undefined,
+              support_url: value.supportURL || undefined,
+              logo_url: value.logoURL || undefined,
+            },
           },
         })
         form.reset(value)
@@ -309,9 +318,15 @@ function MerchantProfileForm({
 // RepriceNoticeWindowForm (#781): the merchant-configurable minimum advance
 // notice (days) a subscription price INCREASE must give existing
 // subscribers. The catalog price-change wizard reads this same value
-// (GET /v1/merchant/settings) for its own date-picker gate; the API enforces
-// it regardless of what the console shows.
-function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
+// (GET /v1/merchant/configuration) for its own date-picker gate; the API
+// enforces it regardless of what the console shows.
+function RepriceNoticeWindowForm({
+  revision,
+  initial,
+}: {
+  revision: string
+  initial?: number
+}) {
   const [editing, setEditing] = React.useState(false)
   const queryClient = useQueryClient()
   const updateSettings = useMutation(
@@ -322,7 +337,8 @@ function RepriceNoticeWindowForm({ initial }: { initial?: number }) {
     onSubmit: async ({ value }) => {
       try {
         await updateSettings.mutateAsync({
-          reprice_notice_window_days: Number(value.days),
+          revision,
+          settings: { reprice_notice_window_days: Number(value.days) },
         })
         form.reset(value)
         toast.success("Notice window saved")

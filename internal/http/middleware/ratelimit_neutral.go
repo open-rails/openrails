@@ -53,7 +53,6 @@ var BucketMaxContentLength = map[string]int64{
 	"checkout":        64 << 10, // 64 KiB
 	"subscriptions":   64 << 10, // 64 KiB
 	"payment-methods": 64 << 10, // 64 KiB
-	"default":         1 << 20,  // 1 MiB (matches the global body limit)
 }
 
 // RateLimitSubject is one rate-limit/captcha subject (an IP or a user). Both
@@ -685,26 +684,22 @@ func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*c
 	if bucket == "captcha" {
 		return nil, bucket
 	}
-	var limit *config.RateLimit
 	switch bucket {
 	case "webhook":
-		limit = (*cfg)["webhook"]
+		return (*cfg)["webhook"], bucket
 	case "subscriptions":
-		limit = (*cfg)["subscribe"]
+		return (*cfg)["subscribe"], bucket
 	case "checkout":
-		limit = (*cfg)["checkout"]
+		return (*cfg)["checkout"], bucket
 	case "payment-methods":
-		limit = (*cfg)["payment"]
-	default:
-		limit = (*cfg)["default"]
+		return (*cfg)["payment"], bucket
 	}
-	if limit == nil {
-		limit = (*cfg)["default"]
-	}
-	return limit, bucket
+	// Generic per-address ceilings belong to the proxy in front of OpenRails.
+	return nil, bucket
 }
 
-// ClassifyBucket maps a request path+method to a rate-limit bucket. It normalizes
+// ClassifyBucket maps a request path+method to a rate-limit bucket; "" for
+// a route OpenRails does not limit. It normalizes
 // the embedded (/billing/v1/...) and standalone (/v1/...) prefixes to one matcher.
 func ClassifyBucket(path, method string) string {
 	if strings.HasPrefix(path, "/billing") {
@@ -727,7 +722,7 @@ func ClassifyBucket(path, method string) string {
 	case method == http.MethodPost && isCheckoutPath(path):
 		return "checkout"
 	default:
-		return "default"
+		return ""
 	}
 }
 

@@ -6,6 +6,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// HostEventID names one host event; on the wire "hev_<uuid>".
+type HostEventID uuid.UUID
+
+const HostEventIDPrefix = "hev_"
+
+func ParseHostEventID(s string) (HostEventID, error) {
+	u, err := parsePrefixedID("host event", HostEventIDPrefix, s)
+	return HostEventID(u), err
+}
+
+func (id HostEventID) UUID() uuid.UUID              { return uuid.UUID(id) }
+func (id HostEventID) IsZero() bool                 { return uuid.UUID(id) == uuid.Nil }
+func (id HostEventID) String() string               { return formatPrefixedID(HostEventIDPrefix, uuid.UUID(id)) }
+func (id HostEventID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id *HostEventID) UnmarshalText(b []byte) error {
+	v, err := ParseHostEventID(string(b))
+	*id = v
+	return err
+}
+
 // HostEventType names the durable event's typed payload.
 type HostEventType string
 
@@ -43,24 +63,23 @@ type DelinquencyHostEvent struct {
 // HostEvent has exactly one payload, selected by Type. Acknowledgment is a
 // durable consumer action; it never changes a payer or merchant notification.
 type HostEvent struct {
-	ID             uuid.UUID             `json:"id"`
+	ID             HostEventID           `json:"id"`
 	MerchantID     MerchantID            `json:"merchant_id"`
 	Type           HostEventType         `json:"type"`
 	OccurredAt     time.Time             `json:"occurred_at"`
-	AcknowledgedAt *time.Time            `json:"acknowledged_at,omitempty"`
-	Payment        *PaymentSettledEvent  `json:"payment,omitempty"`
-	Delinquency    *DelinquencyHostEvent `json:"delinquency,omitempty"`
+	AcknowledgedAt *time.Time            `json:"acknowledged_at"`
+	Payment        *PaymentSettledEvent  `json:"payment"`
+	Delinquency    *DelinquencyHostEvent `json:"delinquency"`
 }
 
-const MaxHostEventPageSize = 1000
-
-// HostEventListOptions filters the bounded stream. By default only unacknowledged
-// events are returned, oldest first. A consumer can select its event type so
-// unrelated pending events cannot starve its work. Acknowledge processed events
-// and fetch again; persisting a UUID high-water mark could skip late commits.
-type HostEventListOptions struct {
+// ListHostEventsRequest pages the merchant's host events, oldest first:
+// unacknowledged ones unless IncludeAcknowledged. A consumer can select its
+// event type so unrelated pending events cannot starve its work. Acknowledge
+// processed events and list again from the start; a cursor is for reading
+// history, never a high-water mark.
+type ListHostEventsRequest struct {
+	PageRequest
 	Type                HostEventType
-	Limit               int
 	IncludeAcknowledged bool
 	PaymentID           PaymentID
 }

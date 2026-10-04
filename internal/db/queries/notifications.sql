@@ -25,11 +25,6 @@ SELECT * FROM billing.notifications nq
 WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY nq.created_at DESC;
 
--- name: MarkNotificationSeen :execrows
-UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
-WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id()
-  AND id = sqlc.arg(id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid;
-
 -- name: UpdateNotification :execrows
 UPDATE billing.notifications SET
     customer_id = sqlc.arg(customer_id)::uuid,
@@ -109,21 +104,33 @@ UPDATE billing.notifications
 SET emailed_at = sqlc.arg(emailed_at)::timestamptz
 WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1 AND emailed_at IS NULL;
 
--- name: CountRepairAlerts :one
-SELECT count(*) FROM billing.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = sqlc.arg(customer_id)::uuid
-  AND nq.event_type = $2
-  AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
-  AND (sqlc.narg(seen)::boolean IS NULL OR (nq.read_at IS NOT NULL) = sqlc.narg(seen)::boolean);
-
 -- name: ListRepairAlerts :many
 SELECT * FROM billing.notifications nq
-WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = sqlc.arg(customer_id)::uuid
-  AND nq.event_type = $2
+WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = sqlc.arg(customer_id)::uuid
+  AND nq.event_type = sqlc.arg(event_type)::text
   AND nq.data ->> 'kind' = 'billing_ledger_repair_required'
   AND (sqlc.narg(seen)::boolean IS NULL OR (nq.read_at IS NOT NULL) = sqlc.narg(seen)::boolean)
-ORDER BY nq.created_at DESC
-LIMIT $3::int OFFSET $4::int;
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (nq.created_at, nq.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY nq.created_at DESC, nq.id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- A customer's own notifications, newest first.
+-- name: ListCustomerNotifications :many
+SELECT * FROM billing.notifications nq
+WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = sqlc.arg(customer_id)::uuid
+  AND (sqlc.narg(seen)::boolean IS NULL OR (nq.read_at IS NOT NULL) = sqlc.narg(seen)::boolean)
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (nq.created_at, nq.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY nq.created_at DESC, nq.id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: CountUnreadCustomerNotifications :one
+SELECT count(*) FROM billing.notifications
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'customer' AND customer_id = sqlc.arg(customer_id)::uuid AND read_at IS NULL;
+
+-- name: MarkCustomerNotificationRead :one
+UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'customer' AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid
+RETURNING *;
 
 -- #1069: renewal-receipt throttle — a receipt for this subscription whose
 -- renewal period started after since.

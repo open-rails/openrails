@@ -2,13 +2,16 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
@@ -37,31 +40,26 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }
 
-// registerStandaloneMetaRoutes registers banner/health endpoints that are appropriate for the
-// standalone billing service, but should not be forced onto embedded hosts.
+// registerStandaloneMetaRoutes registers health, metrics and capability
+// discovery: the standalone server's process surface, which embedded hosts
+// supply themselves.
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
-	live := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "billing"})
-	})
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
-		// A simple JSON banner for API servers.
-		Banner: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"service":   "billing",
-				"status":    "ok",
-				"endpoints": []string{"/health/live", "/health/ready", StandaloneV1Prefix},
-			})
+		Live: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			httprequest.NewHTTP(w, r, nil).SuccessJSON(httproutes.Health{Status: httproutes.HealthOK})
 		}),
-		Live:         live,
-		Ready:        http.HandlerFunc(s.readyHandler),
-		Metrics:      http.HandlerFunc(s.metricsHandler),
-		Capabilities: embedhttp.CapabilitiesHandler(embedhttp.AllRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)),
+		Ready:   http.HandlerFunc(s.readyHandler),
+		Metrics: http.HandlerFunc(s.metricsHandler),
+		Capabilities: embedhttp.CapabilitiesHandler(s.runtime, embedhttp.AllRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
+			// Team invitations mint register-and-join links when the control
+			// plane's posture allows them.
+			map[string]bool{"team_invites": s.controlPlane != nil && s.controlPlane.InvitesEnabled()}),
 	}})
 }
 
-// readyHandler serves /health/ready and /readyz. Dependency checks are the
-// SAME ones pkg/embedded.Embedded.Ready runs (#748, internal/app.Runtime.Ready)
-// — standalone and embedded report one shared posture, never two.
+// readyHandler serves /health/ready with the checks embedded Client.Ready
+// runs (#748). Which dependency failed, and why, goes to the log: the route
+// is public.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
@@ -70,57 +68,15 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if s != nil {
 		runtime = s.runtime
 	}
-	deps, err := runtime.Ready(ctx)
-	authReady := s != nil && s.authenticator != nil
-	verbose := r.URL.Query().Get("verbose") == "1" || strings.EqualFold(r.URL.Query().Get("verbose"), "true")
-
-	if err != nil || !authReady {
-		resp := map[string]any{
-			"status":  "not_ready",
-			"service": "billing",
-			"auth":    map[string]any{"available": authReady},
-		}
-		if verbose {
-			resp["dependencies"] = dependencyStatus(deps)
-		}
-		writeJSON(w, http.StatusServiceUnavailable, resp)
+	_, err := runtime.Ready(ctx)
+	if err == nil && (s == nil || s.authenticator == nil) {
+		err = errors.New("readiness: authentication is not available")
+	}
+	req := httprequest.NewHTTP(w, r, nil)
+	if err != nil {
+		log.WithError(err).Warn("not ready")
+		req.ErrorCode(billing.CodeServiceUnavailable, "not ready")
 		return
 	}
-
-	resp := map[string]any{
-		"status":  "ready",
-		"service": "billing",
-		"auth":    map[string]any{"available": true},
-	}
-	if verbose {
-		resp["dependencies"] = dependencyStatus(deps)
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// dependencyStatus renders Runtime.Ready's per-dependency detail for the
-// verbose /readyz payload (#748).
-func dependencyStatus(deps []app.ReadinessDependency) map[string]any {
-	out := make(map[string]any, len(deps))
-	for _, d := range deps {
-		if d.Available {
-			out[d.Name] = map[string]any{"available": true}
-			continue
-		}
-		entry := map[string]any{"available": false}
-		if d.Optional {
-			entry["degraded"] = true
-		}
-		if d.Err != nil {
-			entry["last_error"] = d.Err.Error()
-		}
-		out[d.Name] = entry
-	}
-	return out
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
+	req.SuccessJSON(httproutes.Health{Status: httproutes.HealthReady})
 }

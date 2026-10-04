@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -82,6 +83,7 @@ type runtimeOverrides struct {
 	Clock            clockwork.Clock
 	UserDirectory    billing.UserDirectory
 	UsernameResolver billing.UsernameResolver
+	EmailSender      config.EmailSender
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -248,25 +250,24 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, err
 	}
 
-	var emailService *subscriptions.EmailService
-	if cfg.SendGrid != nil {
-		if es, err := subscriptions.NewEmailService(cfg.SendGrid, merchantconfig.NewStore(database), clock); err != nil {
-			log.WithError(err).Warn("EmailService init failed; email disabled")
-		} else {
-			emailService = es
-			// Configure domain services for subscription emails
-			emailService.SetDomainServices(
-				serviceInstances.SubscriptionService,
-				serviceInstances.ProductService,
-				serviceInstances.PriceService,
-				// OpenRails does not own the host identity schema. A host that
-				// wants subscription emails must wire its UserDirectory through
-				// its own integration boundary; leaving this nil makes email
-				// lookup fail closed instead of silently depending on AuthKit's
-				// profiles tables or grants.
-				userDirectory,
-			)
+	// One sender for all of OpenRails' email: the host's, else Config.SendGrid.
+	var sender config.EmailSender
+	if overrides != nil && overrides.EmailSender != nil {
+		sender = overrides.EmailSender
+	} else if cfg.SendGrid != nil {
+		sendgrid, err := email.NewSendGrid(*cfg.SendGrid)
+		if err != nil {
+			return nil, err
 		}
+		sender = sendgrid
+	}
+	var emailService *subscriptions.EmailService
+	if sender != nil {
+		emailService = subscriptions.NewEmailService(sender, merchantconfig.NewStore(database), clock)
+		// OpenRails does not own the host identity schema. A host that wants
+		// subscription emails wires its UserDirectory; leaving it nil makes
+		// email lookup fail closed.
+		emailService.SetDomainServices(serviceInstances.SubscriptionService, serviceInstances.ProductService, serviceInstances.PriceService, userDirectory)
 	}
 
 	// Set emailService on the NotificationService that was created in createServices
@@ -341,6 +342,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		PlanMigrationService:     serviceInstances.PlanMigrationService,
 
 		EmailService:                 emailService,
+		EmailSender:                  sender,
 		SubscriptionLifecycleService: serviceInstances.SubscriptionLifecycleService,
 		WebhookDispatcher:            serviceInstances.WebhookDispatcher,
 		DeduplicationService:         serviceInstances.DeduplicationService,

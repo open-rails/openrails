@@ -5,7 +5,7 @@ import type { ListPage } from "@/lib/api/generated/wire"
 import {
   getCatalogRevision,
   getCustomerProfile,
-  getMerchantSettings,
+  getMerchantConfiguration,
   getPayment,
   getPaymentAttempt,
   getPrice,
@@ -20,6 +20,7 @@ import {
   listCustomerPaymentMethods,
   listCustomers,
   listCustomerUsageRateOverrides,
+  getFindingSummary,
   listFindings,
   listNotifications,
   listPaymentAttempts,
@@ -38,6 +39,7 @@ import {
   listUsageMeters,
   listTeam,
   listTeamInvites,
+  getCapabilities,
   listWebhooks,
   listWorkerHealth,
   PAGE_MAX,
@@ -380,14 +382,20 @@ export const adminQueries = {
     }),
   findings: () =>
     queryOptions({
-      queryKey: [...queryKeys.ops(), "findings", { limit: 100, offset: 0 }],
-      queryFn: ({ signal }) => listFindings({}, 100, 0, signal),
+      queryKey: [...queryKeys.ops(), "findings", { limit: 100 }],
+      queryFn: ({ signal }) => listFindings({}, 100, signal),
       meta: { errorAction: "Load findings" },
+    }),
+  findingSummary: () =>
+    queryOptions({
+      queryKey: [...queryKeys.ops(), "findings", "summary"],
+      queryFn: ({ signal }) => getFindingSummary(signal),
+      meta: { errorAction: "Load the findings summary" },
     }),
   repairAlerts: () =>
     queryOptions({
-      queryKey: [...queryKeys.ops(), "repair-alerts", { limit: 50, offset: 0 }],
-      queryFn: ({ signal }) => listRepairAlerts(50, 0, signal),
+      queryKey: [...queryKeys.ops(), "repair-alerts", { limit: 50 }],
+      queryFn: ({ signal }) => listRepairAlerts(50, signal),
       meta: { errorAction: "Load repair alerts" },
     }),
   workerHealth: () =>
@@ -397,10 +405,10 @@ export const adminQueries = {
       staleTime: 10_000,
       meta: { errorAction: "Load worker health" },
     }),
-  merchantSettings: (errorAction?: string) =>
+  merchantConfiguration: (errorAction?: string) =>
     queryOptions({
       queryKey: queryKeys.settings(),
-      queryFn: ({ signal }) => getMerchantSettings(signal),
+      queryFn: ({ signal }) => getMerchantConfiguration(signal),
       meta: queryErrorMeta(errorAction),
     }),
   psps: () =>
@@ -433,6 +441,13 @@ export const adminQueries = {
       queryKey: [...queryKeys.team(), "invites"],
       queryFn: ({ signal }) => listTeamInvites(signal),
       meta: { errorAction: "Load invites" },
+    }),
+  capabilities: () =>
+    queryOptions({
+      queryKey: ["capabilities"],
+      queryFn: ({ signal }) => getCapabilities(signal),
+      staleTime: 5 * 60_000,
+      meta: { errorAction: "Load capabilities" },
     }),
   webhooks: () =>
     queryOptions({

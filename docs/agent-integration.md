@@ -74,8 +74,8 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    Verify: `GET /health/ready` (note: there is no `/health`).
 2. **Provision.** Manifest with merchant + sandbox PSPs; `push-auth-bootstrap` →
    `push-merchant-config --insert` → `apply-catalog --merchant NAME --file PATH`.
-   Mint an API key. Verify: key works via `client.Verify(ctx)` (Go) or an authenticated
-   `GET /v1/merchant/*` call.
+   Mint an API key. Verify: key works via `client.GetMerchantConfiguration(ctx)` (Go) or an
+   authenticated `GET /v1/merchant/configuration` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithAPIKey`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md).
 4. **Frontend.** Delegated tokens: add ONE token-exchange endpoint to the host API,

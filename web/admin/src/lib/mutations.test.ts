@@ -97,8 +97,8 @@ const cases: Case[] = [
     "PUT /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
   ["removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),
     "DELETE /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"]],
-  ["updates settings without dropping the PSP list", (c, g) => g(M.updateMerchantSettings(c), { profile: { display_name: "Acme" } }),
-    "PUT /merchant/settings", ["settings"]],
+  ["applies a settings change without dropping the PSP list", (c, g) => g(M.updateMerchantSettings(c), { revision: "rev_1", settings: { profile: { display_name: "Acme" } } }),
+    "POST /merchant/configuration/applications", ["settings"]],
   ["adds a PSP", (c, g) => g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }),
     "POST /merchant/psps", ["psps"], { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }],
   ["rotates PSP credentials", (c, g) => g(M.updatePSP(c), { id: "psp_1", psp: { operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 } }),
@@ -166,7 +166,7 @@ describe("notification read state", () => {
     queryClient.setQueryData(queryKeys.notifications(), {
       data: [{ id: "note_1", read_at: null }, { id: "note_2", read_at: null }],
     })
-    queryClient.setQueryData(unreadKey(), { unread: 2 })
+    queryClient.setQueryData(unreadKey(), { unread_count: 2 })
   }
   const started = () => {
     const queryClient = client()
@@ -185,14 +185,14 @@ describe("notification read state", () => {
     const readIds = await exec(queryClient, M.markNotificationsRead(queryClient), ["note_1", "note_2"])
     expect(readIds).toEqual(["note_1"])
     expect(readFlags(queryClient)).toEqual([true, false])
-    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread: 1 })
+    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread_count: 1 })
   })
 
   it("marks one notification read", async () => {
     const queryClient = started()
     await exec(queryClient, M.markNotificationRead(queryClient), "note_1")
     expect(readFlags(queryClient)).toEqual([true, false])
-    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread: 1 })
+    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread_count: 1 })
   })
 })
 

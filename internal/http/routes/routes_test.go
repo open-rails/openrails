@@ -136,14 +136,14 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/merchant/metrics/query":                                                   billing.MerchantMetricsRead,
 		"PUT /v1/merchant/dashboard":                                                        billing.MerchantDashboardUpdate,
 		"GET /v1/merchant/notifications":                                                    billing.MerchantMetricsRead,
-		"POST /v1/merchant/notifications/{id}/read":                                         billing.MerchantSettingsUpdate,
+		"POST /v1/merchant/notifications/{id}/read":                                         billing.MerchantMetricsRead,
 		"GET /v1/merchant/repair-alerts":                                                    billing.MerchantRepairAlertsRead,
 		"GET /v1/merchant/worker-health":                                                    billing.MerchantRepairAlertsRead,
 		"GET /v1/merchant/findings/{id}":                                                    billing.MerchantRepairAlertsRead,
 		"POST /v1/merchant/findings/{id}/resolve":                                           billing.MerchantFindingsResolve,
 		"GET /v1/merchant/configuration":                                                    billing.MerchantSettingsRead,
 		"POST /v1/merchant/configuration/applications":                                      billing.MerchantSettingsUpdate,
-		"PUT /v1/merchant/webhooks/{id}/url":                                                billing.MerchantSettingsUpdate,
+		"PUT /v1/merchant/alert-webhooks/{id}/url":                                          billing.MerchantSettingsUpdate,
 		"GET /v1/merchant/psps":                                                             billing.MerchantPSPsRead,
 		"POST /v1/merchant/psps":                                                            billing.MerchantPSPsUpdate,
 		"GET /v1/merchant/psps/{psp_id}":                                                    billing.MerchantPSPsRead,
@@ -196,9 +196,9 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 			RegisterMerchantRoutes(router.NewMux(table, "", rt), rt, Options{})
 			keys := routeKeys(table)
 			for _, key := range []string{
-				"GET /merchant/configuration", "POST /merchant/configuration/applications", "GET /merchant/settings", "PUT /merchant/settings",
+				"GET /merchant/configuration", "POST /merchant/configuration/applications",
 				"GET /merchant/psps", "POST /merchant/psps", "PATCH /merchant/psps/{psp_id}",
-				"POST /merchant/psps/{psp_id}/archive", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url",
+				"POST /merchant/psps/{psp_id}/archive", "POST /merchant/alert-webhooks", "PUT /merchant/alert-webhooks/{id}/url",
 			} {
 				require.Contains(t, keys, key, "%s/%v", backend, writable)
 			}

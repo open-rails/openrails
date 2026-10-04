@@ -64,14 +64,14 @@ type ProvisionMerchantResult struct {
 type MerchantRef struct {
 	ID          MerchantID `json:"id"`
 	Slug        string     `json:"slug"`
-	DisplayName string     `json:"display_name,omitempty"`
+	DisplayName string     `json:"display_name"`
 }
 
 // UserMerchant is a merchant a user holds a role in, with that role.
 type UserMerchant struct {
 	ID          MerchantID `json:"id"`
 	Slug        string     `json:"slug"`
-	DisplayName string     `json:"display_name,omitempty"`
+	DisplayName string     `json:"display_name"`
 	Role        string     `json:"role"`
 }
 
@@ -186,4 +186,88 @@ const (
 type MerchantRetirement struct {
 	Retired bool
 	Refusal MerchantRetirementRefusal
+}
+
+// The standalone server's merchant account routes: the signed-in user's
+// merchants, the merchant's name, API keys and team.
+
+// CreateMerchantRequest creates a merchant the signed-in user owns.
+type CreateMerchantRequest struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+}
+
+// MerchantName is a merchant's name, as a rename leaves it.
+type MerchantName struct {
+	ID   MerchantID `json:"id"`
+	Name string     `json:"name"`
+}
+
+// RenameMerchantRequest renames the merchant; the former name keeps
+// forwarding to it under the deployment's naming policy.
+type RenameMerchantRequest struct {
+	Name string `json:"name"`
+}
+
+// APIKey is one of the merchant's API keys, without its secret.
+type APIKey struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Role       string     `json:"role"`
+	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+}
+
+// CreateAPIKeyRequest mints a key holding one of the merchant roles (viewer,
+// support, owner).
+type CreateAPIKeyRequest struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+// CreatedAPIKey is a new key with its secret, shown this once.
+type CreatedAPIKey struct {
+	APIKey
+	Secret string `json:"secret"`
+}
+
+// TeamMember is a user holding a merchant role.
+type TeamMember struct {
+	UserID   string  `json:"user_id"`
+	Email    *string `json:"email"`
+	Username *string `json:"username"`
+	Role     string  `json:"role"`
+}
+
+// TeamInvite is a single-use link that registers its holder and adds them to
+// the team. Its URL is answered only when it is made.
+type TeamInvite struct {
+	ID         string     `json:"id"`
+	Role       string     `json:"role"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
+	RedeemedAt *time.Time `json:"redeemed_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+}
+
+// InviteTeamMemberRequest invites an email address with a role.
+type InviteTeamMemberRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// TeamInviteResult is an invitation's outcome: Member when an account that
+// verified the address was added at once, else Invite and its URL to share.
+type TeamInviteResult struct {
+	Member *TeamMember `json:"member"`
+	Invite *TeamInvite `json:"invite"`
+	URL    *string     `json:"url"`
+}
+
+// SetTeamRoleRequest changes a member's role.
+type SetTeamRoleRequest struct {
+	Role string `json:"role"`
 }

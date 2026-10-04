@@ -52,6 +52,7 @@ type fileConfig struct {
 	ProviderWriteMode string `koanf:"provider_write_mode"`
 	TestMode          string `koanf:"test_mode"`
 	Schema            string `koanf:"schema"`
+	SchemaOwner       string `koanf:"schema_owner"`
 
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
 	DashboardBaseURL     string `koanf:"dashboard_base_url"`
@@ -59,7 +60,7 @@ type fileConfig struct {
 	DB                 *billing.DBConfig           `koanf:"db"`
 	Redis              *billing.RedisConfig        `koanf:"redis"`
 	Logger             *billing.LoggerConfig       `koanf:"logger"`
-	SendGrid           *billing.SendGridConfig     `koanf:"sendgrid"`
+	SendGrid           *sendGridFile               `koanf:"sendgrid"`
 	RateLimits         *billing.RateLimitsConfig   `koanf:"rate_limits"`
 	RateLimitsDisabled bool                        `koanf:"rate_limits_disabled"`
 	Captcha            *billing.CaptchaConfig      `koanf:"captcha"`
@@ -113,6 +114,21 @@ func defaults() *fileConfig {
 	}
 }
 
+// sendGridFile is the sendgrid section: flat, so every key has an
+// environment variable (SENDGRID_FROM_ADDRESS).
+type sendGridFile struct {
+	APIKey      string `koanf:"api_key"`
+	FromAddress string `koanf:"from_address"`
+	FromName    string `koanf:"from_name"`
+}
+
+func (s *sendGridFile) config() *billing.SendGridConfig {
+	if s == nil {
+		return nil
+	}
+	return &billing.SendGridConfig{APIKey: s.APIKey, From: billing.EmailAddress{Address: s.FromAddress, Name: s.FromName}}
+}
+
 // config is the loaded file as the server's configuration.
 func (f *fileConfig) config() (*Config, error) {
 	posture, err := billing.ParseCredentialPosture(f.TestMode)
@@ -124,12 +140,13 @@ func (f *fileConfig) config() (*Config, error) {
 			ProviderWriteMode:                 f.ProviderWriteMode,
 			TestMode:                          posture,
 			Schema:                            f.Schema,
+			SchemaOwner:                       f.SchemaOwner,
 			PublicBillingBaseURL:              f.PublicBillingBaseURL,
 			DashboardBaseURL:                  f.DashboardBaseURL,
 			DB:                                f.DB,
 			Redis:                             f.Redis,
 			Logger:                            f.Logger,
-			SendGrid:                          f.SendGrid,
+			SendGrid:                          f.SendGrid.config(),
 			RateLimits:                        f.RateLimits,
 			RateLimitsDisabled:                f.RateLimitsDisabled,
 			Captcha:                           f.Captcha,

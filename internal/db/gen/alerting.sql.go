@@ -7,16 +7,18 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const countUnreadMerchantNotifications = `-- name: CountUnreadMerchantNotifications :one
-SELECT count(*) FROM billing.notifications WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id() AND read_at IS NULL
+SELECT count(*) FROM billing.notifications
+WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant' AND read_at IS NULL
 `
 
-func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countUnreadMerchantNotifications)
+func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnreadMerchantNotifications, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -159,19 +161,29 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, arg GetMerchantWebhook
 
 const listMerchantNotifications = `-- name: ListMerchantNotifications :many
 SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications
-WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id()
-  AND (NOT $1::boolean OR read_at IS NULL)
-ORDER BY created_at DESC, id
-LIMIT $2::int
+WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant'
+  AND (NOT $2::boolean OR read_at IS NULL)
+  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $5::int
 `
 
 type ListMerchantNotificationsParams struct {
+	MerchantID uuid.UUID
 	UnreadOnly bool
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
 	RowLimit   int32
 }
 
 func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchantNotificationsParams) ([]BillingNotification, error) {
-	rows, err := q.db.Query(ctx, listMerchantNotifications, arg.UnreadOnly, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listMerchantNotifications,
+		arg.MerchantID,
+		arg.UnreadOnly,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -240,18 +252,37 @@ func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID
 	return items, nil
 }
 
-const markMerchantNotificationRead = `-- name: MarkMerchantNotificationRead :execrows
+const markMerchantNotificationRead = `-- name: MarkMerchantNotificationRead :one
 UPDATE billing.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE recipient_kind = 'merchant' AND merchant_id = billing.current_merchant_id() AND id = $1
+WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant' AND id = $2::uuid
+RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
 `
 
-func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, markMerchantNotificationRead, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+type MarkMerchantNotificationReadParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, arg MarkMerchantNotificationReadParams) (BillingNotification, error) {
+	row := q.db.QueryRow(ctx, markMerchantNotificationRead, arg.MerchantID, arg.ID)
+	var i BillingNotification
+	err := row.Scan(
+		&i.ID,
+		&i.EventType,
+		&i.Data,
+		&i.RecipientKind,
+		&i.ReadAt,
+		&i.Severity,
+		&i.Title,
+		&i.Body,
+		&i.Link,
+		&i.CreatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.EmailedAt,
+	)
+	return i, err
 }
 
 const rotateMerchantWebhookURL = `-- name: RotateMerchantWebhookURL :one

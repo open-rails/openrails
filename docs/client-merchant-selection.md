@@ -65,9 +65,7 @@ request path never depends on the selector.
 ## Operation classification and migration
 
 The existing billing, catalog, customer, product-access, import and archive SDK
-methods are merchant-scoped. The existing `Verify` method is also scoped: it reads
-`/v1/merchant/settings` with settings-read authority, and is not a global health
-probe. Global health/info and control-plane discovery are currently separate
+methods are merchant-scoped. Global health/info and control-plane discovery are currently separate
 server surfaces. Future global Client operations must use explicit platform scope
 for credential minting; an omitted merchant never means platform authority.
 

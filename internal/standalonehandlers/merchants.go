@@ -30,12 +30,13 @@ func MerchantListMine(svc MerchantLister) func(*httprequest.Request) {
 			r.ErrorJSON(http.StatusInternalServerError, "failed to list merchants")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"object": "list", "data": list})
+		r.SuccessJSON(billing.ListPage[billing.UserMerchant]{Items: list})
 	}
 }
 
 // MerchantCreator is the control-plane surface behind POST /v1/merchants.
 type MerchantCreator interface {
+	MerchantLister
 	CreateOwnedMerchant(ctx context.Context, name, userID string) (*merchants.Merchant, bool, error)
 	SetMerchantDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error
 }
@@ -51,10 +52,7 @@ func MerchantCreate(svc MerchantCreator) func(*httprequest.Request) {
 			r.ErrorJSON(http.StatusUnauthorized, "authentication required")
 			return
 		}
-		var req struct {
-			Name        string `json:"name"`
-			DisplayName string `json:"display_name"`
-		}
+		var req billing.CreateMerchantRequest
 		if !r.BindJSON(&req) {
 			return
 		}
@@ -72,7 +70,18 @@ func MerchantCreate(svc MerchantCreator) func(*httprequest.Request) {
 		if created {
 			status = http.StatusCreated
 		}
-		r.JSON(status, map[string]any{"id": m.ID.String(), "slug": m.Slug, "created": created})
+		mine, err := svc.ListUserMerchants(ctx, uc.UserID)
+		if err != nil {
+			r.InternalError("read the created merchant failed", err)
+			return
+		}
+		for _, owned := range mine {
+			if owned.ID == m.ID {
+				r.JSON(status, owned)
+				return
+			}
+		}
+		r.InternalError("the created merchant is not the user's", nil)
 	}
 }
 

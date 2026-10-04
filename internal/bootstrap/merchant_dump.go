@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
@@ -15,11 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/service"
 )
 
 type DumpMerchantConfigOptions struct {
@@ -27,7 +24,7 @@ type DumpMerchantConfigOptions struct {
 }
 
 // DumpMerchantConfig reads a merchant's OpenRails-owned configuration (identity,
-// profile, invoice/collection policy, delegated-invoker windows, and PSPs)
+// settings, custodians and PSPs)
 // and returns it in the push-merchant-config YAML shape (#646/#653).
 // Secret fields are omitted entirely by default (so a redacted dump can be
 // re-applied without a placeholder overwriting real secrets). Plaintext export is refused.
@@ -75,53 +72,9 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		mt.APIHost = *apiHost
 	}
 
-	// merchant_configurations payload: profile + invoice + delegated-invoker windows.
-	conf, found, err := merchantconfig.NewStore(database).Get(mctx)
-	if err != nil {
-		return nil, fmt.Errorf("load merchant configuration: %w", err)
-	}
-	if found {
-		mt.Profile = MerchantProfileConfig{
-			DisplayName: conf.Profile.DisplayName,
-			LogoURL:     conf.Profile.LogoURL,
-			FromEmail:   conf.Profile.FromEmail,
-			SupportURL:  conf.Profile.SupportURL,
-			SignupURL:   conf.Profile.SignupURL,
-		}
-		if conf.InvoiceCollectionThreshold != nil || conf.InvoiceMonthlyFloor != nil ||
-			strings.TrimSpace(conf.InvoiceBillingBoundary) != "" ||
-			conf.ArrearsGraceDays != nil || conf.ArrearsDelinquencyFloor != nil {
-			mt.Invoice = &InvoiceConfig{
-				CollectionThreshold:    conf.InvoiceCollectionThreshold,
-				MonthlyFloor:           conf.InvoiceMonthlyFloor,
-				BillingPeriodBoundary:  strings.TrimSpace(conf.InvoiceBillingBoundary),
-				DelinquencyGraceDays:   conf.ArrearsGraceDays,
-				DelinquencyAmountFloor: conf.ArrearsDelinquencyFloor,
-			}
-		}
-		for _, w := range conf.DelegatedInvokerWastedSpendWindows {
-			if w.WindowSeconds <= 0 {
-				continue
-			}
-			mt.DelegatedInvokerWastedSpendWindows = append(mt.DelegatedInvokerWastedSpendWindows, BudgetWindowConfig{
-				Key:      w.Key,
-				Window:   formatWindowSeconds(w.WindowSeconds),
-				Limit:    w.Limit,
-				Currency: w.Currency,
-			})
-		}
-		for _, rule := range conf.CheckoutRouting {
-			mt.CheckoutRouting = append(mt.CheckoutRouting, CheckoutRoutingRuleConfig{
-				Match: CheckoutRoutingMatchConfig{
-					Currency: rule.Match.Currency,
-					Product:  rule.Match.Product,
-					Price:    rule.Match.Price,
-					Mode:     rule.Match.Mode,
-					Country:  rule.Match.Country,
-				},
-				Prefer: rule.Prefer,
-			})
-		}
+	// Settings in the shape the configuration API reads and applies.
+	if mt.Settings, err = service.ReadMerchantSettings(mctx, database); err != nil {
+		return nil, fmt.Errorf("load merchant settings: %w", err)
 	}
 
 	// custodians (or#880) — dumped BEFORE the PSPs that reference them, and
@@ -155,43 +108,6 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 			entry.Secrets = values
 		}
 		mt.Custodians[key] = CustodianConfig{c.Kind: entry}
-	}
-
-	// or#897 billing policies + bindings. Dumped so a merchant configured through
-	// the mode-2 API round-trips back into a mode-1 manifest unchanged.
-	policyStore := admission.NewBillingPolicyStore(database)
-	storedPolicies, err := policyStore.ListPolicies(mctx)
-	if err != nil {
-		return nil, fmt.Errorf("load billing policies: %w", err)
-	}
-	for name, body := range storedPolicies {
-		if mt.BillingPolicies == nil {
-			mt.BillingPolicies = map[string]BillingPolicyConfig{}
-		}
-		entry := BillingPolicyConfig{
-			Kind:                   string(body.Kind),
-			OutstandingCap:         body.OutstandingCapAmount,
-			SpendWindows:           dumpBudgetWindows(body.SpendWindows),
-			AccrualRateCapPerHour:  body.AccrualRateCapPerHour,
-			BadSpendWindows:        dumpBudgetWindows(body.BadSpendWindows),
-			CollectionThreshold:    body.CollectionThresholdAmount,
-			DelinquencyGraceDays:   body.DelinquencyGraceDays,
-			DelinquencyAmountFloor: body.DelinquencyAmountFloor,
-			PolicyCurrency:         body.PolicyCurrency,
-		}
-		if body.AccrualRateWindowSeconds > 0 {
-			entry.AccrualRateWindow = formatWindowSeconds(body.AccrualRateWindowSeconds)
-		}
-		mt.BillingPolicies[name] = entry
-	}
-	storedBindings, err := policyStore.ListDeclarativeBindings(mctx)
-	if err != nil {
-		return nil, fmt.Errorf("load billing policy bindings: %w", err)
-	}
-	for _, b := range storedBindings {
-		mt.BillingPolicyBindings = append(mt.BillingPolicyBindings, BillingPolicyBindingConfig{
-			Policy: b.PolicyName, Tier: b.Tier,
-		})
 	}
 
 	// PSPs (identity + lifecycle + secret references).
@@ -350,37 +266,4 @@ func pspDumpKey(rail, environment, accountID string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
-}
-
-// formatWindowSeconds renders a window duration as the shortest clean unit string.
-func formatWindowSeconds(seconds int64) string {
-	switch {
-	case seconds%int64(time.Hour/time.Second) == 0:
-		return fmt.Sprintf("%dh", seconds/int64(time.Hour/time.Second))
-	case seconds%int64(time.Minute/time.Second) == 0:
-		return fmt.Sprintf("%dm", seconds/int64(time.Minute/time.Second))
-	default:
-		return fmt.Sprintf("%ds", seconds)
-	}
-}
-
-// dumpBudgetWindows projects stored windows (seconds) back onto the manifest
-// shape (Go duration strings).
-func dumpBudgetWindows(in []models.BudgetWindowPolicy) []BudgetWindowConfig {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]BudgetWindowConfig, 0, len(in))
-	for _, w := range in {
-		if w.WindowSeconds <= 0 {
-			continue
-		}
-		out = append(out, BudgetWindowConfig{
-			Key:      w.Key,
-			Window:   formatWindowSeconds(w.WindowSeconds),
-			Limit:    w.Limit,
-			Currency: w.Currency,
-		})
-	}
-	return out
 }

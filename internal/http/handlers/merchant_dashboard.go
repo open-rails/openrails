@@ -1,12 +1,11 @@
 package handlers
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -18,12 +17,12 @@ import (
 func GetMerchantDashboard(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "dashboard service not configured")
+		r.ErrorCode(billing.CodeServiceUnavailable, "dashboard service not configured")
 		return
 	}
 	d, err := svc.Get(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load dashboard")
+		r.InternalError("load dashboard failed", err)
 		return
 	}
 	r.JSON(http.StatusOK, d)
@@ -35,7 +34,7 @@ func GetMerchantDashboard(r *httprequest.Request) {
 func PutMerchantDashboard(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "dashboard service not configured")
+		r.ErrorCode(billing.CodeServiceUnavailable, "dashboard service not configured")
 		return
 	}
 	widgets, verr := dashboard.DecodePut(r.Request.Body)
@@ -51,7 +50,7 @@ func PutMerchantDashboard(r *httprequest.Request) {
 			dashboardValidationError(r, ve)
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to save dashboard")
+		r.InternalError("save dashboard failed", err)
 		return
 	}
 	r.JSON(http.StatusOK, d)
@@ -66,31 +65,26 @@ func PutMerchantDashboard(r *httprequest.Request) {
 func GenerateDashboardWidget(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if !svc.NLConfigured() {
-		r.ErrorJSON(http.StatusServiceUnavailable, "dashboard service unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "widget generation unavailable")
 		return
 	}
-	var body struct {
-		Prompt    string          `json:"prompt"`
-		BaseQuery json.RawMessage `json:"base_query"`
-	}
-	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.Prompt) == "" {
-		r.ErrorJSON(http.StatusBadRequest, `body must be {"prompt":"<what the widget should show>","base_query":<optional existing query to refine>}`)
+	var body billing.GenerateWidgetRequest
+	if !r.BindJSON(&body) {
 		return
 	}
-	var base *metrics.Query
-	if len(body.BaseQuery) > 0 && string(body.BaseQuery) != "null" {
-		q, verr := metrics.DecodeQuery(bytes.NewReader(body.BaseQuery))
-		if verr == nil {
-			_, verr = metrics.Validate(q)
-		}
-		if verr != nil {
+	if strings.TrimSpace(body.Prompt) == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "prompt is required").WithParam("prompt"))
+		return
+	}
+	base := body.BaseQuery
+	if base != nil {
+		if _, verr := metrics.Validate(base); verr != nil {
 			for i := range verr.Errors {
 				verr.Errors[i].Param = "base_query." + verr.Errors[i].Param
 			}
 			dashboardValidationError(r, verr)
 			return
 		}
-		base = q
 	}
 	res, err := svc.Generate(r.Request.Context(), strings.TrimSpace(body.Prompt), base)
 	if err != nil {

@@ -84,13 +84,16 @@ func TestClientRequestShapes(t *testing.T) {
 			return err
 		}, http.MethodGet, "/v1/merchant/checkout-config", "price_key=pro-monthly", nil},
 		{"settings carry named policies and tier bindings", func() error {
-			return client.SetMerchantSettings(t.Context(), billing.MerchantSettings{
+			revision := "r1"
+			_, err := client.ApplyMerchantConfiguration(t.Context(), &billing.MerchantConfigurationApplyParams{ApplicationID: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 				BillingPolicies:       []billing.BillingPolicyInput{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
 				BillingPolicyBindings: []billing.BillingPolicyBindingInput{{PolicyName: "api_line", Tier: "gold"}},
-			})
-		}, http.MethodPut, "/v1/merchant/settings", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, "api_line", b["billing_policies"].([]any)[0].(map[string]any)["name"])
-			binding := b["billing_policy_bindings"].([]any)[0].(map[string]any)
+			}})
+			return err
+		}, http.MethodPost, "/v1/merchant/configuration/applications", "", func(t *testing.T, b map[string]any) {
+			settings := b["settings"].(map[string]any)
+			require.Equal(t, "api_line", settings["billing_policies"].([]any)[0].(map[string]any)["name"])
+			binding := settings["billing_policy_bindings"].([]any)[0].(map[string]any)
 			require.Equal(t, "api_line", binding["policy"])
 			require.Equal(t, "gold", binding["tier"])
 		}},
@@ -427,7 +430,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"cancel reprice batch":   func() error { _, err := c.CancelRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
 		"get reprice":            func() error { _, err := c.GetReprice(ctx, billing.RepriceID{}); return err },
 		"cancel reprice":         func() error { _, err := c.CancelReprice(ctx, billing.RepriceID{}); return err },
-		"acknowledge host event": func() error { return c.AcknowledgeHostEvent(ctx, uuid.Nil) },
+		"acknowledge host event": func() error { _, err := c.AcknowledgeHostEvent(ctx, billing.HostEventID{}); return err },
 	}
 
 	requireInvalidParam := func(t *testing.T, name string, err error) {

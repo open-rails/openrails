@@ -2,14 +2,12 @@ package merchantbootstrap
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/service"
 )
 
 const (
@@ -40,82 +38,15 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 				return fmt.Errorf("merchant %q api_host: %w", slug, err)
 			}
 		}
-		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !ValidHTTPURL(profileURL) {
-			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)
-		}
-		if profileURL := strings.TrimSpace(t.Profile.SupportURL); profileURL != "" && !ValidHTTPURL(profileURL) {
-			return fmt.Errorf("merchant %q profile.support_url must be an http or https URL", slug)
-		}
-		if profileURL := strings.TrimSpace(t.Profile.SignupURL); profileURL != "" && !ValidHTTPURL(profileURL) {
-			return fmt.Errorf("merchant %q profile.signup_url must be an http or https URL", slug)
-		}
-		if err := ValidateManifestInvoice(slug, t.Invoice); err != nil {
-			return err
-		}
-		if err := ValidateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
-			return err
-		}
-		// or#288: the routing policy is validated by the SAME normalizer the
-		// mode-2 config API uses, so a manifest cannot declare a policy the API
-		// would refuse.
-		if _, err := merchantconfig.NormalizeCheckoutRouting(CheckoutRoutingRules(t.CheckoutRouting)); err != nil {
-			return fmt.Errorf("merchant %q %w", slug, err)
+		// The configuration API's own validator: a manifest cannot declare
+		// settings the API would refuse.
+		if err := service.ValidateMerchantSettings(t.Settings); err != nil {
+			return fmt.Errorf("merchant %q settings: %w", slug, err)
 		}
 		for key, account := range t.PSPs {
 			if err := ValidateManifestPSP(slug, key, account); err != nil {
 				return err
 			}
-		}
-	}
-	return nil
-}
-
-// ValidInvoiceBoundaries mirrors money.NormalizeInvoiceBoundary's accepted set
-// (kept inline to avoid importing the money module into bootstrap).
-var ValidInvoiceBoundaries = map[string]struct{}{
-	"calendar_month": {}, "anniversary": {}, "fixed_interval": {},
-}
-
-func ValidateManifestInvoice(slug string, inv *config.InvoiceConfig) error {
-	if inv == nil {
-		return nil
-	}
-	if inv.CollectionThreshold != nil && *inv.CollectionThreshold < 0 {
-		return fmt.Errorf("merchant %q invoice.collection_threshold must be >= 0", slug)
-	}
-	if inv.MonthlyFloor != nil && *inv.MonthlyFloor < 0 {
-		return fmt.Errorf("merchant %q invoice.monthly_floor must be >= 0", slug)
-	}
-	if inv.DelinquencyGraceDays != nil && *inv.DelinquencyGraceDays < 0 {
-		return fmt.Errorf("merchant %q invoice.delinquency_grace_days must be >= 0", slug)
-	}
-	if inv.DelinquencyAmountFloor != nil && *inv.DelinquencyAmountFloor < 0 {
-		return fmt.Errorf("merchant %q invoice.delinquency_amount_floor must be >= 0", slug)
-	}
-	if b := strings.ToLower(strings.TrimSpace(inv.BillingPeriodBoundary)); b != "" {
-		if _, ok := ValidInvoiceBoundaries[b]; !ok {
-			return fmt.Errorf("merchant %q invoice.billing_period_boundary must be calendar_month, anniversary, or fixed_interval", slug)
-		}
-	}
-	return nil
-}
-
-func ValidateManifestWastedWindows(slug string, windows []config.BudgetWindowConfig) error {
-	seen := map[string]struct{}{}
-	for i, w := range windows {
-		key := strings.TrimSpace(w.Key)
-		if key == "" {
-			return fmt.Errorf("merchant %q delegated_invoker_wasted_spend_windows[%d].key is required", slug, i)
-		}
-		if _, ok := seen[key]; ok {
-			return fmt.Errorf("merchant %q duplicate delegated_invoker_wasted_spend_windows key %q", slug, key)
-		}
-		seen[key] = struct{}{}
-		if _, err := time.ParseDuration(strings.TrimSpace(w.Window)); err != nil {
-			return fmt.Errorf("merchant %q delegated_invoker_wasted_spend_windows[%d].window %q: %w", slug, i, w.Window, err)
-		}
-		if w.Limit <= 0 {
-			return fmt.Errorf("merchant %q delegated_invoker_wasted_spend_windows[%d].limit must be > 0", slug, i)
 		}
 	}
 	return nil
@@ -182,12 +113,4 @@ func SolanaSignerConfigured(cfg config.ProviderRailAccountConfig) bool {
 		}
 	}
 	return false
-}
-
-func ValidHTTPURL(raw string) bool {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" {
-		return false
-	}
-	return u.Scheme == "http" || u.Scheme == "https"
 }

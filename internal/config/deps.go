@@ -86,9 +86,11 @@ type Deps struct {
 	// the binary was built with one.
 	ConsoleAssets fs.FS
 
-	// EmailSender and SMSSender deliver the control plane's AuthKit messages.
+	// EmailSender delivers OpenRails' email: billing receipts and alerts, and
+	// the control plane's AuthKit messages. Nil uses Config.SendGrid.
 	EmailSender EmailSender
-	SMSSender   SMSSender
+	// SMSSender delivers the control plane's AuthKit text messages.
+	SMSSender SMSSender
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond the free allowance.
 	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)
@@ -102,10 +104,30 @@ type Deps struct {
 	Clock           clockwork.Clock
 }
 
-// EmailSender delivers AuthKit email (AuthKit's adapters satisfy it).
+// EmailSender delivers rendered email and reports whether it can.
 type EmailSender interface {
-	Send(context.Context, iam.EmailMessage) error
+	Send(context.Context, Email) error
 	CheckHealth(context.Context) error
+}
+
+// Email is one rendered message.
+type Email struct {
+	// From is empty for the deployment's own mail; the sender then uses its
+	// own address. A field left empty is the sender's.
+	From    EmailAddress
+	To      string
+	Subject string
+	Text    string
+	HTML    string
+	// Auth is the AuthKit message a control-plane email renders, for a sender
+	// with its own templates; nil for billing email.
+	Auth *iam.EmailMessage
+}
+
+// EmailAddress is a mailbox and its display name.
+type EmailAddress struct {
+	Name    string
+	Address string
 }
 
 // SMSSender delivers AuthKit text messages.

@@ -365,6 +365,18 @@ func (w *world) stop() {
 
 func (w *world) restart() { w.stop(); w.start() }
 
+// applySettings changes the merchant's settings through a configuration
+// application against the current revision.
+func (w *world) applySettings(ctx context.Context, settings billing.MerchantSettings) error {
+	client := w.client[embedded]
+	current, err := client.GetMerchantConfiguration(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.ApplyMerchantConfiguration(ctx, &billing.MerchantConfigurationApplyParams{ApplicationID: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
+	return err
+}
+
 // kill ends the process as SIGKILL does: nothing it was doing gets recorded.
 // The running jobs and in-flight operations are captured at the instant of
 // death, the process stops, and those rows are put back as the dead process

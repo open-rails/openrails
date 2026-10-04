@@ -1,32 +1,14 @@
 package handlers
 
 import (
-	"net/http"
-	"time"
-
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
-// workerHealthItem is the view of one registered River worker kind (#689).
-//
-// #SEC-22: worker_state is deliberately global and has NO merchant column
-// — every merchant's rows sit in it. last_error is the verbatim Go error string
-// of some merchant's job and routinely embeds slugs, subscription/customer
-// UUIDs and PSP account ids, so the TEXT is platform-only. The merchant tier
-// still gets the signal it needs (whether a kind is erroring, when, and the
-// streak) without another merchant's error text.
-type WorkerHealthItem struct {
-	WorkerKind            string     `json:"worker_kind"`
-	RegisteredAt          time.Time  `json:"registered_at"`
-	ExpectedPeriodSeconds *int64     `json:"expected_period_seconds,omitempty"`
-	LastSuccessAt         *time.Time `json:"last_success_at,omitempty"`
-	LastErrorAt           *time.Time `json:"last_error_at,omitempty"`
-	LastError             *string    `json:"last_error,omitempty"`
-	ConsecutiveFailures   int32      `json:"consecutive_failures"`
-	LastAlertedAt         *time.Time `json:"last_alerted_at,omitempty"`
-	UpdatedAt             time.Time  `json:"updated_at"`
-}
+// worker_state is global, with no merchant column: last_error is another
+// merchant's verbatim job error (slugs, ids), so its text is platform-only
+// (#SEC-22). The merchant tier keeps the signal without it.
 
 // GetAdminWorkerHealth lists every registered worker kind with its last
 // success/error/streak (#689) — the "expected N runs, got 0" dashboard.
@@ -43,18 +25,18 @@ func listWorkerHealth(r *httprequest.Request, withErrorText bool) {
 	ctx := r.Request.Context()
 	rows, err := r.State.DB.Gen(ctx).ListWorkerHealth(ctx)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve worker health")
+		r.InternalError("list worker health failed", err)
 		return
 	}
-	items := make([]WorkerHealthItem, 0, len(rows))
+	items := make([]billing.WorkerHealth, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, workerHealthItemFromGen(row, withErrorText))
 	}
-	r.SuccessJSON(items)
+	r.SuccessJSON(billing.ListPage[billing.WorkerHealth]{Items: items})
 }
 
-func workerHealthItemFromGen(row gen.BillingWorkerState, withErrorText bool) WorkerHealthItem {
-	item := WorkerHealthItem{
+func workerHealthItemFromGen(row gen.BillingWorkerState, withErrorText bool) billing.WorkerHealth {
+	item := billing.WorkerHealth{
 		WorkerKind:            row.WorkerKind,
 		RegisteredAt:          row.RegisteredAt,
 		ExpectedPeriodSeconds: row.ExpectedPeriodSeconds,

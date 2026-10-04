@@ -13,7 +13,8 @@ import (
 )
 
 // Migrate creates or upgrades OpenRails' database objects through pool, whose
-// role then owns them and runs OpenRails with no grants. The schema and River
+// role then owns them and runs OpenRails with no grants, or hands them to
+// Config.SchemaOwner. The schema and River
 // ownership come from cfg; a host-owned fleet migrates River itself. With
 // Config.ControlPlane it also migrates the control plane's AuthKit schema.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
@@ -41,6 +42,17 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 	}
 	if err := migrate.ApplyPostgresMigrations(ctx, pool, opts); err != nil {
 		return err
+	}
+	if owner := strings.TrimSpace(cfg.SchemaOwner); owner != "" {
+		schemas := []string{schema}
+		if !opts.HostRiver {
+			schemas = append(schemas, opts.RiverSchema)
+		}
+		for _, s := range schemas {
+			if _, err := migrate.HandOver(ctx, pool, s, owner); err != nil {
+				return fmt.Errorf("openrails: hand schema %s to %s: %w", s, owner, err)
+			}
+		}
 	}
 	if cfg.ControlPlane != nil {
 		return standalonedb.ApplyAuthKit(ctx, pool)

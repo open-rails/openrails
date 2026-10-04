@@ -30,7 +30,6 @@ require (
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0
-	github.com/sendgrid/sendgrid-go v3.16.1+incompatible
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -130,7 +129,6 @@ require (
 	github.com/riverqueue/river/riverdriver v0.47.0 // indirect
 	github.com/riverqueue/river/rivershared v0.47.0 // indirect
 	github.com/riverqueue/river/rivertype v0.47.0
-	github.com/sendgrid/rest v2.6.9+incompatible
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect
 	github.com/tidwall/gjson v1.19.0 // indirect

@@ -36,7 +36,7 @@ import {
   listPayments,
   listSubscriptions,
   markNotificationRead,
-  putMerchantSettings,
+  applyMerchantSettings,
   putDefaultUsageRateCard,
   putCustomerUsageRateOverride,
   updatePSP,
@@ -140,8 +140,10 @@ const updateNotificationReadCache = (
           }
         : current
   )
-  queryClient.setQueryData<{ unread: number }>(unreadKey, (current) =>
-    current ? { unread: Math.max(0, current.unread - readIds.length) } : current
+  queryClient.setQueryData<{ unread_count: number }>(unreadKey, (current) =>
+    current
+      ? { unread_count: Math.max(0, current.unread_count - readIds.length) }
+      : current
   )
 }
 
@@ -773,8 +775,10 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.settings(), "update"],
-      mutationFn: (settings: MerchantSettings) => putMerchantSettings(settings),
-      onSuccess: invalidateExactOnSuccess(queryClient, keys.settings()),
+      mutationFn: ({ revision, settings }: { revision: string; settings: MerchantSettings }) =>
+        applyMerchantSettings(revision, settings),
+      // A refused revision means the form is stale: reload either way.
+      onSettled: invalidateExactOnSuccess(queryClient, keys.settings()),
     })
   },
   createPSP: (queryClient: QueryClient) => {

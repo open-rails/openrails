@@ -313,7 +313,7 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	s.nativeRoutes = &router.Table{}
 	for _, entry := range mux.Entries {
 		switch entry.Path {
-		case "/{$}", "/health/live", "/health/ready", "/healthz", "/readyz":
+		case "/health/live", "/health/ready":
 			continue
 		}
 		entry.Browser = s.nativeBrowser[entry.Method+" "+entry.Path]
@@ -349,7 +349,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 	}
 	return middleware.ChainHTTP(next,
 		middleware.RecoverHTTP(),
-		middleware.RequestLogHTTP("/health/live", "/health/ready", "/healthz", "/readyz", "/health"),
+		middleware.RequestLogHTTP("/health/live", "/health/ready"),
 		middleware.SecurityHeadersHTTP(),
 		// CORS is browser transport policy, not API authorization; real request
 		// security is always JWT signature/issuer/audience/permissions plus

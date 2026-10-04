@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/open-rails/authkit/iam"
 
@@ -45,39 +44,16 @@ var (
 
 // MerchantTeamMember is a user holding a merchant role. Display fields are
 // best-effort; a member with no stored email/username still lists.
-type MerchantTeamMember struct {
-	UserID   string `json:"user_id"`
-	Email    string `json:"email,omitempty"`
-	Username string `json:"username,omitempty"`
-	Role     string `json:"role"`
-}
+type MerchantTeamMember = billing.TeamMember
 
 // MerchantTeamInvite is a register+join invite link for the merchant. Its
 // single-use URL is returned ONLY at creation (InviteResult), never listed.
-type MerchantTeamInvite struct {
-	ID         string     `json:"id"`
-	Role       string     `json:"role"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	RedeemedAt *time.Time `json:"redeemed_at,omitempty"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-}
+type MerchantTeamInvite = billing.TeamInvite
 
 // MerchantTeamInviteResult is the outcome of inviting an email. Exactly one of
 // Member (a live account verified the email and was added immediately) or
 // Invite+URL (a single-use link the owner shares with the address) is set.
-type MerchantTeamInviteResult struct {
-	// Added is true when a live account that verified the email was added to
-	// the team directly (no link needed).
-	Added bool `json:"added"`
-	// Member is set when Added: the member now on the team.
-	Member *MerchantTeamMember `json:"member,omitempty"`
-	// Invite is set when a link was minted for the address.
-	Invite *MerchantTeamInvite `json:"invite,omitempty"`
-	// URL is the single-use register+join link — shown once, here, only when a
-	// link was minted. The owner shares it with the invitee.
-	URL string `json:"url,omitempty"`
-}
+type MerchantTeamInviteResult = billing.TeamInviteResult
 
 // ListMerchantTeam returns the merchant's team, owners first.
 func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid billing.MerchantID) ([]MerchantTeamMember, error) {
@@ -121,8 +97,8 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing
 		if _, err := c.client.SetGroupRole(ctx, actor, group, iam.UserSubject(user.ID), role); err != nil {
 			return MerchantTeamInviteResult{}, lastOwner(err)
 		}
-		return MerchantTeamInviteResult{Added: true, Member: &MerchantTeamMember{
-			UserID: user.ID, Email: text(user.Email), Username: user.Username, Role: role.Name(),
+		return MerchantTeamInviteResult{Member: &MerchantTeamMember{
+			UserID: user.ID, Email: nonEmpty(text(user.Email)), Username: nonEmpty(user.Username), Role: role.Name(),
 		}}, nil
 	case err != nil && !errors.Is(err, iam.ErrUserNotFound):
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: resolve invite email: %w", err)
@@ -138,7 +114,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing
 		return MerchantTeamInviteResult{}, err
 	}
 	invite := teamInvite(link.Invitation)
-	return MerchantTeamInviteResult{Invite: &invite, URL: link.URL}, nil
+	return MerchantTeamInviteResult{Invite: &invite, URL: nonEmpty(link.URL)}, nil
 }
 
 // ListMerchantTeamInvites returns the merchant's invite links (pending,
@@ -257,7 +233,7 @@ func (c *ControlPlane) team(ctx context.Context, group iam.GroupRef) (map[string
 	}
 	for id, u := range users {
 		if member, ok := out[id]; ok {
-			member.Email, member.Username = text(u.Email), u.Username
+			member.Email, member.Username = nonEmpty(text(u.Email)), nonEmpty(u.Username)
 			out[id] = member
 		}
 	}
@@ -285,12 +261,20 @@ func teamRoleRank(role string) int {
 
 func teamMemberLabel(m MerchantTeamMember) string {
 	switch {
-	case m.Email != "":
-		return m.Email
-	case m.Username != "":
-		return m.Username
+	case m.Email != nil:
+		return *m.Email
+	case m.Username != nil:
+		return *m.Username
 	}
 	return m.UserID
+}
+
+// nonEmpty is &s, nil when empty.
+func nonEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // text is *s, "" when unset.

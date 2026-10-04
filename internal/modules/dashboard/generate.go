@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
@@ -35,11 +36,7 @@ func (e *GenerateInvalidError) Error() string {
 
 // GenerateResult is a VALIDATED widget suggestion: the query already passed
 // the metrics compiler. The UI previews it live before the merchant saves.
-type GenerateResult struct {
-	Query metrics.Query `json:"query"`
-	Title string        `json:"title"`
-	Viz   string        `json:"viz"`
-}
+type GenerateResult = billing.GeneratedWidget
 
 // Generate turns a natural-language prompt into a validated widget. The LLM
 // only ever sees the metrics /schema document and the prompt — never merchant

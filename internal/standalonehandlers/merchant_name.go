@@ -27,9 +27,7 @@ func MerchantRename(svc MerchantRenamer) func(*httprequest.Request) {
 		if !ok {
 			return
 		}
-		var req struct {
-			Name string `json:"name"`
-		}
+		var req billing.RenameMerchantRequest
 		if !r.BindJSON(&req) {
 			return
 		}
@@ -41,7 +39,7 @@ func MerchantRename(svc MerchantRenamer) func(*httprequest.Request) {
 		var tooSoon *merchants.RenameTooSoonError
 		switch {
 		case err == nil:
-			r.JSON(http.StatusOK, map[string]any{"id": m.ID.String(), "slug": m.Slug})
+			r.SuccessJSON(billing.MerchantName{ID: m.ID, Name: m.Slug})
 		case errors.As(err, &tooSoon):
 			r.SetHeader("Retry-After", strconv.Itoa(int(time.Until(tooSoon.NextRenameAt).Seconds())+1))
 			r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeInvalidRequest, "rename_too_soon",

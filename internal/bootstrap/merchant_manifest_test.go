@@ -10,6 +10,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,10 +25,13 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.Len(t, manifest.Merchants["static-jwks-stack"].RemoteApplication.JWKS.Keys, 1)
 
 	m := manifest.Merchants["local-stack"]
-	require.Equal(t, "calendar_month", m.Invoice.BillingPeriodBoundary)
-	require.Equal(t, int64(50_000_000), *m.Invoice.CollectionThreshold)
-	require.Equal(t, int64(1_000_000), *m.Invoice.MonthlyFloor)
-	require.Len(t, m.DelegatedInvokerWastedSpendWindows, 2)
+	require.Equal(t, "calendar_month", m.Settings.InvoiceBillingBoundary)
+	require.Equal(t, int64(50_000_000), *m.Settings.InvoiceCollectionThreshold)
+	require.Equal(t, int64(1_000_000), *m.Settings.InvoiceMonthlyFloor)
+	require.Equal(t, 7, *m.Settings.ArrearsGraceDays)
+	require.Equal(t, []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000}, {Key: "sustained", WindowSeconds: 18_000, Limit: 20_000_000}}, m.Settings.DelegatedInvokerWastedSpendLimits)
+	require.Len(t, *m.Settings.CheckoutRouting, 3)
+	require.Equal(t, "Local Stack Billing", m.Settings.Profile.DisplayName)
 
 	byName, railOf := map[string]ProviderRailAccountConfig{}, map[string]string{}
 	require.Len(t, m.PSPs, 10)
@@ -76,9 +80,14 @@ func TestMerchantManifestValidation(t *testing.T) {
 		"wrong version":                {"version: 2\nmerchants:\n  x:\n    display_name: X\n", "version must be 1"},
 		"missing display name":         {"version: 1\nmerchants:\n  host-three: {}\n", `merchant "host-three" display_name is required`},
 		"merchant name removed":        {"version: 1\nmerchants:\n  host-three:\n    name: Host Three\n", `unknown field "name"`},
-		"support email removed":        {base("    profile:\n      support_email: s@example.com\n"), "support_email"},
+		"support email removed":        {base("    settings:\n      profile:\n        support_email: s@example.com\n"), "support_email"},
+		"settings outside settings":    {base("    profile:\n      display_name: X\n"), `unknown field "profile"`},
+		"invoice block retired":        {base("    invoice:\n      monthly_floor: 1\n"), `unknown field "invoice"`},
+		"window as duration":           {base("    settings:\n      delegated_invoker_wasted_spend_limits:\n        - { key: burst, window: 15m, limit: 5 }\n"), `unknown field "window"`},
+		"negative floor":               {base("    settings:\n      monthly_floor: -1\n"), "settings"},
+		"policy names an undeclared":   {base("    settings:\n      billing_policy_bindings:\n        - { policy: nope }\n"), "undeclared policy"},
 		"issuer section removed":       {base("    issuer:\n      issuer: https://auth.example\n"), "issuer"},
-		"profile URL scheme":           {base("    profile:\n      logo_url: ftp://cdn.example/logo.png\n"), "profile.logo_url"},
+		"profile URL scheme":           {base("    settings:\n      profile:\n        logo_url: ftp://cdn.example/logo.png\n"), "profile.logo_url"},
 		"api_host with scheme":         {base("    api_host: https://api.host-three.example\n"), "api_host"},
 		"api_host with path":           {base("    api_host: api.host-three.example/v1\n"), "api_host"},
 		"remote without issuer":        {remote("      jwks_uri: https://auth.example/jwks\n"), "remote_application.issuer is required"},

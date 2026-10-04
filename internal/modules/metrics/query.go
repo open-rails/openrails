@@ -12,6 +12,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/billing"
 )
 
 // Grains accepted for the time dimension.
@@ -27,16 +29,7 @@ const (
 )
 
 // Query is the POST /v1/merchant/metrics/query body.
-type Query struct {
-	Measures []string            `json:"measures"`
-	By       []string            `json:"by"`
-	Grain    string              `json:"grain"`
-	Range    *QueryRange         `json:"range"`
-	Filters  map[string][]string `json:"filters"`
-	Order    []OrderTerm         `json:"order"`
-	Limit    *int                `json:"limit"`
-	Compare  string              `json:"compare"`
-}
+type Query = billing.MetricsQuery
 
 // QueryRange bounds the query window. Date-only values are UTC calendar days:
 // from = day start (inclusive), to = day end (inclusive, i.e. to+1d exclusive).
@@ -44,18 +37,10 @@ type Query struct {
 // alternative ("7d", "12w", "6m", "1y" — a trailing window ending today,
 // inclusive), mutually exclusive with from/to; saved dashboard widgets (#741)
 // use it so "past 7 days" stays current on every load.
-type QueryRange struct {
-	From string `json:"from,omitempty"`
-	To   string `json:"to,omitempty"`
-	Last string `json:"last,omitempty"`
-}
+type QueryRange = billing.MetricsRange
 
 // OrderTerm orders result rows by a requested measure or dimension.
-type OrderTerm struct {
-	Measure   string `json:"measure,omitempty"`
-	Dimension string `json:"dimension,omitempty"`
-	Dir       string `json:"dir,omitempty"` // asc|desc (default asc)
-}
+type OrderTerm = billing.MetricsOrder
 
 // DecodeQuery strictly decodes a query body: unknown JSON keys are an error
 // (LLM-legibility: a typo'd key must fail loudly, never be silently ignored).

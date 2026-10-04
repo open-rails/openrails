@@ -21,14 +21,14 @@ import (
 
 // untypedBudget is how many routes still accept or answer a body no Go type
 // declares. It only goes down: a lane that types a route lowers it.
-const untypedBudget = 34
+const untypedBudget = 4
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 242)
+	require.Len(t, Catalog(), 238)
 	untyped := 0
 	for _, r := range Catalog() {
 		key := r.Key()
@@ -90,9 +90,6 @@ type recorder struct {
 }
 
 func (rec recorder) Handle(method, path string, _ router.Handler, _ ...router.Middleware) {
-	if path == "/{$}" {
-		path = "/"
-	}
 	rec.seen[method+" "+rec.base+path]++
 }
 
@@ -111,7 +108,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
 	opts := Options{ProviderRoutes: &providers, External: External{
-		Banner: raw, Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
+		Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
 		MerchantCreationEnabled: true,

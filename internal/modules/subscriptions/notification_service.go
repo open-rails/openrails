@@ -52,10 +52,6 @@ func (s *NotificationService) GetByUserID(ctx context.Context, userID string) ([
 	return s.repo.GetByUserID(ctx, userID)
 }
 
-func (s *NotificationService) MarkAsSeen(ctx context.Context, id, customerID uuid.UUID) error {
-	return s.repo.MarkAsSeen(ctx, id, customerID)
-}
-
 func (s *NotificationService) Update(ctx context.Context, notification *models.NotificationQueue) error {
 	return s.repo.Update(ctx, notification)
 }

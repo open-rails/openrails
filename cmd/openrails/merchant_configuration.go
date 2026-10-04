@@ -103,9 +103,9 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			}
 			var result any
 			if apply {
-				result, err = client.MerchantConfiguration.Apply(cmd.Context(), &params)
+				result, err = client.ApplyMerchantConfiguration(cmd.Context(), &params)
 			} else {
-				result, err = client.MerchantConfiguration.Retrieve(cmd.Context())
+				result, err = client.GetMerchantConfiguration(cmd.Context())
 			}
 			if err != nil {
 				return err

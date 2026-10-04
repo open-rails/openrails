@@ -98,13 +98,15 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	get := func(path string) *httptest.ResponseRecorder {
 		return serve(t, mux, httptest.NewRequest(http.MethodGet, path, nil))
 	}
-	require.Equal(t, http.StatusOK, get("/").Code)
-	require.Contains(t, get("/").Body.String(), `"service"`)
-	require.Equal(t, http.StatusNotFound, get("/nope").Code, "the root banner is exact-match")
-	require.Equal(t, http.StatusNotFound, get("/health/services").Code)
+	require.JSONEq(t, `{"status":"ok"}`, get("/health/live").Body.String())
+	for _, gone := range []string{"/", "/healthz", "/readyz", "/health/services"} {
+		require.Equal(t, http.StatusNotFound, get(gone).Code, gone)
+	}
+	// Readiness detail is logged, never answered on the public route.
 	ready := get("/health/ready?verbose=1")
 	require.Equal(t, http.StatusServiceUnavailable, ready.Code)
-	require.Contains(t, ready.Body.String(), `"dependencies"`)
+	require.Contains(t, ready.Body.String(), `"service_unavailable"`)
+	require.NotContains(t, ready.Body.String(), "postgres")
 
 	// #623: the standalone server publishes every route group.
 	caps := get("/v1/capabilities")

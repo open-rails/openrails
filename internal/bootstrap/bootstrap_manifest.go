@@ -2,14 +2,15 @@ package bootstrap
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/open-rails/authkit/keys"
 
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
+	"github.com/open-rails/openrails/internal/service"
 
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 const (
@@ -40,31 +41,15 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 				return fmt.Errorf("merchant %q api_host: %w", slug, err)
 			}
 		}
-		if profileURL := strings.TrimSpace(t.Profile.LogoURL); profileURL != "" && !validHTTPURL(profileURL) {
-			return fmt.Errorf("merchant %q profile.logo_url must be an http or https URL", slug)
-		}
-		if profileURL := strings.TrimSpace(t.Profile.SupportURL); profileURL != "" && !validHTTPURL(profileURL) {
-			return fmt.Errorf("merchant %q profile.support_url must be an http or https URL", slug)
-		}
-		if profileURL := strings.TrimSpace(t.Profile.SignupURL); profileURL != "" && !validHTTPURL(profileURL) {
-			return fmt.Errorf("merchant %q profile.signup_url must be an http or https URL", slug)
-		}
 		if t.RemoteApplication != nil {
 			if err := validateManifestRemoteApplication(slug, t.RemoteApplication); err != nil {
 				return err
 			}
 		}
-		if err := validateManifestInvoice(slug, t.Invoice); err != nil {
-			return err
-		}
-		if err := validateManifestWastedWindows(slug, t.DelegatedInvokerWastedSpendWindows); err != nil {
-			return err
-		}
-		// or#288: the routing policy is validated by the SAME normalizer the
-		// mode-2 config API uses, so a manifest cannot declare a policy the API
-		// would refuse.
-		if _, err := merchantconfig.NormalizeCheckoutRouting(checkoutRoutingRules(t.CheckoutRouting)); err != nil {
-			return fmt.Errorf("merchant %q %w", slug, err)
+		// The configuration API's own validator: a manifest cannot declare
+		// settings the API would refuse.
+		if err := service.ValidateMerchantSettings(t.Settings); err != nil {
+			return fmt.Errorf("merchant %q settings: %w", slug, err)
 		}
 		for key, account := range t.PSPs {
 			if err := validateManifestPSP(slug, key, account); err != nil {
@@ -114,8 +99,10 @@ func validateManifestRemoteApplication(merchantSlug string, app *RemoteApplicati
 	return nil
 }
 
-var validateManifestInvoice = merchantbootstrap.ValidateManifestInvoice
-var validateManifestWastedWindows = merchantbootstrap.ValidateManifestWastedWindows
 var validateManifestPSP = merchantbootstrap.ValidateManifestPSP
 var solanaSignerConfigured = merchantbootstrap.SolanaSignerConfigured
-var validHTTPURL = merchantbootstrap.ValidHTTPURL
+
+func validHTTPURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
+}

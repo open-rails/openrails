@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -44,8 +45,9 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
 			deps := openrails.Deps{Postgres: f.pool}
+			mail := &outbox{}
 			if hosted {
-				deps.EmailSender = new(authtest.Outbox).Email()
+				deps.EmailSender = mail
 			}
 			cp, err := openrails.New(ctx, cfg, deps)
 			require.NoError(t, err)
@@ -95,7 +97,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			}
 			// shape is what the answer reveals: status, fields and error code.
 			shape := func(status int, body map[string]any) []any {
-				out := []any{status, body["added"], body["member"] != nil, body["invite"] != nil, body["url"] != nil}
+				out := []any{status, body["member"] != nil, body["invite"] != nil, body["url"] != nil}
 				if e, ok := body["error"].(map[string]any); ok {
 					out = append(out, e["code"])
 				}
@@ -113,6 +115,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			}
 
 			unknown := shape(invite("team-" + uuid.NewString()[:12] + "@e2e.test"))
+
 			for what, u := range map[string]iam.User{"unverified": account(false), "deleted": account(true)} {
 				if what == "deleted" {
 					results, err := core.DeleteUsers(ctx, iam.SystemActor(), []string{u.ID})
@@ -126,8 +129,45 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			verified := account(true)
 			status, body := invite(strings.ToUpper(*verified.Email))
 			require.Equal(t, http.StatusCreated, status, "%v", body)
-			require.Equal(t, true, body["added"])
+			require.NotNil(t, body["member"], "added at once: %v", body)
 			require.True(t, onTeam(verified), "control: the account that proved the address joins")
+
+			if hosted {
+				// The control plane's mail reaches the deployment's one sender,
+				// rendered, from the deployment's own address.
+				require.NoError(t, core.ResetAccountMFA(ctx, verified.ID))
+				notice := mail.to(*verified.Email)
+				require.NotNil(t, notice, "the notice was sent")
+				require.Equal(t, iam.MessageMFAReset, notice.Auth.Kind)
+				require.Empty(t, notice.From)
+				require.Contains(t, notice.Subject, "Two-step verification")
+			}
 		})
 	}
+}
+
+// outbox is an EmailSender that keeps what it is given.
+type outbox struct {
+	mu   sync.Mutex
+	sent []openrails.Email
+}
+
+func (o *outbox) Send(_ context.Context, m openrails.Email) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sent = append(o.sent, m)
+	return nil
+}
+
+func (*outbox) CheckHealth(context.Context) error { return nil }
+
+func (o *outbox) to(address string) *openrails.Email {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for i := range o.sent {
+		if o.sent[i].To == address {
+			return &o.sent[i]
+		}
+	}
+	return nil
 }

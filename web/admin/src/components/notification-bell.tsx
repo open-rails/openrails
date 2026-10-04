@@ -36,7 +36,7 @@ export function NotificationBell() {
   const { data: unreadData } = useQuery(unreadOptions)
   const { data: notificationData, isFetching: loading } =
     useQuery(notificationsOptions)
-  const count = unreadData?.unread ?? 0
+  const count = unreadData?.unread_count ?? 0
   const items = notificationData?.data ?? []
 
   const handleOpen = (next: boolean) => {

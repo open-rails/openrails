@@ -121,6 +121,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		NMITransport:     deps.NMITransport,
 		DNSResolver:      deps.DNSResolver,
 		Clock:            deps.Clock,
+		EmailSender:      deps.EmailSender,
 	}
 	if cfg.River != config.RiverHostOwned && strings.TrimSpace(bootstrap.RiverSchema) == "" {
 		bootstrap.RiverSchema = config.DefaultRiverSchema
@@ -244,6 +245,12 @@ func validate(cfg *config.Config, deps config.Deps) error {
 	}
 	if (deps.UserExists == nil) != (deps.UserEmail == nil) {
 		return fmt.Errorf("openrails: set Deps.UserExists and Deps.UserEmail together")
+	}
+	if deps.EmailSender != nil && cfg.SendGrid != nil {
+		return fmt.Errorf("openrails: set Deps.EmailSender or Config.SendGrid, not both")
+	}
+	if cfg.SendGrid != nil && strings.TrimSpace(cfg.SendGrid.APIKey) == "" {
+		return fmt.Errorf("openrails: Config.SendGrid.APIKey is required")
 	}
 	if cfg.ControlPlane != nil && (deps.AuthKit != nil || deps.Authenticate != nil) {
 		return fmt.Errorf("openrails: Config.ControlPlane authenticates with its own AuthKit; leave Deps.AuthKit and Deps.Authenticate unset")

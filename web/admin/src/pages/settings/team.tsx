@@ -92,6 +92,7 @@ function roleLabel(role: string): string {
 export function TeamTab() {
   const members = useQuery(adminQueries.team())
   const invites = useQuery(adminQueries.teamInvites())
+  const capabilities = useQuery(adminQueries.capabilities())
 
   if (members.isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
@@ -113,7 +114,7 @@ export function TeamTab() {
             </p>
           </div>
           <InviteDialog
-            invitesEnabled={invites.data?.invites_enabled ?? false}
+            invitesEnabled={capabilities.data?.features.team_invites ?? false}
           />
         </div>
         {team.length === 0 ? (
@@ -339,7 +340,7 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
           email,
           role: value.role,
         })
-        if (result.added) {
+        if (result.member) {
           toast.success(`${result.member?.email || email} added to the team`)
           handleOpenChange(false)
         } else {

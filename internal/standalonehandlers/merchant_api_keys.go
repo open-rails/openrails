@@ -128,10 +128,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 		if !ok {
 			return
 		}
-		var req struct {
-			Name string `json:"name"`
-			Role string `json:"role"`
-		}
+		var req billing.CreateAPIKeyRequest
 		if !r.BindJSON(&req) {
 			return
 		}
@@ -166,10 +163,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 			}
 			return
 		}
-		r.JSON(http.StatusCreated, struct {
-			controlplane.MerchantAPIKey
-			Secret string `json:"secret"`
-		}{MerchantAPIKey: key, Secret: secret})
+		r.JSON(http.StatusCreated, billing.CreatedAPIKey{APIKey: key, Secret: secret})
 	}
 }
 
@@ -191,7 +185,7 @@ func MerchantListAPIKeys(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 			r.ErrorJSON(http.StatusInternalServerError, "failed to list API keys")
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"data": keys})
+		r.SuccessJSON(billing.ListPage[billing.APIKey]{Items: keys})
 	}
 }
 
@@ -232,6 +226,6 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				"no API key with that id in this merchant"))
 			return
 		}
-		r.JSON(http.StatusOK, map[string]any{"revoked": true, "id": id})
+		r.NoContent()
 	}
 }

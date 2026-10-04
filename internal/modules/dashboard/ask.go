@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -60,16 +61,10 @@ func (e *AskNoAnswerError) Error() string {
 // (the embedded metrics.Result flattens to grain/range/columns/rows/...). The
 // UI renders these as tables — on-screen numbers come from here, never from
 // the model's prose.
-type AskEvidence struct {
-	Query metrics.Query `json:"query"`
-	metrics.Result
-}
+type AskEvidence = billing.MetricsEvidence
 
 // AskResult is the POST /v1/merchant/metrics/ask response.
-type AskResult struct {
-	Answer   string        `json:"answer"`
-	Evidence []AskEvidence `json:"evidence"`
-}
+type AskResult = billing.MetricsAnswer
 
 // Ask answers a natural-language metrics question by letting the model run
 // compiler-validated #733 queries as tools (executed through the normal
@@ -163,7 +158,7 @@ func (s *Service) runAskTool(ctx context.Context, call ToolCall, evidence *[]Ask
 		log.WithError(err).Warn("dashboard ask: metrics query execution failed")
 		return errResult("query execution failed — try a different query")
 	}
-	*evidence = append(*evidence, AskEvidence{Query: *q, Result: *result})
+	*evidence = append(*evidence, AskEvidence{Query: *q, MetricsResult: *result})
 	payload := askToolPayload(result)
 	*fedBytes += len(payload)
 	return ToolResult{ToolUseID: call.ID, Content: payload}

@@ -70,7 +70,7 @@ func (q *Queries) AdminIgnoreReconciliationFinding(ctx context.Context, arg Admi
 
 const adminListReconciliationFindings = `-- name: AdminListReconciliationFindings :many
 
-SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class, count(*) OVER () AS total_count
+SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class
 FROM billing.reconciliation_findings f
 WHERE f.merchant_id = $1::uuid
   AND (CASE
@@ -79,9 +79,12 @@ WHERE f.merchant_id = $1::uuid
        END)
   AND ($3::text IS NULL OR f.severity = $3::text)
   AND ($4::text IS NULL OR f.finding_type = $4::text)
+  AND ($5::int IS NULL
+       OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
+          > ($5::int, $6::timestamptz, $7::uuid))
 ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          f.created_at, f.id
-LIMIT $6 OFFSET $5
+LIMIT $8::int
 `
 
 type AdminListReconciliationFindingsParams struct {
@@ -89,13 +92,10 @@ type AdminListReconciliationFindingsParams struct {
 	Status      *string
 	Severity    *string
 	FindingType *string
-	PageOffset  int64
-	PageLimit   int64
-}
-
-type AdminListReconciliationFindingsRow struct {
-	BillingReconciliationFinding BillingReconciliationFinding
-	TotalCount                   int64
+	AfterRank   *int32
+	AfterAt     *time.Time
+	AfterID     *uuid.UUID
+	RowLimit    int32
 }
 
 // ============================================================================
@@ -105,52 +105,53 @@ type AdminListReconciliationFindingsRow struct {
 // status filter overrides it (e.g. status=ignored). Sort: severity desc
 // (critical first) then age desc (oldest first). total_count rides every row
 // for pagination. merchant_id stamped explicitly (multi-merchant pattern).
-func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg AdminListReconciliationFindingsParams) ([]AdminListReconciliationFindingsRow, error) {
+func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg AdminListReconciliationFindingsParams) ([]BillingReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, adminListReconciliationFindings,
 		arg.MerchantID,
 		arg.Status,
 		arg.Severity,
 		arg.FindingType,
-		arg.PageOffset,
-		arg.PageLimit,
+		arg.AfterRank,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AdminListReconciliationFindingsRow
+	var items []BillingReconciliationFinding
 	for rows.Next() {
-		var i AdminListReconciliationFindingsRow
+		var i BillingReconciliationFinding
 		if err := rows.Scan(
-			&i.BillingReconciliationFinding.ID,
-			&i.BillingReconciliationFinding.MerchantID,
-			&i.BillingReconciliationFinding.FindingType,
-			&i.BillingReconciliationFinding.Rail,
-			&i.BillingReconciliationFinding.PspID,
-			&i.BillingReconciliationFinding.OpenrailsResourceType,
-			&i.BillingReconciliationFinding.OpenrailsResourceID,
-			&i.BillingReconciliationFinding.ExternalResourceID,
-			&i.BillingReconciliationFinding.Field,
-			&i.BillingReconciliationFinding.OpenrailsValue,
-			&i.BillingReconciliationFinding.ExternalValue,
-			&i.BillingReconciliationFinding.SubjectKey,
-			&i.BillingReconciliationFinding.Severity,
-			&i.BillingReconciliationFinding.Status,
-			&i.BillingReconciliationFinding.RecommendedAction,
-			&i.BillingReconciliationFinding.FirstSeenRun,
-			&i.BillingReconciliationFinding.LastSeenRun,
-			&i.BillingReconciliationFinding.LastSeenAt,
-			&i.BillingReconciliationFinding.ResolvedAt,
-			&i.BillingReconciliationFinding.Resolution,
-			&i.BillingReconciliationFinding.OperatorNotes,
-			&i.BillingReconciliationFinding.CreatedAt,
-			&i.BillingReconciliationFinding.UpdatedAt,
-			&i.BillingReconciliationFinding.Evidence,
-			&i.BillingReconciliationFinding.ResolvedBy,
-			&i.BillingReconciliationFinding.NotifiedAt,
-			&i.BillingReconciliationFinding.NotifiedSeverity,
-			&i.BillingReconciliationFinding.SeenRunClass,
-			&i.TotalCount,
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
 		); err != nil {
 			return nil, err
 		}

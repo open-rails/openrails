@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
@@ -26,7 +27,7 @@ func MerchantMetricsSchema(r *httprequest.Request) {
 func MerchantMetricsQuery(r *httprequest.Request) {
 	svc := r.State.MetricsService
 	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "metrics service not configured")
+		r.ErrorCode(billing.CodeServiceUnavailable, "metrics service not configured")
 		return
 	}
 	q, verr := metrics.DecodeQuery(r.Request.Body)
@@ -36,7 +37,7 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 		if verr == nil {
 			res, err := svc.Execute(r.Request.Context(), plan)
 			if err != nil {
-				r.ErrorJSON(http.StatusInternalServerError, "metrics query failed")
+				r.InternalError("metrics query failed", err)
 				return
 			}
 			r.JSON(http.StatusOK, res)
@@ -57,14 +58,15 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 func MerchantMetricsAsk(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if !svc.AskConfigured() {
-		r.ErrorJSON(http.StatusServiceUnavailable, "metrics Q&A unavailable")
+		r.ErrorCode(billing.CodeServiceUnavailable, "metrics Q&A unavailable")
 		return
 	}
-	var body struct {
-		Question string `json:"question"`
+	var body billing.AskMetricsRequest
+	if !r.BindJSON(&body) {
+		return
 	}
-	if err := r.DecodeJSON(&body); err != nil || strings.TrimSpace(body.Question) == "" {
-		r.ErrorJSON(http.StatusBadRequest, `body must be {"question":"<what you want to know>"}`)
+	if strings.TrimSpace(body.Question) == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "question is required").WithParam("question"))
 		return
 	}
 	res, err := svc.Ask(r.Request.Context(), strings.TrimSpace(body.Question))
@@ -74,7 +76,7 @@ func MerchantMetricsAsk(r *httprequest.Request) {
 		switch {
 		case errors.As(err, &limited):
 			r.SetHeader("Retry-After", strconv.Itoa(int(math.Ceil(limited.RetryAfter.Seconds()))))
-			r.ErrorJSON(http.StatusTooManyRequests, "ask rate limit exceeded — try again later")
+			r.ErrorCode(billing.CodeRateLimitExceeded, "ask rate limit exceeded; try again later")
 		case errors.As(err, &noAnswer):
 			r.ErrorJSON(http.StatusBadGateway, "the model did not produce an answer within the query budget — try a narrower question")
 		default:

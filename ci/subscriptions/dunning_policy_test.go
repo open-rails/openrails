@@ -20,12 +20,12 @@ func TestMerchantDunningPolicy(t *testing.T) {
 	w := newWorld(t)
 	w.armDestructive()
 	bad := &billing.DunningPolicy{Tiers: []billing.DunningTier{{RetryAfterHours: []int{24, 900}}}}
-	require.Error(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: bad}), "retries past the cycle are refused")
+	require.Error(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: bad}), "retries past the cycle are refused")
 	policy := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
-	require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
-	got, err := w.client[embedded].GetMerchantSettings(t.Context())
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
+	got, err := w.client[embedded].GetMerchantConfiguration(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, policy, got.DunningPolicy)
+	require.Equal(t, policy, got.Settings.DunningPolicy)
 
 	e := enroll(t, w, "nmi", embedded)
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
@@ -57,7 +57,7 @@ func TestDunningAccessPolicy(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			policy := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 120, 216, 312}}}, AccessDuringDunning: access}
-			require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
+			require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
 			e := enroll(t, w, "stripe", embedded)
 			e.setDecline(visa.Last4, "insufficient_funds", "202")
 			e.toPeriodEnd()
@@ -85,7 +85,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 		t.Run(rail, func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
-			require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessDuringDunning: billing.DunningAccessSuspend}}))
+			require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessDuringDunning: billing.DunningAccessSuspend}}))
 			l := importLegacy(t, w, rail, embedded)
 			w.converge()
 			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
@@ -116,7 +116,7 @@ func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	opened := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
-	require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: opened}))
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: opened}))
 	e := enroll(t, w, "nmi", embedded)
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
 	e.toPeriodEnd()
@@ -127,7 +127,7 @@ func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	require.Equal(t, 24*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour))
 
 	edited := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{36, 60}}}}
-	require.NoError(t, w.client[embedded].SetMerchantSettings(t.Context(), billing.MerchantSettings{DunningPolicy: edited}))
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: edited}))
 	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
 	w.runRenewals()
 	sub = w.subscription(embedded, e.sub)

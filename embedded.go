@@ -34,7 +34,9 @@ func init() {
 
 // Migrate creates or upgrades OpenRails' tables in cfg.Schema through pool.
 // It is idempotent: run it on every boot, before New. The pool's role owns
-// what it creates and is the role OpenRails runs as. With Config.River
+// what it creates and is the role OpenRails runs as; with cfg.SchemaOwner,
+// Migrate hands the schema and everything in it to that role instead, touching
+// only what it does not already own. With Config.River
 // RiverManaged it also migrates River; a host-owned fleet migrates River itself.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	return engine.Migrate(ctx, pool, cfg)

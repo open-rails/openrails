@@ -25,7 +25,7 @@ var platformRoutes = []Route{
 	// verbatim job error) lives on the platform tier; the merchant tier keeps
 	// the same list with the error text withheld.
 	{Method: GET, Path: "/v1/platform/worker-health", Group: Platform, Auth: AuthOperator, Perm: billing.RootWorkerHealthRead, NoConn: true,
-		Responses: []Reply{{200, []handlers.WorkerHealthItem{}}}, Handler: h(handlers.GetPlatformWorkerHealth)},
+		Responses: []Reply{{200, billing.ListPage[billing.WorkerHealth]{}}}, Handler: h(handlers.GetPlatformWorkerHealth)},
 	{Method: GET, Path: "/v1/platform/merchants", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRead, NoConn: true,
 		Query: queryOf(handlers.PlatformMerchantListQuery{}), Responses: []Reply{{200, PathPage[handlers.PlatformMerchantItem]{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PlatformListMerchants)},
 	{Method: GET, Path: "/v1/platform/merchants/{id}", Group: Platform, Auth: AuthOperator, Perm: billing.RootMerchantsRead, NoConn: true,

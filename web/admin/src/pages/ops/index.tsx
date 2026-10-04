@@ -83,9 +83,9 @@ const severityTone: Record<string, string> = {
 
 function FindingsTab() {
   const { data, isPending: loading } = useQuery(adminQueries.findings())
+  const { data: gauges } = useQuery(adminQueries.findingSummary())
   const [resolving, setResolving] = React.useState<Finding | null>(null)
 
-  const gauges = data?.gauges
   return (
     <div className="flex flex-col gap-4">
       {gauges && (
@@ -109,7 +109,7 @@ function FindingsTab() {
       )}
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : !data?.items?.length ? (
+      ) : !data?.data.length ? (
         <p className="text-sm text-muted-foreground">
           Nothing needs attention right now.
         </p>
@@ -134,7 +134,7 @@ function FindingsTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.items.map((f) => (
+              {data.data.map((f) => (
                 <TableRow key={f.id}>
                   <TableCell>
                     <Badge
@@ -342,7 +342,7 @@ function RepairAlertsTab() {
 function WorkerHealthTab() {
   const { data, isPending: loading } = useQuery(adminQueries.workerHealth())
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!data?.length)
+  if (!data?.data.length)
     return (
       <p className="text-sm text-muted-foreground">No workers registered.</p>
     )
@@ -363,7 +363,7 @@ function WorkerHealthTab() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.map((w) => (
+          {data.data.map((w) => (
             <TableRow key={w.worker_kind}>
               <TableCell className="text-xs">{w.worker_kind}</TableCell>
               <TableCell>{formatDate(w.last_success_at)}</TableCell>

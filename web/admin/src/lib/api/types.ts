@@ -267,8 +267,7 @@ export interface Recommendation {
 
 export interface Finding {
   id: string
-  tenant_id: string
-  provider?: string
+  provider: string | null
   finding_type: string
   subject_key: string
   severity: "critical" | "high" | "medium" | "low"
@@ -285,20 +284,13 @@ export interface Finding {
   recommendation?: Recommendation
 }
 
+// GET /merchant/findings/summary: the queue at a glance.
 export interface FindingsGauges {
   orphaned_members: number
   freeloaders: number
   duplicate_coverage: number
   open_by_severity: Record<string, number>
   total_open: number
-}
-
-export interface FindingsListResponse {
-  items: Finding[]
-  total: number
-  limit: number
-  offset: number
-  gauges: FindingsGauges
 }
 
 // NotificationData mirrors openrails.NotificationData: every event fills the
@@ -372,6 +364,15 @@ export interface WorkerHealth {
 
 // --- Settings / providers ---
 
+// GET /merchant/configuration: the merchant's non-secret configuration and
+// the revision an application must name.
+export interface MerchantConfiguration {
+  revision: string
+  display_name: string
+  api_host: string
+  settings: MerchantSettings
+}
+
 export interface MerchantSettings {
   profile?: {
     display_name?: string
@@ -438,9 +439,9 @@ export interface MerchantAPIKey {
   // stored credential. The secret itself is shown once, at mint time only.
   prefix: string
   created_at: string
-  last_used_at?: string
-  expires_at?: string
-  revoked_at?: string
+  last_used_at: string | null
+  expires_at: string | null
+  revoked_at: string | null
 }
 
 export interface MintedAPIKey extends MerchantAPIKey {
@@ -451,8 +452,8 @@ export interface MintedAPIKey extends MerchantAPIKey {
 
 export interface TeamMember {
   user_id: string
-  email?: string
-  username?: string
+  email: string | null
+  username: string | null
   role: string
 }
 
@@ -460,19 +461,18 @@ export interface TeamInvite {
   id: string
   role: string
   created_at: string
-  expires_at?: string
-  redeemed_at?: string
-  revoked_at?: string
+  expires_at: string | null
+  redeemed_at: string | null
+  revoked_at: string | null
 }
 
 // Outcome of inviting an email: either a live account had verified the address
 // (added to the team immediately) or a single-use register+join link was minted
 // (url shown once for the owner to share).
 export interface TeamInviteResult {
-  added: boolean
-  member?: TeamMember
-  invite?: TeamInvite
-  url?: string
+  member: TeamMember | null
+  invite: TeamInvite | null
+  url: string | null
 }
 
 // --- Auth (AuthKit authhttp) ---

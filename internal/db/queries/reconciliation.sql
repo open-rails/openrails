@@ -240,7 +240,7 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id =
 -- (critical first) then age desc (oldest first). total_count rides every row
 -- for pagination. merchant_id stamped explicitly (multi-merchant pattern).
 -- name: AdminListReconciliationFindings :many
-SELECT sqlc.embed(f), count(*) OVER () AS total_count
+SELECT f.*
 FROM billing.reconciliation_findings f
 WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (CASE
@@ -249,9 +249,12 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
        END)
   AND (sqlc.narg(severity)::text IS NULL OR f.severity = sqlc.narg(severity)::text)
   AND (sqlc.narg(finding_type)::text IS NULL OR f.finding_type = sqlc.narg(finding_type)::text)
+  AND (sqlc.narg(after_rank)::int IS NULL
+       OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
+          > (sqlc.narg(after_rank)::int, sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          f.created_at, f.id
-LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+LIMIT sqlc.arg(row_limit)::int;
 
 -- Gauge input (#690): open-finding counts per (type, severity). The Go layer
 -- folds these into the named gauges (freeloaders, duplicate_coverage,

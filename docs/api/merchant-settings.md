@@ -1,28 +1,25 @@
 # Merchant settings
 
-`GET /v1/merchant/settings` reads the complete declarative merchant document.
-`PUT /v1/merchant/settings` replaces that document atomically. The Go methods are
-`Client.GetMerchantSettings` and `Client.SetMerchantSettings` in every deployment.
+A merchant's settings (`billing.MerchantSettings`) are part of its
+configuration: `GET /v1/merchant/configuration` (`Client.GetMerchantConfiguration`)
+reads them with the configuration's revision, and
+`POST /v1/merchant/configuration/applications` (`Client.ApplyMerchantConfiguration`)
+changes them against that revision
+([configuration applications](../merchant-configuration-applications.md)). A
+mode-1 merchant declares the same document under `settings:` in its YAML.
 
-GET includes profile, invoice/arrears policy, checkout routing,
-named billing policies, default/tier bindings and delegated
-wasted-spend limits. Sending an unchanged GET result preserves the declaration.
-Omitted fields in PUT reset to their defaults; empty lists remove declarations.
-Unknown fields and null/non-object documents are rejected. The server returns complete
-configuration lists; runtime customer records are not part of this document.
+The settings hold the profile, invoice/arrears policy, checkout routing, the
+dunning policy, named billing policies, default/tier bindings and delegated
+wasted-spend limits. An application changes only the fields it names; an
+explicit empty list removes those declarations. Unknown fields are rejected.
 
-All policy references must name policies in the same document. Invalid fields,
-missing references or database errors leave every setting unchanged. Readers
-observe a complete document before or after a concurrent replacement. Financial
-policy resolution reads PostgreSQL directly so another runtime does not retain
-an old process-local cached cap.
+All policy references must name policies in the resulting document. Invalid
+fields, missing references or database errors leave every setting unchanged.
+Financial policy resolution reads PostgreSQL directly, so another runtime never
+keeps an old cached cap.
 
-Per-customer policy bindings are runtime segmentation, outside
-this declaration. Use `Client.GetCustomerBillingPolicy` and
-`Client.SetCustomerBillingPolicy` (GET/PUT on
-`/v1/merchant/customers/{customer_id}/billing-policy`) to read, assign or clear
-one customer's explicit policy. A required nullable `policy_name` distinguishes
-clearing from an incomplete request. PUT rejects customer bindings and preserves existing runtime
-rows. Removing a named policy still referenced by a customer is refused, preserving
-the entire previous document. This contract contains no global consumer or wallet
-state; those remain OpenRails-SaaS responsibilities.
+Per-customer policy bindings are runtime segmentation, outside the settings. Use
+`Client.GetCustomerBillingPolicy` and `Client.SetCustomerBillingPolicy`
+(GET/PUT `/v1/merchant/customers/{customer_id}/billing-policy`) to read, assign
+or clear one customer's explicit policy. Removing a named policy a customer is
+still bound to is refused, and the previous settings stay.

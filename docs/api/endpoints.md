@@ -67,9 +67,8 @@ admin responses are never replayed by global middleware.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/` | none | JSON service banner `{"service":"billing","status":"ok",...}` |
-| GET | `/health/live` (alias `/healthz`) | none | Unconditional liveness probe |
-| GET | `/health/ready` (alias `/readyz`) | none | Readiness: Postgres, configured Redis, merchant-secret backend, River producer/local consumer, auth verifier. 200 or 503 `not_ready`; `?verbose=1` adds per-dependency detail. `run-server --no-workers` remains not-ready |
+| GET | `/health/live` | none | Unconditional liveness probe: `{"status":"ok"}` |
+| GET | `/health/ready` | none | Readiness: Postgres, configured Redis, merchant-secret backend, River producer/local consumer, auth verifier. 200 `{"status":"ready"}` or 503 `service_unavailable`; the failing dependency is logged, never answered. `run-server --no-workers` remains not-ready |
 | GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `features` (`stripe_billing_portal`, `solana_one_time_payments`, `solana_subscription_management`, `provider_credential_writes`). Features require both an exposed HTTP action and provider support; webhooks appear only in route groups. ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
@@ -268,10 +267,8 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/provider-operations/{operation_id}/release` | `merchant:admissions:create` | Release after proven provider non-creation: `{ release_reference }`. 409 `operation_authorization_has_billing_evidence` once any evidence exists |
 | POST | `/v1/merchant/provider-operations/{operation_id}/observations` | `merchant:admissions:create` | Append immutable provider billing evidence (lifecycle facts, raw body, typed records or refusal); unknown fields are refused. OpenRails qualifies, rates and settles; there is no caller-rated amount. Spend authority because an eligible observation settles the payer's reservation. Encoded body ≤ 768 KiB (`ProviderBillingObservationMaxBytes`, checked on the shared service path and mirrored by the remote Client, so over-cap is `400 invalid_param` in every deployment) |
 | GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | `merchant:usage:read` | Qualification state with its authorization; 404 `provider_billing_qualification_not_found` |
-| GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
 | GET | `/v1/merchant/configuration` | `merchant:settings:read` | Read the merchant configuration and its current revision |
-| POST | `/v1/merchant/configuration/applications` | `merchant:settings:update` | Apply a configuration document with an application ID and expected revision; returns a durable receipt ([configuration applications](../merchant-configuration-applications.md)) |
-| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Replace the merchant settings document atomically ([merchant-settings.md](merchant-settings.md)), incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
+| POST | `/v1/merchant/configuration/applications` | `merchant:settings:update` | Apply a configuration document (display name, API host, [settings](merchant-settings.md) incl. [billing policies](../billing-policies.md)) with an application ID and expected revision; returns a durable receipt ([configuration applications](../merchant-configuration-applications.md)) |
 | GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's proven API host (#734 Host routing; `api_host` null when unset) and its open `claim`, if any |
 | PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Claim an API host: `{ api_host }` (bare lowercase domain). 202 with `claim.dns_record`: publish its `value` as a TXT record at its `name` (`_openrails-challenge.<host>`), then verify. A claim routes nothing. `""` releases the host and any claim at once. 400 `api_host_reserved` for the deployment's own hosts (public billing URL, console, issuer); 409 `api_host_taken` when another merchant holds it |
 | POST | `/v1/merchant/api-host/verify` | `merchant:settings:update` | Prove the open claim through DNS (5s bound) and bind its host; 409 `api_host_unproven` until the TXT record carries the token, `api_host_taken` when another merchant proved it first |
@@ -475,13 +472,13 @@ Archiving the last active PSP on a rail answers `409 psp_last_active` unless
 | GET | `/v1/merchant/dashboard` | `merchant:metrics:read` | Saved dashboard config |
 | PUT | `/v1/merchant/dashboard` | `merchant:dashboard:update` | Replace dashboard config |
 | POST | `/v1/merchant/dashboard/widgets/generate` | `merchant:dashboard:update` | NL widget generation |
-| GET | `/v1/merchant/webhooks` | `merchant:metrics:read` | List outbound alert webhook metadata; destination host only, never URL credentials |
-| POST | `/v1/merchant/webhooks` | `merchant:settings:update` | Create outbound webhook; URL is write-only and stored encrypted |
-| PUT | `/v1/merchant/webhooks/{id}/url` | `merchant:settings:update` | Replace the destination credential while preserving the webhook identity |
-| DELETE | `/v1/merchant/webhooks/{id}` | `merchant:settings:update` | Delete outbound webhook |
+| GET | `/v1/merchant/alert-webhooks` | `merchant:settings:read` | List outbound alert webhook metadata; destination host only, never URL credentials |
+| POST | `/v1/merchant/alert-webhooks` | `merchant:settings:update` | Create outbound alert webhook; URL is write-only and stored encrypted |
+| PUT | `/v1/merchant/alert-webhooks/{id}/url` | `merchant:settings:update` | Replace the destination credential while preserving the webhook identity |
+| DELETE | `/v1/merchant/alert-webhooks/{id}` | `merchant:settings:update` | Delete outbound alert webhook; 204 |
 | GET | `/v1/merchant/notifications` | `merchant:metrics:read` | Merchant notification feed |
 | GET | `/v1/merchant/notifications/unread-count` | `merchant:metrics:read` | Unread count |
-| POST | `/v1/merchant/notifications/{id}/read` | `merchant:settings:update` | Mark read |
+| POST | `/v1/merchant/notifications/{id}/read` | `merchant:metrics:read` | Mark read; returns the notification |
 
 ### Operations: repair, findings, worker health
 
@@ -489,7 +486,8 @@ Archiving the last active PSP on a rail answers `409 psp_last_active` unless
 |---|---|---|---|
 | GET | `/v1/merchant/repair-alerts` | `merchant:repair-alerts:read` | Merchant repair alerts |
 | GET | `/v1/merchant/worker-health` | `merchant:repair-alerts:read` | Background-worker health dashboard |
-| GET | `/v1/merchant/findings` | `merchant:repair-alerts:read` | Operator findings queue |
+| GET | `/v1/merchant/findings` | `merchant:repair-alerts:read` | Operator findings queue (cursor-paged) |
+| GET | `/v1/merchant/findings/summary` | `merchant:repair-alerts:read` | Open-finding gauges by severity and kind |
 | GET | `/v1/merchant/findings/{id}` | `merchant:repair-alerts:read` | One finding |
 | POST | `/v1/merchant/findings/{id}/resolve` | `merchant:findings:resolve` | Execute a finding's recommendation (cancel/refund/revoke/grant) — one at a time, no bulk endpoint |
 

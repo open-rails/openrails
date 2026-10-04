@@ -103,7 +103,7 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 		ReturnOrigins:        []string{baseURL},
 		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
 		Merchant: openrails.MerchantDeclaration{
-			Slug: MerchantSlug, DisplayName: "billing-ui e2e", CheckoutRouting: checkoutRouting,
+			Slug: MerchantSlug, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{CheckoutRouting: &checkoutRouting},
 			PSPs: map[string]openrails.PSPConfig{
 				// An armed Solana PSP on devnet: checkout offers it (#1078).
 				SolanaPSPKey: {"solana": {
@@ -178,8 +178,8 @@ func authConfig(issuer string) authkit.Config {
 
 // checkoutRouting sells the card product through the card PSP and everything
 // else through Solana; the declared-only NMI account never sells.
-var checkoutRouting = []openrails.CheckoutRoutingRuleConfig{
-	{Match: openrails.CheckoutRoutingMatchConfig{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
+var checkoutRouting = []billing.CheckoutRoutingRule{
+	{Match: billing.CheckoutRoutingMatch{Product: "e2e-card"}, Prefer: []string{CardPSPKey}},
 	{Prefer: []string{SolanaPSPKey}},
 }
 

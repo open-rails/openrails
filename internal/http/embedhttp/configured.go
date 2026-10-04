@@ -73,7 +73,7 @@ func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*
 	// Generic callbacks remain registered as API-owned accounts are added after
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
-	capabilities := configuredCapabilities(cfg, providers)
+	capabilities := configuredCapabilities(a.Runtime, cfg, providers)
 	table := asm.NewRoutes(Options{RouteSets: withoutRouteSet(active, RouteSetCustomer), AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities})
 	extra, err := BuildCustomerRoutes(a, cfg.CustomerRoutes, a.Runtime.Auth)
 	if err != nil {
@@ -89,7 +89,7 @@ func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*
 	return table, nil
 }
 
-func configuredCapabilities(cfg config.HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
+func configuredCapabilities(rt *app.Runtime, cfg config.HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
 	active := routeSets(cfg)
 	fullCustomer := false
 	for _, exposure := range cfg.CustomerRoutes {
@@ -98,7 +98,7 @@ func configuredCapabilities(cfg config.HTTPConfig, providers routesurface.Provid
 	if len(cfg.CustomerRoutes) > 0 {
 		active = append(active, RouteSetCustomer)
 	}
-	caps := buildCapabilities(active, providers)
+	caps := buildCapabilities(rt, active, providers)
 	caps.Features["stripe_billing_portal"] = fullCustomer && providers.StripePortal
 	return caps
 }

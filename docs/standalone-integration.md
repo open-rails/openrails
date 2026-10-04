@@ -166,8 +166,8 @@ client, err := openrails.NewRemote("https://openrails.example",
     openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
 )
 if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
-if err := client.Verify(ctx); err != nil { // authenticated boot probe
-    log.Fatal(err)                         // unreachable, bad key — fail fast
+if _, err := client.GetMerchantConfiguration(ctx); err != nil { // authenticated boot probe
+    log.Fatal(err) // unreachable, bad key — fail fast
 }
 
 verdicts, err := client.Admit(ctx, []billing.AdmitParams{{

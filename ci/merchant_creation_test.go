@@ -42,32 +42,21 @@ func TestMerchantCreationRoute(t *testing.T) {
 
 	body, status := create(ownerToken, map[string]string{"name": shop, "display_name": "Shop One"})
 	require.Equal(t, http.StatusCreated, status)
-	var created struct {
-		ID      string `json:"id"`
-		Slug    string `json:"slug"`
-		Created bool   `json:"created"`
-	}
+	var created billing.UserMerchant
 	require.NoError(t, body.Decode(&created))
-	require.Equal(t, shop, created.Slug)
-	require.True(t, created.Created)
 	mine, err := cp.ListUserMerchants(t.Context(), owner)
 	require.NoError(t, err)
-	require.Len(t, mine, 1)
 	require.Equal(t, []billing.UserMerchant{{ID: mine[0].ID, Slug: shop, DisplayName: "Shop One", Role: "owner"}}, mine)
-	require.Equal(t, created.ID, mine[0].ID.String())
+	require.Equal(t, mine[0], created, "the answer is the user's new merchant")
 	w := call(t, handler, ownerToken, http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"role":"owner"`)
 
 	body, status = create(ownerToken, map[string]string{"name": shop})
 	require.Equal(t, http.StatusOK, status, "re-posting an owned name is the idempotent repair, past the allowance")
-	var repaired struct {
-		ID      string `json:"id"`
-		Created bool   `json:"created"`
-	}
+	var repaired billing.UserMerchant
 	require.NoError(t, body.Decode(&repaired))
 	require.Equal(t, created.ID, repaired.ID)
-	require.False(t, repaired.Created)
 	require.Equal(t, http.StatusPaymentRequired, code(ownerToken, map[string]string{"name": uniqueName("second")}), "past the allowance a vaulted payment method is required")
 
 	require.Equal(t, http.StatusConflict, code(otherToken, map[string]string{"name": shop}))
