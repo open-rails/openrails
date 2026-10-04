@@ -60,6 +60,25 @@ list. Enable locally with `apk add postgresql-hypopg` in the vet container plus
 index_advisor's SQL. (It calls `DEALLOCATE` internally, which poisons pgx's
 statement cache, so its connection uses `QueryExecModeExec`.)
 
+### What it plans
+
+Every sqlc query, and the SQL outside sqlc that runs against the same tables:
+
+- **Stored function and trigger bodies.** `LoadFunctionQueries` reads every
+  `billing` function from the catalog and extracts each statement that touches
+  a billing table. NEW/OLD fields, variables, arguments and trigger context
+  become typed parameters; a trigger function is planned once per table it is
+  attached to. Named `function.<fn>.<n>` or `trigger.<fn>.<table>.<n>`.
+  Dynamic `EXECUTE` text is not planned; nothing touching a billing table may
+  fail to bind silently.
+- **Metrics.** `metrics.AuditStatements` compiles every family bucketed by day
+  with all its dimensions, and as one total (`metrics.<family>.<shape>`).
+- **Archive.** `merchantarchive.AuditStatements` lists each table's export and
+  count and every preflight and reference refusal (`archive.<kind>.<table>`).
+
+`unbounded-many` applies to sqlc `:many` queries only; the plan rules apply to
+everything.
+
 ### Rules
 
 Rule names are shared with host-four's equivalent gate so allowlists stay

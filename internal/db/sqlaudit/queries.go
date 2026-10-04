@@ -21,9 +21,11 @@ import (
 // const text, with $n placeholders already substituted.
 type Query struct {
 	Name string // e.g. ListDueDunningSubscriptions
-	Kind string // one/many/exec/execrows/copyfrom/batch*
+	Kind string // sqlc: one/many/exec/execrows/copyfrom/batch*; or function, metrics, archive
 	SQL  string
 	File string
+
+	bindErr error // a stored-function statement that could not be bound to parameters
 }
 
 var (

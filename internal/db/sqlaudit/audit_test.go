@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/open-rails/openrails/internal/merchantarchive"
+	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
 const (
@@ -38,6 +41,23 @@ func TestQueryAudit(t *testing.T) {
 	cat, err := LoadCatalog(ctx, conn)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Beyond sqlc: stored function and trigger bodies, metrics compiled from
+	// the registry, and the archive's per-table statements.
+	functions, err := LoadFunctionQueries(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries = append(queries, functions...)
+	compiled, err := metrics.AuditStatements()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range compiled {
+		queries = append(queries, Query{Name: st.Name, Kind: "metrics", SQL: st.SQL, File: "internal/modules/metrics"})
+	}
+	for _, st := range merchantarchive.AuditStatements() {
+		queries = append(queries, Query{Name: st.Name, Kind: "archive", SQL: st.SQL, File: "internal/merchantarchive"})
 	}
 	if err := PrepareSession(ctx, conn); err != nil {
 		t.Fatal(err)

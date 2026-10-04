@@ -213,9 +213,13 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+func refuseQuery(table, predicate string) string {
+	return "SELECT count(*) FROM billing." + table + " WHERE merchant_id=$1 AND (" + predicate + ")"
+}
+
 func refuseRows(ctx context.Context, tx pgx.Tx, id billing.MerchantID, table, predicate string) error {
 	var count int64
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table+" WHERE merchant_id=$1 AND ("+predicate+")", id.UUID()).Scan(&count); err != nil {
+	if err := tx.QueryRow(ctx, refuseQuery(table, predicate), id.UUID()).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
@@ -224,30 +228,35 @@ func refuseRows(ctx context.Context, tx pgx.Tx, id billing.MerchantID, table, pr
 	return nil
 }
 
+// rowCheck refuses the archive when any of the merchant's rows match.
+type rowCheck struct{ table, predicate string }
+
+// preflightChecks are states the archive cannot carry.
+var preflightChecks = []rowCheck{
+	{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
+	{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
+	{"checkout_sessions", "status NOT IN ('succeeded','failed','expired','canceled')"},
+	// A request still running under a live claim has an outcome the archive
+	// would miss; settled, failed and lapsed claims are not moved (#1099).
+	{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},
+	// Money awaiting a transfer, or received and not yet refunded or
+	// resolved, stays with the deployment that watches the chain (#1086).
+	{"solana_pay_references", "status='pending'"},
+	{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
+	{"rail_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
+	{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
+	{"invoices", "collection_intent_id IS NOT NULL"},
+	{"admission_operations", "state='open'"},
+	{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
+	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
+	{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
+	// Credential retirement and webhook endpoint registrations belong to the
+	// source deployment, like secret references and publication revisions.
+	{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credential_refs','credential_custody','credential_custody_transition','configuration_revision','credentials_validated','retired_credentials','webhook_endpoint_id','api_key'] <> '{}'::jsonb"},
+}
+
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
-	checks := []struct{ table, predicate string }{
-		{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
-		{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
-		{"checkout_sessions", "status NOT IN ('succeeded','failed','expired','canceled')"},
-		// A request still running under a live claim has an outcome the archive
-		// would miss; settled, failed and lapsed claims are not moved (#1099).
-		{"idempotency_keys", "status='processing' AND lease_expires_at > now()"},
-		// Money awaiting a transfer, or received and not yet refunded or
-		// resolved, stays with the deployment that watches the chain (#1086).
-		{"solana_pay_references", "status='pending'"},
-		{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
-		{"rail_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
-		{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
-		{"invoices", "collection_intent_id IS NOT NULL"},
-		{"admission_operations", "state='open'"},
-		{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
-		{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
-		{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
-		// Credential retirement and webhook endpoint registrations belong to the
-		// source deployment, like secret references and publication revisions.
-		{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credential_refs','credential_custody','credential_custody_transition','configuration_revision','credentials_validated','retired_credentials','webhook_endpoint_id','api_key'] <> '{}'::jsonb"},
-	}
-	for _, c := range checks {
+	for _, c := range preflightChecks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {
 			return err
 		}
@@ -296,6 +305,42 @@ func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return validateReferences(ctx, tx, id)
 }
 
+// referenceChecks: the ledger intentionally has no control-plane FKs. Archive
+// restoration still refuses missing/cross-payer retained business references.
+var referenceChecks = []rowCheck{
+	{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
+          (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
+           (m.custodian='psp' AND m.psp_id=rail_intents.psp_id AND m.rail_customer_ref=rail_intents.payload->>'rail_customer_ref' AND m.rail_customer_ref<>'' AND
+            (rail_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=rail_intents.payload->>'rail_method_ref'))))`},
+	{"rail_intents", `intent_type='hyperswitch_method_delete' AND
+          (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
+           EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
+             (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
+              (rail_intents.payload->>'detach_only'='false' AND m.custodian_id=rail_intents.custodian_id AND m.rail_method_ref=rail_intents.payload->'instrument'->>'rail_method_ref'))))`},
+	{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
+	 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
+	 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
+	// Restore preserves historical denormalized tiers, but a live subscription
+	// must still agree with its product, as required by the ordinary tier
+	// derivation and product-update guards. Include remaining paid access.
+	{"subscriptions", `deleted_at IS NULL
+	 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
+	 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
+	{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
+	{"ledger_transfers", `source_id LIKE 'invoice_collection:%' AND
+	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
+	 NOT EXISTS(SELECT 1 FROM billing.invoice_payments a WHERE a.merchant_id=$1
+	 AND a.ledger_transfer_id=ledger_transfers.id AND a.idempotency_key=ledger_transfers.source_id
+	 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
+	 AND a.currency=ledger_transfers.currency AND a.status='settled'))`},
+	{"invoice_payments", `idempotency_key LIKE 'invoice_collection:%'
+	 AND NOT EXISTS(SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=$1
+	 AND i.intent_type='invoice_collection' AND i.idempotency_key=invoice_payments.idempotency_key)`},
+	{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
+	 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))
+	 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.prices p WHERE p.merchant_id=$1 AND p.id=rail_intents.price_id))`},
+}
+
 func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	purchaseInvalid, err := gen.New(tx).CountInvalidPurchaseCheckoutReferences(ctx, id.UUID())
 	if err != nil {
@@ -335,42 +380,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: invalid}
 	}
 
-	// The ledger intentionally has no control-plane FKs. Archive restoration
-	// still refuses missing/cross-payer retained business references.
-	checks := []struct{ table, predicate string }{
-		{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
-          (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
-           (m.custodian='psp' AND m.psp_id=rail_intents.psp_id AND m.rail_customer_ref=rail_intents.payload->>'rail_customer_ref' AND m.rail_customer_ref<>'' AND
-            (rail_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=rail_intents.payload->>'rail_method_ref'))))`},
-		{"rail_intents", `intent_type='hyperswitch_method_delete' AND
-          (NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
-           EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
-             (m.id::text=(CASE WHEN rail_intents.intent_type='initial_membership' THEN rail_intents.payload->'terms'->>'payment_method_id' ELSE rail_intents.payload->>'payment_method_id' END) OR
-              (rail_intents.payload->>'detach_only'='false' AND m.custodian_id=rail_intents.custodian_id AND m.rail_method_ref=rail_intents.payload->'instrument'->>'rail_method_ref'))))`},
-		{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
-		 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
-		 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
-		// Restore preserves historical denormalized tiers, but a live subscription
-		// must still agree with its product, as required by the ordinary tier
-		// derivation and product-update guards. Include remaining paid access.
-		{"subscriptions", `deleted_at IS NULL
-		 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
-		 AND EXISTS(SELECT 1 FROM billing.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
-		{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
-		{"ledger_transfers", `source_id LIKE 'invoice_collection:%' AND
-		 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
-		 NOT EXISTS(SELECT 1 FROM billing.invoice_payments a WHERE a.merchant_id=$1
-		 AND a.ledger_transfer_id=ledger_transfers.id AND a.idempotency_key=ledger_transfers.source_id
-		 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
-		 AND a.currency=ledger_transfers.currency AND a.status='settled'))`},
-		{"invoice_payments", `idempotency_key LIKE 'invoice_collection:%'
-		 AND NOT EXISTS(SELECT 1 FROM billing.rail_intents i WHERE i.merchant_id=$1
-		 AND i.intent_type='invoice_collection' AND i.idempotency_key=invoice_payments.idempotency_key)`},
-		{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
-		 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))
-		 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.prices p WHERE p.merchant_id=$1 AND p.id=rail_intents.price_id))`},
-	}
-	for _, c := range checks {
+	for _, c := range referenceChecks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {
 			return err
 		}
