@@ -150,6 +150,9 @@ type CleanupResult struct {
 	CheckoutAttempts        int64
 	ReconciliationFindings  int64
 	ReconciliationRuns      int64
+	ProviderIntents         int64
+	ProviderMutationLogs    int64
+	CostObservations        int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
 	PartitionsCreated int
 	PartitionsDropped int
@@ -271,6 +274,8 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			CheckoutAttemptCutoff:  now.Add(-retention.ExpiredCheckoutAttempts),
 			FindingCutoff:          now.Add(-retention.ResolvedFindings),
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
+			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
+			CostObservationCutoff:  now.Add(-retention.CostObservations),
 			After:                  after,
 			MerchantLimit:          limit,
 		})
@@ -344,6 +349,9 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"checkout_attempts":         result.CheckoutAttempts,
 		"reconciliation_findings":   result.ReconciliationFindings,
 		"reconciliation_runs":       result.ReconciliationRuns,
+		"provider_intents":          result.ProviderIntents,
+		"provider_mutation_logs":    result.ProviderMutationLogs,
+		"cost_observations":         result.CostObservations,
 		"partitions_created":        result.PartitionsCreated,
 		"partitions_dropped":        result.PartitionsDropped,
 	})
@@ -495,6 +503,27 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 			return q.DeleteReconciliationRunsPastRetention(ctx, gen.DeleteReconciliationRunsPastRetentionParams{
 				MerchantID: mid, RetentionDays: retention.Days(retention.ReconciliationRuns), RowLimit: limit,
+			})
+		}))
+
+	// 11. Finished outbox intents and the mutation log. Intents that are the
+	// record of money, a membership or an erasure are not outbox types.
+	sweep("delete finished outbox intents", &result.ProviderIntents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteFinishedOutboxIntentsBefore(ctx, gen.DeleteFinishedOutboxIntentsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
+		})
+	})
+	sweep("delete provider mutation logs", &result.ProviderMutationLogs, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteProviderMutationLogsBefore(ctx, gen.DeleteProviderMutationLogsBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.ProviderWrites), RowLimit: limit,
+		})
+	})
+
+	// 12. Cost observations of operations settled or released.
+	sweep("delete cost observations", &result.CostObservations, guarded("cost_observations",
+		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+			return q.DeleteCostObservationsPastRetention(ctx, gen.DeleteCostObservationsPastRetentionParams{
+				MerchantID: mid, RetentionDays: retention.Days(retention.CostObservations), RowLimit: limit,
 			})
 		}))
 

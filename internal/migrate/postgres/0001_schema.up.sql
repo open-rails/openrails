@@ -2156,7 +2156,7 @@ CREATE INDEX idx_checkout_attempts_psp ON billing.checkout_attempts USING btree 
 CREATE INDEX idx_checkout_attempts_subscription_id ON billing.checkout_attempts USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 CREATE INDEX ix_checkout_attempts_expirable ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((expires_at IS NOT NULL) AND (deleted_at IS NULL) AND (status = ANY (ARRAY['created'::text, 'requires_action'::text])));
 -- An expired attempt that reached no provider: what retention deletes.
-CREATE INDEX ix_checkout_attempts_abandoned ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((status = 'expired'::text) AND (payment_id IS NULL) AND (subscription_id IS NULL) AND (transaction_id IS NULL));
+CREATE INDEX ix_checkout_attempts_abandoned ON billing.checkout_attempts USING btree (merchant_id, expires_at) WHERE ((status = 'expired'::text) AND (deleted_at IS NULL) AND (payment_id IS NULL) AND (subscription_id IS NULL) AND (transaction_id IS NULL));
 CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_reference ON billing.checkout_attempts USING btree (merchant_id, psp_id, reference) WHERE ((reference IS NOT NULL) AND (deleted_at IS NULL));
 CREATE UNIQUE INDEX uq_checkout_attempts_merchant_psp_transaction ON billing.checkout_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
 CREATE INDEX checkout_attempts_price_id_idx ON billing.checkout_attempts USING btree (merchant_id, price_id) WHERE (price_id IS NOT NULL);
@@ -2923,8 +2923,9 @@ CREATE TABLE billing.admission_operations (
     CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
     CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
     -- A hold ends within 30 days of its admission, so a partition past its
-    -- retention holds no live reservation.
-    CONSTRAINT admission_operations_hold_lifetime CHECK (expires_at IS NULL OR expires_at <= admitted_at + interval '30 days'),
+    -- retention holds no live reservation. Hours, because a day's length
+    -- follows the session time zone.
+    CONSTRAINT admission_operations_hold_lifetime CHECK (expires_at IS NULL OR expires_at <= admitted_at + interval '720 hours'),
     CHECK (
         (state = 'open' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
         OR (state = 'released' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
@@ -3057,7 +3058,7 @@ CREATE TABLE billing.cost_qualifications (
     CONSTRAINT cost_qualification_reference_shape CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024))),
     CONSTRAINT cost_qualification_state_shape CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_cost_amount IS NOT NULL) AND (qualified_cost_amount >= 0) AND (qualified_at IS NOT NULL)))))
 );
-COMMENT ON TABLE billing.cost_qualifications IS 'OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.';
+COMMENT ON TABLE billing.cost_qualifications IS 'OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality. Retention: permanent, never pruned.';
 
 ALTER TABLE ONLY billing.cost_qualifications
     ADD CONSTRAINT cost_qualifications_pkey PRIMARY KEY (merchant_id, operation_id);
@@ -3092,18 +3093,23 @@ CREATE TABLE billing.cost_observations (
     CONSTRAINT cost_observation_raw_shape CHECK (((octet_length(raw_body_bytes) <= 786432) AND (octet_length(raw_body_digest) = 32) AND (raw_body_digest = sha256(raw_body_bytes)) AND (raw_body_available OR (octet_length(raw_body_bytes) = 0)))),
     CONSTRAINT cost_observation_reason_shape CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))
 );
-COMMENT ON TABLE billing.cost_observations IS 'Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.';
+COMMENT ON TABLE billing.cost_observations IS 'Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement. Retention: rows are deleted 90 days after their operation was settled or released, by the cleanup job only.';
 
 ALTER TABLE ONLY billing.cost_observations
     ADD CONSTRAINT cost_observations_pkey PRIMARY KEY (merchant_id, operation_id, observation_id);
 
 CREATE INDEX idx_cost_observations_operation_time ON billing.cost_observations USING btree (merchant_id, operation_id, observed_at DESC);
+CREATE INDEX idx_cost_observations_merchant_observed ON billing.cost_observations USING btree (merchant_id, observed_at);
 
 ALTER TABLE ONLY billing.cost_observations
     ADD CONSTRAINT cost_observation_qualification_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.cost_qualifications(merchant_id, operation_id) ON DELETE RESTRICT;
 
-CREATE TRIGGER immutable_cost_observations BEFORE UPDATE OR DELETE ON billing.cost_observations
+CREATE TRIGGER immutable_cost_observations BEFORE UPDATE ON billing.cost_observations
 FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+-- The sweep deletes an observation only once its operation is settled or
+-- released; this guard holds the floor every such row has passed.
+CREATE TRIGGER retained_cost_observations BEFORE DELETE ON billing.cost_observations
+FOR EACH ROW EXECUTE FUNCTION billing.guard_retention_delete('observed_at', '90 days');
 
 -- ---------------------------------------------------------------------------
 -- Provider operations
@@ -3141,7 +3147,7 @@ CREATE TABLE billing.provider_intents (
     CONSTRAINT chk_provider_intents_status CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text]))),
     CONSTRAINT provider_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
 );
-COMMENT ON TABLE billing.provider_intents IS 'Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
+COMMENT ON TABLE billing.provider_intents IS 'Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.';
 COMMENT ON COLUMN billing.provider_intents.rail IS 'Rail the mutation targets (e.g. ''nmi'', ''stripe'').';
 COMMENT ON COLUMN billing.provider_intents.intent_type IS 'Registry key selecting the per-type semantics (executor, verifier, relevance, backoff), for example nmi_delete_subscription or manual_rebill.';
 COMMENT ON COLUMN billing.provider_intents.idempotency_key IS 'Deterministic identity of the logical intent within the merchant. Re-enqueues conflict here: a pending intent is refreshed, a superseded/expired one revived (relevance returned), anything else untouched — effectively-once per logical intent.';
@@ -3173,6 +3179,17 @@ CREATE INDEX idx_provider_intents_destructive_run ON billing.provider_intents US
 CREATE INDEX idx_provider_intents_due ON billing.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]));
 CREATE INDEX idx_provider_intents_merchant_destructive_window ON billing.provider_intents USING btree (merchant_id, origin, created_at, intent_type);
 CREATE INDEX idx_provider_intents_psp ON billing.provider_intents USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL);
+-- A checkout attempt an intent names reached a provider and is kept.
+CREATE INDEX idx_provider_intents_checkout_attempt ON billing.provider_intents
+    (merchant_id, (payload->>'checkout_attempt_id'))
+    WHERE payload ? 'checkout_attempt_id';
+-- What retention deletes: finished intents that only carried an instruction to
+-- a provider. Intents that moved or refused money, enrolled a membership or
+-- erased a card are the record of that and are not in this index.
+CREATE INDEX idx_provider_intents_finished_outbox ON billing.provider_intents USING btree (merchant_id, updated_at)
+    WHERE status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
+      AND destructive_run_id IS NULL
+      AND intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'bt_account_updater_batch');
 CREATE INDEX idx_provider_intents_subscription ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL);
 -- Initial membership identity is frozen in terms, including failed attempts
 -- with no subscription row. Paid agreement lookup must not scan the whole book.
@@ -3218,7 +3235,7 @@ CREATE TABLE billing.provider_mutation_logs (
     CONSTRAINT provider_mutation_logs_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL))),
     CONSTRAINT provider_mutation_logs_phase_check CHECK ((phase = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
 );
-COMMENT ON TABLE billing.provider_mutation_logs IS 'Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.';
+COMMENT ON TABLE billing.provider_mutation_logs IS 'Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back. Retention: rows are deleted 25 months (761 days) after created_at.';
 COMMENT ON COLUMN billing.provider_mutation_logs.psp_id IS 'PSP the logged mutation was addressed to. Required unless the mutation is custodian-addressed (provider_mutation_logs_addressed).';
 COMMENT ON COLUMN billing.provider_mutation_logs.phase IS 'Provider mutation lifecycle phase: attempting before the remote call, then succeeded/failed/unknown/parked after the handler classifies the result.';
 COMMENT ON COLUMN billing.provider_mutation_logs.evidence IS 'Scrubbed structured metadata only. Never store API keys, authorization headers, card data, private keys, or unsanitized provider bodies.';
@@ -3242,8 +3259,11 @@ ALTER TABLE ONLY billing.provider_mutation_logs
 ALTER TABLE ONLY billing.provider_mutation_logs
     ADD CONSTRAINT provider_mutation_logs_provider_intent_fk FOREIGN KEY (merchant_id, provider_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE SET NULL (provider_intent_id);
 
+-- An entry's content never changes. The one update let through is the foreign
+-- key's own: the link to an intent that retention deleted going NULL.
 CREATE TRIGGER immutable_provider_mutation_log_content BEFORE UPDATE ON billing.provider_mutation_logs
-FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact();
+FOR EACH ROW WHEN (NOT (NEW.provider_intent_id IS NULL AND (to_jsonb(NEW) - 'provider_intent_id') = (to_jsonb(OLD) - 'provider_intent_id')))
+EXECUTE FUNCTION billing.reject_immutable_billing_fact();
 
 CREATE TABLE billing.psp_refresh_watermarks (
     merchant_id uuid NOT NULL,
@@ -3275,7 +3295,7 @@ CREATE TABLE billing.webhook_events (
     completed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT webhook_events_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
 );
-COMMENT ON TABLE billing.webhook_events IS 'webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied.';
+COMMENT ON TABLE billing.webhook_events IS 'webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.';
 COMMENT ON COLUMN billing.webhook_events.op IS 'webhook.<source>.<event_type>.';
 
 ALTER TABLE ONLY billing.webhook_events
@@ -3325,7 +3345,7 @@ CREATE TABLE billing.webhook_health_daily (
     drift bigint DEFAULT 0 NOT NULL,
     CONSTRAINT webhook_health_daily_source_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
 );
-COMMENT ON TABLE billing.webhook_health_daily IS 'UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics.';
+COMMENT ON TABLE billing.webhook_health_daily IS 'UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics. Retention: permanent, never pruned.';
 
 ALTER TABLE ONLY billing.webhook_health_daily
     ADD CONSTRAINT webhook_health_daily_merchant_id_psp_id_custodian_id_day_at_key UNIQUE NULLS NOT DISTINCT (merchant_id, psp_id, custodian_id, day_at);
@@ -3722,7 +3742,7 @@ CREATE TABLE billing.reconciliation_findings (
     CONSTRAINT chk_reconciliation_findings_status CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text]))),
     CONSTRAINT chk_reconciliation_findings_type CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
 );
-COMMENT ON TABLE billing.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.';
+COMMENT ON TABLE billing.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.';
 COMMENT ON COLUMN billing.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or customer uuid depending on the check.';
 COMMENT ON COLUMN billing.reconciliation_findings.psp_id IS 'Catalog and pull.* findings: the PSP whose read raised the finding. Part of the identity; absence can be proven only by a complete read of this PSP.';
 COMMENT ON COLUMN billing.reconciliation_findings.first_seen_run IS 'Reconciliation run that first observed this finding; NULL when raised outside a run (e.g. the intents volume breaker).';

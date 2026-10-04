@@ -551,7 +551,7 @@ func replayProviderBillingLifecycle(row gen.BillingCostQualification, in Provide
 	return nil
 }
 
-func replayProviderBillingObservation(row gen.BillingCostObservation, in ProviderBillingObservationInput, prepared preparedProviderBillingObservation) error {
+func replayProviderBillingObservation(row gen.GetProviderBillingObservationRow, in ProviderBillingObservationInput, prepared preparedProviderBillingObservation) error {
 	checks := []struct {
 		field string
 		same  bool
@@ -559,10 +559,10 @@ func replayProviderBillingObservation(row gen.BillingCostObservation, in Provide
 		{"normalized_query", row.NormalizedQuery == in.NormalizedQuery},
 		{"query_start", row.QueryStart.Equal(in.QueryStart)},
 		{"query_end", row.QueryEnd.Equal(in.QueryEnd)},
-		{"raw_body", bytes.Equal(row.RawBodyBytes, in.RawBody)},
-		{"raw_body_sha256", bytes.Equal(row.RawBodyDigest, prepared.rawDigest[:])},
-		{"normalized_records", bytes.Equal(row.NormalizedRecordsBytes, prepared.normalizedRecords)},
-		{"normalized_records_sha256", bytes.Equal(row.NormalizedRecordsDigest, nullableDigest(prepared))},
+		// The stored digests are bound to the stored bodies by the table's
+		// checks, so comparing digests compares bodies without reading them.
+		{"raw_body", bytes.Equal(row.RawBodyDigest, prepared.rawDigest[:])},
+		{"normalized_records", bytes.Equal(row.NormalizedRecordsDigest, nullableDigest(prepared))},
 		{"cost_amount", equalOptionalInt64(row.CostAmount, prepared.providerCost)},
 		{"negative_record", row.HasNegativeRecord == prepared.hasNegative},
 		{"refusal_kind", equalOptionalString(row.RefusalKind, prepared.refusalKind)},
@@ -654,7 +654,7 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 	return body, nil
 }
 
-func providerBillingSettlementObservationFromRow(row gen.BillingCostObservation) providerBillingSettlementObservation {
+func providerBillingSettlementObservationFromRow(row gen.GetProviderBillingObservationRow) providerBillingSettlementObservation {
 	queryDigest := sha256.Sum256([]byte(row.NormalizedQuery))
 	return providerBillingSettlementObservation{
 		ObservationID:           row.ObservationID,

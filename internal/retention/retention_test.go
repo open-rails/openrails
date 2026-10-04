@@ -35,7 +35,8 @@ var (
 	partitionBy  = regexp.MustCompile(`(?m)^\) PARTITION BY RANGE \((\w+)\);$`)
 	tableComment = regexp.MustCompile(`(?m)^COMMENT ON TABLE billing\.(\w+) IS '((?:[^']|'')*)';$`)
 	guardTrigger = regexp.MustCompile(`(?s)BEFORE DELETE ON billing\.(\w+)\s+FOR EACH ROW(?: WHEN \([^)]*\))? EXECUTE FUNCTION billing\.guard_retention_delete\('(\w+)', '(\d+) days'\);`)
-	holdLifetime = regexp.MustCompile(`admission_operations_hold_lifetime CHECK \(expires_at IS NULL OR expires_at <= admitted_at \+ interval '(\d+) days'\)`)
+	outboxIndex  = regexp.MustCompile(`(?s)CREATE INDEX idx_provider_intents_finished_outbox .*?intent_type IN \(([^)]*)\);`)
+	holdLifetime = regexp.MustCompile(`admission_operations_hold_lifetime CHECK \(expires_at IS NULL OR expires_at <= admitted_at \+ interval '(\d+) hours'\)`)
 )
 
 // A table added to the baseline without a retention class fails here.
@@ -128,6 +129,7 @@ func TestBaselinePeriodsAreTheConstants(t *testing.T) {
 	want := map[string]time.Duration{
 		"subscription_status_transitions": SubscriptionTransitions,
 		"maintenance_runs":                ReconciliationRuns,
+		"cost_observations":               CostObservations,
 	}
 	got := map[string]time.Duration{}
 	for _, m := range guardTrigger.FindAllStringSubmatch(sql, -1) {
@@ -152,8 +154,8 @@ func TestBaselinePeriodsAreTheConstants(t *testing.T) {
 	if m == nil {
 		t.Fatal("admission_operations_hold_lifetime not found in the baseline")
 	}
-	if days, _ := strconv.Atoi(m[1]); time.Duration(days)*Day != AdmissionMaxHold {
-		t.Errorf("baseline hold lifetime is %s days, AdmissionMaxHold is %s", m[1], AdmissionMaxHold)
+	if hours, _ := strconv.Atoi(m[1]); time.Duration(hours)*time.Hour != AdmissionMaxHold {
+		t.Errorf("baseline hold lifetime is %s hours, AdmissionMaxHold is %s", m[1], AdmissionMaxHold)
 	}
 	if Admissions < AdmissionMaxWindow+AdmissionMaxHold {
 		t.Errorf("an admission must outlive its window and its hold: kept %s", Admissions)
@@ -200,5 +202,35 @@ func TestPartitionCalendar(t *testing.T) {
 	}
 	if got := AdmissionsDropBefore(at("2026-10-04T10:00:00Z")); !got.Equal(at("2026-08-04T10:00:00Z")) {
 		t.Errorf("AdmissionsDropBefore = %s", got)
+	}
+}
+
+// The intents retention may delete are listed once in the baseline's partial
+// index and once here. A type added to either alone fails: an intent that is a
+// record of money must never drift into the deletable set.
+func TestOutboxIntentTypesMatchTheBaseline(t *testing.T) {
+	m := outboxIndex.FindStringSubmatch(baseline(t))
+	if m == nil {
+		t.Fatal("idx_provider_intents_finished_outbox not found in the baseline")
+	}
+	var indexed []string
+	for _, q := range regexp.MustCompile(`'(\w+)'`).FindAllStringSubmatch(m[1], -1) {
+		indexed = append(indexed, q[1])
+	}
+	listed := slices.Clone(OutboxIntentTypes)
+	sort.Strings(indexed)
+	sort.Strings(listed)
+	if !slices.Equal(indexed, listed) {
+		t.Errorf("the baseline index and OutboxIntentTypes differ\nbaseline: %v\nlisted:   %v", indexed, listed)
+	}
+	// The record-of-money types are never deletable.
+	for _, permanent := range []string{
+		"subscription_collection", "initial_membership", "manual_rebill", "invoice_collection",
+		"nmi_sale", "custodian_sale", "nmi_upgrade", "stripe_tier_change", "solana_pull",
+		"nmi_refund", "stripe_refund", "ccbill_refund", "nmi_vault_delete", "hyperswitch_method_delete",
+	} {
+		if slices.Contains(listed, permanent) {
+			t.Errorf("%s is a record of money, a membership or an erasure and must not be an outbox type", permanent)
+		}
 	}
 }

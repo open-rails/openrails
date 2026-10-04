@@ -92,8 +92,13 @@ INSERT INTO billing.cost_observations (
 ON CONFLICT (merchant_id, operation_id, observation_id) DO NOTHING
 RETURNING *;
 
+-- An observation's facts without its bodies: the digests decide a replay and
+-- author the settlement, so the stored bytes (up to 768 KB each) are never
+-- read back.
 -- name: GetProviderBillingObservation :one
-SELECT *
+SELECT merchant_id, operation_id, observation_id, normalized_query, query_start, query_end,
+       raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
+       has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
 FROM billing.cost_observations
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text

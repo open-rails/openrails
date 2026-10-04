@@ -194,7 +194,7 @@ type BillingCheckoutSession struct {
 	CreatedAt  time.Time
 }
 
-// Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
+// Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement. Retention: rows are deleted 90 days after their operation was settled or released, by the cleanup job only.
 type BillingCostObservation struct {
 	MerchantID              uuid.UUID
 	OperationID             string
@@ -215,7 +215,7 @@ type BillingCostObservation struct {
 	ObservedAt              time.Time
 }
 
-// OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
+// OpenRails-owned post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality. Retention: permanent, never pruned.
 type BillingCostQualification struct {
 	MerchantID               uuid.UUID
 	OperationID              string
@@ -1076,7 +1076,7 @@ type BillingProductArchiveOperation struct {
 	CreatedAt      time.Time
 }
 
-// Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.
+// Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.
 type BillingProviderIntent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1118,7 +1118,7 @@ type BillingProviderIntent struct {
 	CustodianID *uuid.UUID
 }
 
-// Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.
+// Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back. Retention: rows are deleted 25 months (761 days) after created_at.
 type BillingProviderMutationLog struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1221,7 +1221,7 @@ type BillingRebillCycle struct {
 	MissReason *string
 }
 
-// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored.
+// Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.
 type BillingReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1463,7 +1463,7 @@ type BillingUsageEvent struct {
 	CreatedAt  time.Time
 }
 
-// webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied.
+// webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.
 type BillingWebhookEvent struct {
 	MerchantID  uuid.UUID
 	PspID       *uuid.UUID
@@ -1487,7 +1487,7 @@ type BillingWebhookHealth struct {
 	UpdatedAt      time.Time
 }
 
-// UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics.
+// UTC-day webhook counter buckets per event source, backing the #733 webhook_rejects / webhook_drift_events windowed metrics. Retention: permanent, never pruned.
 type BillingWebhookHealthDaily struct {
 	MerchantID  uuid.UUID
 	PspID       *uuid.UUID

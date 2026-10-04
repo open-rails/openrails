@@ -71,10 +71,12 @@ FROM (
     (SELECT DISTINCT ca.merchant_id AS mid
        FROM billing.checkout_attempts ca
       WHERE (sqlc.narg(after)::uuid IS NULL OR ca.merchant_id > sqlc.narg(after)::uuid)
-        AND ca.status = 'expired' AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
+        AND ca.status = 'expired' AND ca.deleted_at IS NULL
+        AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
         AND ca.expires_at < sqlc.arg(checkout_attempt_cutoff)::timestamptz
         AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
         AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
+        AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
     UNION
     (SELECT DISTINCT rf.merchant_id AS mid
@@ -92,6 +94,37 @@ FROM (
         AND mr.kind = 'reconciliation' AND mr.started_at < sqlc.arg(run_cutoff)::timestamptz
         AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.first_seen_run = mr.id)
         AND NOT EXISTS (SELECT 1 FROM billing.reconciliation_findings f WHERE f.merchant_id = mr.merchant_id AND f.last_seen_run = mr.id)
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT pi.merchant_id AS mid
+       FROM billing.provider_intents pi
+      WHERE (sqlc.narg(after)::uuid IS NULL OR pi.merchant_id > sqlc.narg(after)::uuid)
+        AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
+        AND pi.destructive_run_id IS NULL
+        AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'bt_account_updater_batch')
+        AND pi.updated_at < sqlc.arg(provider_write_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    (SELECT DISTINCT ml.merchant_id AS mid
+       FROM billing.provider_mutation_logs ml
+      WHERE (sqlc.narg(after)::uuid IS NULL OR ml.merchant_id > sqlc.narg(after)::uuid)
+        AND ml.created_at < sqlc.arg(provider_write_cutoff)::timestamptz
+      ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
+    UNION
+    -- An observation of an operation still open is not due. The walk is over
+    -- the observations that still exist, each checked against its operation by
+    -- key: never over the authorizations, which are permanent. LATERAL with a
+    -- LIMIT keeps it one key lookup per observation, whatever the statistics.
+    (SELECT DISTINCT co.merchant_id AS mid
+       FROM billing.cost_observations co
+       CROSS JOIN LATERAL (
+            SELECT 1 FROM billing.operation_authorizations oa
+             WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
+               AND oa.state <> 'open'
+               AND COALESCE(oa.settled_at, oa.released_at) < sqlc.arg(cost_observation_cutoff)::timestamptz
+             LIMIT 1) closed
+      WHERE (sqlc.narg(after)::uuid IS NULL OR co.merchant_id > sqlc.narg(after)::uuid)
+        AND co.observed_at < sqlc.arg(cost_observation_cutoff)::timestamptz
       ORDER BY 1 LIMIT sqlc.arg(merchant_limit)::int)
 ) q
 ORDER BY q.mid
@@ -176,18 +209,75 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 );
 
 -- An attempt that expired without reaching a provider: no payment,
--- subscription or provider transaction, and no Solana Pay reference or receipt
--- names it. Its checkout session, if one still exists, goes with it.
+-- subscription or provider transaction, and no provider intent, Solana Pay
+-- reference or receipt names it. Its checkout session, if one still exists,
+-- goes with it. A soft-deleted attempt belongs to a destructive run that can
+-- still be undone, and is left to it.
 -- name: DeleteAbandonedCheckoutAttemptsBefore :execrows
 DELETE FROM billing.checkout_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND deleted_at IS NULL
   AND id IN (
     SELECT ca.id FROM billing.checkout_attempts ca
     WHERE ca.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND ca.status = 'expired' AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
+      AND ca.status = 'expired' AND ca.deleted_at IS NULL
+      AND ca.payment_id IS NULL AND ca.subscription_id IS NULL AND ca.transaction_id IS NULL
       AND ca.expires_at < sqlc.arg(cutoff)::timestamptz
       AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_references r WHERE r.merchant_id = ca.merchant_id AND r.checkout_attempt_id = ca.id)
       AND NOT EXISTS (SELECT 1 FROM billing.solana_pay_receipts rc WHERE rc.merchant_id = ca.merchant_id AND rc.checkout_attempt_id = ca.id)
+      AND NOT EXISTS (SELECT 1 FROM billing.provider_intents pi WHERE pi.merchant_id = ca.merchant_id AND pi.payload ? 'checkout_attempt_id' AND pi.payload->>'checkout_attempt_id' = ca.id::text)
     ORDER BY ca.expires_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- Finished intents that only carried an instruction to a provider. An intent
+-- that moved or refused money, enrolled a membership or erased a card is the
+-- record of that: it is not one of these types and is never deleted here. A
+-- mutation log entry that names a deleted intent keeps its own row and loses
+-- the link.
+-- name: DeleteFinishedOutboxIntentsBefore :execrows
+DELETE FROM billing.provider_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT pi.id FROM billing.provider_intents pi
+    WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND pi.status IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
+      AND pi.destructive_run_id IS NULL
+      AND pi.intent_type IN ('nmi_delete_subscription', 'stripe_cancel_subscription', 'ccbill_cancel_subscription', 'nmi_payment_method_update', 'nmi_payment_source_update', 'nmi_card_vault', 'network_token', 'stripe_archive_price', 'stripe_archive_product', 'solana_sunset_plan', 'bt_account_updater_batch')
+      AND pi.updated_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY pi.updated_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- name: DeleteProviderMutationLogsBefore :execrows
+DELETE FROM billing.provider_mutation_logs
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id IN (
+    SELECT ml.id FROM billing.provider_mutation_logs ml
+    WHERE ml.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND ml.created_at < sqlc.arg(cutoff)::timestamptz
+    ORDER BY ml.created_at
+    LIMIT sqlc.arg(row_limit)::int
+);
+
+-- An observation goes once its operation is settled or released and the
+-- period has passed since: the settlement body, which is permanent, already
+-- carries the digests of the two observations it was authored from. While the
+-- operation is open its observations stay, however old.
+-- name: DeleteCostObservationsPastRetention :execrows
+DELETE FROM billing.cost_observations
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (operation_id, observation_id) IN (
+    SELECT co.operation_id, co.observation_id
+    FROM billing.cost_observations co
+    CROSS JOIN LATERAL (
+        SELECT 1 FROM billing.operation_authorizations oa
+         WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
+           AND oa.state <> 'open'
+           AND COALESCE(oa.settled_at, oa.released_at) < now() - make_interval(days => sqlc.arg(retention_days)::int)
+         LIMIT 1) closed
+    WHERE co.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND co.observed_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+    ORDER BY co.observed_at
     LIMIT sqlc.arg(row_limit)::int
 );

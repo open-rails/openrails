@@ -45,8 +45,8 @@ const (
 const (
 	// SubscriptionTransitions keeps a subscription status change 25 months.
 	SubscriptionTransitions = 761 * Day
-	// ProviderWrites keeps a finished provider intent and a mutation log
-	// entry 25 months.
+	// ProviderWrites keeps a finished outbox intent (OutboxIntentTypes) and a
+	// mutation log entry 25 months.
 	ProviderWrites = 761 * Day
 	// PaymentAttempts keeps payment attempts, rebill cycles and NMI history
 	// months 25 months.
@@ -55,7 +55,7 @@ const (
 	// reaching a provider 90 days past its expiry.
 	ExpiredCheckoutAttempts = 90 * Day
 	// CostObservations keeps a provider cost observation 90 days past the
-	// qualification it was read for.
+	// settlement or release of the operation it was read for.
 	CostObservations = 90 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past
 	// its resolution and its last sighting.
@@ -126,4 +126,23 @@ func (p MonthlyPartitions) Range(now time.Time) (from, through time.Time) {
 func (p MonthlyPartitions) RetainedRange(now time.Time) (from, through time.Time) {
 	_, through = p.Range(now)
 	return MonthStart(p.DropBefore(now)), through
+}
+
+// OutboxIntentTypes are the provider intents that only carried an instruction
+// to a provider: once finished, nothing reads them back, and they are deleted
+// after ProviderWrites. Every other intent type is the record of money moved
+// or refused, a membership enrolled or a card erased, and is permanent. The
+// baseline's idx_provider_intents_finished_outbox lists the same types.
+var OutboxIntentTypes = []string{
+	"nmi_delete_subscription",
+	"stripe_cancel_subscription",
+	"ccbill_cancel_subscription",
+	"nmi_payment_method_update",
+	"nmi_payment_source_update",
+	"nmi_card_vault",
+	"network_token",
+	"stripe_archive_price",
+	"stripe_archive_product",
+	"solana_sunset_plan",
+	"bt_account_updater_batch",
 }
