@@ -90,11 +90,12 @@ explicit:
 | `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
 | `Schema` | default `billing` | The Postgres schema of OpenRails' tables. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
+| `Catalog` | no | The merchant's declared catalog, applied by `New` (section 5). Requires `Merchant`. |
 | `HTTP` | no | The route groups `Client.Routes` publishes (section 6); nil publishes none. |
 | `River`, `RiverSchema` | default managed | Who runs the job fleet (section 4). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Catalog`, delegated credentials). The in-process Client writes its own catalog without it. |
+| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Catalog`, delegated credentials). The in-process Client writes its own catalog without it. A declared `Catalog` stays read-only either way. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
 
 | Deps field | Meaning |
@@ -127,10 +128,11 @@ if err != nil { return err }
 defer client.Close(ctx)
 ```
 
-Only Postgres can fail `New`. Vault login, PSP posture checks and Redis
-reconnect in the background (capped full-jitter backoff, forever); until then
-only their features answer 503. `Ready` is the readiness check (Postgres, the
-merchant directory, River). Register `Probes` with the host's
+Only Postgres and a refused `Config.Catalog` can fail `New`. Vault login, PSP
+posture checks and Redis reconnect in the background (capped full-jitter
+backoff, forever); until then only their features answer 503. `Ready` is the
+readiness check (Postgres, the merchant directory, the declared catalog,
+River). Register `Probes` with the host's
 `github.com/open-rails/helpers/deps` supervisor:
 
 ```go
@@ -225,9 +227,24 @@ managed provider credentials are published through `Client.PaymentProviders` wit
 an operation ID and expected account revision. `HTTP.MerchantConfig` opts into
 the settings/provider route family, with normal authentication and authorization.
 
-**Catalog authoring**: storage is always the database. The in-process Client
-is the process owner and writes its catalog directly (`Catalog.Apply` for a
-declarative catalog, or `Products.Create`, `Prices.Create`, `Prices.SetKey`);
+**Declared catalog**: a host whose `catalog.yaml` is the truth sets
+`Config.Catalog` (`billing.ParseCatalogApplicationYAML` of the file). `New`
+applies it before returning, so checkout never sells an unapplied catalog:
+unchanged it replays, edited it converges, and replicas booting together
+converge on one application. A catalog the engine refuses fails `New` with the
+reason; a transient database error is retried within `ctx`. The apply makes no
+provider writes. It reads a provider only to confirm a new or changed
+`psp_links` reference (a Stripe price, an NMI plan, a Solana plan); if that
+read gets no answer within seconds, `New` returns and the application finishes
+in the background, with `Ready` failing until it commits. While declared, writes
+to the merchant's catalog (products, prices, meters, default rate cards,
+`Catalog.Apply`) answer 405 `catalog_declared` (`billing.ErrCatalogDeclared`)
+from every caller, the host included: the next boot would overwrite them.
+Creator-owned catalogs and negotiated payer rates stay writable.
+
+**Catalog authoring** (no `Config.Catalog`): storage is always the database.
+The in-process Client is the process owner and writes its catalog directly
+(`Catalog.Apply`, or `Products.Create`, `Prices.Create`, `Prices.SetKey`);
 `AllowCatalogUpdates` only publishes catalog mutations to HTTP callers. YAML is
 decoded into the same typed request as JSON (`billing.ParseCatalogApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known

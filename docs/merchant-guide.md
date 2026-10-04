@@ -43,7 +43,12 @@ admin grants, and grace. See [Entitlements](#entitlements).
 
 ### Applying through the Go Client
 
-Use `client.Catalog.Apply(ctx, params)` for embedded and remote Clients. Decode
+An embedded host whose `catalog.yaml` is the truth declares it instead:
+`Config.Catalog`, applied by `openrails.New` before it returns, after which the
+merchant's catalog refuses other writes (`catalog_declared`) until the file
+changes. See [embedded-integration.md](embedded-integration.md).
+
+Otherwise use `client.Catalog.Apply(ctx, params)` for embedded and remote Clients. Decode
 YAML with `billing.ParseCatalogApplicationYAML`; both encodings share the same
 validation and authorization as individual writes. The HTTP operation is
 `POST /v1/merchant/catalog/applications`; a guarded application reads its base
